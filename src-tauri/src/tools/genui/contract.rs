@@ -20,11 +20,68 @@ pub const CONTRACT_JSON: &str = include_str!("../../../../data/genui-contract.js
 /// Exemplo canônico documentado no system prompt.
 pub const EXAMPLE_JSON: &str = include_str!("../../../../data/genui-example.json");
 /// Exemplo mínimo (usado nos testes de documentação).
-pub const MINIMAL_EXAMPLE_JSON: &str = include_str!("../../../../data/genui-example-minimal.json");
+#[cfg(test)]
+pub const MINIMAL_EXAMPLE_JSON: &str =
+    include_str!("../../../../data/genui-example-minimal.json");
 
 static CONTRACT: Lazy<Contract> = Lazy::new(|| {
-    serde_json::from_str(CONTRACT_JSON).expect("data/genui-contract.json embutido é JSON inválido")
+    let contract: Contract = serde_json::from_str(CONTRACT_JSON)
+        .expect("data/genui-contract.json embutido é JSON inválido");
+    validate_embedded_contract(&contract);
+    contract
 });
+
+/// Valida a metainformação do contrato embutido uma única vez, na inicialização
+/// do `Lazy`. O contrato é dado de engenharia versionado no repositório: se
+/// estiver inconsistente, o correto é falhar rápido (como o `expect` acima) em
+/// vez de gerar prompt/validador divergentes em tempo de execução.
+fn validate_embedded_contract(contract: &Contract) {
+    assert_eq!(
+        contract.version, contract.format.version,
+        "data/genui-contract.json: `version` e `format.version` divergem"
+    );
+    assert!(
+        !contract.name.trim().is_empty(),
+        "data/genui-contract.json: `name` vazio"
+    );
+    assert!(
+        !contract.description.trim().is_empty(),
+        "data/genui-contract.json: `description` vazia"
+    );
+    for rule in &contract.rules {
+        assert!(
+            matches!(rule.scope.as_str(), "block" | "message"),
+            "data/genui-contract.json: regra `{}` com scope inesperado `{}`",
+            rule.id,
+            rule.scope
+        );
+        assert!(
+            !rule.category.trim().is_empty(),
+            "data/genui-contract.json: regra `{}` sem categoria",
+            rule.id
+        );
+    }
+    for component in &contract.components {
+        for (name, prop) in &component.props {
+            if prop.prop_type != "array" {
+                continue;
+            }
+            let items = prop.items.as_ref().unwrap_or_else(|| {
+                panic!(
+                    "data/genui-contract.json: array `{}` do componente `{}` sem `items`",
+                    name, component.typ
+                )
+            });
+            assert_eq!(
+                items.spec_type.as_deref(),
+                Some("array"),
+                "data/genui-contract.json: array `{name}` do componente `{}` deve declarar \
+                 `items.type == \"array\"`",
+                component.typ
+            );
+        }
+    }
+}
 
 /// Contrato decodificado (estático, inicializado uma única vez).
 pub fn contract() -> &'static Contract {
@@ -246,10 +303,6 @@ pub struct RuleSpec {
 impl RuleSpec {
     pub fn param_u64(&self, key: &str) -> Option<u64> {
         self.params.get(key).and_then(Value::as_u64)
-    }
-
-    pub fn param_f64(&self, key: &str) -> Option<f64> {
-        self.params.get(key).and_then(Value::as_f64)
     }
 }
 

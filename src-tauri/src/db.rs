@@ -752,6 +752,8 @@ impl Db {
             .context("falha ao listar mensagens")
     }
 
+    // Somente os testes de persistência leem mensagens individuais; a produção não usa.
+    #[cfg(test)]
     pub fn get_message(&self, id: &str) -> anyhow::Result<Option<ChatMessage>> {
         let conn = self.conn.lock();
         let sql = format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE id = ?1");
@@ -943,6 +945,8 @@ impl Db {
         Ok(())
     }
 
+    // Somente os testes de persistência agregam o uso; a produção não usa.
+    #[cfg(test)]
     pub fn usage_summary(&self) -> anyhow::Result<serde_json::Value> {
         const SUM_COLUMNS: &str = "COUNT(*), COALESCE(SUM(input_tokens), 0), \
              COALESCE(SUM(output_tokens), 0), COALESCE(SUM(reasoning_tokens), 0), \

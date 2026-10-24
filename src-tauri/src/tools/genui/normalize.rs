@@ -487,7 +487,7 @@ impl Normalizer<'_> {
             }
         };
 
-        if !spec.accepts_children {
+        if !spec.is_container() {
             if !raw_children.is_empty() {
                 self.error(
                     codes::CHILDREN_NOT_ALLOWED,

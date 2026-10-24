@@ -232,9 +232,8 @@ pub enum ProviderEvent {
     Usage(UsageInfo),
     /// Raw assistant payload used for stateless replay in the next step.
     ProviderState(Value),
-    Done {
-        stop_reason: Option<String>,
-    },
+    /// End of the provider stream.
+    Done,
 }
 
 pub type EventSink = tokio::sync::mpsc::UnboundedSender<ProviderEvent>;
@@ -515,14 +514,14 @@ pub async fn stream_completion(
         attempted.push(protocol.as_str());
         match stream_one(http, &request, protocol, &sink).await {
             Ok(()) => return Ok(()),
-            Err(ProviderError::UnsupportedProtocol(detail)) => {
+            Err(error) if error.is_unsupported_protocol() => {
                 eprintln!(
                     "[providers] protocolo {} não suportado pelo modelo {}: {}",
                     protocol.as_str(),
                     request.config.model.id,
-                    detail
+                    error
                 );
-                last_error = Some(ProviderError::UnsupportedProtocol(detail));
+                last_error = Some(error);
             }
             Err(error) => return Err(anyhow::Error::new(error)),
         }
@@ -532,7 +531,9 @@ pub async fn stream_completion(
         .map(|error| error.to_string())
         .unwrap_or_else(|| "nenhum protocolo tentado".to_string());
     anyhow::bail!(
-        "nenhum protocolo aceito pelo gateway para o modelo {} (tentados: {}; última falha: {})",
+        "nenhum protocolo aceito pelo provedor {} ({}) para o modelo {} (tentados: {}; última falha: {})",
+        request.config.provider_name,
+        request.config.provider_id,
         request.config.model.id,
         attempted.join(", "),
         last
@@ -590,7 +591,6 @@ mod smoke {
         calls: Vec<Call>,
         state: Option<Value>,
         usage: Option<UsageInfo>,
-        stop_reason: Option<String>,
         trace: Vec<String>,
     }
 
@@ -728,9 +728,8 @@ mod smoke {
                     result.trace.push("usage".to_string());
                     result.usage = Some(usage);
                 }
-                ProviderEvent::Done { stop_reason } => {
+                ProviderEvent::Done => {
                     result.trace.push("done".to_string());
-                    result.stop_reason = stop_reason;
                 }
             }
         }
@@ -818,13 +817,12 @@ mod smoke {
             )
             .await;
             eprintln!(
-                "[{}] protocolo={} texto={:?} reasoning_chars={} usage={:?} stop={:?}",
+                "[{}] protocolo={} texto={:?} reasoning_chars={} usage={:?}",
                 model_id,
                 protocol.as_str(),
                 result.text.trim(),
                 result.reasoning.chars().count(),
-                result.usage,
-                result.stop_reason
+                result.usage
             );
             assert!(
                 !result.text.trim().is_empty(),
@@ -972,10 +970,9 @@ mod smoke {
             )
             .await;
             eprintln!(
-                "[{}] replay texto={:?} stop={:?} calls={:?} trace={:?} state={}",
+                "[{}] replay texto={:?} calls={:?} trace={:?} state={}",
                 model_id,
                 second.text.trim(),
-                second.stop_reason,
                 second
                     .calls
                     .iter()
@@ -1020,11 +1017,7 @@ mod smoke {
         )
         .await
         .unwrap_or_else(|error| panic!("fallback deveria ter sucesso: {error:#}"));
-        eprintln!(
-            "fallback chat->anthropic texto={:?} stop={:?}",
-            result.text.trim(),
-            result.stop_reason
-        );
+        eprintln!("fallback chat->anthropic texto={:?}", result.text.trim());
         assert!(!result.text.trim().is_empty());
 
         // When every declared protocol is rejected the error must be explicit.
@@ -1121,7 +1114,7 @@ mod smoke {
                     }
                     eprintln!("delta#{deltas}: {delta:?}");
                 }
-                ProviderEvent::Done { .. } => saw_done = true,
+                ProviderEvent::Done => saw_done = true,
                 _ => {}
             }
         }

@@ -2,7 +2,7 @@
 
 Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usando **OpenCode Go** e **OpenCode Zen** como provedores.
 
-![status](https://img.shields.io/badge/status-conclu%C3%ADdo-7c5cff)
+![status](https://img.shields.io/badge/status-conclu%C3%ADdo-6446fb)
 
 ## Funcionalidades
 
@@ -76,6 +76,8 @@ cargo test --lib tools::fetch_url::tests::live -- --ignored --nocapture
 ```
 data/catalog.json        catálogo de modelos (gerado)
 scripts/                 geração do catálogo e sondagens dos provedores
+assets/                  logos oficiais; `pnpm tauri icon app-icon.png` regenera src-tauri/icons
+public/brand/            vetores da marca usados na UI e no favicon
 src/                     renderer React (componentes, stores, genui)
 src-tauri/src/           core Rust (providers, harness, tools, documents, db)
 docs/                    arquitetura, design, modelos e screenshots

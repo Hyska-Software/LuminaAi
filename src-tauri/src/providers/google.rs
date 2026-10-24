@@ -174,7 +174,6 @@ struct Handler<'a> {
     /// so the next step can replay the model turn.
     calls: Vec<Value>,
     next_index: usize,
-    stop_reason: Option<String>,
     usage: Option<UsageInfo>,
 }
 
@@ -188,7 +187,6 @@ impl<'a> Handler<'a> {
             text_signature: None,
             calls: Vec::new(),
             next_index: 0,
-            stop_reason: None,
             usage: None,
         }
     }
@@ -211,9 +209,6 @@ impl<'a> Handler<'a> {
         let Some(candidate) = candidates.first() else {
             return Ok(());
         };
-        if let Some(reason) = candidate.get("finishReason").and_then(Value::as_str) {
-            self.stop_reason = Some(reason.to_string());
-        }
         let Some(parts) = candidate
             .pointer("/content/parts")
             .and_then(Value::as_array)
@@ -318,13 +313,7 @@ impl<'a> Handler<'a> {
             ProviderEvent::ProviderState(Value::Array(parts)),
         )
         .map_err(to_provider_error)?;
-        emit(
-            self.sink,
-            ProviderEvent::Done {
-                stop_reason: self.stop_reason.take(),
-            },
-        )
-        .map_err(to_provider_error)?;
+        emit(self.sink, ProviderEvent::Done).map_err(to_provider_error)?;
         Ok(())
     }
 }

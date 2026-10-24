@@ -73,6 +73,9 @@ pub struct HarnessDeps {
     pub app: Option<tauri::AppHandle>,
     pub db: Arc<Db>,
     pub http: reqwest::Client,
+    /// Browser-like client used by the web tools (`AppState::search_http`):
+    /// search engines reject the plain API client.
+    pub search_http: reqwest::Client,
     pub catalog: CatalogFile,
     /// Test hook: when set, replaces `providers::stream_completion`.
     pub streamer: Option<ProviderStreamer>,
@@ -209,10 +212,9 @@ pub async fn run_turn(
     let runtime = ToolRuntime {
         app: deps.app.clone(),
         db: deps.db.clone(),
-        http: deps.http.clone(),
+        http: deps.search_http.clone(),
         conversation_id: payload.conversation_id.clone(),
         message_id: assistant_message.id.clone(),
-        settings: settings.clone(),
         options: options.clone(),
     };
 
@@ -333,7 +335,7 @@ pub async fn run_turn(
                         }
                         ProviderEvent::Usage(usage) => step_usage = Some(usage),
                         ProviderEvent::ProviderState(state) => step_state = Some(state),
-                        ProviderEvent::Done { .. } => {}
+                        ProviderEvent::Done => {}
                     }
                 }
             }
@@ -540,7 +542,7 @@ pub async fn run_turn(
                         ProviderEvent::ToolCallStart { .. }
                         | ProviderEvent::ToolCallArgsDelta { .. }
                         | ProviderEvent::ToolCallDone { .. }
-                        | ProviderEvent::Done { .. } => {}
+                        | ProviderEvent::Done => {}
                         _ => {}
                     }
                 }
@@ -1589,6 +1591,7 @@ mod agent_loop_tests {
             app: None,
             db,
             http: reqwest::Client::new(),
+            search_http: reqwest::Client::new(),
             catalog: test_catalog(),
             streamer: Some(streamer),
             api_key_override: Some("test-key".to_string()),
@@ -1648,12 +1651,12 @@ mod agent_loop_tests {
         emit(sink, ProviderEvent::ToolCallStart { index: 0, id: id.to_string(), name: name.to_string() });
         emit(sink, ProviderEvent::ToolCallArgsDelta { index: 0, delta: "{}".to_string() });
         emit(sink, ProviderEvent::ToolCallDone { index: 0, arguments: "{}".to_string() });
-        emit(sink, ProviderEvent::Done { stop_reason: Some("tool_calls".to_string()) });
+        emit(sink, ProviderEvent::Done);
     }
 
     fn text_stream(sink: &EventSink, text: &str) {
         emit(sink, ProviderEvent::TextDelta(text.to_string()));
-        emit(sink, ProviderEvent::Done { stop_reason: Some("stop".to_string()) });
+        emit(sink, ProviderEvent::Done);
     }
 
     #[tokio::test]

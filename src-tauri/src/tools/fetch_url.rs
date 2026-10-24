@@ -11,8 +11,8 @@ use crate::domain::Citation;
 use crate::providers::ToolDefinition;
 
 use super::{
-    browser_client, citation_id, clean_inline, host_of, json_str, normalize_blocks, selector,
-    truncate_chars, ToolOutcome, ToolRuntime,
+    citation_id, clean_inline, host_of, json_str, normalize_blocks, selector, truncate_chars,
+    ToolOutcome, ToolRuntime,
 };
 
 const MAX_DOWNLOAD_BYTES: usize = 2 * 1024 * 1024;
@@ -93,7 +93,7 @@ pub fn definition() -> ToolDefinition {
     }
 }
 
-pub async fn run(_rt: &ToolRuntime, args: &Value) -> ToolOutcome {
+pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
     let raw = match json_str(args, "url") {
         Some(url) if !url.trim().is_empty() => url.trim().to_string(),
         _ => return ToolOutcome::error("o argumento `url` é obrigatório"),
@@ -103,7 +103,8 @@ pub async fn run(_rt: &ToolRuntime, args: &Value) -> ToolOutcome {
         Err(error) => return ToolOutcome::error(error),
     };
 
-    let response = match browser_client()
+    let response = match rt
+        .http
         .get(url.clone())
         .header(
             reqwest::header::ACCEPT,
@@ -463,7 +464,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "live network access"]
     async fn live_fetch_extracts_readable_page() {
-        let response = browser_client()
+        let client = crate::http::search_client();
+        let response = client
             .get("https://opencode.ai/docs")
             .send()
             .await

@@ -204,7 +204,6 @@ struct ChatToolCall {
 
 struct Handler<'a> {
     sink: &'a EventSink,
-    stop_reason: Option<String>,
     usage: Option<UsageInfo>,
     tools: BTreeMap<usize, ChatToolCall>,
 }
@@ -213,7 +212,6 @@ impl<'a> Handler<'a> {
     fn new(sink: &'a EventSink) -> Self {
         Self {
             sink,
-            stop_reason: None,
             usage: None,
             tools: BTreeMap::new(),
         }
@@ -256,9 +254,6 @@ impl<'a> Handler<'a> {
                         self.on_tool_delta(tool_call)?;
                     }
                 }
-            }
-            if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
-                self.stop_reason = Some(reason.to_string());
             }
         }
         Ok(())
@@ -350,13 +345,7 @@ impl<'a> Handler<'a> {
             ProviderEvent::ProviderState(json!({"tool_calls": state_calls})),
         )
         .map_err(to_provider_error)?;
-        emit(
-            self.sink,
-            ProviderEvent::Done {
-                stop_reason: self.stop_reason.take(),
-            },
-        )
-        .map_err(to_provider_error)?;
+        emit(self.sink, ProviderEvent::Done).map_err(to_provider_error)?;
         Ok(())
     }
 }

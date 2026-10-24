@@ -4,7 +4,7 @@ import { motion } from 'motion/react';
 import { useReduceMotion } from '@/components/layout/hooks';
 import { Kbd } from '@/components/ui';
 import { modKey } from '@/lib/utils';
-import { LuminaOrb } from './LuminaOrb';
+import { BrandMark } from './BrandMark';
 
 const EASE_OUT_SOFT: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
@@ -67,7 +67,13 @@ export function WelcomeScreen() {
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: reduceMotion ? 0 : 0.26, ease: EASE_OUT_SOFT }}
       >
-        <LuminaOrb size={64} className="shadow-[0_0_48px_-8px_var(--accent)]" />
+        <span className="relative inline-flex items-center justify-center">
+          <span
+            aria-hidden
+            className="absolute left-1/2 top-1/2 size-28 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/25 blur-2xl"
+          />
+          <BrandMark size={64} className="relative" />
+        </span>
       </motion.div>
 
       <h1 className="mt-6 text-[32px] font-semibold tracking-tight text-foreground">Como posso ajudar?</h1>

@@ -64,10 +64,6 @@ impl AppState {
             token.cancel();
         }
     }
-
-    pub fn app_handle_from_state(&self) -> Option<AppHandle> {
-        None
-    }
 }
 
 /// Ensure transient directories exist.

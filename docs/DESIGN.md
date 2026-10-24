@@ -2,7 +2,7 @@
 
 ## 1. Direção
 
-Lumina é um chat de IA **calmo, preciso e premium**, inspirado na hierarquia do ChatGPT e na contenção visual do Claude, com identidade própria: um orbe violeta-azul ("aurora") usado apenas em momentos de marca (logo, estados de raciocínio, foco).
+Lumina é um chat de IA **calmo, preciso e premium**, inspirado na hierarquia do ChatGPT e na contenção visual do Claude, com identidade própria: a marca Lumina — símbolo violeta `#6446FB` com spark vazado sobre tile grafite-claro `#EBEBEB` — usada apenas em momentos de marca (logo, avatar do assistente, splash, Sobre).
 
 Princípios:
 - **Conteúdo primeiro**: a conversa ocupa o centro, sem molduras pesadas. Superfícies neutras, bordas de 1px, sombras suaves.
@@ -16,7 +16,10 @@ Princípios:
 | Token | Valor |
 | --- | --- |
 | Nome | Lumina |
-| Símbolo | orbe com gradiente `#7c5cff → #b06bff → #3ad0ff` + "spark" branco de 4 pontas |
+| Símbolo | dois balões estilizados formando um "L" com um spark de 4 pontas vazado, em `#6446FB` |
+| Ícone | o mesmo símbolo sobre tile grafite-claro `#EBEBEB` (cantos arredondados, bordas transparentes) |
+| Arquivos | `assets/Logo Lumina.png`, `assets/LogoLuminaSemFundo.png`, `assets/LogoLuminaSVG.svg` (originais); vetores usados pelo app em `public/brand/lumina-tile.svg` e `public/brand/lumina-mark.svg` |
+| Uso | tile → ícones do app (instalador, taskbar, janela) e favicon; marca sem fundo → titlebar, avatar do assistente, boas-vindas, splash e Sobre |
 | Voz | português brasileiro, direta, sem excesso de exclamações; termos técnicos em inglês quando consagrados |
 
 ## 3. Paleta (tokens em `src/styles/globals.css`)
@@ -39,7 +42,7 @@ Princípios:
 | danger | `#dc2626` | `#f87171` |
 | user-bubble | `#f2f2f4` | `#242429` |
 
-Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-foreground-muted`, `border-border`, etc. Gradiente da marca só no logo, no botão de enviar ativo e no estado "pensando".
+Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-foreground-muted`, `border-border`, etc. A marca é servida como asset vetorial (`public/brand/`, ver §2) e não recebe recolorização por tema; o botão de enviar ativo e o estado "pensando" usam apenas `accent`/`accent-soft`.
 
 ## 4. Tipografia
 
@@ -71,7 +74,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 ## 6. Estados da conversa
 
 ### 6.1 Boas-vindas (vazia)
-- Orbe 64px com glow suave, título 32px "Como posso ajudar?" e subtítulo muted.
+- Marca 64px com glow suave, título 32px "Como posso ajudar?" e subtítulo muted.
 - Grid 2×2 de sugestões (cards com ícone, título e descrição curta) que preenchem o composer.
 - Dica de atalhos abaixo (`⌘K` comandos, `⌘B` sidebar).
 
@@ -81,7 +84,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 - Ações no hover: copiar, editar.
 
 ### 6.3 Mensagem do assistente
-- Alinhada à esquerda, sem bolha (fundo transparente), avatar 24px (orbe) no topo esquerdo.
+- Alinhada à esquerda, sem bolha (fundo transparente), avatar 24px (marca Lumina) no topo esquerdo.
 - Markdown completo (headings, listas, tabelas, código com header + botão copiar, KaTeX, mermaid, `ui` blocks).
 - **Passos do agente (espaço de pensamento)**: um único bloco colapsável acima do texto, no lugar dos antigos cards de ferramenta. Header com ícone `Brain`, shimmer enquanto o agente trabalha ("Pensando…", "Executando ferramentas…"), contador de tempo ao vivo e, ao concluir, o total ("Pensou por 10s"; sem raciocínio exposto, "N passos"). Expandido, uma timeline com trilho vertical sutil intercala os parágrafos de raciocínio (bullets) com uma linha por atividade, na ordem em que aconteceram: "Encontrou 8 páginas web" (+ avatares de domínio das fontes), "Leu 3 páginas" (+ chips de páginas com sublinhado tracejado que abrem no navegador), "Criou 2 arquivos" (+ chips dos nomes), "Validou a interface". Cada linha mostra spinner enquanto executa, ícone da ferramenta ao concluir e mensagem em `danger` em caso de erro. O painel abre sozinho durante o streaming e recolhe quando a resposta começa a chegar.
 - **Citações**: chips de fonte em linha (`favicon`/letra do domínio, título truncado), abrem no navegador.
@@ -157,7 +160,7 @@ Tabs à esquerda (180px), conteúdo à direita (520px):
 | Popover do seletor de modelo | fade + scale 0.97→1 (180ms) |
 | Sidebar | width/translate 220ms ease-out-soft |
 | Artifact panel | slide-in 240ms |
-| Pensando | shimmer no texto + pulso do orbe |
+| Pensando | shimmer no texto + pulso da marca |
 | Passos do agente | shimmer no header durante o streaming; timeline expande/recolhe |
 | Timeline de passos | linha de atividade entra com fade, spinner enquanto executa |
 | Caret de streaming | blink 1.1s |

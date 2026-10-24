@@ -11,7 +11,7 @@ import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import type { ChatMessage } from '@/lib/types';
 import { cn, copyText, formatDuration, formatTokens } from '@/lib/utils';
 import { CitationChips } from './CitationChips';
-import { LuminaOrb } from './LuminaOrb';
+import { BrandMark } from './BrandMark';
 import { Markdown } from './Markdown';
 import { AgentSteps } from './AgentSteps';
 
@@ -202,7 +202,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({ message, isStr
       transition={reduceMotion ? { duration: 0 } : MESSAGE_MOTION.transition}
       className={cn('group/message flex items-start gap-3', isGroupStart ? 'mt-7' : 'mt-3')}
     >
-      <LuminaOrb size={24} className="mt-0.5" animated={isStreaming} />
+      <BrandMark size={24} className="mt-0.5" animated={isStreaming} />
 
       <div className="min-w-0 flex-1">
         {reasoning || reasoningActive || toolCalls.length > 0 ? (

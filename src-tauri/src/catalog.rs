@@ -139,27 +139,10 @@ impl CatalogFile {
             .find(|m| m.id == model_id)
     }
 
-    pub fn models(&self, provider_id: &str) -> Vec<&ModelInfo> {
-        self.provider(provider_id)
-            .map(|p| p.models.iter().collect())
-            .unwrap_or_default()
-    }
-
     /// Resolve the provider a model belongs to when the client did not send one.
     pub fn find_provider_for_model(&self, model_id: &str) -> Option<&ProviderInfo> {
         self.providers
             .iter()
             .find(|p| p.models.iter().any(|m| m.id == model_id))
-    }
-}
-
-impl ProviderInfo {
-    pub fn endpoint_for(&self, protocol: &str, model_id: &str) -> Option<String> {
-        let path = self.endpoints.get(protocol)?;
-        Some(format!(
-            "{}{}",
-            self.base_url.trim_end_matches('/'),
-            path.replace("{model}", model_id)
-        ))
     }
 }

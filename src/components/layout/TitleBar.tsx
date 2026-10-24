@@ -5,7 +5,7 @@ import { ModelPill } from '@/components/models/ModelPill';
 import { IconButton, Kbd, Tooltip } from '@/components/ui';
 import { useUiStore } from '@/lib/store';
 import { cn, modKey } from '@/lib/utils';
-import { LuminaOrb } from '@/components/chat/LuminaOrb';
+import { BrandMark } from '@/components/chat/BrandMark';
 
 /** Resolves the Tauri window lazily so the renderer also boots outside Tauri. */
 function appWindow(): ReturnType<typeof getCurrentWindow> | null {
@@ -119,7 +119,7 @@ export function TitleBar() {
       </Tooltip>
 
       <div data-tauri-drag-region className="flex items-center gap-2 pl-1 pr-1">
-        <LuminaOrb size={22} />
+        <BrandMark size={22} />
         <span className="text-[14px] font-semibold tracking-tight text-foreground">Lumina</span>
       </div>
 

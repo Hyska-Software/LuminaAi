@@ -1,4 +1,5 @@
-import { ExternalLink, Sparkles } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
+import { BrandMark } from '@/components/chat/BrandMark';
 import { catalog, CATALOG_GENERATED_AT } from '@/lib/catalog';
 import { openExternal } from '@/lib/genui/open-external';
 import { useAppStore } from '@/lib/store';
@@ -23,8 +24,8 @@ export function AboutTab() {
     <div className="flex flex-col gap-6">
       <SettingsSection title="Sobre o Lumina" description="Chat desktop local-first com OpenCode Go e Zen.">
         <div className="flex items-center gap-3 py-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
-            <Sparkles className="size-5" strokeWidth={1.9} />
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft">
+            <BrandMark size={24} />
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-[14px] font-semibold tracking-tight text-foreground">Lumina</p>

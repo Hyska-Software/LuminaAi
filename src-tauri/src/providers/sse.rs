@@ -14,9 +14,6 @@ use anyhow::Context;
 use futures_util::StreamExt;
 use tokio_util::sync::CancellationToken;
 
-/// Callback invoked once per complete SSE event.
-pub type SseCallback<'a> = dyn FnMut(Option<&str>, &str) -> anyhow::Result<()> + 'a;
-
 /// Incremental SSE parser. Public within the crate so it can be unit tested by
 /// feeding arbitrary byte chunks (chunks may split UTF-8 sequences or lines).
 pub struct SseDecoder {
@@ -42,10 +39,6 @@ impl SseDecoder {
             has_data: false,
             finished: false,
         }
-    }
-
-    pub fn is_finished(&self) -> bool {
-        self.finished
     }
 
     /// Feed a chunk of bytes. Returns `true` when the `[DONE]` sentinel was seen

@@ -223,7 +223,6 @@ struct Handler<'a> {
     reasoning_tokens: Option<u32>,
     cached_tokens: Option<u32>,
     has_usage: bool,
-    stop_reason: Option<String>,
 }
 
 impl<'a> Handler<'a> {
@@ -236,7 +235,6 @@ impl<'a> Handler<'a> {
             reasoning_tokens: None,
             cached_tokens: None,
             has_usage: false,
-            stop_reason: None,
         }
     }
 
@@ -397,10 +395,6 @@ impl<'a> Handler<'a> {
                 if let Some(usage) = value.get("usage") {
                     self.merge_usage(usage);
                 }
-                if let Some(stop_reason) = value.pointer("/delta/stop_reason").and_then(Value::as_str)
-                {
-                    self.stop_reason = Some(stop_reason.to_string());
-                }
             }
             "message_stop" => {}
             "ping" => {}
@@ -503,13 +497,7 @@ impl<'a> Handler<'a> {
             ProviderEvent::ProviderState(Value::Array(state_blocks)),
         )
         .map_err(to_provider_error)?;
-        emit(
-            self.sink,
-            ProviderEvent::Done {
-                stop_reason: self.stop_reason.take(),
-            },
-        )
-        .map_err(to_provider_error)?;
+        emit(self.sink, ProviderEvent::Done).map_err(to_provider_error)?;
         Ok(())
     }
 }

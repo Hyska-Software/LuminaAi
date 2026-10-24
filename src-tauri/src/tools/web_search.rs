@@ -15,8 +15,8 @@ use crate::domain::Citation;
 use crate::providers::ToolDefinition;
 
 use super::{
-    browser_client, citation_id, clean_inline, host_of, json_str, json_u32, selector,
-    truncate_chars, ToolOutcome, ToolRuntime,
+    citation_id, clean_inline, host_of, json_str, json_u32, selector, truncate_chars, ToolOutcome,
+    ToolRuntime,
 };
 
 const MAX_RESULTS: usize = 8;
@@ -77,7 +77,7 @@ pub fn definition() -> ToolDefinition {
     }
 }
 
-pub async fn run(_rt: &ToolRuntime, args: &Value) -> ToolOutcome {
+pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
     let query = match json_str(args, "query") {
         Some(query) if !query.trim().is_empty() => query.trim().to_string(),
         _ => return ToolOutcome::error("o argumento `query` é obrigatório"),
@@ -86,7 +86,7 @@ pub async fn run(_rt: &ToolRuntime, args: &Value) -> ToolOutcome {
         .unwrap_or(MAX_RESULTS as u32)
         .clamp(1, MAX_RESULTS as u32) as usize;
 
-    let (results, engine) = search(&query, limit).await;
+    let (results, engine) = search(&rt.http, &query, limit).await;
 
     if results.is_empty() {
         let payload = json!({
@@ -131,7 +131,11 @@ pub async fn run(_rt: &ToolRuntime, args: &Value) -> ToolOutcome {
 }
 
 /// Try every engine in order until one returns parseable results.
-async fn search(query: &str, limit: usize) -> (Vec<SearchResult>, &'static str) {
+async fn search(
+    client: &reqwest::Client,
+    query: &str,
+    limit: usize,
+) -> (Vec<SearchResult>, &'static str) {
     let encoded: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
     let engines = [
         (
@@ -153,7 +157,7 @@ async fn search(query: &str, limit: usize) -> (Vec<SearchResult>, &'static str) 
     ];
 
     for (engine, url) in engines {
-        let html = match fetch_html(&url).await {
+        let html = match fetch_html(client, &url).await {
             Ok(html) => html,
             Err(_) => continue,
         };
@@ -170,8 +174,8 @@ async fn search(query: &str, limit: usize) -> (Vec<SearchResult>, &'static str) 
     (Vec::new(), "")
 }
 
-async fn fetch_html(url: &str) -> Result<String, String> {
-    let response = browser_client()
+async fn fetch_html(client: &reqwest::Client, url: &str) -> Result<String, String> {
+    let response = client
         .get(url)
         .header(
             reqwest::header::ACCEPT,
@@ -609,7 +613,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "live network access"]
     async fn live_search_parses_results() {
-        let (results, engine) = search("tauri 2", 5).await;
+        let client = crate::http::search_client();
+        let (results, engine) = search(&client, "tauri 2", 5).await;
         assert!(!results.is_empty(), "no results parsed (engine {engine})");
         assert!(!engine.is_empty());
         assert!(results.iter().all(|result| result.url.starts_with("http")));

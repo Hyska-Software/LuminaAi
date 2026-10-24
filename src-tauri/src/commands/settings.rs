@@ -124,6 +124,9 @@ fn clear_dir(path: &Path) -> std::io::Result<()> {
 
 #[tauri::command]
 pub fn reset_app_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    // Cancela turnos em andamento antes de apagar o banco: impede que o harness
+    // grave linhas obsoletas no meio do reset.
+    state.cancel_all();
     state.db.reset().map_err(to_error)?;
     let data_dir = config::data_dir(&app).map_err(to_error)?;
     for sub in ["attachments", "artifacts"] {

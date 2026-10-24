@@ -180,7 +180,6 @@ struct ResponsesTool {
 struct Handler<'a> {
     sink: &'a EventSink,
     text: String,
-    stop_reason: Option<String>,
     usage: Option<UsageInfo>,
     output: Option<Value>,
     tools: Vec<ResponsesTool>,
@@ -192,7 +191,6 @@ impl<'a> Handler<'a> {
         Self {
             sink,
             text: String::new(),
-            stop_reason: None,
             usage: None,
             output: None,
             tools: Vec::new(),
@@ -419,13 +417,6 @@ impl<'a> Handler<'a> {
                 "resposta falhou: {error}"
             ))));
         }
-        let stop_reason = response
-            .pointer("/incomplete_details/reason")
-            .and_then(Value::as_str)
-            .or_else(|| response.get("status").and_then(Value::as_str));
-        if let Some(stop_reason) = stop_reason {
-            self.stop_reason = Some(stop_reason.to_string());
-        }
         Ok(())
     }
 
@@ -485,13 +476,7 @@ impl<'a> Handler<'a> {
             emit(self.sink, ProviderEvent::Usage(usage)).map_err(to_provider_error)?;
         }
         emit(self.sink, ProviderEvent::ProviderState(state)).map_err(to_provider_error)?;
-        emit(
-            self.sink,
-            ProviderEvent::Done {
-                stop_reason: self.stop_reason.take(),
-            },
-        )
-        .map_err(to_provider_error)?;
+        emit(self.sink, ProviderEvent::Done).map_err(to_provider_error)?;
         Ok(())
     }
 

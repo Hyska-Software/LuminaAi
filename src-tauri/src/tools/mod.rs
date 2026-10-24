@@ -1,12 +1,9 @@
 //! Agent tools: web search, page fetching and file creation (artifacts).
 
-use std::time::Duration;
-
-use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 
 use crate::db::Db;
-use crate::domain::{Artifact, Citation, Settings, ToolCallRecord, TurnOptions};
+use crate::domain::{Artifact, Citation, ToolCallRecord, TurnOptions};
 use crate::providers::ToolDefinition;
 
 pub mod create_file;
@@ -17,18 +14,16 @@ pub mod web_search;
 /// Upper bound for the text fed back to the model from a single tool call.
 pub const MAX_TOOL_RESULT_CHARS: usize = 120_000;
 
-pub(crate) const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
-     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
 #[derive(Clone)]
 pub struct ToolRuntime {
     /// Missing in unit tests that exercise the harness without a Tauri app.
     pub app: Option<tauri::AppHandle>,
     pub db: std::sync::Arc<Db>,
+    /// Shared browser-like client (`AppState::search_http`) used by the web
+    /// tools: search engines and scraped pages reject the plain API client.
     pub http: reqwest::Client,
     pub conversation_id: String,
     pub message_id: String,
-    pub settings: Settings,
     pub options: TurnOptions,
 }
 
@@ -44,13 +39,6 @@ pub struct ToolOutcome {
 }
 
 impl ToolOutcome {
-    pub fn text(content: impl Into<String>) -> Self {
-        Self {
-            content: content.into(),
-            ..Default::default()
-        }
-    }
-
     pub fn error(message: impl Into<String>) -> Self {
         Self {
             content: format!("ERROR: {}", message.into()),
@@ -118,22 +106,6 @@ fn truncate_outcome(mut outcome: ToolOutcome) -> ToolOutcome {
         outcome.content.push_str("\n\n[resultado truncado para caber no contexto]");
     }
     outcome
-}
-
-/// Shared HTTP client for search and page fetching (browser-like headers).
-pub(crate) fn browser_client() -> &'static reqwest::Client {
-    static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
-        reqwest::Client::builder()
-            .user_agent(BROWSER_UA)
-            .connect_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::limited(6))
-            .gzip(true)
-            .brotli(true)
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
-    });
-    &CLIENT
 }
 
 /* ------------------------------------------------------------------ */

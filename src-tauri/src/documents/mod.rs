@@ -21,21 +21,19 @@ pub struct ExtractedDocument {
     pub page_count: Option<u32>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    /// Saída documentada da extração de imagens (ARCHITECTURE: "Imagens |
+    /// metadados + base64"), parte do contrato de `ExtractedDocument` e lida
+    /// pelos testes de extração; ainda não consumida pelo fluxo de produção.
+    #[allow(dead_code)]
     pub image_base64: Option<String>,
+    /// MIME da imagem extraída, par de `image_base64` no contrato de extração.
+    #[allow(dead_code)]
     pub image_mime: Option<String>,
     pub truncated: bool,
     pub metadata: Value,
 }
 
 impl ExtractedDocument {
-    pub fn text_preview(&self) -> Option<String> {
-        if self.text.trim().is_empty() {
-            return None;
-        }
-        let preview: String = self.text.chars().take(280).collect();
-        Some(preview)
-    }
-
     fn failed(kind: impl Into<String>, message: impl Into<String>) -> Self {
         let kind = kind.into();
         Self {

@@ -258,17 +258,6 @@
     -webkit-app-region: no-drag;
     app-region: no-drag;
   }
-  .text-gradient-brand {
-    background-image: linear-gradient(100deg, #7c5cff 0%, #b06bff 45%, #3ad0ff 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-  .surface-glow {
-    background:
-      radial-gradient(60% 80% at 18% 8%, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 60%),
-      radial-gradient(50% 70% at 88% 12%, rgba(58, 208, 255, 0.1) 0%, transparent 65%);
-  }
   .hairline {
     box-shadow: inset 0 0 0 1px var(--border);
   }

@@ -1,14 +1,12 @@
-import { Sparkles } from 'lucide-react';
+import { BrandMark } from '@/components/chat/BrandMark';
 
 /** Minimal boot screen shown while settings/catalog/conversations load. */
 export function SplashScreen() {
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-5 bg-background">
-      <div className="relative">
-        <div className="absolute inset-0 animate-pulse-soft rounded-[28%] bg-accent/25 blur-2xl" />
-        <div className="relative flex size-16 items-center justify-center rounded-[28%] bg-gradient-to-br from-accent to-[#3ad0ff] text-white shadow-xl">
-          <Sparkles className="size-8" strokeWidth={2} />
-        </div>
+      <div className="relative inline-flex items-center justify-center">
+        <div className="absolute left-1/2 top-1/2 size-28 -translate-x-1/2 -translate-y-1/2 animate-pulse-soft rounded-full bg-accent/25 blur-2xl" />
+        <BrandMark size={72} className="relative" />
       </div>
       <div className="flex flex-col items-center gap-1.5">
         <span className="text-lg font-semibold tracking-tight">Lumina</span>
