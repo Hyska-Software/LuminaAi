@@ -1,0 +1,494 @@
+//! Serializable domain types shared by the Tauri commands, the SQLite layer and
+//! the React renderer. Every struct here is part of the IPC contract: keep field
+//! names in sync with `src/lib/types.ts`.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/* ------------------------------------------------------------------ */
+/* Conversations & messages                                            */
+/* ------------------------------------------------------------------ */
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Conversation {
+    pub id: String,
+    pub title: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    #[serde(default)]
+    pub pinned: bool,
+    pub provider_id: String,
+    pub model_id: String,
+    #[serde(default)]
+    pub message_count: i64,
+    #[serde(default)]
+    pub preview: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationDetail {
+    pub conversation: Conversation,
+    pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MessageRole {
+    User,
+    Assistant,
+    System,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MessageStatus {
+    Streaming,
+    Complete,
+    Error,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolCallStatus {
+    Running,
+    Done,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallRecord {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub arguments: String,
+    #[serde(default)]
+    pub result: Option<String>,
+    #[serde(default = "default_tool_status")]
+    pub status: ToolCallStatus,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<i64>,
+    #[serde(default)]
+    pub finished_at: Option<i64>,
+}
+
+fn default_tool_status() -> ToolCallStatus {
+    ToolCallStatus::Running
+}
+
+impl ToolCallRecord {
+    pub fn running(id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            arguments: String::new(),
+            result: None,
+            status: ToolCallStatus::Running,
+            summary: None,
+            started_at: Some(now_ms()),
+            finished_at: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Citation {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+    #[serde(default)]
+    pub snippet: Option<String>,
+    #[serde(default)]
+    pub site_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentInfo {
+    pub id: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size: i64,
+    /// image | pdf | docx | xlsx | pptx | text | code | csv | json | unknown
+    pub kind: String,
+    #[serde(default)]
+    pub text_preview: Option<String>,
+    #[serde(default)]
+    pub page_count: Option<u32>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageInfo {
+    #[serde(default)]
+    pub input_tokens: Option<u32>,
+    #[serde(default)]
+    pub output_tokens: Option<u32>,
+    #[serde(default)]
+    pub reasoning_tokens: Option<u32>,
+    #[serde(default)]
+    pub cached_tokens: Option<u32>,
+    #[serde(default)]
+    pub total_tokens: Option<u32>,
+    #[serde(default)]
+    pub cost: Option<f64>,
+    /// Wall-clock duration of the turn in milliseconds.
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessage {
+    pub id: String,
+    pub conversation_id: String,
+    pub role: MessageRole,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub reasoning: Option<String>,
+    pub status: MessageStatus,
+    #[serde(default)]
+    pub tool_calls: Vec<ToolCallRecord>,
+    #[serde(default)]
+    pub citations: Vec<Citation>,
+    #[serde(default)]
+    pub attachments: Vec<AttachmentInfo>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub usage: Option<UsageInfo>,
+    pub created_at: i64,
+    /// Opaque protocol payload (Anthropic thinking blocks, Responses items,
+    /// Google parts) replayed verbatim on the next turn of the same conversation.
+    #[serde(default)]
+    pub provider_state: Option<Value>,
+}
+
+impl ChatMessage {
+    pub fn user(conversation_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            conversation_id: conversation_id.into(),
+            role: MessageRole::User,
+            content: content.into(),
+            reasoning: None,
+            status: MessageStatus::Complete,
+            tool_calls: Vec::new(),
+            citations: Vec::new(),
+            attachments: Vec::new(),
+            model_id: None,
+            provider_id: None,
+            usage: None,
+            created_at: now_ms(),
+            provider_state: None,
+        }
+    }
+
+    pub fn assistant(conversation_id: impl Into<String>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            conversation_id: conversation_id.into(),
+            role: MessageRole::Assistant,
+            content: String::new(),
+            reasoning: None,
+            status: MessageStatus::Streaming,
+            tool_calls: Vec::new(),
+            citations: Vec::new(),
+            attachments: Vec::new(),
+            model_id: None,
+            provider_id: None,
+            usage: None,
+            created_at: now_ms(),
+            provider_state: None,
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Turn input / output                                                 */
+/* ------------------------------------------------------------------ */
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningMode {
+    Off,
+    Effort,
+    Budget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReasoningSelection {
+    pub mode: ReasoningMode,
+    #[serde(default)]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub budget: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TurnOptions {
+    pub web_search: bool,
+    pub create_files: bool,
+    pub max_steps: u32,
+    pub temperature: Option<f32>,
+    pub system_prompt_override: Option<String>,
+    /// Regenerate the last assistant answer (drops it before running).
+    pub regenerate: bool,
+}
+
+impl Default for TurnOptions {
+    fn default() -> Self {
+        Self {
+            web_search: true,
+            create_files: true,
+            max_steps: 8,
+            temperature: None,
+            system_prompt_override: None,
+            regenerate: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnPayload {
+    pub conversation_id: String,
+    pub content: String,
+    #[serde(default)]
+    pub attachment_ids: Vec<String>,
+    pub provider_id: String,
+    pub model_id: String,
+    #[serde(default)]
+    pub reasoning: Option<ReasoningSelection>,
+    #[serde(default)]
+    pub options: TurnOptions,
+    /// Client generated id used to cancel the stream.
+    #[serde(default)]
+    pub turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnResult {
+    pub user_message: ChatMessage,
+    pub assistant_message: ChatMessage,
+    #[serde(default)]
+    pub usage: Option<UsageInfo>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub conversation: Option<Conversation>,
+}
+
+/* ------------------------------------------------------------------ */
+/* Artifacts                                                           */
+/* ------------------------------------------------------------------ */
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtifactKind {
+    Markdown,
+    Code,
+    Text,
+    Html,
+    Csv,
+    Json,
+    Svg,
+    Image,
+    Pdf,
+    Docx,
+    Xlsx,
+    Binary,
+}
+
+impl ArtifactKind {
+    pub fn from_mime_and_name(mime: &str, name: &str) -> Self {
+        let lower = name.to_lowercase();
+        let ext = lower.rsplit('.').next().unwrap_or("");
+        match ext {
+            "md" | "markdown" | "mdx" => return Self::Markdown,
+            "html" | "htm" => return Self::Html,
+            "csv" | "tsv" => return Self::Csv,
+            "json" | "jsonl" => return Self::Json,
+            "svg" => return Self::Svg,
+            "pdf" => return Self::Pdf,
+            "docx" => return Self::Docx,
+            "xlsx" | "xls" | "ods" => return Self::Xlsx,
+            _ => {}
+        }
+        if mime.starts_with("image/") {
+            return Self::Image;
+        }
+        if mime.starts_with("text/") {
+            if mime.contains("html") {
+                return Self::Html;
+            }
+            if mime.contains("csv") {
+                return Self::Csv;
+            }
+            if mime.contains("json") {
+                return Self::Json;
+            }
+            return Self::Text;
+        }
+        if mime.contains("json") {
+            return Self::Json;
+        }
+        Self::Binary
+    }
+
+    pub fn is_textual(&self) -> bool {
+        matches!(
+            self,
+            Self::Markdown | Self::Code | Self::Text | Self::Html | Self::Csv | Self::Json | Self::Svg
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Artifact {
+    pub id: String,
+    pub conversation_id: String,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    pub name: String,
+    pub mime_type: String,
+    pub kind: ArtifactKind,
+    #[serde(default)]
+    pub language: Option<String>,
+    pub size: i64,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactContent {
+    pub artifact: Artifact,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub data_base64: Option<String>,
+}
+
+/* ------------------------------------------------------------------ */
+/* Settings                                                            */
+/* ------------------------------------------------------------------ */
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Settings {
+    pub theme: String,
+    pub locale: String,
+    pub default_provider: String,
+    pub default_model: String,
+    pub reasoning_default: String,
+    pub system_prompt: String,
+    pub web_search_enabled: bool,
+    pub file_creation_enabled: bool,
+    pub max_steps: u32,
+    pub send_key: String,
+    pub show_token_usage: bool,
+    pub reduce_motion: bool,
+    pub font_scale: f32,
+    pub temperature: Option<f32>,
+    pub include_attachments: bool,
+    pub auto_title: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            theme: "system".into(),
+            locale: "pt-BR".into(),
+            default_provider: "opencode-go".into(),
+            default_model: "glm-5.3-flash".into(),
+            reasoning_default: "auto".into(),
+            system_prompt: String::new(),
+            web_search_enabled: true,
+            file_creation_enabled: true,
+            max_steps: 8,
+            send_key: "enter".into(),
+            show_token_usage: true,
+            reduce_motion: false,
+            font_scale: 1.0,
+            temperature: None,
+            include_attachments: true,
+            auto_title: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderKeyStatus {
+    pub provider_id: String,
+    pub has_key: bool,
+    #[serde(default)]
+    pub masked: Option<String>,
+    /// settings | env | opencode-cli | none
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsView {
+    pub settings: Settings,
+    pub keys: Vec<ProviderKeyStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppInfo {
+    pub name: String,
+    pub version: String,
+    pub tauri_version: String,
+    pub platform: String,
+    pub started_at: i64,
+    pub data_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderValidation {
+    pub provider_id: String,
+    pub ok: bool,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub latency_ms: Option<u64>,
+    #[serde(default)]
+    pub models: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogView {
+    pub catalog: crate::catalog::CatalogFile,
+    pub keys: Vec<ProviderKeyStatus>,
+    #[serde(default)]
+    pub remote_refreshed_at: Option<i64>,
+}
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
+
+pub fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}

@@ -1,0 +1,64 @@
+# AGENTS.md — como trabalhar neste repositório
+
+> Leia `docs/ARCHITECTURE.md` (visão técnica), `docs/DESIGN.md` (UI/UX) e `docs/MODELS.md` (provedores/raciocínio) antes de implementar.
+
+## Comandos
+
+```bash
+pnpm install                 # dependências do renderer
+pnpm typecheck               # TypeScript (tsc --noEmit)
+pnpm build                   # build do renderer (Vite)
+pnpm app:dev                 # Tauri dev (janela + HMR)
+pnpm app:build               # binário + instalador
+cd src-tauri && cargo check  # backend
+cd src-tauri && cargo build  # binário de debug
+node scripts/build-catalog.mjs
+```
+
+Observação: `cargo` usa um target dir compartilhado. Se aparecer `Blocking waiting for file lock`, aguarde a outra compilação terminar — **não** delete `src-tauri/target`.
+
+## Estrutura & propriedade
+
+| Área | Arquivos | Dono |
+| --- | --- | --- |
+| Contratos compartilhados | `src/lib/types.ts`, `src/lib/api.ts`, `src/lib/catalog.ts`, `src/lib/utils.ts`, `src/lib/store/**`, `data/catalog.json`, `src-tauri/src/{domain,catalog,events,state,http}.rs`, `src-tauri/src/lib.rs`, `src-tauri/src/commands/{mod,turn,models}.rs`, `src/App.tsx` | Lead |
+| Provedores | `src-tauri/src/providers/**` | provider-dev |
+| Harness/tools/docs | `src-tauri/src/harness/**`, `src-tauri/src/tools/**`, `src-tauri/src/documents/**` | harness-dev |
+| Persistência/config/commands | `src-tauri/src/db.rs`, `src-tauri/src/config.rs`, `src-tauri/src/commands/{conversations,settings,attachments,artifacts}.rs` | storage-dev |
+| UI núcleo | `src/components/layout/**`, `src/components/chat/**`, `src/components/composer/**` | ui-core |
+| UI sistemas | `src/components/ui/**`, `src/components/models/**`, `src/components/settings/**`, `src/components/artifacts/**`, `src/components/genui/**`, `src/components/palette/**` | ui-systems |
+
+**Nunca edite arquivos de outra área.** Se precisar de uma mudança de contrato, envie uma mensagem ao Lead com a assinatura exata desejada.
+
+## Convenções
+
+### TypeScript/React
+- `strict` ligado; sem `any` implícito, sem `@ts-ignore`.
+- Import alias: `@/` → `src/`, `@data/` → `data/`.
+- Estilo: componentes funcionais, hooks no topo, sem classes; `cn()` para classes condicionais.
+- Cores/espaçamentos **somente** via tokens do Tailwind definidos em `src/styles/globals.css` (`bg-background`, `text-foreground-muted`, `border-border`, `bg-accent-soft`, …). Nada de hex solto.
+- Ícones: `lucide-react` (stroke 1.75–2), tamanho 16/18/20.
+- Texto da interface em **português brasileiro**.
+- Acessibilidade obrigatória: `aria-label` em ícones-botão, foco visível, roles corretas.
+
+### Rust
+- Erros de módulo: `anyhow::Result`; comandos Tauri retornam `Result<T, String>`.
+- Nada de `unwrap()`/`expect()` em caminho de dados do usuário (use `?` + contexto).
+- Async: tokio; HTTP: `reqwest` com o client compartilhado (`AppState::http`).
+- Serialização IPC sempre `#[serde(rename_all = "camelCase")]`.
+- Streaming: emita `ProviderEvent`/`TurnEvent` incrementalmente; nunca acumule tudo para emitir no fim.
+- Preserve as assinaturas públicas definidas nos arquivos de contrato; substitua apenas os `todo!()` e corpos internos.
+
+## Fluxo de trabalho
+
+1. Leia os arquivos de contrato da sua área + `docs/`.
+2. Implemente em incrementos compiláveis; rode `cargo check` / `pnpm typecheck` com frequência.
+3. Ao terminar: rode a verificação da sua área, atualize a task compartilhada (`complete`) e envie ao Lead um resumo com: o que implementou, comandos rodados, riscos/pendências.
+4. Se bloquear por contrato/ambiguidade, mande mensagem ao Lead em vez de mudar arquivos de outros.
+
+## Critérios de pronto
+
+- `cargo check` sem erros (warnings são aceitáveis).
+- `pnpm typecheck` sem erros nos arquivos da sua área.
+- Sem `todo!()`/`unimplemented!()` restantes na sua área.
+- Funcionalidade real (sem mocks/fakes) usando as APIs descritas em `docs/`.
