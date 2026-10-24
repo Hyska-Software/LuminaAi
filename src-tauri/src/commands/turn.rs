@@ -22,12 +22,21 @@ pub async fn run_turn(
     let cancel = state.register_turn(&turn_id);
     let settings = crate::config::load_settings(&app);
     let deps = HarnessDeps {
-        app: app.clone(),
+        app: Some(app.clone()),
         db: state.db.clone(),
         http: state.http.clone(),
         catalog: state.catalog.clone(),
+        streamer: None,
+        api_key_override: None,
     };
-    let result = harness::run_turn(deps, payload, settings, on_event, cancel).await;
+    let result = harness::run_turn(
+        deps,
+        payload,
+        settings,
+        std::sync::Arc::new(on_event),
+        cancel,
+    )
+    .await;
     state.finish_turn(&turn_id);
     result.map_err(|e| format!("{e:#}"))
 }

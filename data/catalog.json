@@ -1,6 +1,6 @@
 {
  "version": 1,
- "generatedAt": "2026-10-24T00:52:27.840Z",
+ "generatedAt": "2026-10-24T03:35:03.767Z",
  "sources": {
   "docs": [
    "https://opencode.ai/v2/docs/console/go/",
@@ -24,7 +24,7 @@
     "google": "/google/v1beta/models/{model}"
    },
    "authEnv": "OPENCODE_API_KEY",
-   "defaultModelId": "glm-5.3-flash",
+   "defaultModelId": "deepseek-v4.1-flash",
    "models": [
     {
      "id": "claude-haiku-5-5",

@@ -234,12 +234,15 @@ pnpm app:build          # Tauri: binário + instalador NSIS
 pnpm app:dev            # dev com HMR
 ```
 
-## 15. Verificação
+## 15. Verificação (TDD)
 
-1. `cargo check` / `cargo build` no backend.
-2. `pnpm typecheck` + `pnpm build` no renderer.
-3. `scripts/probe-models.mjs` valida protocolos e parâmetros de raciocínio contra o gateway real.
-4. Smoke test manual: envio de mensagem, streaming de raciocínio, busca web, anexo PDF, criação e download de arquivo, troca de modelo/modo de pensamento, cancelamento, regeneração.
+A verificação é feita por testes automatizados — unitários e de integração — e por build:
+
+1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, schema e sanitização da UI generativa, parser CSV e o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento).
+2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, validadores de UI generativa, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), SQLite (conversas/mensagens/anexos/artefatos/usage), settings/segredos, exportação e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor e cancelamento.
+3. **Integração com o gateway real** (testes `#[ignore]`, executados sob demanda): streaming nos 4 protocolos, tool call + replay de `provider_state`, fallback de protocolo, mapeamento de 401, cancelamento e o caso canônico **DeepSeek V4.1 Flash com esforço máximo**.
+4. **Build**: `pnpm typecheck`, `pnpm build` e `pnpm tauri build --no-bundle` (artefato em `src-tauri/target/release/lumina.exe`).
+5. **Manual (release)**: abrir o app e validar visualmente os fluxos principais.
 
 ## 16. Decisões registradas
 

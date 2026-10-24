@@ -305,7 +305,7 @@ const catalog = {
       shortName: 'Go',
       description: 'Assinatura OpenCode Go — modelos abertos de alta performance com limites mensais.',
       baseUrl: 'https://opencode.ai/inference/go',
-      defaultModelId: 'glm-5.3-flash',
+      defaultModelId: 'deepseek-v4.1-flash',
       docsById: docsGoById,
       mdSource: { ...mdGo, ...mdOpencode },
       kind: 'go',

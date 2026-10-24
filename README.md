@@ -36,6 +36,25 @@ Build de produção:
 pnpm app:build      # instalador NSIS em src-tauri/target/release/bundle
 ```
 
+## Testes
+
+O projeto é verificado por testes automatizados (TDD), sem automação de UI:
+
+```bash
+pnpm test                                     # Vitest: utils, catálogo, UI generativa, store do chat
+cd src-tauri && cargo test --lib              # Rust: providers, harness, tools, documents, db, comandos
+```
+
+Testes de integração que chamam o gateway real ficam marcados como `#[ignore]` e usam
+`deepseek-v4.1-flash` (OpenCode Go) com esforço máximo:
+
+```bash
+cd src-tauri
+cargo test --lib providers::smoke -- --ignored --nocapture --test-threads=1
+cargo test --lib tools::web_search::tests::live -- --ignored --nocapture
+cargo test --lib tools::fetch_url::tests::live -- --ignored --nocapture
+```
+
 ## Estrutura
 
 ```

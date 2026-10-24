@@ -1,0 +1,8 @@
+export { SettingsDialog } from './SettingsDialog';
+export { GeneralTab } from './GeneralTab';
+export { ProvidersTab } from './ProvidersTab';
+export { ModelTab } from './ModelTab';
+export { InstructionsTab } from './InstructionsTab';
+export { ToolsTab } from './ToolsTab';
+export { DataTab } from './DataTab';
+export { AboutTab } from './AboutTab';

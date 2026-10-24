@@ -7,10 +7,12 @@
 ```bash
 pnpm install                 # dependências do renderer
 pnpm typecheck               # TypeScript (tsc --noEmit)
+pnpm test                    # Vitest (TDD do renderer)
 pnpm build                   # build do renderer (Vite)
 pnpm app:dev                 # Tauri dev (janela + HMR)
 pnpm app:build               # binário + instalador
 cd src-tauri && cargo check  # backend
+cd src-tauri && cargo test --lib   # testes Rust (TDD)
 cd src-tauri && cargo build  # binário de debug
 node scripts/build-catalog.mjs
 ```
@@ -29,6 +31,14 @@ Observação: `cargo` usa um target dir compartilhado. Se aparecer `Blocking wai
 | UI sistemas | `src/components/ui/**`, `src/components/models/**`, `src/components/settings/**`, `src/components/artifacts/**`, `src/components/genui/**`, `src/components/palette/**` | ui-systems |
 
 **Nunca edite arquivos de outra área.** Se precisar de uma mudança de contrato, envie uma mensagem ao Lead com a assinatura exata desejada.
+
+## Testes (TDD)
+
+- Toda funcionalidade nova entra com teste automatizado **antes/durante** a implementação.
+- Renderer: Vitest (`src/**/*.test.ts`, jsdom quando precisar de DOM); mock de `@/lib/api` para stores.
+- Backend: `#[cfg(test)]` nos módulos; fixtures reais em `src-tauri/src/documents/testdata/`.
+- Integrações com o gateway usam `#[ignore]` + `deepseek-v4.1-flash` (Go) com esforço máximo.
+- **Não** use automação de UI/navegador (screenshots, SendKeys, CDP) como critério de verificação.
 
 ## Convenções
 

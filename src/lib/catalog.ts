@@ -48,10 +48,18 @@ export function defaultSelection(settings?: Settings | null): ModelSelection {
       ? configured
       : (provider?.defaultModelId ?? provider?.models[0]?.id ?? '');
   const model = provider?.models.find((m) => m.id === modelId);
+  const preferred = settings?.reasoningDefault;
+  const ui = reasoningUi(model);
+  let reasoning = defaultReasoningFor(model);
+  if (preferred === 'off' && ui.canDisable) {
+    reasoning = { mode: 'off' };
+  } else if (preferred && ui.efforts.includes(preferred)) {
+    reasoning = { mode: 'effort', effort: preferred };
+  }
   return {
     providerId: provider?.id ?? providerId,
     modelId,
-    reasoning: defaultReasoningFor(model),
+    reasoning,
   };
 }
 
@@ -118,6 +126,22 @@ export function effortLabel(effort: string): string {
   return map[effort] ?? effort;
 }
 
+/** Compact reasoning label used inside pills (e.g. "Máx."). */
+export function reasoningShortLabel(
+  model: ModelInfo | undefined,
+  selection: ReasoningSelection | null | undefined,
+): string {
+  if (!model || !reasoningUi(model).supported) return '';
+  if (!selection || selection.mode === 'off') {
+    return reasoningUi(model).canDisable ? 'off' : '';
+  }
+  if (selection.mode === 'effort') {
+    return selection.effort ? effortLabel(selection.effort) : 'on';
+  }
+  if (selection.mode === 'budget') return String(selection.budget ?? 0);
+  return '';
+}
+
 export function reasoningLabel(
   model: ModelInfo | undefined,
   selection: ReasoningSelection | null | undefined,
@@ -126,7 +150,10 @@ export function reasoningLabel(
   if (!selection || selection.mode === 'off') {
     return reasoningUi(model).canDisable ? 'Pensamento off' : 'Padrão';
   }
-  if (selection.mode === 'effort') return `Pensamento ${effortLabel(selection.effort ?? 'medium')}`;
+  if (selection.mode === 'effort') {
+    if (!selection.effort) return 'Pensamento ligado';
+    return `Pensamento ${effortLabel(selection.effort)}`;
+  }
   if (selection.mode === 'budget') return `Orçamento ${selection.budget ?? 0}`;
   return 'Padrão';
 }

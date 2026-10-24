@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::catalog::CatalogFile;

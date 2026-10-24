@@ -1,0 +1,119 @@
+import { useId } from 'react';
+import { cn } from '@/lib/utils';
+import { GENUI_LIMITS, propString, type GenUIComponent, type GenUISpec } from '@/lib/genui/schema';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
+import { GenUICard, GenUIGrid, GenUIStack } from './components/GenUILayout';
+import { GenUIChart, GenUITable } from './components/GenUIData';
+import {
+  GenUIBadge,
+  GenUICallout,
+  GenUICode,
+  GenUIDivider,
+  GenUIImage,
+  GenUIKeyValue,
+  GenUILink,
+  GenUIList,
+  GenUIProgress,
+  GenUIQuote,
+  GenUIStat,
+  GenUISteps,
+  GenUITimeline,
+} from './components/GenUIBlocks';
+
+interface RenderNodeProps {
+  node: GenUIComponent;
+  depth: number;
+}
+
+function renderChildren(node: GenUIComponent, depth: number) {
+  return node.children?.map((child, index) => <GenUINode key={index} node={child} depth={depth + 1} />);
+}
+
+function GenUINode({ node, depth }: RenderNodeProps) {
+  if (depth > GENUI_LIMITS.depth) return null;
+  const children = renderChildren(node, depth);
+  const props = node.props;
+
+  switch (node.type) {
+    case 'card':
+      return <GenUICard props={props}>{children}</GenUICard>;
+    case 'stack':
+      return <GenUIStack props={props}>{children}</GenUIStack>;
+    case 'grid':
+      return <GenUIGrid props={props}>{children}</GenUIGrid>;
+    case 'tabs':
+      return <GenUITabs node={node} depth={depth} />;
+    case 'table':
+      return <GenUITable props={props} />;
+    case 'chart':
+      return <GenUIChart props={props} />;
+    case 'stat':
+      return <GenUIStat props={props} />;
+    case 'progress':
+      return <GenUIProgress props={props} />;
+    case 'timeline':
+      return <GenUITimeline props={props} />;
+    case 'steps':
+      return <GenUISteps props={props} />;
+    case 'callout':
+      return <GenUICallout props={props}>{children}</GenUICallout>;
+    case 'quote':
+      return <GenUIQuote props={props}>{children}</GenUIQuote>;
+    case 'code':
+      return <GenUICode props={props} />;
+    case 'list':
+      return <GenUIList props={props} />;
+    case 'image':
+      return <GenUIImage props={props} />;
+    case 'badge':
+      return <GenUIBadge props={props} />;
+    case 'divider':
+      return <GenUIDivider props={props} />;
+    case 'link':
+      return <GenUILink props={props} />;
+    case 'keyvalue':
+      return <GenUIKeyValue props={props} />;
+    default:
+      return null;
+  }
+}
+
+/** `tabs` maps each child component into a panel; the tab label comes from `props.label`. */
+function GenUITabs({ node, depth }: { node: GenUIComponent; depth: number }) {
+  const baseId = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const panels = node.children ?? [];
+  if (!panels.length) return null;
+
+  return (
+    <Tabs defaultValue={`${baseId}-0`} className="w-full">
+      <TabsList className="mb-3 max-w-full flex-wrap">
+        {panels.map((panel, index) => (
+          <TabsTrigger key={index} value={`${baseId}-${index}`} variant="pill">
+            {propString(panel.props, 'label', propString(panel.props, 'title', `Aba ${index + 1}`))}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      {panels.map((panel, index) => (
+        <TabsContent key={index} value={`${baseId}-${index}`} className="flex flex-col gap-3">
+          <GenUINode node={panel} depth={depth + 1} />
+        </TabsContent>
+      ))}
+    </Tabs>
+  );
+}
+
+export interface GenUIRendererProps {
+  spec: GenUISpec;
+  className?: string;
+}
+
+/** Renders a sanitized generative UI spec using only whitelisted primitives. */
+export function GenUIRenderer({ spec, className }: GenUIRendererProps) {
+  return (
+    <div className={cn('flex min-w-0 flex-col gap-3 text-[13.5px] leading-relaxed text-foreground', className)}>
+      {spec.components.map((component, index) => (
+        <GenUINode key={index} node={component} depth={0} />
+      ))}
+    </div>
+  );
+}
