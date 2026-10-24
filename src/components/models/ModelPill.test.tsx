@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { beforeEach } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TooltipProvider } from '@/components/ui';
@@ -86,8 +86,8 @@ describe('ModelPill (interactions)', () => {
     expect(screen.getByText('GLM')).toBeTruthy();
     expect(screen.getByText('Ver todos os modelos…')).toBeTruthy();
 
-    // The current model details are visible by default.
-    expect(screen.getByText('Contexto')).toBeTruthy();
+    // Details are hidden until a model is hovered.
+    expect(screen.queryByText('Contexto')).toBeNull();
 
     const glmItem = await screen.findByRole('menuitem', { name: /GLM-5.3-Flash/ });
     await user.hover(glmItem);
@@ -95,6 +95,32 @@ describe('ModelPill (interactions)', () => {
       expect(screen.getByText('GLM-5.3-Flash', { selector: 'p' })).toBeTruthy();
       const line = screen.getByText('Protocolo').closest('dl');
       expect(line?.textContent).toContain('OpenAI Chat');
+    });
+
+    // Leaving the list hides the details panel again.
+    const menu = screen.getByLabelText('Selecionar modelo');
+    fireEvent.pointerLeave(menu.firstElementChild as Element);
+    await waitFor(() => {
+      expect(screen.queryByText('Contexto')).toBeNull();
+    });
+  });
+
+  it('keeps the details in sync while hovering different models', async () => {
+    const user = userEvent.setup();
+    renderInteractive(<ModelPill />);
+    await openModelList(user);
+
+    const claudeItem = await screen.findByRole('menuitem', { name: /Claude Haiku 5.5/ });
+    await user.hover(claudeItem);
+    await waitFor(() => {
+      expect(screen.getByText('Claude Haiku 5.5', { selector: 'p' })).toBeTruthy();
+    });
+
+    const deepseekItem = await screen.findByRole('menuitem', { name: /DeepSeek V4.1 Flash/ });
+    await user.hover(deepseekItem);
+    await waitFor(() => {
+      expect(screen.getByText('DeepSeek V4.1 Flash', { selector: 'p' })).toBeTruthy();
+      expect(screen.queryByText('Claude Haiku 5.5', { selector: 'p' })).toBeNull();
     });
   });
 

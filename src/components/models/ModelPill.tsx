@@ -81,7 +81,8 @@ export function ModelPill({
   const modelGroups = provider ? buildModelMenu(provider, mid, favorites) : [];
   const effortItems = buildEffortMenu(model, effectiveReasoning);
 
-  const hoveredModel = hoveredModelId ? getModel(pid, hoveredModelId) : model;
+  // Details are shown only while a model in the list is hovered/focused.
+  const hoveredModel = hoveredModelId ? getModel(pid, hoveredModelId) : undefined;
   const details = useMemo(
     () => modelDetails(hoveredModel, provider?.name),
     [hoveredModel, provider?.name],
@@ -104,7 +105,7 @@ export function ModelPill({
       const nextReasoning = reasoningForModel(nextModel, effectiveReasoning);
       setSelection({ providerId: pid, modelId: nextModelId, reasoning: nextReasoning });
       if (nextReasoning) setReasoning(nextReasoning);
-      setHoveredModelId(nextModelId);
+      setHoveredModelId(null);
     }
     // Continue inside the same dropdown: choose the thinking mode now.
     if (reasoningUi(nextModel).supported) {
@@ -131,7 +132,7 @@ export function ModelPill({
 
   const openModelStage = () => {
     setStage('model');
-    setHoveredModelId(mid);
+    setHoveredModelId(null);
     setOpen(true);
   };
 
@@ -154,7 +155,10 @@ export function ModelPill({
     >
       <DropdownMenu
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setHoveredModelId(null);
+        }}
       >
         <DropdownMenuTrigger asChild>
           <button
@@ -209,12 +213,20 @@ export function ModelPill({
         </button>
 
         <DropdownMenuContent
-          align="start"
-          className={cn('p-0', stage === 'model' ? 'w-[35rem] max-w-[calc(100vw-2rem)]' : 'w-64')}
+          align="end"
+          className={cn(
+            'overflow-hidden p-0',
+            stage === 'thinking' && 'w-64',
+            stage === 'model' && (details ? 'w-[35rem]' : 'w-64'),
+            'max-w-[calc(100vw-2rem)]',
+          )}
           aria-label={stage === 'model' ? 'Selecionar modelo' : 'Modo de pensamento'}
         >
           {stage === 'model' ? (
-            <div className="flex max-h-[25rem]">
+            <div
+              className="flex max-h-[25rem]"
+              onPointerLeave={() => setHoveredModelId(null)}
+            >
               <div className="w-64 shrink-0 overflow-y-auto p-1">
                 <DropdownMenuLabel className="flex items-center justify-between gap-2">
                   <span>Modelos</span>
@@ -237,7 +249,6 @@ export function ModelPill({
                           handleModelSelect(item.modelId);
                         }}
                         onPointerEnter={() => setHoveredModelId(item.modelId)}
-                        onPointerLeave={() => setHoveredModelId(mid)}
                         onFocus={() => setHoveredModelId(item.modelId)}
                         className={cn(item.current && 'font-medium')}
                       >
@@ -252,16 +263,20 @@ export function ModelPill({
                   </div>
                 ) : null}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem icon={<SlidersHorizontal />} onSelect={openFullPicker}>
+                <DropdownMenuItem
+                  icon={<SlidersHorizontal />}
+                  onSelect={openFullPicker}
+                  onPointerEnter={() => setHoveredModelId(null)}
+                >
                   Ver todos os modelos…
                 </DropdownMenuItem>
               </div>
 
-              <div
-                className="hidden w-[15.5rem] shrink-0 overflow-y-auto border-l border-border bg-surface/40 p-3 sm:block"
-                aria-live="polite"
-              >
-                {details ? (
+              {details ? (
+                <div
+                  className="w-[15.5rem] shrink-0 overflow-y-auto border-l border-border bg-surface/40 p-3"
+                  aria-live="polite"
+                >
                   <div className="flex flex-col gap-2.5">
                     <div className="min-w-0">
                       <p className="text-[13px] font-semibold leading-tight text-foreground">
@@ -295,8 +310,8 @@ export function ModelPill({
                       ))}
                     </dl>
                   </div>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="p-1">
