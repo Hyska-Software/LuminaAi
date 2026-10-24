@@ -147,6 +147,18 @@ pub struct UsageInfo {
     pub duration_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceStep {
+    /// Visible reasoning emitted by the model in this step.
+    #[serde(default)]
+    pub reasoning: Option<String>,
+    /// Tool calls requested by this step; they are stored in `ChatMessage.tool_calls`
+    /// in chronological order, so the count is enough to slice them back.
+    #[serde(default)]
+    pub tool_calls: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
@@ -175,6 +187,9 @@ pub struct ChatMessage {
     /// Google parts) replayed verbatim on the next turn of the same conversation.
     #[serde(default)]
     pub provider_state: Option<Value>,
+    /// Agent loop trace for the thinking timeline (reasoning + tool counts per step).
+    #[serde(default)]
+    pub trace: Vec<TraceStep>,
 }
 
 impl ChatMessage {
@@ -194,6 +209,7 @@ impl ChatMessage {
             usage: None,
             created_at: now_ms(),
             provider_state: None,
+            trace: Vec::new(),
         }
     }
 
@@ -213,6 +229,7 @@ impl ChatMessage {
             usage: None,
             created_at: now_ms(),
             provider_state: None,
+            trace: Vec::new(),
         }
     }
 }

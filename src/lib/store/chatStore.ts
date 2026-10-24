@@ -8,6 +8,7 @@ import type {
   Conversation,
   ModelSelection,
   ReasoningSelection,
+  TraceStep,
   TurnEvent,
   TurnOptions,
   TurnPayload,
@@ -148,6 +149,20 @@ function turnOptionsFromSettings(overrides?: Partial<TurnOptions>): TurnOptions 
   };
 }
 
+/** Appends streamed reasoning to the last trace step (creating it if needed). */
+function appendTraceReasoning(trace: TraceStep[], delta: string): TraceStep[] {
+  const steps = trace.length > 0 ? trace : [{ toolCalls: 0 }];
+  const last = steps[steps.length - 1];
+  return [...steps.slice(0, -1), { ...last, reasoning: `${last.reasoning ?? ''}${delta}` }];
+}
+
+/** Accounts one started tool call in the current trace step. */
+function addTraceToolCall(trace: TraceStep[]): TraceStep[] {
+  const steps = trace.length > 0 ? trace : [{ toolCalls: 0 }];
+  const last = steps[steps.length - 1];
+  return [...steps.slice(0, -1), { ...last, toolCalls: last.toolCalls + 1 }];
+}
+
 export const useChatStore = create<ChatState>()((set, get) => {
   const patchMessage = (
     conversationId: string,
@@ -260,6 +275,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         patchMessage(context.conversationId, target, (message) => ({
           ...message,
           reasoning: (message.reasoning ?? '') + delta,
+          trace: appendTraceReasoning(message.trace ?? [], delta),
         }));
       }
       if (textBuffer) {
@@ -301,6 +317,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
           break;
         }
         case 'step_started':
+          // A new agent loop step begins: the streamed reasoning that follows
+          // belongs to its own timeline entry.
+          flush();
+          patchMessage(context.conversationId, context.assistantId, (message) => ({
+            ...message,
+            trace: [...(message.trace ?? []), { toolCalls: 0 }],
+          }));
           set((state) => (state.streaming ? { streaming: { ...state.streaming, step: event.step } } : {}));
           break;
         case 'reasoning_delta':
@@ -324,6 +347,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
             toolCalls: [...message.toolCalls.filter((t) => t.id !== event.toolCall.id), event.toolCall],
+            trace: addTraceToolCall(message.trace ?? []),
           }));
           break;
         case 'tool_call_args':
@@ -361,6 +385,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
           }));
           break;
         case 'message_updated':
+          // The definitive message (persisted by the harness) already carries
+          // the trace; flush pending deltas first so nothing is duplicated.
+          flush();
           patchMessage(context.conversationId, event.message.id, () => event.message);
           break;
         case 'title_updated':
@@ -660,6 +687,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         toolCalls: [],
         citations: [],
         attachments: [],
+        trace: [],
         modelId: selection.modelId,
         providerId: selection.providerId,
         createdAt: now + 1,
@@ -735,6 +763,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         toolCalls: [],
         citations: [],
         attachments: [],
+        trace: [],
         modelId: selection.modelId,
         providerId: selection.providerId,
         createdAt: Date.now(),

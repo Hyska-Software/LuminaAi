@@ -71,7 +71,7 @@ Eventos (`TurnEvent`): `turn_started`, `step_started`, `reasoning_delta`, `reaso
 conversations(id PK, title, created_at, updated_at, pinned, provider_id, model_id, message_count, preview)
 messages(id PK, conversation_id, role, content, reasoning, status, tool_calls JSON,
          citations JSON, attachments JSON, model_id, provider_id, usage JSON,
-         provider_state JSON, created_at, seq)
+         provider_state JSON, created_at, seq, trace JSON)
 attachments(id PK, name, mime_type, size, kind, text, page_count, width, height, file_path, created_at)
 artifacts(id PK, conversation_id, message_id, name, mime_type, kind, language, size, created_at, path)
 usage_log(id, conversation_id, message_id, provider_id, model_id, tokens..., cost, created_at)
@@ -79,6 +79,8 @@ meta(key PK, value)
 ```
 
 `provider_state` guarda o payload bruto da resposta do provedor (blocos `thinking` da Anthropic, itens do Responses, `parts` do Google) para replay fiel no próximo passo do loop — necessário para tool calls com raciocínio estendido.
+
+`trace` guarda o traço do loop de agentes usado pelo espaço de pensamento do chat: uma entrada por passo com o `reasoning` visível daquele passo e a quantidade de tool calls que ele pediu (as chamadas em si continuam em `tool_calls`, na ordem cronológica). Bancos antigos recebem a coluna automaticamente na abertura (migração aditiva).
 
 ### Arquivos
 
@@ -154,6 +156,7 @@ Fatos descobertos por sondagem (ver `docs/MODELS.md`):
    - acumula texto, reasoning e tool calls;
    - se houver tool calls: executa `tools::execute` em paralelo (máx. 4), emite `tool_call_finished`, adiciona resultados ao histórico e repete;
    - se não houver: finaliza.
+   Cada passo alimenta `ChatMessage.trace` (`reasoning` do passo + número de tool calls), o que permite reconstruir a timeline de pensamento do chat depois de reabrir a conversa (DESIGN §6.3).
 4. Persiste mensagem final + `provider_state` + usage; gera título automático (primeiro turno) com o próprio modelo (requisição curta, não-streaming) ou heurística local.
 5. Cancelamento: `CancellationToken` interrompe o stream; mensagem parcial é salva com status `cancelled`.
 
@@ -303,8 +306,8 @@ pnpm app:dev            # dev com HMR
 
 A verificação é feita por testes automatizados — unitários e de integração — e por build:
 
-1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV e o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento).
-2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui`, o system prompt gerado do contrato, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), SQLite (conversas/mensagens/anexos/artefatos/usage), settings/segredos, exportação e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor e cancelamento.
+1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo) e a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`).
+2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui`, o system prompt gerado do contrato, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), SQLite (conversas/mensagens/anexos/artefatos/usage/`trace` + migração de bancos antigos), settings/segredos, exportação e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor, cancelamento e o trace por passo.
 3. **Integração com o gateway real** (testes `#[ignore]`, executados sob demanda): streaming nos 4 protocolos, tool call + replay de `provider_state`, fallback de protocolo, mapeamento de 401, cancelamento e o caso canônico **DeepSeek V4.1 Flash com esforço máximo**.
 4. **Build**: `pnpm typecheck`, `pnpm build` e `pnpm tauri build --no-bundle` (artefato em `src-tauri/target/release/lumina.exe`).
 5. **Manual (release)**: abrir o app e validar visualmente os fluxos principais.

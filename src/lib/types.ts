@@ -122,6 +122,22 @@ export interface AttachmentInfo {
   height?: number | null;
 }
 
+/**
+ * One step of the agent loop (ARCHITECTURE §8): the reasoning the model
+ * produced before acting and how many tool calls that step requested. The
+ * calls themselves stay in `ChatMessage.toolCalls`, in chronological order, so
+ * the count is enough to slice them back into the step that produced them.
+ *
+ * Persisted with the message and replayed by the thinking timeline; messages
+ * from before the trace existed have no entries and fall back to a heuristic.
+ */
+export interface TraceStep {
+  /** Visible reasoning of this step (`null` when the model emitted none). */
+  reasoning?: string | null;
+  /** Number of tool calls produced by this step. */
+  toolCalls: number;
+}
+
 export interface UsageInfo {
   inputTokens?: number | null;
   outputTokens?: number | null;
@@ -142,6 +158,8 @@ export interface ChatMessage {
   toolCalls: ToolCallRecord[];
   citations: Citation[];
   attachments: AttachmentInfo[];
+  /** Agent loop trace (thinking timeline). Absent on legacy/non-agent turns. */
+  trace?: TraceStep[];
   modelId?: string | null;
   providerId?: string | null;
   usage?: UsageInfo | null;

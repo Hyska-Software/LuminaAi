@@ -237,6 +237,86 @@ describe('chatStore.send', () => {
     expect(assistant.status).toBe('complete');
     expect(state.error).toContain('gateway fora do ar');
   });
+
+  it('builds the thinking trace incrementally while the turn streams', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent({ type: 'step_started', step: 1 });
+        onEvent({ type: 'reasoning_delta', delta: 'Vou pesquisar.' });
+        onEvent({ type: 'reasoning_done' });
+        onEvent({
+          type: 'tool_call_started',
+          toolCall: { id: 'tool-1', name: 'web_search', arguments: '', status: 'running' },
+        });
+        await gate;
+        onEvent({
+          type: 'tool_call_finished',
+          id: 'tool-1',
+          status: 'done',
+          result: '{"results":[]}',
+          summary: '0 resultados',
+        });
+        onEvent({ type: 'step_started', step: 2 });
+        onEvent({ type: 'reasoning_delta', delta: 'Concluído.' });
+        onEvent({ type: 'reasoning_done' });
+        const trace = [
+          { reasoning: 'Vou pesquisar.', toolCalls: 1 },
+          { reasoning: 'Concluído.', toolCalls: 0 },
+        ];
+        const finalMessage = assistantMessage({
+          reasoning: 'Vou pesquisar.Concluído.',
+          toolCalls: [
+            {
+              id: 'tool-1',
+              name: 'web_search',
+              arguments: '',
+              result: '{"results":[]}',
+              status: 'done' as const,
+              summary: '0 resultados',
+            },
+          ],
+          trace,
+        });
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: finalMessage,
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 2 }),
+        };
+        onEvent({ type: 'message_updated', message: finalMessage });
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    await useChatStore.getState().send('Pesquise');
+
+    // While the turn is held open, the first step is already on the timeline.
+    const streamingMessage = useChatStore.getState().messagesByConversation['conv-1'][1];
+    expect(streamingMessage.status).toBe('streaming');
+    expect(streamingMessage.trace).toEqual([{ reasoning: 'Vou pesquisar.', toolCalls: 1 }]);
+
+    release();
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+
+    const finalMessage = useChatStore.getState().messagesByConversation['conv-1'][1];
+    expect(finalMessage.trace).toEqual([
+      { reasoning: 'Vou pesquisar.', toolCalls: 1 },
+      { reasoning: 'Concluído.', toolCalls: 0 },
+    ]);
+  });
 });
 
 describe('chatStore.regenerate', () => {

@@ -6,6 +6,7 @@ import {
   formatBytes,
   formatCost,
   formatDuration,
+  formatThinkingDuration,
   formatTokens,
   groupConversations,
   hostnameOf,
@@ -82,6 +83,20 @@ describe('formatDuration', () => {
     [null, '—'],
   ])('formats %s as %s', (input, expected) => {
     expect(formatDuration(input as number | null)).toBe(expected);
+  });
+});
+
+describe('formatThinkingDuration', () => {
+  it.each([
+    [0, 'menos de 1s'],
+    [420, 'menos de 1s'],
+    [1_400, '1s'],
+    [10_000, '10s'],
+    [65_000, '1 min 5s'],
+    [120_000, '2 min'],
+    [null, null],
+  ])('formats %s as %s', (input, expected) => {
+    expect(formatThinkingDuration(input as number | null)).toBe(expected);
   });
 });
 

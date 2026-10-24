@@ -257,7 +257,7 @@ describe('GenUIBlock — diagnósticos', () => {
     expect(within(diagnostics).getAllByRole('listitem').length).toBeGreaterThan(0);
   });
 
-  it('bloco com warning renderiza normalizado e mostra a faixa de DEV', () => {
+  it('bloco com warning renderiza normalizado, sem faixa visual, e loga no console em DEV', () => {
     // `card` de topo sem `title`: lint warning do contrato (`ui.card-title`);
     // a UI continua renderizável, só que normalizada.
     const source = JSON.stringify({
@@ -273,10 +273,23 @@ describe('GenUIBlock — diagnósticos', () => {
     expect(parsed.spec, parsed.error ?? '').not.toBeNull();
     expect(parsed.warnings.length).toBeGreaterThan(0);
 
-    render(<GenUIBlock source={source} />);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      render(<GenUIBlock source={source} />);
 
-    expect(screen.getByText(/UI normalizada · \d+ aviso/)).toBeTruthy();
-    expect(screen.getByText('Receita')).toBeTruthy();
+      // Nada de faixa/aviso visual na mensagem.
+      expect(screen.queryByText(/UI normalizada/)).toBeNull();
+      expect(screen.queryByText(/aviso de design/i)).toBeNull();
+      expect(screen.getByText('Receita')).toBeTruthy();
+
+      // Feedback só no console do DevTools, com os diagnósticos estruturados.
+      expect(warn).toHaveBeenCalledTimes(1);
+      const [title, payload] = warn.mock.calls[0] as [string, Array<{ code: string }>];
+      expect(title).toMatch(/Lumina GenUI/);
+      expect(payload.some((entry) => entry.code === 'ui.card-title')).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

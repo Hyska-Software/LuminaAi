@@ -13,8 +13,7 @@ import { cn, copyText, formatDuration, formatTokens } from '@/lib/utils';
 import { CitationChips } from './CitationChips';
 import { LuminaOrb } from './LuminaOrb';
 import { Markdown } from './Markdown';
-import { ThinkingBlock } from './ThinkingBlock';
-import { ToolCallCard } from './ToolCallCard';
+import { AgentSteps } from './AgentSteps';
 
 /** Errors that indicate a missing/invalid provider key get a settings CTA. */
 const KEY_ERROR_PATTERN = /(chave de api|api[ _-]?key|401|unauthorized|não configurad)/i;
@@ -190,11 +189,6 @@ const AssistantMessageItem = memo(function AssistantMessageItem({ message, isStr
     ((usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0) || null);
   const model = modelLabel(message);
   const isKeyError = message.status === 'error' && KEY_ERROR_PATTERN.test(message.content ?? '');
-  // Only the last search card shows the merged citation list (avoids repetition).
-  const lastSearchIndex = toolCalls.reduce(
-    (last, tool, index) => (tool.name === 'web_search' ? index : last),
-    -1,
-  );
 
   const regenerate = () => {
     window.dispatchEvent(new CustomEvent('lumina:scroll-bottom'));
@@ -211,20 +205,13 @@ const AssistantMessageItem = memo(function AssistantMessageItem({ message, isStr
       <LuminaOrb size={24} className="mt-0.5" animated={isStreaming} />
 
       <div className="min-w-0 flex-1">
-        {reasoning || reasoningActive ? (
-          <ThinkingBlock text={reasoning} streaming={reasoningActive} startedAt={startedAt} />
-        ) : null}
-
-        {toolCalls.length > 0 ? (
-          <div className="mb-2.5 flex flex-col gap-1.5">
-            {toolCalls.map((tool, index) => (
-              <ToolCallCard
-                key={tool.id}
-                tool={tool}
-                citations={index === lastSearchIndex ? citations : undefined}
-              />
-            ))}
-          </div>
+        {reasoning || reasoningActive || toolCalls.length > 0 ? (
+          <AgentSteps
+            message={message}
+            streaming={isStreaming}
+            phase={phase}
+            startedAt={startedAt}
+          />
         ) : null}
 
         {message.status !== 'error' && message.content ? (

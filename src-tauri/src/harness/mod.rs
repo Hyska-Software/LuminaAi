@@ -14,8 +14,8 @@ use crate::catalog::{CatalogFile, ModelInfo, ProviderInfo};
 use crate::db::{Db, StoredAttachment};
 use crate::domain::{
     now_ms, AttachmentInfo, ChatMessage, Citation, MessageRole, MessageStatus, ReasoningMode,
-    ReasoningSelection, Settings, ToolCallRecord, ToolCallStatus, TurnOptions, TurnPayload,
-    TurnResult, UsageInfo, MAX_STEPS_LIMIT,
+    ReasoningSelection, Settings, ToolCallRecord, ToolCallStatus, TraceStep, TurnOptions,
+    TurnPayload, TurnResult, UsageInfo, MAX_STEPS_LIMIT,
 };
 use crate::events::TurnEvent;
 use crate::providers::{
@@ -223,6 +223,7 @@ pub async fn run_turn(
     let mut step_number = 0u32;
     let mut full_text = String::new();
     let mut full_reasoning = String::new();
+    let mut trace: Vec<TraceStep> = Vec::new();
     let mut all_tool_calls: Vec<ToolCallRecord> = Vec::new();
     let mut citations: Vec<Citation> = Vec::new();
     let mut total_usage = UsageInfo::default();
@@ -369,13 +370,16 @@ pub async fn run_turn(
 
         if let Some(error) = provider_error {
             turn_error = Some(error);
+            let mut failed = 0usize;
             for call in streaming_calls.drain(..).filter(|call| !call.id.is_empty()) {
                 let mut record = tool_call_record(call);
                 record.status = ToolCallStatus::Error;
                 record.result = Some("Interrompida por um erro do provedor.".to_string());
                 record.finished_at = Some(now_ms());
                 all_tool_calls.push(record);
+                failed += 1;
             }
+            push_trace_step(&mut trace, &step_reasoning, failed);
             break;
         }
 
@@ -388,9 +392,12 @@ pub async fn run_turn(
         if step_calls.is_empty() {
             // The model produced a final answer. Intermediate narration from
             // tool-calling steps is intentionally not part of the final message.
+            push_trace_step(&mut trace, &step_reasoning, 0);
             full_text = step_text.trim().to_string();
             break;
         }
+
+        push_trace_step(&mut trace, &step_reasoning, step_calls.len());
 
         // Tools requested on the last allowed step still run: artifacts and other
         // deliverables must never be lost. A forced final-answer pass (below)
@@ -565,6 +572,7 @@ pub async fn run_turn(
             }
             full_reasoning.push_str(&forced_reasoning);
         }
+        push_trace_step(&mut trace, &forced_reasoning, 0);
         if !forced_text.trim().is_empty() {
             full_text = forced_text.trim().to_string();
         } else if turn_error.is_none() {
@@ -638,6 +646,7 @@ pub async fn run_turn(
     assistant_message.citations = citations.clone();
     assistant_message.usage = Some(usage.clone());
     assistant_message.provider_state = provider_state.clone();
+    assistant_message.trace = trace.clone();
     assistant_message.model_id = Some(model.id.clone());
     assistant_message.provider_id = Some(provider.id.clone());
     deps.db.update_message(&assistant_message)?;
@@ -1051,6 +1060,19 @@ fn tool_call_record(call: StreamingToolCall) -> ToolCallRecord {
         started_at: Some(now_ms()),
         finished_at: None,
     }
+}
+
+/// Appends one step of the agent loop to the persisted thinking trace. Steps
+/// without visible reasoning and without tool calls are ignored.
+fn push_trace_step(trace: &mut Vec<TraceStep>, reasoning: &str, tool_calls: usize) {
+    let reasoning = reasoning.trim();
+    if reasoning.is_empty() && tool_calls == 0 {
+        return;
+    }
+    trace.push(TraceStep {
+        reasoning: (!reasoning.is_empty()).then(|| reasoning.to_string()),
+        tool_calls: u32::try_from(tool_calls).unwrap_or(u32::MAX),
+    });
 }
 
 async fn execute_tools(runtime: &ToolRuntime, calls: &[ToolCallRecord]) -> Vec<ToolOutcome> {
@@ -1686,6 +1708,14 @@ mod agent_loop_tests {
         assert!(result.error.is_none());
         assert!(has_event(&events, "done"));
         assert!(has_event(&events, "tool_call_finished"));
+        // One acting step in the thinking trace, without visible reasoning.
+        assert_eq!(
+            result.assistant_message.trace,
+            vec![TraceStep {
+                reasoning: None,
+                tool_calls: 1,
+            }]
+        );
 
         let reloaded = temp
             .db
@@ -1739,7 +1769,83 @@ mod agent_loop_tests {
         );
         assert_eq!(result.assistant_message.tool_calls.len(), 2);
         assert_eq!(result.assistant_message.status, MessageStatus::Complete);
+        assert_eq!(
+            result.assistant_message.trace.len(),
+            2,
+            "one trace entry per acting step"
+        );
+        assert!(result.assistant_message.trace.iter().all(|step| step.reasoning.is_none()));
+        assert!(result.assistant_message.trace.iter().all(|step| step.tool_calls == 1));
         assert!(result.error.is_none(), "forced answer must not surface an error");
+    }
+
+    #[tokio::test]
+    async fn records_reasoning_and_tool_counts_per_step_in_the_trace() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let step = step.clone();
+            Arc::new(move |_request, sink| {
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    if current == 0 {
+                        emit(
+                            &sink,
+                            ProviderEvent::ReasoningDelta("Vou buscar os dados.".to_string()),
+                        );
+                        tool_call_stream(&sink, "call-1", "ferramenta_inexistente");
+                    } else {
+                        emit(
+                            &sink,
+                            ProviderEvent::ReasoningDelta("Já tenho o que preciso.".to_string()),
+                        );
+                        text_stream(&sink, "Resposta final.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let (channel, _events) = channel();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            payload(&conversation, 4),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn should complete");
+
+        assert_eq!(
+            result.assistant_message.trace,
+            vec![
+                TraceStep {
+                    reasoning: Some("Vou buscar os dados.".to_string()),
+                    tool_calls: 1,
+                },
+                TraceStep {
+                    reasoning: Some("Já tenho o que preciso.".to_string()),
+                    tool_calls: 0,
+                },
+            ]
+        );
+        assert_eq!(
+            result.assistant_message.reasoning.as_deref(),
+            Some("Vou buscar os dados.\n\nJá tenho o que preciso.")
+        );
+        // The persisted message keeps the trace.
+        let stored = temp
+            .db
+            .get_message(&result.assistant_message.id)
+            .expect("get message")
+            .expect("stored message");
+        assert_eq!(stored.trace, result.assistant_message.trace);
     }
 
     #[tokio::test]

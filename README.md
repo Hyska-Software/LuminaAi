@@ -6,7 +6,7 @@ Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usan
 
 ## Funcionalidades
 
-- **Conversas com streaming** em tempo real, com raciocínio (thinking) visível e colapsável.
+- **Conversas com streaming** em tempo real, com espaço de pensamento que mostra os passos do agente (raciocínio, buscas, páginas lidas e arquivos criados) numa timeline colapsável.
 - **Escolha de modelo e modo de pensamento** por modelo (esforço, orçamento de tokens ou desligado), com catálogo de 120+ modelos dos dois provedores.
 - **Análise de documentos**: PDF, DOCX, XLSX/CSV, PPTX, texto/código e imagens (visão).
 - **Busca na web** com citações de fontes e leitura de páginas.
@@ -57,7 +57,7 @@ pnpm tauri build --no-bundle   # src-tauri/target/release/lumina.exe
 O projeto é verificado por testes automatizados (TDD), sem automação de UI:
 
 ```bash
-pnpm test                                     # Vitest: utils, catálogo, UI generativa, store do chat
+pnpm test                                     # Vitest: utils, catálogo, UI generativa, store do chat e timeline de passos
 cd src-tauri && cargo test --lib              # Rust: providers, harness, tools, documents, db, comandos
 ```
 

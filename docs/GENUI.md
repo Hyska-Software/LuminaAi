@@ -321,10 +321,11 @@ legadas são **normalizadas** (`ui.legacy-shape`). O bloco só degrada quando h�
    `aria-current` de `steps`, status textual de `timeline`); exemplos do
    prompt/`docs/GENUI.md` são validados por teste (se um exemplo do doc ficar
    inválido, o teste falha).
-8. **Feedback no desenvolvimento**: o renderer mostra avisos de design numa faixa
-   discreta apenas em DEV; o harness loga blocos inválidos em
-   `debug_assertions`. Em produção vale a validação do renderer descrita no
-   item 5.
+8. **Feedback no desenvolvimento**: o renderer **não** mostra avisos de design na
+   interface — em DEV eles vão apenas para o **console do DevTools** (com
+   `code`/`path`/mensagem), e o usuário vê a árvore normalizada. O harness loga
+   blocos inválidos em `debug_assertions`. Em produção vale a validação do
+   renderer descrita no item 5.
 9. **Acessibilidade estrutural**: `alt`, `label` e `title` obrigatórios são
    erros do validador, não recomendações.
 

@@ -83,8 +83,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 ### 6.3 Mensagem do assistente
 - Alinhada à esquerda, sem bolha (fundo transparente), avatar 24px (orbe) no topo esquerdo.
 - Markdown completo (headings, listas, tabelas, código com header + botão copiar, KaTeX, mermaid, `ui` blocks).
-- **Raciocínio**: bloco colapsável acima do texto com linha vertical sutil, shimmer enquanto streama, ícone `Brain`/`Sparkles`, título "Pensando…" (durante) ou "Raciocínio" (concluído), contador de tempo.
-- **Ferramentas**: cards compactos com ícone (`Globe`, `FileText`, `FilePlus`, `ShieldCheck`), nome amigável, argumento resumido, spinner/check/erro, expandir para ver resultado. A autovalidação da UI generativa aparece como “Validar interface”.
+- **Passos do agente (espaço de pensamento)**: um único bloco colapsável acima do texto, no lugar dos antigos cards de ferramenta. Header com ícone `Brain`, shimmer enquanto o agente trabalha ("Pensando…", "Executando ferramentas…"), contador de tempo ao vivo e, ao concluir, o total ("Pensou por 10s"; sem raciocínio exposto, "N passos"). Expandido, uma timeline com trilho vertical sutil intercala os parágrafos de raciocínio (bullets) com uma linha por atividade, na ordem em que aconteceram: "Encontrou 8 páginas web" (+ avatares de domínio das fontes), "Leu 3 páginas" (+ chips de páginas com sublinhado tracejado que abrem no navegador), "Criou 2 arquivos" (+ chips dos nomes), "Validou a interface". Cada linha mostra spinner enquanto executa, ícone da ferramenta ao concluir e mensagem em `danger` em caso de erro. O painel abre sozinho durante o streaming e recolhe quando a resposta começa a chegar.
 - **Citações**: chips de fonte em linha (`favicon`/letra do domínio, título truncado), abrem no navegador.
 - **Artefatos**: card com ícone por tipo, nome, tamanho, botões "Visualizar" e "Salvar".
 - **UI generativa**: renderizada inline no fluxo do markdown usando o design system (tokens, tipografia e raios do chat). Blocos interativos (`actions`, `tabs`, `reveal`) seguem regras próprias de UI/UX — ver `docs/GENUI.md` e §16.
@@ -159,7 +158,8 @@ Tabs à esquerda (180px), conteúdo à direita (520px):
 | Sidebar | width/translate 220ms ease-out-soft |
 | Artifact panel | slide-in 240ms |
 | Pensando | shimmer no texto + pulso do orbe |
-| Tool card | altura animada + spinner |
+| Passos do agente | shimmer no header durante o streaming; timeline expande/recolhe |
+| Timeline de passos | linha de atividade entra com fade, spinner enquanto executa |
 | Caret de streaming | blink 1.1s |
 | Hover de botões | 120ms |
 
@@ -183,7 +183,7 @@ Com `reduceMotion` (config ou media query), remover transformações e shimmer; 
 
 ## 14. Microcopy (pt-BR)
 
-- Novo chat, Buscar conversas, Configurações, Modelo padrão, Modo de pensamento, Buscar modelos…, Limpar busca, Usar este modelo, Configurar, Modelo bloqueado nesta conversa, Anexar arquivos, Busca web, Criar arquivos, Pensando…, Parar, Copiar, Regenerar, Salvar como…, Abrir, Excluir, Fixar, Renomear, Exportar, Limpar dados.
+- Novo chat, Buscar conversas, Configurações, Modelo padrão, Modo de pensamento, Buscar modelos…, Limpar busca, Usar este modelo, Configurar, Modelo bloqueado nesta conversa, Anexar arquivos, Busca web, Criar arquivos, Pensando…, Executando ferramentas…, Pensou por 10s, Encontrou 8 páginas web, Leu 3 páginas, Criou 2 arquivos, Validou a interface, Parar, Copiar, Regenerar, Salvar como…, Abrir, Excluir, Fixar, Renomear, Exportar, Limpar dados.
 - Erros: "Não foi possível concluir", "Chave de API ausente", "Limite de uso atingido", "Tente novamente em instantes".
 
 ## 15. Anti-padrões proibidos
@@ -217,7 +217,8 @@ execução (contrato e regras completas em `docs/GENUI.md`):
   `prompt` preenche o composer (o usuário revisa e envia) e `copy` copia com
   toast discreto. `reveal` usa `<details>` com chevron 150ms; `tabs` usa Radix.
 - **Estados**: bloco inválido degrada para código + diagnóstico discreto
-  (nunca tela quebrada); avisos de design aparecem só em DEV; carregamento de
+  (nunca tela quebrada); avisos de design vão apenas para o console do DevTools
+  em DEV, nunca para a mensagem; carregamento de
   imagem tem fallback; tabela vazia/gráfico inválido têm mensagem muted.
 - **Acessibilidade**: contraste AA, foco visível (`ring-accent`), alvos ≥32px,
   teclado completo, `aria-label` em ícones e grupos, `alt` obrigatório em

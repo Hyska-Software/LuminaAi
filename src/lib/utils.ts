@@ -59,6 +59,20 @@ export function formatDuration(ms?: number | null): string {
   return `${minutes}m ${rest}s`;
 }
 
+/**
+ * Duration of a thinking phase shown in the timeline header: rounded to whole
+ * seconds so "Pensou por 10s" does not flicker while streaming.
+ */
+export function formatThinkingDuration(ms?: number | null): string | null {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return null;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 1) return 'menos de 1s';
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest ? `${minutes} min ${rest}s` : `${minutes} min`;
+}
+
 export function relativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
   const minute = 60_000;

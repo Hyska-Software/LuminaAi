@@ -2,8 +2,8 @@
 //!
 //! One shared `rusqlite::Connection` guarded by a `parking_lot::Mutex` keeps
 //! `Db` `Send + Sync`, which is what the Tauri state requires. All JSON columns
-//! (`tool_calls`, `citations`, `attachments`, `usage`, `provider_state`) are
-//! (de)serialized here; the rest of the app only sees domain types.
+//! (`tool_calls`, `citations`, `attachments`, `usage`, `provider_state`,
+//! `trace`) are (de)serialized here; the rest of the app only sees domain types.
 
 use std::path::Path;
 
@@ -26,7 +26,7 @@ const CONVERSATION_COLUMNS: &str = "id, title, created_at, updated_at, pinned, \
      provider_id, model_id, message_count, preview";
 
 const MESSAGE_COLUMNS: &str = "id, conversation_id, role, content, reasoning, status, \
-     tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, created_at";
+     tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, created_at, trace";
 
 const ATTACHMENT_COLUMNS: &str = "id, name, mime_type, size, kind, text, page_count, \
      width, height, file_path, created_at";
@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS messages (
   provider_id     TEXT,
   usage           TEXT,
   provider_state  TEXT,
-  created_at      INTEGER NOT NULL
+  created_at      INTEGER NOT NULL,
+  trace           TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS attachments (
@@ -190,6 +191,28 @@ fn decode_opt<T: DeserializeOwned>(raw: Option<String>) -> Option<T> {
 
 fn decode_opt_value(raw: Option<String>) -> Option<Value> {
     raw.and_then(|raw| serde_json::from_str(&raw).ok())
+}
+
+/// Adds `column` to `table` when an older database is missing it.
+fn ensure_column(conn: &Connection, table: &str, column: &str, ddl: &str) -> Result<()> {
+    let has_column = {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .with_context(|| format!("falha ao inspecionar a tabela {table}"))?;
+        let names = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .with_context(|| format!("falha ao listar colunas de {table}"))?;
+        names
+            .collect::<rusqlite::Result<Vec<String>>>()
+            .with_context(|| format!("falha ao ler colunas de {table}"))?
+            .iter()
+            .any(|name| name == column)
+    };
+    if !has_column {
+        conn.execute(ddl, [])
+            .with_context(|| format!("falha ao adicionar a coluna {column} em {table}"))?;
+    }
+    Ok(())
 }
 
 /* ------------------------------------------------------------------ */
@@ -330,6 +353,7 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<ChatMessage> {
         usage: decode_opt::<UsageInfo>(row.get(11)?),
         created_at: row.get(13)?,
         provider_state: decode_opt_value(row.get(12)?),
+        trace: decode_json(&row.get::<_, String>(14)?),
     })
 }
 
@@ -374,6 +398,7 @@ struct MessageColumns {
     attachments: String,
     usage: Option<String>,
     provider_state: Option<String>,
+    trace: String,
 }
 
 fn serialize_message(message: &ChatMessage) -> Result<MessageColumns> {
@@ -387,6 +412,7 @@ fn serialize_message(message: &ChatMessage) -> Result<MessageColumns> {
             .as_ref()
             .map(encode_json)
             .transpose()?,
+        trace: encode_json(&message.trace)?,
     })
 }
 
@@ -398,7 +424,7 @@ fn insert_message_row(
     conn.execute(
         "INSERT INTO messages (id, conversation_id, role, content, reasoning, status, \
          tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, \
-         created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+         created_at, trace) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             &message.id,
             &message.conversation_id,
@@ -414,6 +440,7 @@ fn insert_message_row(
             &cols.usage,
             &cols.provider_state,
             message.created_at,
+            &cols.trace,
         ],
     )
     .with_context(|| format!("falha ao inserir mensagem {}", message.id))?;
@@ -429,7 +456,8 @@ fn update_message_row(
         .execute(
             "UPDATE messages SET role = ?2, content = ?3, reasoning = ?4, status = ?5, \
              tool_calls = ?6, citations = ?7, attachments = ?8, model_id = ?9, \
-             provider_id = ?10, usage = ?11, provider_state = ?12, created_at = ?13 \
+             provider_id = ?10, usage = ?11, provider_state = ?12, created_at = ?13, \
+             trace = ?14 \
              WHERE id = ?1",
             params![
                 &message.id,
@@ -445,6 +473,7 @@ fn update_message_row(
                 &cols.usage,
                 &cols.provider_state,
                 message.created_at,
+                &cols.trace,
             ],
         )
         .with_context(|| format!("falha ao atualizar mensagem {}", message.id))?;
@@ -533,6 +562,14 @@ impl Db {
             .context("falha ao configurar o SQLite (WAL/foreign keys)")?;
         conn.execute_batch(SCHEMA)
             .context("falha ao aplicar o schema do banco")?;
+        // Databases created before the agent trace existed get the column on
+        // open; new databases already have it from `SCHEMA`.
+        ensure_column(
+            conn,
+            "messages",
+            "trace",
+            "ALTER TABLE messages ADD COLUMN trace TEXT NOT NULL DEFAULT '[]'",
+        )?;
         Ok(())
     }
 
@@ -1017,7 +1054,7 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Citation, MessageStatus, ToolCallRecord, ToolCallStatus};
+    use crate::domain::{Citation, MessageStatus, ToolCallRecord, ToolCallStatus, TraceStep};
 
     fn test_db() -> Db {
         Db::open_in_memory().expect("in-memory database")
@@ -1131,6 +1168,16 @@ mod tests {
             duration_ms: Some(1500),
         });
         assistant.provider_state = Some(serde_json::json!({ "items": [1, 2, 3] }));
+        assistant.trace = vec![
+            TraceStep {
+                reasoning: Some("vou pesquisar".to_string()),
+                tool_calls: 1,
+            },
+            TraceStep {
+                reasoning: Some("resumo final".to_string()),
+                tool_calls: 0,
+            },
+        ];
         db.insert_message(&assistant).expect("insert assistant");
 
         let messages = db.list_messages(&conversation.id).expect("list messages");
@@ -1149,6 +1196,7 @@ mod tests {
             messages[1].usage.as_ref().and_then(|u| u.total_tokens),
             Some(30)
         );
+        assert_eq!(messages[1].trace, assistant.trace);
 
         let refreshed = db
             .get_conversation(&conversation.id)
@@ -1169,12 +1217,49 @@ mod tests {
         assert_eq!(stored.status, MessageStatus::Cancelled);
         assert_eq!(stored.citations.len(), 0);
         assert_eq!(stored.provider_state, assistant.provider_state);
+        assert_eq!(stored.trace, assistant.trace, "trace survives updates");
 
         // update_message creates the row when it does not exist yet.
         let mut orphan = assistant_message(&conversation.id, 3_000);
         orphan.content = "recurso".to_string();
         db.update_message(&orphan).expect("upsert");
         assert!(db.get_message(&orphan.id).expect("get orphan").is_some());
+    }
+
+    #[test]
+    fn migrates_legacy_databases_with_the_trace_column() {
+        // A database created before the thinking trace existed.
+        let conn = Connection::open_in_memory().expect("in-memory connection");
+        conn.execute_batch(
+            "CREATE TABLE messages (
+               id              TEXT PRIMARY KEY,
+               conversation_id TEXT NOT NULL,
+               role            TEXT NOT NULL,
+               content         TEXT NOT NULL DEFAULT '',
+               reasoning       TEXT,
+               status          TEXT NOT NULL,
+               tool_calls      TEXT NOT NULL DEFAULT '[]',
+               citations       TEXT NOT NULL DEFAULT '[]',
+               attachments     TEXT NOT NULL DEFAULT '[]',
+               model_id        TEXT,
+               provider_id     TEXT,
+               usage           TEXT,
+               provider_state  TEXT,
+               created_at      INTEGER NOT NULL
+             );
+             INSERT INTO messages (id, conversation_id, role, status, created_at)
+               VALUES ('m1', 'c1', 'assistant', 'complete', 1);",
+        )
+        .expect("legacy schema");
+
+        Db::init_connection(&conn).expect("migration");
+        let trace: String = conn
+            .query_row("SELECT trace FROM messages WHERE id = 'm1'", [], |row| row.get(0))
+            .expect("trace column");
+        assert_eq!(trace, "[]");
+
+        // Opening the same database again is a no-op.
+        Db::init_connection(&conn).expect("idempotent migration");
     }
 
     #[test]
