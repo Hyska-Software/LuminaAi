@@ -1,0 +1,86 @@
+import { cloneElement, Children, isValidElement, type ReactNode } from 'react';
+import { CircleAlert, Info, Lightbulb, OctagonAlert, TriangleAlert, type LucideIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { childrenToText, isIgnorableNode, stripLeadingText } from './reactText';
+
+/** GitHub alert kinds supported by the chat renderer (`docs/MARKDOWN.md` §3.3). */
+export type GitHubAlertKind = 'note' | 'tip' | 'important' | 'warning' | 'caution';
+
+interface AlertMeta {
+  label: string;
+  Icon: LucideIcon;
+}
+
+const ALERT_META: Record<GitHubAlertKind, AlertMeta> = {
+  note: { label: 'Nota', Icon: Info },
+  tip: { label: 'Dica', Icon: Lightbulb },
+  important: { label: 'Importante', Icon: CircleAlert },
+  warning: { label: 'Atenção', Icon: TriangleAlert },
+  caution: { label: 'Cuidado', Icon: OctagonAlert },
+};
+
+/** `> [!NOTE]` on the first line of a blockquote. */
+const ALERT_MARKER = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:[ \t]*\r?\n)?[ \t]*/i;
+
+export interface ParsedGitHubAlert {
+  kind: GitHubAlertKind;
+  content: ReactNode[];
+}
+
+/**
+ * Detects a GitHub alert: the first paragraph of the blockquote must start with
+ * a `[!TYPE]` marker. The marker is removed from the paragraph while the inline
+ * formatting after it is preserved. Unknown markers (`[!FOO]`) stay untouched.
+ */
+export function parseGitHubAlert(children: ReactNode): ParsedGitHubAlert | null {
+  const nodes = Children.toArray(children);
+  const index = nodes.findIndex((node) => !isIgnorableNode(node));
+  if (index === -1) return null;
+
+  const paragraph = nodes[index];
+  if (!isValidElement<{ children?: ReactNode }>(paragraph) || paragraph.type !== 'p') return null;
+
+  const match = ALERT_MARKER.exec(childrenToText(paragraph.props.children));
+  if (!match) return null;
+
+  const kind = match[1].toLowerCase() as GitHubAlertKind;
+  const remainder = stripLeadingText(paragraph.props.children, match[0].length);
+  const content: ReactNode[] = [];
+
+  nodes.forEach((node, nodeIndex) => {
+    if (nodeIndex !== index) {
+      content.push(node);
+      return;
+    }
+    // A marker on its own line produces an empty first paragraph; drop it.
+    if (childrenToText(remainder).trim()) {
+      content.push(cloneElement(paragraph, {}, remainder));
+    }
+  });
+
+  return { kind, content };
+}
+
+export interface GitHubAlertProps {
+  kind: GitHubAlertKind;
+  children?: ReactNode;
+}
+
+/** Styled GitHub alert block with a pt-BR label and an accessible note role. */
+export function GitHubAlert({ kind, children }: GitHubAlertProps) {
+  const { label, Icon } = ALERT_META[kind];
+  return (
+    <div
+      role="note"
+      aria-label={label}
+      data-alert={kind}
+      className={cn('lumina-alert', `lumina-alert-${kind}`)}
+    >
+      <div className="lumina-alert-header flex items-center gap-1.5">
+        <Icon aria-hidden className="size-4 shrink-0" />
+        <span className="font-semibold">{label}</span>
+      </div>
+      <div className="lumina-alert-body">{children}</div>
+    </div>
+  );
+}

@@ -1,95 +1,183 @@
-import { memo } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import {
+  Children,
+  isValidElement,
+  memo,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+} from 'react';
+import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
+import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { ChartBlock, GenUIBlock, HtmlPreview, MermaidBlock } from '@/components/genui';
 import { cn } from '@/lib/utils';
 import { CodeBlock, normalizeLanguage } from './CodeBlock';
-import { isExternalUrl, openExternalUrl } from './external';
+import { GitHubAlert, parseGitHubAlert } from './markdown/GitHubAlert';
+import { MarkdownImage } from './markdown/MarkdownImage';
+import { MarkdownLink } from './markdown/MarkdownLink';
+import { childrenToText, isIgnorableNode } from './markdown/reactText';
+import { rehypeSafeHtml } from './markdown/rehypeSafeHtml';
 
 /** Fence languages rendered by dedicated components instead of Prism. */
 const DELEGATED_LANGUAGES = new Set(['ui', 'mermaid', 'chart', 'html', 'svg']);
 
-function childrenToText(children: unknown): string {
-  if (Array.isArray(children)) {
-    return children.map((child) => (typeof child === 'string' ? child : '')).join('');
+type MarkdownCodeProps = ComponentPropsWithoutRef<'code'> & ExtraProps;
+
+function MarkdownCode({ node, className, children, ...rest }: MarkdownCodeProps) {
+  const match = /language-([\w+#.-]+)/.exec(className ?? '');
+  if (!match) {
+    const text = childrenToText(children);
+    // Fenced blocks without an info string still render as code, not inline.
+    if (text.includes('\n')) {
+      return <CodeBlock code={text.replace(/\n$/, '')} label="text" />;
+    }
+    return (
+      <code {...rest} className={className}>
+        {children}
+      </code>
+    );
   }
-  return typeof children === 'string' ? children : '';
+  const fenceLanguage = match[1].toLowerCase();
+  // `language-math` is consumed by rehype-katex before rendering; if a math
+  // element ever survives, fall back to the raw source instead of a Prism card.
+  if (fenceLanguage === 'math') {
+    return <code className={className}>{children}</code>;
+  }
+  const code = childrenToText(children).replace(/\n$/, '');
+  if (!code.trim()) return null;
+
+  if (DELEGATED_LANGUAGES.has(fenceLanguage)) {
+    switch (fenceLanguage) {
+      case 'ui':
+        return <GenUIBlock source={code} />;
+      case 'mermaid':
+        return <MermaidBlock code={code} />;
+      case 'chart':
+        return <ChartBlock spec={code} />;
+      case 'html':
+        return <HtmlPreview html={code} title="HTML" />;
+      case 'svg':
+        return <HtmlPreview html={code} title="SVG" />;
+      default:
+        break;
+    }
+  }
+
+  return <CodeBlock code={code} language={normalizeLanguage(fenceLanguage)} label={fenceLanguage} />;
 }
 
-const components: Components = {
-  // The `<pre>` wrapper would nest block-level components (genui/code cards).
-  pre: ({ children }) => <>{children}</>,
-  code: ({ className, children }) => {
-    const match = /language-([\w+-]+)/.exec(className ?? '');
-    if (!match) {
-      const text = childrenToText(children);
-      // Fenced blocks without an info string still render as code, not inline.
-      if (text.includes('\n')) {
-        return <CodeBlock code={text.replace(/\n$/, '')} label="text" />;
-      }
-      return <code>{children}</code>;
-    }
-    const fenceLanguage = match[1].toLowerCase();
-    const code = childrenToText(children).replace(/\n$/, '');
-    if (!code.trim()) return null;
+/** True when the `<pre>` child will become a block card (code card / KaTeX display). */
+function isBlockPreChild(children: ReactNode): boolean {
+  const nodes = Children.toArray(children).filter((node) => !isIgnorableNode(node));
+  if (nodes.length !== 1) return false;
+  const child = nodes[0];
+  if (!isValidElement<{ className?: string; children?: ReactNode }>(child)) return false;
 
-    if (DELEGATED_LANGUAGES.has(fenceLanguage)) {
-      switch (fenceLanguage) {
-        case 'ui':
-          return <GenUIBlock source={code} />;
-        case 'mermaid':
-          return <MermaidBlock code={code} />;
-        case 'chart':
-          return <ChartBlock spec={code} />;
-        case 'html':
-          return <HtmlPreview html={code} title="HTML" />;
-        case 'svg':
-          return <HtmlPreview html={code} title="SVG" />;
-        default:
-          break;
-      }
-    }
+  if (child.type === MarkdownCode) {
+    const hasInfoString = /(^|\s)language-/.test(child.props.className ?? '');
+    return hasInfoString || childrenToText(child.props.children).includes('\n');
+  }
+  if (child.type === 'span') {
+    return (child.props.className ?? '').split(/\s+/).includes('katex-display');
+  }
+  return false;
+}
 
-    return <CodeBlock code={code} language={normalizeLanguage(fenceLanguage)} label={fenceLanguage} />;
-  },
-  a: ({ href, children, title }) => (
-    <a
-      href={href}
-      title={title}
-      rel="noreferrer noopener"
-      target="_blank"
-      onClick={(event) => {
-        if (!isExternalUrl(href)) return;
-        event.preventDefault();
-        void openExternalUrl(href);
-      }}
-    >
+/**
+ * Keeps literal `<pre>` HTML from Markdown while letting code cards and KaTeX
+ * display math escape the invalid `<pre><div>` nesting.
+ */
+function MarkdownPre({ children }: { children?: ReactNode }) {
+  const nodes = Children.toArray(children).filter((node) => !isIgnorableNode(node));
+  if (nodes.length === 0) return null;
+  if (isBlockPreChild(nodes)) return <>{children}</>;
+  return (
+    <pre className="my-3 overflow-x-auto rounded-xl border border-border bg-surface p-3 font-mono text-[12.5px] leading-6 text-foreground">
       {children}
-    </a>
-  ),
-  table: ({ children }) => (
-    <div className="my-3 w-full overflow-x-auto">
+    </pre>
+  );
+}
+
+type BlockquoteProps = ComponentPropsWithoutRef<'blockquote'> & ExtraProps;
+
+function MarkdownBlockquote({ children }: BlockquoteProps) {
+  const alert = parseGitHubAlert(children);
+  if (alert) return <GitHubAlert kind={alert.kind}>{alert.content}</GitHubAlert>;
+  return <blockquote>{children}</blockquote>;
+}
+
+/** Disabled GFM task-list checkbox with a pt-BR accessible label. */
+function TaskListCheckbox({ checked }: ComponentPropsWithoutRef<'input'>) {
+  const done = checked === true;
+  return (
+    <input
+      type="checkbox"
+      disabled
+      checked={done}
+      aria-label={done ? 'Concluído' : 'Pendente'}
+      className="lumina-task-checkbox"
+    />
+  );
+}
+
+/** Footnote section generated by `remark-gfm`, styled and localized. */
+function MarkdownFootnotesSection({ node, className, children, ...props }: ComponentPropsWithoutRef<'section'> & ExtraProps) {
+  const isFootnotes = node?.properties?.dataFootnotes !== undefined;
+  return (
+    <section {...props} className={cn(className, isFootnotes && 'lumina-footnotes')}>
+      {children}
+    </section>
+  );
+}
+
+/** The generated footnote title is hidden and localized to pt-BR ("Notas"). */
+function MarkdownHeading2({ node, children, ...props }: ComponentPropsWithoutRef<'h2'> & ExtraProps) {
+  if (node?.properties?.id === 'footnote-label') {
+    return (
+      <h2 id="footnote-label" className="sr-only">
+        Notas
+      </h2>
+    );
+  }
+  return <h2 {...props}>{children}</h2>;
+}
+
+function MarkdownTable({ children }: ComponentPropsWithoutRef<'table'>) {
+  return (
+    <div className="lumina-table-wrap my-3 w-full overflow-x-auto">
       <table>{children}</table>
     </div>
-  ),
-  img: ({ src, alt, title }) => <img src={src} alt={alt ?? ''} title={title} loading="lazy" />,
+  );
+}
+
+const COMPONENTS: Components = {
+  pre: MarkdownPre,
+  code: MarkdownCode,
+  a: MarkdownLink,
+  img: MarkdownImage,
+  blockquote: MarkdownBlockquote,
+  input: TaskListCheckbox,
+  table: MarkdownTable,
+  section: MarkdownFootnotesSection,
+  h2: MarkdownHeading2,
 };
 
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
-const REHYPE_PLUGINS = [rehypeKatex];
+const REHYPE_PLUGINS = [rehypeRaw, rehypeSafeHtml, rehypeKatex];
 
 export interface MarkdownProps {
   content: string;
   className?: string;
+  /** Adds the blinking stream caret to the last text block. */
+  streaming?: boolean;
 }
 
 /** GFM + math markdown renderer tuned by the global `.lumina-prose` styles. */
-export const Markdown = memo(function Markdown({ content, className }: MarkdownProps) {
+export const Markdown = memo(function Markdown({ content, className, streaming = false }: MarkdownProps) {
   return (
-    <div className={cn('lumina-prose text-[15px]', className)}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={components}>
+    <div className={cn('lumina-prose text-[15px]', streaming && 'lumina-prose--streaming', className)}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>

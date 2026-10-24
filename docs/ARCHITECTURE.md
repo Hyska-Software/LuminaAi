@@ -16,7 +16,7 @@ Lumina é um aplicativo desktop de conversação com LLMs, construído em **Taur
 | --- | --- |
 | Shell desktop | Tauri 2 (Rust), janela frameless com titlebar própria |
 | UI | React 19, TypeScript 7, Vite 8, Tailwind CSS 4, Radix UI, lucide-react, motion, sonner |
-| Markdown | react-markdown + remark-gfm + remark-math + rehype-katex, Prism para código, Mermaid (lazy) |
+| Markdown | react-markdown + remark-gfm (tabelas, task lists, notas de rodapé, autolinks, riscado) + remark-math/rehype-katex, `rehype-raw` com sanitizador allowlist próprio (HTML cru seguro), Prism para código, Mermaid (lazy) — contrato em `docs/MARKDOWN.md` |
 | Estado | Zustand (app, chat, ui) |
 | Backend | Rust: tokio + reqwest (rustls) + rusqlite (SQLite embutido) + scraper/zip/quick-xml/calamine/pdf-extract |
 | Streaming | SSE lido no Rust, reemitido ao renderer via `tauri::ipc::Channel` |
@@ -150,7 +150,7 @@ Fatos descobertos por sondagem (ver `docs/MODELS.md`):
 `harness::run_turn` executa:
 
 1. Carrega conversa e histórico, injeta anexos (texto extraído + imagens quando o modelo suporta).
-2. Monta o system prompt (`harness/prompt.rs`): identidade, idioma (pt-BR), regras de ferramentas, formato de **UI generativa**, formato de artefatos e citações.
+2. Monta o system prompt (`harness/prompt.rs`): identidade, idioma (pt-BR), regras de ferramentas, **guia de formatação Markdown/GFM** (ver §8.1), formato de **UI generativa**, formato de artefatos e citações.
 3. Loop de até `max_steps`:
    - chama `providers::stream_completion` e reemite eventos;
    - acumula texto, reasoning e tool calls;
@@ -171,6 +171,29 @@ Fatos descobertos por sondagem (ver `docs/MODELS.md`):
 
 `validate_ui` está sempre disponível e não conta no orçamento de ferramentas de
 dados — é o mecanismo de autovalidação do agente para a UI generativa (ver §9).
+
+### 8.1 Markdown do chat
+
+O contrato completo (sintaxe suportada, decisões e matriz de testes) está em
+**`docs/MARKDOWN.md`**; o renderer fica em `src/components/chat/Markdown.tsx`.
+
+- **Pipeline**: `remark-gfm` (tabelas com alinhamento, task lists, notas de
+  rodapé, autolinks, riscado), `remark-math` + `rehype-katex` (`$…$` inline e
+  `$$…$$` display), `rehype-raw` para HTML cru e, em seguida, o sanitizador
+  próprio `rehypeSafeHtml` (allowlist de tags/attrs/URLs, roda **antes** do
+  KaTeX para não descartar a saída dele).
+- **Componentes**: código cercado com header de linguagem + botão copiar
+  (Prism); fences especiais `ui`, `mermaid`, `chart`, `html`, `svg`; links
+  externos e `mailto:` via plugin-opener; âncoras internas (notas de rodapé);
+  imagens com fallback; alertas GitHub (`> [!NOTE]` etc.); tabelas com wrapper
+  rolável.
+- **Segurança**: o Markdown nunca usa `innerHTML`; o HTML cru passa por
+  allowlist (sem `script`/`style`/`iframe`/`on*`/`style` inline) e as URLs
+  aceitas são apenas `http(s)`, `mailto:` e `#âncora`. O prompt (seção
+  **Formatação Markdown** em `harness/prompt.rs`) orienta o modelo a preferir
+  Markdown puro e nunca emitir HTML perigoso.
+- **Testes**: `src/components/chat/Markdown.test.tsx` (matriz funcional) e
+  `Markdown.security.test.tsx` (vetores XSS/atributos/URLs).
 
 ## 9. UI generativa
 
@@ -290,6 +313,7 @@ open_artifact, delete_artifact, run_turn, cancel_turn
 - CSP restritiva em produção; sem `eval`, sem imports remotos em runtime.
 - HTML/SVG de artefatos e blocos `html` rodam em iframe `sandbox="allow-scripts"` sem acesso ao IPC (sem `allow-same-origin`).
 - Links externos abrem no navegador padrão via plugin-opener, nunca no webview.
+- Markdown com HTML cru passa por sanitizador allowlist (`rehypeSafeHtml`): sem `script`/`style`/`iframe`/eventos/`style` inline, classes e `data-*` fora da allowlist, e URLs restritas a `http(s)`, `mailto:` e âncoras internas. React nunca injeta o markdown via `innerHTML`.
 - Toda saída de ferramentas é tratada como dados; o system prompt instrui o modelo a ignorar instruções vindas de páginas web.
 
 ## 14. Build
@@ -306,7 +330,7 @@ pnpm app:dev            # dev com HMR
 
 A verificação é feita por testes automatizados — unitários e de integração — e por build:
 
-1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo) e a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`).
+1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo), a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`) e o **renderer de Markdown** (matriz CommonMark/GFM, math, notas de rodapé, alertas, HTML sanitizado e vetores de segurança).
 2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui`, o system prompt gerado do contrato, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), SQLite (conversas/mensagens/anexos/artefatos/usage/`trace` + migração de bancos antigos), settings/segredos, exportação e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor, cancelamento e o trace por passo.
 3. **Integração com o gateway real** (testes `#[ignore]`, executados sob demanda): streaming nos 4 protocolos, tool call + replay de `provider_state`, fallback de protocolo, mapeamento de 401, cancelamento e o caso canônico **DeepSeek V4.1 Flash com esforço máximo**.
 4. **Build**: `pnpm typecheck`, `pnpm build` e `pnpm tauri build --no-bundle` (artefato em `src-tauri/target/release/lumina.exe`).

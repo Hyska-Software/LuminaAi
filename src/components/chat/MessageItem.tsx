@@ -25,9 +25,7 @@ const MESSAGE_MOTION = {
   transition: { duration: 0.26, ease: [0.22, 1, 0.36, 1] as [number, number, number, number] },
 };
 
-/** Blinking caret appended to the last rendered block while text streams. */
-const STREAMING_CARET =
-  "[&>*:last-child]:after:ml-0.5 [&>*:last-child]:after:inline-block [&>*:last-child]:after:h-[1.05em] [&>*:last-child]:after:w-[0.5em] [&>*:last-child]:after:rounded-[1px] [&>*:last-child]:after:bg-accent [&>*:last-child]:after:align-[-0.15em] [&>*:last-child]:after:content-['']";
+/** Blinking caret is rendered by `.lumina-prose--streaming` in globals.css. */
 
 function useCopyFeedback() {
   const [copied, setCopied] = useState(false);
@@ -215,14 +213,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({ message, isStr
         ) : null}
 
         {message.status !== 'error' && message.content ? (
-          <div
-            className={cn(
-              showCaret && STREAMING_CARET,
-              showCaret && !reduceMotion && '[&>*:last-child]:after:animate-blink',
-            )}
-          >
-            <Markdown content={message.content} />
-          </div>
+          <Markdown content={message.content} streaming={showCaret} />
         ) : null}
 
         {awaitingText ? (
