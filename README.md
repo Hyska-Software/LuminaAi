@@ -2,7 +2,7 @@
 
 Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usando **OpenCode Go** e **OpenCode Zen** como provedores.
 
-![status](https://img.shields.io/badge/status-em%20desenvolvimento-7c5cff)
+![status](https://img.shields.io/badge/status-conclu%C3%ADdo-7c5cff)
 
 ## Funcionalidades
 
@@ -15,6 +15,16 @@ Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usan
 - **Artefatos em painel lateral** estilo canvas, com preview por tipo.
 - **Histórico local** (SQLite), busca, fixar, renomear, exportar.
 - **UI/UX** inspirada no ChatGPT: sidebar, composer flutuante, paleta de comandos, temas claro/escuro, atalhos.
+
+## Screenshots
+
+| Boas-vindas | Seletor de modelo |
+| --- | --- |
+| ![Boas-vindas](docs/screenshots/01-welcome.png) | ![Seletor de modelo](docs/screenshots/02-model-picker.png) |
+
+| Busca na web com citações | Raciocínio + markdown |
+| --- | --- |
+| ![Busca na web](docs/screenshots/03-web-search.png) | ![Raciocínio](docs/screenshots/04-reasoning.png) |
 
 ## Requisitos
 
@@ -33,7 +43,13 @@ pnpm app:dev        # Tauri + Vite com HMR
 Build de produção:
 
 ```bash
-pnpm app:build      # instalador NSIS em src-tauri/target/release/bundle
+pnpm app:build      # instalador NSIS em src-tauri/target/release/bundle/nsis
+```
+
+Somente o executável (sem instalador):
+
+```bash
+pnpm tauri build --no-bundle   # src-tauri/target/release/lumina.exe
 ```
 
 ## Testes
@@ -62,7 +78,7 @@ data/catalog.json        catálogo de modelos (gerado)
 scripts/                 geração do catálogo e sondagens dos provedores
 src/                     renderer React (componentes, stores, genui)
 src-tauri/src/           core Rust (providers, harness, tools, documents, db)
-docs/                    arquitetura, design e modelos
+docs/                    arquitetura, design, modelos e screenshots
 ```
 
 Documentação: [Arquitetura](docs/ARCHITECTURE.md) · [Design](docs/DESIGN.md) · [Modelos & Provedores](docs/MODELS.md).
