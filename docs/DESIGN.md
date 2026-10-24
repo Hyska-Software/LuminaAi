@@ -114,10 +114,13 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 - Botão enviar: círculo 32px, `bg-foreground` (light) / `bg-foreground` (dark), ícone `ArrowUp`; desabilitado quando vazio; vira `Square` (parar) durante streaming.
 - Anexar: seletor de arquivos nativo (`@tauri-apps/plugin-dialog`), também drag & drop na janela.
 - Pills de ferramentas: `Busca web` e `Criar arquivos` com estado on/off (accent-soft quando ligado).
-- Pill de modelo: avatar da família + nome + esforço (ex.: "GLM-5.3-Flash · Alto"). Click abre ModelPicker.
+- Seletor de modelo (padrão): pill segmentado em duas partes — ① avatar + nome do modelo: abre o **dropdown em duas etapas**: a lista de modelos (Favoritos + famílias, com painel de detalhes ao passar o mouse) e, ao escolher um modelo, a mesma lista troca para os **modos de pensamento** (Desligado / esforços / orçamento); ② rótulo do pensamento (ex.: "Alto"): atalho que abre direto a etapa de pensamento. O item **"Ver todos os modelos…"** no rodapé da lista abre o **seletor completo** (modal com busca, provedores e capacidades) — não há botão extra na interface do chat.
 - Dica de rodapé: "Lumina pode cometer erros. Verifique informações importantes." (11–12px, muted).
 
-## 8. Model Picker (dialog)
+## 8. Model Picker (dialog completo)
+
+> O caminho padrão é o pill com o dropdown em duas etapas (DESIGN §7). Este
+> diálogo é o modo avançado, aberto por "Ver todos os modelos…" no rodapé da lista.
 
 - Largura 720px, altura 560px, `rounded-2xl`.
 - Header com busca e tabs de provedor: `OpenCode Go` / `OpenCode Zen` (badge de chave configurada).
