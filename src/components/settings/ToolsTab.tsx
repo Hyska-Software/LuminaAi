@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAppStore } from '@/lib/store';
+import { MAX_STEPS_LIMIT, useAppStore } from '@/lib/store';
 import { Slider, Switch } from '@/components/ui';
 import { SettingRow, SettingsBlock, SettingsSection } from './shared';
 
@@ -72,7 +72,7 @@ export function ToolsTab() {
         >
           <Slider
             min={1}
-            max={16}
+            max={MAX_STEPS_LIMIT}
             step={1}
             value={maxSteps}
             valueLabel={String(maxSteps)}

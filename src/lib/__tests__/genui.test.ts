@@ -13,6 +13,7 @@ import {
   propObjectArray,
   propString,
 } from '@/lib/genui/schema';
+import { GENUI_CONTRACT, GENUI_ICONS } from '@/lib/genui/contract';
 import { isSvgMarkup, sanitizeSvg } from '@/lib/genui/sanitize';
 import { parseCsv } from '@/components/artifacts/csv';
 
@@ -48,10 +49,12 @@ describe('parseGenUI', () => {
     expect(error).toMatch(/JSON/i);
   });
 
-  it('rejects unknown component types', () => {
-    const { spec, error } = parseGenUI('{"components":[{"type":"iframe","props":{}}]}');
-    expect(spec).toBeNull();
-    expect(error).toMatch(/não permitido|desconhecid/i);
+  it('rejects unknown component types (incluindo tipos herdados de Object.prototype)', () => {
+    for (const kind of ['iframe', 'constructor', 'toString', '__proto__']) {
+      const { spec, diagnostics } = parseGenUI(`{"components":[{"type":"${kind}","props":{}}]}`);
+      expect(spec).toBeNull();
+      expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain('ui.unknown-type');
+    }
   });
 
   it('rejects nesting deeper than the limit', () => {
@@ -59,9 +62,9 @@ describe('parseGenUI', () => {
     for (let index = 0; index < GENUI_LIMITS.depth + 1; index += 1) {
       node = { type: 'card', children: [node] };
     }
-    const { spec, error } = parseGenUI(JSON.stringify({ components: [node] }));
+    const { spec, diagnostics } = parseGenUI(JSON.stringify({ components: [node] }));
     expect(spec).toBeNull();
-    expect(error).toMatch(/profundidade/i);
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain('ui.too-deep');
   });
 
   it('rejects trees with too many components', () => {
@@ -69,9 +72,9 @@ describe('parseGenUI', () => {
       type: 'badge',
       props: { label: 'x' },
     }));
-    const { spec, error } = parseGenUI(JSON.stringify({ components: children }));
+    const { spec, diagnostics } = parseGenUI(JSON.stringify({ components: children }));
     expect(spec).toBeNull();
-    expect(error).toMatch(/limite|300|componentes/i);
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain('ui.too-many-nodes');
   });
 
   it('rejects empty component lists', () => {
@@ -85,6 +88,7 @@ describe('parseGenUI', () => {
       'stack',
       'grid',
       'tabs',
+      'reveal',
       'table',
       'chart',
       'stat',
@@ -100,15 +104,33 @@ describe('parseGenUI', () => {
       'divider',
       'link',
       'keyvalue',
+      'actions',
     ]) {
       expect(GENUI_TYPES).toContain(type);
     }
   });
 
-  it('keeps the source limit aligned with the backend validator', () => {
-    expect(GENUI_LIMITS.source).toBe(200_000);
+  it('keeps the limits aligned with the shared contract', () => {
+    expect(GENUI_LIMITS.source).toBe(GENUI_CONTRACT.limits.sourceChars);
+    expect(GENUI_LIMITS.depth).toBe(GENUI_CONTRACT.limits.depth);
+    expect(GENUI_LIMITS.nodes).toBe(GENUI_CONTRACT.limits.nodes);
+    expect(GENUI_LIMITS.nodes).toBe(120);
     expect(GENUI_LIMITS.depth).toBe(8);
-    expect(GENUI_LIMITS.nodes).toBe(300);
+  });
+
+  it('keeps the contract internally consistent', () => {
+    const types = GENUI_CONTRACT.components.map((component) => component.type);
+    expect(new Set(types).size).toBe(types.length);
+    expect(new Set(GENUI_ICONS).size).toBe(GENUI_ICONS.length);
+    for (const rule of GENUI_CONTRACT.rules) {
+      expect(rule.prompt.trim()).not.toBe('');
+      expect(rule.hint.trim()).not.toBe('');
+      expect(['error', 'warning']).toContain(rule.severity);
+      expect(['block', 'message']).toContain(rule.scope);
+    }
+    // Toda regra de bloco tem um `params` numérico ou é estrutural.
+    const withParams = GENUI_CONTRACT.rules.filter((rule) => rule.params);
+    expect(withParams.length).toBeGreaterThan(8);
   });
 });
 

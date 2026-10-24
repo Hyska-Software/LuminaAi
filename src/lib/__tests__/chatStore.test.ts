@@ -35,7 +35,7 @@ vi.mock('sonner', () => ({
 
 // Imported after the mocks above.
 import { useAppStore } from '@/lib/store/appStore';
-import { useChatStore } from '@/lib/store/chatStore';
+import { useChatStore, selectModelLocked } from '@/lib/store/chatStore';
 import { useUiStore } from '@/lib/store/uiStore';
 import { catalog } from '@/lib/catalog';
 
@@ -332,5 +332,212 @@ describe('chatStore other actions', () => {
   it('ships the DeepSeek V4.1 Flash model in the bundled catalog', () => {
     const go = catalog.providers.find((provider) => provider.id === 'opencode-go');
     expect(go?.models.some((model) => model.id === 'deepseek-v4.1-flash')).toBe(true);
+  });
+});
+
+describe('model lock', () => {
+  it('locks as soon as the conversation has messages, is streaming or is known to be non-empty', () => {
+    expect(selectModelLocked(useChatStore.getState())).toBe(false);
+
+    useChatStore.setState({
+      activeId: 'conv-1',
+      conversations: [conversation({ messageCount: 0 })],
+      messagesByConversation: { 'conv-1': [] },
+    });
+    expect(selectModelLocked(useChatStore.getState())).toBe(false);
+
+    useChatStore.setState({ messagesByConversation: { 'conv-1': [userMessage()] } });
+    expect(selectModelLocked(useChatStore.getState())).toBe(true);
+
+    // The conversation list alone already says the conversation started.
+    useChatStore.setState({
+      messagesByConversation: {},
+      conversations: [conversation({ messageCount: 2 })],
+    });
+    expect(selectModelLocked(useChatStore.getState())).toBe(true);
+
+    // A running turn also locks the model.
+    useChatStore.setState({
+      messagesByConversation: {},
+      conversations: [conversation({ messageCount: 0 })],
+      streaming: {
+        turnId: 'turn-1',
+        conversationId: 'conv-1',
+        assistantId: 'assistant-1',
+        userMessageId: 'user-1',
+        phase: 'text',
+        step: 1,
+        startedAt: Date.now(),
+      },
+    });
+    expect(selectModelLocked(useChatStore.getState())).toBe(true);
+  });
+
+  it('syncs the active selection to the conversation model when opening a started conversation', async () => {
+    mocks.api.getConversation.mockResolvedValue({
+      conversation: conversation({
+        providerId: 'opencode-go',
+        modelId: 'glm-5.3-flash',
+        messageCount: 2,
+      }),
+      messages: [userMessage(), assistantMessage()],
+    });
+
+    await useChatStore.getState().openConversation('conv-1');
+
+    expect(useAppStore.getState().selection).toMatchObject({
+      providerId: 'opencode-go',
+      modelId: 'glm-5.3-flash',
+    });
+  });
+
+  it('does not change the selection when opening an empty conversation', async () => {
+    mocks.api.getConversation.mockResolvedValue({
+      conversation: conversation({
+        providerId: 'opencode-zen',
+        modelId: 'gpt-6-luna',
+        messageCount: 0,
+      }),
+      messages: [],
+    });
+
+    await useChatStore.getState().openConversation('conv-2');
+
+    expect(useAppStore.getState().selection.modelId).toBe('deepseek-v4.1-flash');
+  });
+
+  it('startNewConversation resets the composer to the configured defaults after a started conversation', async () => {
+    useChatStore.setState({
+      activeId: 'conv-1',
+      conversations: [conversation({ messageCount: 2 })],
+      messagesByConversation: { 'conv-1': [userMessage(), assistantMessage()] },
+    });
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings,
+        defaultProvider: 'opencode-go',
+        defaultModel: 'glm-5.3-flash',
+        reasoningDefault: 'high',
+      },
+    });
+    mocks.api.createConversation.mockResolvedValue(
+      conversation({ id: 'conv-2', title: 'Nova conversa', messageCount: 0 }),
+    );
+
+    await useChatStore.getState().startNewConversation();
+
+    expect(useAppStore.getState().selection).toEqual({
+      providerId: 'opencode-go',
+      modelId: 'glm-5.3-flash',
+      reasoning: { mode: 'effort', effort: 'high' },
+    });
+  });
+
+  it('keeps the current selection when starting a new chat from the welcome screen', async () => {
+    useAppStore.setState({
+      selection: {
+        providerId: 'opencode-go',
+        modelId: 'qwen3.8-flash',
+        reasoning: { mode: 'effort', effort: 'low' },
+      },
+    });
+    mocks.api.createConversation.mockResolvedValue(
+      conversation({ id: 'conv-3', title: 'Nova conversa', messageCount: 0 }),
+    );
+
+    await useChatStore.getState().startNewConversation();
+
+    expect(useAppStore.getState().selection.modelId).toBe('qwen3.8-flash');
+  });
+
+  it('send keeps the conversation model even if the global selection was mutated', async () => {
+    useChatStore.setState({
+      activeId: 'conv-1',
+      conversations: [conversation({ messageCount: 2 })],
+      messagesByConversation: { 'conv-1': [userMessage(), assistantMessage()] },
+    });
+    // Simulates any surface bypassing the UI lock.
+    useAppStore.setState({
+      selection: {
+        providerId: 'opencode-go',
+        modelId: 'glm-5.3-flash',
+        reasoning: { mode: 'effort', effort: 'low' },
+      },
+    });
+
+    const payloads: TurnPayload[] = [];
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        payloads.push(payload);
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-2',
+          assistantMessageId: 'assistant-2',
+        });
+        const result = {
+          userMessage: userMessage({ id: 'user-2' }),
+          assistantMessage: assistantMessage({ id: 'assistant-2', content: 'ok' }),
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 4 }),
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    await useChatStore.getState().send('continua');
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+
+    expect(payloads[0]).toMatchObject({
+      providerId: 'opencode-go',
+      modelId: 'deepseek-v4.1-flash',
+    });
+  });
+
+  it('regenerate keeps the conversation model even if the global selection was mutated', async () => {
+    useChatStore.setState({
+      activeId: 'conv-1',
+      conversations: [conversation({ messageCount: 2 })],
+      messagesByConversation: { 'conv-1': [userMessage(), assistantMessage()] },
+    });
+    useAppStore.setState({
+      selection: {
+        providerId: 'opencode-go',
+        modelId: 'glm-5.3-flash',
+        reasoning: { mode: 'effort', effort: 'low' },
+      },
+    });
+
+    const payloads: TurnPayload[] = [];
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        payloads.push(payload);
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-2',
+        });
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage({ id: 'assistant-2', content: 'nova' }),
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 2 }),
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    await useChatStore.getState().regenerate();
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+
+    expect(payloads[0]).toMatchObject({
+      providerId: 'opencode-go',
+      modelId: 'deepseek-v4.1-flash',
+    });
   });
 });

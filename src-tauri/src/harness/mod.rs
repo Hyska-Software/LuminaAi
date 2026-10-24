@@ -15,7 +15,7 @@ use crate::db::{Db, StoredAttachment};
 use crate::domain::{
     now_ms, AttachmentInfo, ChatMessage, Citation, MessageRole, MessageStatus, ReasoningMode,
     ReasoningSelection, Settings, ToolCallRecord, ToolCallStatus, TurnOptions, TurnPayload,
-    TurnResult, UsageInfo,
+    TurnResult, UsageInfo, MAX_STEPS_LIMIT,
 };
 use crate::events::TurnEvent;
 use crate::providers::{
@@ -164,7 +164,7 @@ pub async fn run_turn(
     let mut options = payload.options.clone();
     options.web_search = options.web_search && settings.web_search_enabled;
     options.create_files = options.create_files && settings.file_creation_enabled;
-    options.max_steps = options.max_steps.clamp(1, 16);
+    options.max_steps = options.max_steps.clamp(1, MAX_STEPS_LIMIT);
 
     /* ---------------------------------------------------------------- */
     /* 3. Persist the user message (or reuse it when regenerating) and   */
@@ -576,15 +576,37 @@ pub async fn run_turn(
     /* 6. Finalize the assistant message                                 */
     /* ---------------------------------------------------------------- */
 
-    // Defense in depth: the renderer validates the `ui` blocks again and
-    // degrades invalid JSON to a code block, but surfacing the problem in the
-    // backend log makes prompt/schema regressions visible.
+    // Defense in depth: o renderer valida os blocos `ui` de novo e degrada JSON
+    // inválido para código, mas logar os diagnósticos no backend (debug) torna
+    // regressões de prompt/contrato visíveis durante o desenvolvimento.
     if cfg!(debug_assertions) {
-        for warning in tools::render_ui::markdown_ui_blocks(&full_text)
-            .iter()
-            .filter_map(|block| block.as_ref().err())
-        {
-            eprintln!("lumina: bloco `ui` inválido na resposta: {warning}");
+        let contract = tools::genui::contract();
+        let blocks = tools::genui::scan_markdown_blocks(&full_text);
+        for (index, analysis) in blocks.iter().enumerate() {
+            for diagnostic in &analysis.diagnostics {
+                let severity = match diagnostic.severity {
+                    tools::genui::Severity::Error => "erro",
+                    tools::genui::Severity::Warning => "aviso",
+                };
+                let path = if diagnostic.path.is_empty() {
+                    "(raiz)"
+                } else {
+                    diagnostic.path.as_str()
+                };
+                eprintln!(
+                    "lumina: bloco `ui` #{} com {severity} {} em {path}: {}",
+                    index + 1,
+                    diagnostic.code,
+                    diagnostic.message
+                );
+            }
+        }
+        if blocks.len() > contract.blocks.max_per_message {
+            eprintln!(
+                "lumina: resposta com {} blocos `ui` (máximo {} por mensagem)",
+                blocks.len(),
+                contract.blocks.max_per_message
+            );
         }
     }
 

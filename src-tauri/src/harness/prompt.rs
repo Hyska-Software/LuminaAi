@@ -1,45 +1,25 @@
-//! System prompt + tool instructions.
+//! System prompt + instruções das ferramentas.
 //!
-//! The prompt is written in Brazilian Portuguese because the product UI is
-//! pt-BR and the model is expected to answer in the user's language. The
-//! generative-UI schema documented here must stay in sync with
-//! `crate::tools::render_ui`.
+//! O prompt é escrito em português do Brasil porque a UI do produto é pt-BR e o
+//! modelo deve responder no idioma do usuário. A seção de UI generativa é
+//! **gerada a partir de `data/genui-contract.json`**: catálogo de componentes,
+//! regras de design, interações, limites, exemplo canônico e autoverificação.
+//! Nenhuma lista de componentes/limites/regras é duplicada aqui — mudar o
+//! contrato muda o prompt (e os testes quebram se algo divergir).
 
 use chrono::Datelike;
 
 use crate::catalog::ModelInfo;
 use crate::domain::{Settings, TurnOptions};
-
-/// Example block reused by the prompt and checked by the tests, so the
-/// documented schema can never drift from the validator.
-const UI_EXAMPLE: &str = r#"{
-  "components": [
-    { "type": "card", "props": { "title": "Resumo do trimestre", "subtitle": "Receita consolidada por mês" }, "children": [
-      { "type": "grid", "props": { "columns": 2 }, "children": [
-        { "type": "stat", "props": { "label": "Receita", "value": "R$ 12.400", "trend": "up", "hint": "+12% vs. trimestre anterior" } },
-        { "type": "stat", "props": { "label": "Churn", "value": "3,1%", "trend": "down" } }
-      ]},
-      { "type": "chart", "props": {
-        "type": "bar",
-        "title": "Receita mensal (R$ mil)",
-        "data": [ { "label": "Jan", "value": 3.2 }, { "label": "Fev", "value": 4.1 }, { "label": "Mar", "value": 5.0 } ]
-      }},
-      { "type": "callout", "props": { "variant": "warning", "title": "Atenção" }, "children": [
-        { "type": "list", "props": { "items": ["Margem caiu 2 pontos", "Churn concentrado no plano base"] } }
-      ]}
-    ]}
-  ]
-}"#;
+use crate::tools::genui::contract::{self, Contract};
 
 /// Build the full system prompt for a turn.
 pub fn build_system_prompt(model: &ModelInfo, options: &TurnOptions, settings: &Settings) -> String {
     let date = today_pt_br();
-    let tools = tools_section(options);
     let model_name = model.name.as_str();
-    let example = UI_EXAMPLE;
     let extra = extra_instructions(settings, options);
 
-    let mut prompt = String::with_capacity(12_000);
+    let mut prompt = String::with_capacity(20_000);
     prompt.push_str(&format!(
         "# Identidade\n\
          Você é **Lumina**, um assistente de IA para conversas, pesquisa e criação de conteúdo, \
@@ -56,57 +36,23 @@ pub fn build_system_prompt(model: &ModelInfo, options: &TurnOptions, settings: &
          - Seja conciso quando a pergunta for simples e completo quando o assunto exigir. Sem \
          preâmbulos vazios (\"Claro!\", \"Com certeza!\") e sem repetir a pergunta.\n\
          - Blocos de código sempre com a linguagem identificada. Use Mermaid (` ```mermaid `) para \
-         diagramas e blocos `chart` não são necessários — prefira a UI generativa descrita abaixo.\n\
+         diagramas; para dados estruturados prefira a UI generativa descrita abaixo.\n\
          - Não invente fatos, números, citações, APIs ou resultados de ferramentas. Se não souber ou \
          não tiver acesso, diga o que falta e proponha o próximo passo.\n\
-         - Ao final, ofereça um próximo passo apenas quando ele for realmente útil.\n\n\
-         {tools}\n\
-         # Citações e fontes\n\
+         - Ao final, ofereça um próximo passo apenas quando ele for realmente útil.\n\n"
+    ));
+    prompt.push_str(&tools_section(options));
+    prompt.push_str(
+        "# Citações e fontes\n\
          - Sempre que usar resultados de `web_search` ou `fetch_url`, cite as fontes no texto com \
          links Markdown: `[título do resultado](https://url)`. A interface transforma esses links em \
          chips de citação; nunca invente URLs.\n\
          - Prefira fontes primárias/oficiais e mencione a data de publicação quando for relevante.\n\
-         - Se as fontes divergirem, explique a divergência em vez de escolher uma silenciosamente.\n\n\
-                  # UI generativa (blocos `ui`)\n\
-         Você pode renderizar componentes declarativos na interface usando um bloco cercado com a linguagem `ui` contendo UM objeto JSON. A interface valida o JSON e desenha apenas componentes da whitelist (nada de HTML/JS/CSS).\n\
-         \n\
-         Formato:\n\
-         ```ui\n\
-         {example}\n\
-         ```\n\
-         \n\
-         Regras:\n\
-         - A raiz é `{{ \"components\": [ ... ] }}`; cada componente é `{{ \"type\": \"...\", \"props\": {{...}}, \"children\": [...] }}`.\n\
-         - `type` deve ser um dos 19 tipos da whitelist: `card`, `stack`, `grid`, `tabs`, `table`, `chart`, `stat`, `progress`, `timeline`, `steps`, `callout`, `quote`, `code`, `list`, `image`, `badge`, `divider`, `link`, `keyvalue`.\n\
-         - `children` só é permitido em containers: `card`, `stack`, `grid`, `tabs`, `callout`. Profundidade máxima: 8 níveis; máximo de 300 componentes.\n\
-         - `props` deve ser objeto; cada tipo tem suas props listadas abaixo. Propriedades desconhecidas são ignoradas — use exatamente os nomes documentados.\n\
-         - URLs em `image.src` e `link.href` precisam ser `http://` ou `https://`; `image.src` também aceita `data:image/png|jpeg|webp|gif;base64,...`.\n\
-         - Use no máximo 1 ou 2 blocos `ui` por resposta, para dados estruturados (comparações, métricas, etapas, cronogramas). Para texto corrido, use Markdown normal.\n\
-         - Não repita no Markdown o mesmo conteúdo do bloco `ui`.\n\
-         \n\
-         Componentes e props (contrato exato do renderer):\n\
-         - `card`: `title?`, `subtitle?`, `footer?`, `variant?` (`default|accent|muted`); aceita `children`.\n\
-         - `stack`: `direction?` (`column` padrão ou `row`), `gap?` (`none|sm|md|lg`), `align?` (`start|center|end|stretch`), `justify?` (`center|between|end`), `wrap?` (boolean); aceita `children`.\n\
-         - `grid`: `columns?` (1 a 4, padrão 2), `gap?` (`none|sm|md|lg`); aceita `children`.\n\
-         - `tabs`: aceita `children` com um painel por aba; o nome de cada aba vem de `props.label` (ou `props.title`) do painel.\n\
-         - `table`: `columns` (array de strings), `rows` (array de arrays de strings/números), `caption?`.\n\
-         - `chart`: `type` (`bar|line|pie`), `data` (array de `{{label, value}}` com value numérico), `title?`, `suffix?`.\n\
-         - `stat`: `label`, `value`, `trend?` (`up|down|flat`), `hint?`.\n\
-         - `progress`: `value` (0-100), `max?` (padrão 100), `label?`, `suffix?`.\n\
-         - `timeline`: `items` (array de `{{title, time?, description?, status?}}`, status `done|active|pending|error`).\n\
-         - `steps`: `items` (array de `{{title, description?}}`), `current?` (índice do passo atual começando em 1; 0 = nenhum concluído).\n\
-         - `callout`: `variant?` (`info|warning|success|danger`), `title?`, `text?`.\n\
-         - `quote`: `text`, `cite?` (autor/fonte).\n\
-         - `code`: `code`, `language?`, `title?` (nome do arquivo).\n\
-         - `list`: `items` (array de strings ou de `{{text, description?}}`), `ordered?` (boolean).\n\
-         - `image`: `src`, `alt`, `caption?`.\n\
-         - `badge`: `label`, `tone?` (`neutral|accent|success|warning|danger|outline`).\n\
-         - `divider`: `label?`.\n\
-         - `link`: `href`, `label`.\n\
-         - `keyvalue`: `items` (array de `{{label, value}}` ou um objeto chave→valor).\n\
-         - Se o JSON ficar inválido, a interface degrada o bloco para código — então revise o JSON antes de emitir (sem comentários, sem vírgula sobrando).\n\
-         \n\
-         # Arquivos e artefatos\n\
+         - Se as fontes divergirem, explique a divergência em vez de escolher uma silenciosamente.\n\n",
+    );
+    prompt.push_str(&generative_ui_section(contract::contract()));
+    prompt.push_str(
+        "# Arquivos e artefatos\n\
          - Use `create_file` para entregar conteúdo longo ou que o usuário queira guardar: documentos \
          (`relatorio.md`), páginas (`index.html`), dados (`dados.csv`, `dados.json`), código \
          (`app.tsx`), diagramas (`fluxo.svg`).\n\
@@ -126,8 +72,8 @@ pub fn build_system_prompt(model: &ModelInfo, options: &TurnOptions, settings: &
          conversas.\n\
          - Não gere conteúdo ilegal, malicioso ou que viole direitos; recuse com clareza e ofereça uma \
          alternativa segura.\n\
-         - Ao criar HTML/SVG, não inclua scripts externos nem código de rastreamento.\n"
-    ));
+         - Ao criar HTML/SVG, não inclua scripts externos nem código de rastreamento.\n",
+    );
 
     if !extra.is_empty() {
         prompt.push_str("\n# Instruções adicionais do usuário\n");
@@ -164,8 +110,12 @@ fn tools_section(options: &TurnOptions) -> String {
         );
     }
     section.push_str(
-        "- Orçamento de ferramentas: no máximo 6 chamadas por resposta (ideal 2 a 4). Assim que \
-         tiver informação suficiente, PARE de chamar ferramentas e escreva a resposta final.\n\
+        "- `validate_ui(block)`: valida o JSON completo de um bloco `ui` antes de emiti-lo e devolve \
+         `{ ok, summary, errors, warnings, normalized }` com o caminho exato de cada problema. \
+         **Sempre disponível**; não conta no orçamento de 6 chamadas de ferramentas de dados — \
+         idealmente no máximo 2 vezes por resposta.\n\
+         - Orçamento de ferramentas de dados: no máximo 6 chamadas por resposta (ideal 2 a 4). \
+         Assim que tiver informação suficiente, PARE de chamar ferramentas e escreva a resposta final.\n\
          - Prefira uma busca bem formulada a várias buscas parecidas; nunca repita a mesma consulta.\n\
          - Não narre o processo (\"vou buscar…\", \"agora vou ler…\"): chame a ferramenta em \
          silêncio e entregue a resposta final com os resultados. Cite as URLs usadas.\n\
@@ -175,6 +125,178 @@ fn tools_section(options: &TurnOptions) -> String {
          fica no artefato, não o repita no chat.\n\n",
     );
     section
+}
+
+/// Seção de UI generativa inteiramente derivada do contrato v2.
+fn generative_ui_section(contract: &Contract) -> String {
+    let limits = &contract.limits;
+    let categories = contract.categories();
+    let mut section = String::with_capacity(8_000);
+
+    section.push_str("# UI generativa (blocos `ui`)\n");
+    // `description` é metainformação de engenharia; o modelo recebe o
+    // `promptIntro`, que é escrito para ele.
+    section.push_str(contract.prompt_intro.trim());
+    section.push_str("\n\n");
+
+    section.push_str("## Quando usar\n");
+    section.push_str(
+        "- Quando a resposta ganha como interface: dados que o usuário vai comparar, escanear ou \
+         sobre os quais vai agir. O bloco substitui tabelas/gráficos do Markdown e pode oferecer \
+         ações clicáveis.\n",
+    );
+    section.push_str(&format!(
+        "- Catálogo do contrato: {} componentes em {} categorias — {}. Use somente componentes e \
+         props documentados abaixo.\n",
+        contract.components.len(),
+        categories.len(),
+        categories
+            .iter()
+            .map(|category| {
+                let types: Vec<String> = contract
+                    .components_by_category(category)
+                    .iter()
+                    .map(|component| format!("`{}`", component.typ))
+                    .collect();
+                format!("`{category}` ({})", types.join(", "))
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    ));
+    for action_kind in &contract.interactions.action_kinds {
+        section.push_str(&format!(
+            "- Interação `{}` ({}) para próximos passos: {}\n",
+            action_kind.kind, action_kind.label, action_kind.description
+        ));
+    }
+
+    section.push_str("\n## Quando não usar\n");
+    section.push_str(
+        "- Texto corrido, explicações longas, código ou qualquer conteúdo que o Markdown já resolve.\n\
+         - Quando não houver dados reais: nunca invente números, rótulos ou séries para preencher um \
+         componente.\n",
+    );
+    section.push_str(&format!(
+        "- Mais de {} {} `ui` na mesma resposta (ideal {}).\n",
+        contract.blocks.max_per_message,
+        if contract.blocks.max_per_message == 1 { "bloco" } else { "blocos" },
+        contract.blocks.recommended_per_message
+    ));
+    section.push_str(
+        "- Quando a resposta já termina em uma pergunta simples ou não há próximo passo útil, não \
+         use `actions`.\n",
+    );
+
+    section.push_str("\n## Formato\n");
+    section.push_str(&format!("- {}\n", contract.format.root.trim()));
+    for note in &contract.format.notes {
+        section.push_str("- ");
+        section.push_str(note.trim());
+        section.push('\n');
+    }
+    section.push_str(&format!(
+        "- `version` é opcional; prefira emitir `{{ \"components\": [...] }}` sem `version` (a \
+         interface usa a versão {}).\n",
+        contract.format.version
+    ));
+    section.push_str(
+        "- Se o JSON ficar inválido, a interface degrada o bloco para código: chame `validate_ui` \
+         antes de emitir.\n\n",
+    );
+
+    section.push_str("## Exemplo canônico\n\n");
+    section.push_str("```ui\n");
+    section.push_str(contract::EXAMPLE_JSON.trim());
+    section.push_str("\n```\n\n");
+
+    section.push_str("## Regras de design (do contrato)\n");
+    for rule in &contract.rules {
+        section.push_str("- ");
+        section.push_str(rule.prompt.trim());
+        section.push('\n');
+    }
+    section.push('\n');
+
+    section.push_str("## Componentes (catálogo do contrato)\n");
+    for category in &categories {
+        section.push_str(&format!("### {category}\n"));
+        for component in contract.components_by_category(category) {
+            section.push_str(&format!(
+                "- `{}` ({}) — {} {}\n",
+                component.typ,
+                component.kind,
+                component.summary.trim(),
+                component.doc.trim()
+            ));
+        }
+    }
+    section.push('\n');
+
+    section.push_str("## Interações\n");
+    section.push_str(contract.interactions.description.trim());
+    section.push('\n');
+    for action_kind in &contract.interactions.action_kinds {
+        section.push_str(&format!(
+            "- `{}` ({}): {} Texto de até {} caracteres.\n",
+            action_kind.kind,
+            action_kind.label,
+            action_kind.description.trim(),
+            action_kind.max_chars
+        ));
+    }
+    for rule in &contract.interactions.rules {
+        section.push_str("- ");
+        section.push_str(rule.trim());
+        section.push('\n');
+    }
+    section.push('\n');
+
+    section.push_str("## Limites\n");
+    section.push_str(&format!(
+        "- Até {} caracteres de origem por bloco, {} componentes, profundidade de {} níveis, {} \
+         props por componente, arrays de até {} itens e textos de até {} caracteres.\n",
+        format_limit(limits.source_chars),
+        limits.nodes,
+        limits.depth,
+        limits.props,
+        limits.array_items,
+        format_limit(limits.string_chars)
+    ));
+    section.push_str(&format!(
+        "- No máximo {} {} `ui` por resposta (ideal {}).\n",
+        contract.blocks.max_per_message,
+        if contract.blocks.max_per_message == 1 { "bloco" } else { "blocos" },
+        contract.blocks.recommended_per_message
+    ));
+    section.push_str(&format!(
+        "- No máximo {} diagnósticos por código; corrija a causa raiz em vez de repetir o erro.\n\n",
+        limits.diagnostics_per_code
+    ));
+
+    section.push_str("## Autoverificação\n");
+    section.push_str(
+        "- Antes de responder, chame `validate_ui` com o JSON completo do bloco e corrija todos os \
+         erros; resolva os avisos de design quando possível.\n\
+         - `validate_ui` não conta no orçamento de 6 chamadas de ferramentas de dados; idealmente \
+         no máximo 2 vezes por resposta.\n\
+         - Só emita o bloco depois que `validate_ui` retornar `ok: true` com JSON completo — o bloco \
+         não renderiza quando há erros.\n\n",
+    );
+
+    section
+}
+
+/// Agrupamento de milhares com ponto (pt-BR), determinístico para os testes.
+fn format_limit(value: usize) -> String {
+    let digits = value.to_string();
+    let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, character) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            formatted.push('.');
+        }
+        formatted.push(character);
+    }
+    formatted
 }
 
 fn extra_instructions(settings: &Settings, options: &TurnOptions) -> String {
@@ -229,7 +351,7 @@ mod tests {
     use super::*;
     use crate::catalog::ModelInfo;
     use crate::domain::{Settings, TurnOptions};
-    use serde_json::json;
+    use crate::tools::genui::{analyze, contract};
 
     fn model() -> ModelInfo {
         ModelInfo {
@@ -253,9 +375,13 @@ mod tests {
         }
     }
 
+    fn default_prompt() -> String {
+        build_system_prompt(&model(), &TurnOptions::default(), &Settings::default())
+    }
+
     #[test]
     fn prompt_contains_core_sections() {
-        let prompt = build_system_prompt(&model(), &TurnOptions::default(), &Settings::default());
+        let prompt = default_prompt();
         assert!(prompt.contains("Lumina"));
         assert!(prompt.contains("português do Brasil"));
         assert!(prompt.contains("web_search"));
@@ -264,6 +390,7 @@ mod tests {
         assert!(prompt.contains("UI generativa"));
         assert!(prompt.contains("```ui"));
         assert!(prompt.contains("Hoje é"));
+        assert!(prompt.contains("validate_ui"));
     }
 
     #[test]
@@ -275,6 +402,8 @@ mod tests {
         assert!(!prompt.contains("`web_search("));
         assert!(prompt.contains("`fetch_url("));
         assert!(!prompt.contains("`create_file("));
+        // `validate_ui` é sempre documentada.
+        assert!(prompt.contains("`validate_ui("));
     }
 
     #[test]
@@ -290,67 +419,163 @@ mod tests {
     }
 
     #[test]
-    fn prompt_documents_every_generative_ui_type() {
-        let prompt = build_system_prompt(&model(), &TurnOptions::default(), &Settings::default());
-        for kind in [
-            "card",
-            "stack",
-            "grid",
-            "tabs",
-            "table",
-            "chart",
-            "stat",
-            "progress",
-            "timeline",
-            "steps",
-            "callout",
-            "quote",
-            "code",
-            "list",
-            "image",
-            "badge",
-            "divider",
-            "link",
-            "keyvalue",
-        ] {
+    fn prompt_documents_every_contract_component() {
+        let prompt = default_prompt();
+        for component in &contract::contract().components {
             assert!(
-                prompt.contains(&format!("`{kind}`")),
-                "o prompt deve documentar o componente `{kind}`"
+                prompt.contains(&format!("`{}`", component.typ)),
+                "o prompt deve documentar o componente `{}`",
+                component.typ
+            );
+            assert!(
+                prompt.contains(component.summary.trim()),
+                "o prompt deve incluir o summary de `{}`",
+                component.typ
+            );
+            assert!(
+                prompt.contains(component.doc.trim()),
+                "o prompt deve incluir o doc de `{}`",
+                component.typ
             );
         }
-        // Limits documented in the prompt must match the backend validator.
-        assert!(prompt.contains("300 componentes"));
-        assert!(prompt.contains("Profundidade máxima: 8"));
-        // Chart contract matches the renderer (data points, not series).
-        assert!(prompt.contains("`data`"));
-        assert!(!prompt.contains("`series`"));
+    }
+
+    #[test]
+    fn prompt_documents_every_design_rule() {
+        let prompt = default_prompt();
+        for rule in &contract::contract().rules {
+            assert!(
+                prompt.contains(rule.prompt.trim()),
+                "a regra `{}` deve aparecer no prompt",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn prompt_documents_interactions_from_the_contract() {
+        let prompt = default_prompt();
+        let interactions = &contract::contract().interactions;
+        assert!(prompt.contains(interactions.description.trim()));
+        for rule in &interactions.rules {
+            assert!(prompt.contains(rule.trim()), "regra de interação ausente: {rule}");
+        }
+        for kind in &interactions.action_kinds {
+            assert!(prompt.contains(&format!("`{}`", kind.kind)));
+            assert!(prompt.contains(&kind.label));
+        }
+    }
+
+    #[test]
+    fn prompt_documents_the_contract_limits() {
+        let prompt = default_prompt();
+        let contract = contract::contract();
+        assert!(prompt.contains(&format_limit(contract.limits.source_chars)));
+        assert!(prompt.contains(&contract.limits.nodes.to_string()));
+        assert!(prompt.contains(&contract.limits.depth.to_string()));
+        assert!(prompt.contains(&contract.limits.props.to_string()));
+        assert!(prompt.contains(&contract.limits.array_items.to_string()));
+        assert!(prompt.contains(&contract.limits.diagnostics_per_code.to_string()));
+        assert!(prompt.contains(&contract.blocks.max_per_message.to_string()));
+        assert!(prompt.contains(&contract.blocks.recommended_per_message.to_string()));
+        // Formato: raiz e notes vêm do contrato.
+        assert!(prompt.contains(contract.format.root.trim()));
+        for note in &contract.format.notes {
+            assert!(prompt.contains(note.trim()), "nota de formato ausente: {note}");
+        }
+    }
+
+    #[test]
+    fn prompt_has_when_to_use_and_when_not_to_use_sections() {
+        let prompt = default_prompt();
+        assert!(prompt.contains("## Quando usar"));
+        assert!(prompt.contains("## Quando não usar"));
+        // A lista de categorias/tipos é derivada do contrato.
+        for category in contract::contract().categories() {
+            assert!(prompt.contains(&format!("`{category}`")));
+        }
+    }
+
+    #[test]
+    fn documented_ui_example_is_valid_and_lint_clean() {
+        let prompt = default_prompt();
+        let analysis = analyze(contract::EXAMPLE_JSON);
+        assert!(
+            analysis.is_ok(),
+            "o exemplo do prompt precisa ser válido: {:?}",
+            analysis
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.clone())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            analysis.warnings().next().is_none(),
+            "o exemplo do prompt precisa ser lint-clean"
+        );
+        assert!(prompt.contains("\"Receita do trimestre\""));
+    }
+
+    #[test]
+    fn prompt_does_not_mention_legacy_series_shape() {
+        let prompt = default_prompt();
+        assert!(
+            !prompt.contains("`series`"),
+            "o contrato usa `data` com pares label/value, nunca `series`"
+        );
+    }
+
+    #[test]
+    fn prompt_uses_the_model_facing_intro_and_hides_contract_metadata() {
+        let prompt = default_prompt();
+        let contract = contract::contract();
+        let intro = contract.prompt_intro.trim();
+        assert!(!intro.is_empty(), "promptIntro não pode ser vazio");
+        assert!(
+            prompt.contains(intro),
+            "a seção de UI generativa deve começar com o promptIntro do contrato"
+        );
+        // Metainformação de engenharia do contrato não pode vazar para o modelo.
+        assert!(!prompt.contains("testes de paridade"));
+        assert!(!prompt.contains("Consumido pelo system prompt"));
+        assert!(!prompt.contains("data/genui-fixtures.json"));
+        assert!(
+            !prompt.contains(contract.description.trim()),
+            "a `description` de engenharia do contrato vazou para o prompt"
+        );
+    }
+
+    #[test]
+    fn prompt_instructs_validate_ui_self_check() {
+        let prompt = default_prompt();
+        assert!(prompt.contains("Autoverificação"));
+        assert!(prompt.contains("`validate_ui`"));
+        assert!(prompt.contains("idealmente no máximo 2 vezes por resposta"));
+        assert!(prompt.contains("ok: true"));
     }
 
     #[test]
     fn prompt_instructs_tool_budget_and_no_narration() {
-        let prompt = build_system_prompt(&model(), &TurnOptions::default(), &Settings::default());
+        let prompt = default_prompt();
         assert!(prompt.contains("no máximo 6 chamadas"));
         assert!(prompt.contains("PARE de chamar ferramentas"));
         assert!(prompt.contains("Não narre o processo"));
+        // `validate_ui` explicitamente fora do orçamento de dados.
+        assert!(prompt.contains("não conta no orçamento de 6 chamadas"));
     }
 
     #[test]
     fn prompt_tells_the_model_to_create_files_for_long_deliverables() {
-        let prompt = build_system_prompt(&model(), &TurnOptions::default(), &Settings::default());
+        let prompt = default_prompt();
         assert!(prompt.contains("create_file"));
         assert!(prompt.contains("artefato"));
         assert!(prompt.contains("preview"));
     }
 
     #[test]
-    fn documented_ui_example_is_valid() {
-        let prompt = build_system_prompt(&model(), &TurnOptions::default(), &Settings::default());
-        let parsed: serde_json::Value = serde_json::from_str(UI_EXAMPLE).expect("example json");
-        assert_eq!(parsed["components"][0]["type"], json!("card"));
-        assert!(
-            crate::tools::render_ui::validate_ui_json(UI_EXAMPLE).is_ok(),
-            "the UI example documented in the system prompt must pass the validator"
-        );
-        assert!(prompt.contains("\"Resumo do trimestre\""));
+    fn format_limit_groups_thousands_like_pt_br() {
+        assert_eq!(format_limit(120), "120");
+        assert_eq!(format_limit(4_000), "4.000");
+        assert_eq!(format_limit(200_000), "200.000");
     }
 }

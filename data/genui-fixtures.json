@@ -1,0 +1,2976 @@
+{
+  "version": 2,
+  "description": "Corpus de paridade do contrato GenUI v2 (data/genui-contract.json). Cada caso é executado pelo núcleo TypeScript (src/lib/genui) e pelo backend Rust (src-tauri/src/tools/genui) com o MESMO resultado: `errors`/`warnings` são códigos de diagnóstico esperados (comparar como multiconjunto ordenado), `normalized` é a árvore canônica esperada (deep equal com spec.components; só existe quando errors vazio).",
+  "cases": [
+    {
+      "name": "card com stack e badge",
+      "source": "{\"components\":[{\"type\":\"card\",\"props\":{\"title\":\"Resumo\"},\"children\":[{\"type\":\"stack\",\"props\":{\"direction\":\"row\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"novo\"}}]}]}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "card",
+            "props": {
+              "title": "Resumo"
+            },
+            "children": [
+              {
+                "type": "stack",
+                "props": {
+                  "direction": "row"
+                },
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "novo"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "grid de métricas",
+      "source": "{\"components\":[{\"type\":\"card\",\"props\":{\"title\":\"Indicadores\"},\"children\":[{\"type\":\"grid\",\"props\":{\"columns\":2},\"children\":[{\"type\":\"stat\",\"props\":{\"label\":\"Receita\",\"value\":\"R$ 12,4 mi\"}},{\"type\":\"stat\",\"props\":{\"label\":\"Churn\",\"value\":\"3,1%\"}}]}]}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "card",
+            "props": {
+              "title": "Indicadores"
+            },
+            "children": [
+              {
+                "type": "grid",
+                "props": {
+                  "columns": 2
+                },
+                "children": [
+                  {
+                    "type": "stat",
+                    "props": {
+                      "label": "Receita",
+                      "value": "R$ 12,4 mi"
+                    }
+                  },
+                  {
+                    "type": "stat",
+                    "props": {
+                      "label": "Churn",
+                      "value": "3,1%"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "tabs com painéis rotulados",
+      "source": "{\"components\":[{\"type\":\"tabs\",\"children\":[{\"type\":\"stack\",\"props\":{\"label\":\"Visão geral\"},\"children\":[{\"type\":\"stat\",\"props\":{\"label\":\"Receita\",\"value\":\"R$ 10 mi\"}}]},{\"type\":\"stack\",\"props\":{\"label\":\"Detalhes\"},\"children\":[{\"type\":\"list\",\"props\":{\"items\":[{\"text\":\"Canal direto\"}]}}]}]}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "tabs",
+            "children": [
+              {
+                "type": "stack",
+                "children": [
+                  {
+                    "type": "stat",
+                    "props": {
+                      "label": "Receita",
+                      "value": "R$ 10 mi"
+                    }
+                  }
+                ],
+                "props": {
+                  "label": "Visão geral"
+                }
+              },
+              {
+                "type": "stack",
+                "children": [
+                  {
+                    "type": "list",
+                    "props": {
+                      "items": [
+                        {
+                          "text": "Canal direto"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "props": {
+                  "label": "Detalhes"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "tabela compacta",
+      "source": "{\"components\":[{\"type\":\"card\",\"props\":{\"title\":\"Canais\"},\"children\":[{\"type\":\"table\",\"props\":{\"columns\":[\"Canal\",\"Receita\"],\"rows\":[[\"Direto\",\"R$ 6,2 mi\"],[\"Parceiros\",\"R$ 4,1 mi\"]]}}]}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "card",
+            "props": {
+              "title": "Canais"
+            },
+            "children": [
+              {
+                "type": "table",
+                "props": {
+                  "columns": [
+                    "Canal",
+                    "Receita"
+                  ],
+                  "rows": [
+                    [
+                      "Direto",
+                      "R$ 6,2 mi"
+                    ],
+                    [
+                      "Parceiros",
+                      "R$ 4,1 mi"
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "gráfico de barras",
+      "source": "{\"components\":[{\"type\":\"chart\",\"props\":{\"type\":\"bar\",\"title\":\"Receita mensal (R$ milhões)\",\"suffix\":\" mi\",\"data\":[{\"label\":\"Jul\",\"value\":3.8},{\"label\":\"Ago\",\"value\":4.1}]}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "chart",
+            "props": {
+              "type": "bar",
+              "data": [
+                {
+                  "label": "Jul",
+                  "value": 3.8
+                },
+                {
+                  "label": "Ago",
+                  "value": 4.1
+                }
+              ],
+              "title": "Receita mensal (R$ milhões)",
+              "suffix": " mi"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "gráfico de linha",
+      "source": "{\"components\":[{\"type\":\"chart\",\"props\":{\"type\":\"line\",\"title\":\"Usuários ativos\",\"data\":[{\"label\":\"Jan\",\"value\":10},{\"label\":\"Fev\",\"value\":12},{\"label\":\"Mar\",\"value\":15}]}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "chart",
+            "props": {
+              "type": "line",
+              "data": [
+                {
+                  "label": "Jan",
+                  "value": 10
+                },
+                {
+                  "label": "Fev",
+                  "value": 12
+                },
+                {
+                  "label": "Mar",
+                  "value": 15
+                }
+              ],
+              "title": "Usuários ativos"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "gráfico de pizza",
+      "source": "{\"components\":[{\"type\":\"chart\",\"props\":{\"type\":\"pie\",\"title\":\"Receita por canal\",\"data\":[{\"label\":\"Direto\",\"value\":6},{\"label\":\"Parceiros\",\"value\":3},{\"label\":\"Marketplace\",\"value\":1}]}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "chart",
+            "props": {
+              "type": "pie",
+              "data": [
+                {
+                  "label": "Direto",
+                  "value": 6
+                },
+                {
+                  "label": "Parceiros",
+                  "value": 3
+                },
+                {
+                  "label": "Marketplace",
+                  "value": 1
+                }
+              ],
+              "title": "Receita por canal"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "barra de progresso",
+      "source": "{\"components\":[{\"type\":\"progress\",\"props\":{\"value\":42,\"max\":100,\"label\":\"Migração concluída\",\"suffix\":\"%\"}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "progress",
+            "props": {
+              "value": 42,
+              "max": 100,
+              "label": "Migração concluída",
+              "suffix": "%"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "linha do tempo",
+      "source": "{\"components\":[{\"type\":\"timeline\",\"props\":{\"items\":[{\"title\":\"Planejamento\",\"time\":\"Jul\",\"status\":\"done\"},{\"title\":\"Execução\",\"time\":\"Ago\",\"status\":\"active\"},{\"title\":\"Revisão\",\"time\":\"Set\",\"status\":\"pending\"}]}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "timeline",
+            "props": {
+              "items": [
+                {
+                  "title": "Planejamento",
+                  "time": "Jul",
+                  "status": "done"
+                },
+                {
+                  "title": "Execução",
+                  "time": "Ago",
+                  "status": "active"
+                },
+                {
+                  "title": "Revisão",
+                  "time": "Set",
+                  "status": "pending"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "passos",
+      "source": "{\"components\":[{\"type\":\"steps\",\"props\":{\"current\":2,\"items\":[{\"title\":\"Coletar dados\",\"description\":\"Exportar o trimestre\"},{\"title\":\"Consolidar\",\"description\":\"Unificar os canais\"},{\"title\":\"Revisar\",\"description\":\"Checar com o time\"}]}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "steps",
+            "props": {
+              "items": [
+                {
+                  "title": "Coletar dados",
+                  "description": "Exportar o trimestre"
+                },
+                {
+                  "title": "Consolidar",
+                  "description": "Unificar os canais"
+                },
+                {
+                  "title": "Revisar",
+                  "description": "Checar com o time"
+                }
+              ],
+              "current": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "pares chave-valor",
+      "source": "{\"components\":[{\"type\":\"keyvalue\",\"props\":{\"items\":[{\"label\":\"Uptime\",\"value\":\"99,9%\"},{\"label\":\"Latência p95\",\"value\":\"180 ms\"}]}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "keyvalue",
+            "props": {
+              "items": [
+                {
+                  "label": "Uptime",
+                  "value": "99,9%"
+                },
+                {
+                  "label": "Latência p95",
+                  "value": "180 ms"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "lista ordenada",
+      "source": "{\"components\":[{\"type\":\"list\",\"props\":{\"ordered\":true,\"items\":[{\"text\":\"Primeiro\"},{\"text\":\"Segundo\"}]}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "list",
+            "props": {
+              "items": [
+                {
+                  "text": "Primeiro"
+                },
+                {
+                  "text": "Segundo"
+                }
+              ],
+              "ordered": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "bloco de código",
+      "source": "{\"components\":[{\"type\":\"code\",\"props\":{\"code\":\"const total = 3;\",\"language\":\"ts\",\"title\":\"total.ts\"}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "code",
+            "props": {
+              "code": "const total = 3;",
+              "language": "ts",
+              "title": "total.ts"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "citação",
+      "source": "{\"components\":[{\"type\":\"quote\",\"props\":{\"text\":\"A margem é o que sobra.\",\"cite\":\"Relatório interno\"}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "quote",
+            "props": {
+              "text": "A margem é o que sobra.",
+              "cite": "Relatório interno"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "callout com lista",
+      "source": "{\"components\":[{\"type\":\"callout\",\"props\":{\"variant\":\"warning\",\"title\":\"Atenção\",\"text\":\"Dois pontos pedem revisão.\"},\"children\":[{\"type\":\"list\",\"props\":{\"items\":[{\"text\":\"Margem caiu 2 pontos\"},{\"text\":\"Churn estável\"}]}}]}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "callout",
+            "props": {
+              "variant": "warning",
+              "title": "Atenção",
+              "text": "Dois pontos pedem revisão."
+            },
+            "children": [
+              {
+                "type": "list",
+                "props": {
+                  "items": [
+                    {
+                      "text": "Margem caiu 2 pontos"
+                    },
+                    {
+                      "text": "Churn estável"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "badge isolado",
+      "source": "{\"components\":[{\"type\":\"badge\",\"props\":{\"label\":\"novo\"}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "badge",
+            "props": {
+              "label": "novo"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "imagem remota",
+      "source": "{\"components\":[{\"type\":\"image\",\"props\":{\"src\":\"https://example.com/grafico.png\",\"alt\":\"Gráfico de receita por canal\",\"caption\":\"Fonte: financeiro\"}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "image",
+            "props": {
+              "src": "https://example.com/grafico.png",
+              "alt": "Gráfico de receita por canal",
+              "caption": "Fonte: financeiro"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "link externo",
+      "source": "{\"components\":[{\"type\":\"link\",\"props\":{\"href\":\"https://example.com/relatorio\",\"label\":\"Abrir relatório\"}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "link",
+            "props": {
+              "href": "https://example.com/relatorio",
+              "label": "Abrir relatório"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ações interativas",
+      "source": "{\"components\":[{\"type\":\"actions\",\"props\":{\"items\":[{\"label\":\"Comparar trimestres\",\"prompt\":\"Compare este trimestre com o anterior.\",\"tone\":\"primary\",\"icon\":\"arrow-right\"},{\"label\":\"Copiar resumo\",\"copy\":\"Receita: R$ 12,4 mi\"}]}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "actions",
+            "props": {
+              "items": [
+                {
+                  "label": "Comparar trimestres",
+                  "prompt": "Compare este trimestre com o anterior.",
+                  "tone": "primary",
+                  "icon": "arrow-right"
+                },
+                {
+                  "label": "Copiar resumo",
+                  "copy": "Receita: R$ 12,4 mi"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "seção recolhível",
+      "source": "{\"components\":[{\"type\":\"reveal\",\"props\":{\"title\":\"Metodologia\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"dados internos\"}}]}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "reveal",
+            "props": {
+              "title": "Metodologia"
+            },
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "dados internos"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "divisor com rótulo",
+      "source": "{\"components\":[{\"type\":\"divider\",\"props\":{\"label\":\"Detalhes\"}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "divider",
+            "props": {
+              "label": "Detalhes"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "exemplo do system prompt é válido",
+      "source": "{\n  \"version\": 2,\n  \"components\": [\n    {\n      \"type\": \"card\",\n      \"props\": {\n        \"title\": \"Receita do trimestre\",\n        \"subtitle\": \"Consolidado por mês e por canal\"\n      },\n      \"children\": [\n        {\n          \"type\": \"grid\",\n          \"props\": { \"columns\": 2 },\n          \"children\": [\n            {\n              \"type\": \"stat\",\n              \"props\": {\n                \"label\": \"Receita\",\n                \"value\": \"R$ 12,4 mi\",\n                \"trend\": \"up\",\n                \"hint\": \"+12% vs. trimestre anterior\"\n              }\n            },\n            {\n              \"type\": \"stat\",\n              \"props\": {\n                \"label\": \"Churn\",\n                \"value\": \"3,1%\",\n                \"trend\": \"down\",\n                \"hint\": \"Menor valor em 12 meses\"\n              }\n            }\n          ]\n        },\n        {\n          \"type\": \"chart\",\n          \"props\": {\n            \"type\": \"bar\",\n            \"title\": \"Receita mensal (R$ milhões)\",\n            \"suffix\": \" mi\",\n            \"data\": [\n              { \"label\": \"Jul\", \"value\": 3.8 },\n              { \"label\": \"Ago\", \"value\": 4.1 },\n              { \"label\": \"Set\", \"value\": 4.5 }\n            ]\n          }\n        },\n        {\n          \"type\": \"table\",\n          \"props\": {\n            \"columns\": [\"Canal\", \"Receita\", \"Crescimento\"],\n            \"rows\": [\n              [\"Direto\", \"R$ 6,2 mi\", \"+9%\"],\n              [\"Parceiros\", \"R$ 4,1 mi\", \"+15%\"],\n              [\"Marketplace\", \"R$ 2,1 mi\", \"+6%\"]\n            ]\n          }\n        },\n        {\n          \"type\": \"callout\",\n          \"props\": {\n            \"variant\": \"warning\",\n            \"title\": \"Atenção\",\n            \"text\": \"A margem bruta caiu 2 pontos por causa do desconto no marketplace.\"\n          }\n        },\n        {\n          \"type\": \"actions\",\n          \"props\": {\n            \"items\": [\n              {\n                \"label\": \"Comparar com o trimestre anterior\",\n                \"prompt\": \"Compare a receita deste trimestre com a do trimestre anterior, canal por canal.\",\n                \"tone\": \"primary\",\n                \"icon\": \"arrow-right\"\n              },\n              {\n                \"label\": \"Gerar plano de margem\",\n                \"prompt\": \"Monte um plano de ações para recuperar 2 pontos de margem no próximo trimestre.\",\n                \"icon\": \"lightbulb\"\n              }\n            ]\n          }\n        }\n      ]\n    }\n  ]\n}\n",
+      "normalized": {
+        "components": [
+          {
+            "type": "card",
+            "props": {
+              "title": "Receita do trimestre",
+              "subtitle": "Consolidado por mês e por canal"
+            },
+            "children": [
+              {
+                "type": "grid",
+                "props": {
+                  "columns": 2
+                },
+                "children": [
+                  {
+                    "type": "stat",
+                    "props": {
+                      "label": "Receita",
+                      "value": "R$ 12,4 mi",
+                      "trend": "up",
+                      "hint": "+12% vs. trimestre anterior"
+                    }
+                  },
+                  {
+                    "type": "stat",
+                    "props": {
+                      "label": "Churn",
+                      "value": "3,1%",
+                      "trend": "down",
+                      "hint": "Menor valor em 12 meses"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "chart",
+                "props": {
+                  "type": "bar",
+                  "data": [
+                    {
+                      "label": "Jul",
+                      "value": 3.8
+                    },
+                    {
+                      "label": "Ago",
+                      "value": 4.1
+                    },
+                    {
+                      "label": "Set",
+                      "value": 4.5
+                    }
+                  ],
+                  "title": "Receita mensal (R$ milhões)",
+                  "suffix": " mi"
+                }
+              },
+              {
+                "type": "table",
+                "props": {
+                  "columns": [
+                    "Canal",
+                    "Receita",
+                    "Crescimento"
+                  ],
+                  "rows": [
+                    [
+                      "Direto",
+                      "R$ 6,2 mi",
+                      "+9%"
+                    ],
+                    [
+                      "Parceiros",
+                      "R$ 4,1 mi",
+                      "+15%"
+                    ],
+                    [
+                      "Marketplace",
+                      "R$ 2,1 mi",
+                      "+6%"
+                    ]
+                  ]
+                }
+              },
+              {
+                "type": "callout",
+                "props": {
+                  "variant": "warning",
+                  "title": "Atenção",
+                  "text": "A margem bruta caiu 2 pontos por causa do desconto no marketplace."
+                }
+              },
+              {
+                "type": "actions",
+                "props": {
+                  "items": [
+                    {
+                      "label": "Comparar com o trimestre anterior",
+                      "prompt": "Compare a receita deste trimestre com a do trimestre anterior, canal por canal.",
+                      "tone": "primary",
+                      "icon": "arrow-right"
+                    },
+                    {
+                      "label": "Gerar plano de margem",
+                      "prompt": "Monte um plano de ações para recuperar 2 pontos de margem no próximo trimestre.",
+                      "icon": "lightbulb"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "exemplo mínimo é válido",
+      "source": "{\n  \"version\": 2,\n  \"components\": [\n    {\n      \"type\": \"stack\",\n      \"props\": { \"gap\": \"md\" },\n      \"children\": [\n        {\n          \"type\": \"callout\",\n          \"props\": {\n            \"variant\": \"info\",\n            \"title\": \"Resumo\",\n            \"text\": \"Três pontos merecem atenção antes de fechar o trimestre.\"\n          },\n          \"children\": [\n            {\n              \"type\": \"list\",\n              \"props\": {\n                \"items\": [\n                  { \"text\": \"Margem bruta caiu 2 pontos\" },\n                  { \"text\": \"Marketplace cresceu acima do plano\" },\n                  { \"text\": \"Churn estável no plano base\" }\n                ]\n              }\n            }\n          ]\n        },\n        {\n          \"type\": \"actions\",\n          \"props\": {\n            \"items\": [\n              {\n                \"label\": \"Ver detalhes por canal\",\n                \"prompt\": \"Detalhe a receita e a margem por canal no trimestre.\",\n                \"tone\": \"primary\"\n              }\n            ]\n          }\n        }\n      ]\n    }\n  ]\n}\n",
+      "normalized": {
+        "components": [
+          {
+            "type": "stack",
+            "props": {
+              "gap": "md"
+            },
+            "children": [
+              {
+                "type": "callout",
+                "props": {
+                  "variant": "info",
+                  "title": "Resumo",
+                  "text": "Três pontos merecem atenção antes de fechar o trimestre."
+                },
+                "children": [
+                  {
+                    "type": "list",
+                    "props": {
+                      "items": [
+                        {
+                          "text": "Margem bruta caiu 2 pontos"
+                        },
+                        {
+                          "text": "Marketplace cresceu acima do plano"
+                        },
+                        {
+                          "text": "Churn estável no plano base"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "actions",
+                "props": {
+                  "items": [
+                    {
+                      "label": "Ver detalhes por canal",
+                      "prompt": "Detalhe a receita e a margem por canal no trimestre.",
+                      "tone": "primary"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "raiz em array cru",
+      "source": "[{\"type\":\"badge\",\"props\":{\"label\":\"novo\"}}]",
+      "normalized": {
+        "components": [
+          {
+            "type": "badge",
+            "props": {
+              "label": "novo"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "bloco cercado por fence",
+      "source": "```ui\n{\"components\":[{\"type\":\"badge\",\"props\":{\"label\":\"ok\"}}]}\n```",
+      "normalized": {
+        "components": [
+          {
+            "type": "badge",
+            "props": {
+              "label": "ok"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "version 2 explícita",
+      "source": "{\"version\":2,\"components\":[{\"type\":\"badge\",\"props\":{\"label\":\"ok\"}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "badge",
+            "props": {
+              "label": "ok"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "legado: chart com labels e values",
+      "source": "{\"components\":[{\"type\":\"chart\",\"props\":{\"type\":\"bar\",\"title\":\"Receita\",\"labels\":[\"Jan\",\"Fev\"],\"values\":[3,4]}}]}",
+      "warnings": [
+        "ui.legacy-shape"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "chart",
+            "props": {
+              "type": "bar",
+              "title": "Receita",
+              "data": [
+                {
+                  "label": "Jan",
+                  "value": 3
+                },
+                {
+                  "label": "Fev",
+                  "value": 4
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "legado: keyvalue como objeto",
+      "source": "{\"components\":[{\"type\":\"keyvalue\",\"props\":{\"items\":{\"Uptime\":\"99,9%\"}}}]}",
+      "warnings": [
+        "ui.legacy-shape"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "keyvalue",
+            "props": {
+              "items": [
+                {
+                  "label": "Uptime",
+                  "value": "99,9%"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "legado: lista de strings",
+      "source": "{\"components\":[{\"type\":\"list\",\"props\":{\"items\":[\"um\",\"dois\"]}}]}",
+      "warnings": [
+        "ui.legacy-shape"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "list",
+            "props": {
+              "items": [
+                {
+                  "text": "um"
+                },
+                {
+                  "text": "dois"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "legado: passos como strings",
+      "source": "{\"components\":[{\"type\":\"steps\",\"props\":{\"items\":[\"um\",\"dois\"]}}]}",
+      "warnings": [
+        "ui.legacy-shape"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "steps",
+            "props": {
+              "items": [
+                {
+                  "title": "um"
+                },
+                {
+                  "title": "dois"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "legado: tabs com nomes em props",
+      "source": "{\"components\":[{\"type\":\"tabs\",\"props\":{\"tabs\":[\"Geral\",\"Detalhes\"]},\"children\":[{\"type\":\"stack\",\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"a\"}}]},{\"type\":\"stack\",\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"b\"}}]}]}]}",
+      "warnings": [
+        "ui.legacy-shape"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "tabs",
+            "children": [
+              {
+                "type": "stack",
+                "props": {
+                  "label": "Geral"
+                },
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "a"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "stack",
+                "props": {
+                  "label": "Detalhes"
+                },
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "b"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "prop desconhecida é removida",
+      "source": "{\"components\":[{\"type\":\"card\",\"props\":{\"title\":\"Resumo\",\"foo\":\"bar\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"novo\"}}]}]}",
+      "warnings": [
+        "ui.unknown-prop"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "card",
+            "props": {
+              "title": "Resumo"
+            },
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "novo"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "números são convertidos para texto",
+      "source": "{\"components\":[{\"type\":\"stat\",\"props\":{\"label\":12,\"value\":34.5}}]}",
+      "warnings": [
+        "ui.coerced",
+        "ui.coerced"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "stat",
+            "props": {
+              "label": "12",
+              "value": "34.5"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "enum com caixa diferente é canonicalizado",
+      "source": "{\"components\":[{\"type\":\"callout\",\"props\":{\"variant\":\"Warning\",\"text\":\"ok\"}}]}",
+      "warnings": [
+        "ui.coerced"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "callout",
+            "props": {
+              "variant": "warning",
+              "text": "ok"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "enum inválido usa o default",
+      "source": "{\"components\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\",\"tone\":\"purple\"}}]}",
+      "warnings": [
+        "ui.enum-default"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "badge",
+            "props": {
+              "label": "x",
+              "tone": "neutral"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ícone desconhecido é removido",
+      "source": "{\"components\":[{\"type\":\"actions\",\"props\":{\"items\":[{\"label\":\"Ver mais\",\"prompt\":\"Detalhe a receita.\",\"icon\":\"rocket\"}]}}]}",
+      "warnings": [
+        "ui.icon-unknown"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "actions",
+            "props": {
+              "items": [
+                {
+                  "label": "Ver mais",
+                  "prompt": "Detalhe a receita."
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "texto acima do limite rígido é truncado",
+      "source": "{\"components\":[{\"type\":\"quote\",\"props\":{\"text\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]}",
+      "warnings": [
+        "ui.text-truncated"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "quote",
+            "props": {
+              "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "grid com colunas demais é ajustado",
+      "source": "{\"components\":[{\"type\":\"grid\",\"props\":{\"columns\":9},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"1\"}},{\"type\":\"badge\",\"props\":{\"label\":\"2\"}},{\"type\":\"badge\",\"props\":{\"label\":\"3\"}},{\"type\":\"badge\",\"props\":{\"label\":\"4\"}}]}]}",
+      "warnings": [
+        "ui.clamped"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "grid",
+            "props": {
+              "columns": 4
+            },
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "1"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "2"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "3"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "4"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "progresso fora do intervalo é ajustado",
+      "source": "{\"components\":[{\"type\":\"progress\",\"props\":{\"value\":150}}]}",
+      "warnings": [
+        "ui.clamped"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "progress",
+            "props": {
+              "value": 100
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "lista acima do máximo é truncada",
+      "source": "{\"components\":[{\"type\":\"list\",\"props\":{\"items\":[{\"text\":\"item 0\"},{\"text\":\"item 1\"},{\"text\":\"item 2\"},{\"text\":\"item 3\"},{\"text\":\"item 4\"},{\"text\":\"item 5\"},{\"text\":\"item 6\"},{\"text\":\"item 7\"},{\"text\":\"item 8\"},{\"text\":\"item 9\"},{\"text\":\"item 10\"},{\"text\":\"item 11\"},{\"text\":\"item 12\"},{\"text\":\"item 13\"},{\"text\":\"item 14\"},{\"text\":\"item 15\"},{\"text\":\"item 16\"},{\"text\":\"item 17\"},{\"text\":\"item 18\"},{\"text\":\"item 19\"},{\"text\":\"item 20\"},{\"text\":\"item 21\"},{\"text\":\"item 22\"},{\"text\":\"item 23\"},{\"text\":\"item 24\"},{\"text\":\"item 25\"},{\"text\":\"item 26\"},{\"text\":\"item 27\"},{\"text\":\"item 28\"},{\"text\":\"item 29\"},{\"text\":\"item 30\"},{\"text\":\"item 31\"},{\"text\":\"item 32\"},{\"text\":\"item 33\"},{\"text\":\"item 34\"},{\"text\":\"item 35\"},{\"text\":\"item 36\"},{\"text\":\"item 37\"},{\"text\":\"item 38\"},{\"text\":\"item 39\"},{\"text\":\"item 40\"}]}}]}",
+      "warnings": [
+        "ui.array-truncated",
+        "ui.list-long"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "list",
+            "props": {
+              "items": [
+                {
+                  "text": "item 0"
+                },
+                {
+                  "text": "item 1"
+                },
+                {
+                  "text": "item 2"
+                },
+                {
+                  "text": "item 3"
+                },
+                {
+                  "text": "item 4"
+                },
+                {
+                  "text": "item 5"
+                },
+                {
+                  "text": "item 6"
+                },
+                {
+                  "text": "item 7"
+                },
+                {
+                  "text": "item 8"
+                },
+                {
+                  "text": "item 9"
+                },
+                {
+                  "text": "item 10"
+                },
+                {
+                  "text": "item 11"
+                },
+                {
+                  "text": "item 12"
+                },
+                {
+                  "text": "item 13"
+                },
+                {
+                  "text": "item 14"
+                },
+                {
+                  "text": "item 15"
+                },
+                {
+                  "text": "item 16"
+                },
+                {
+                  "text": "item 17"
+                },
+                {
+                  "text": "item 18"
+                },
+                {
+                  "text": "item 19"
+                },
+                {
+                  "text": "item 20"
+                },
+                {
+                  "text": "item 21"
+                },
+                {
+                  "text": "item 22"
+                },
+                {
+                  "text": "item 23"
+                },
+                {
+                  "text": "item 24"
+                },
+                {
+                  "text": "item 25"
+                },
+                {
+                  "text": "item 26"
+                },
+                {
+                  "text": "item 27"
+                },
+                {
+                  "text": "item 28"
+                },
+                {
+                  "text": "item 29"
+                },
+                {
+                  "text": "item 30"
+                },
+                {
+                  "text": "item 31"
+                },
+                {
+                  "text": "item 32"
+                },
+                {
+                  "text": "item 33"
+                },
+                {
+                  "text": "item 34"
+                },
+                {
+                  "text": "item 35"
+                },
+                {
+                  "text": "item 36"
+                },
+                {
+                  "text": "item 37"
+                },
+                {
+                  "text": "item 38"
+                },
+                {
+                  "text": "item 39"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "tabela com linha desalinhada",
+      "source": "{\"components\":[{\"type\":\"table\",\"props\":{\"columns\":[\"A\",\"B\"],\"rows\":[[\"1\",\"2\",\"3\"],[\"4\",\"5\"]]}}]}",
+      "warnings": [
+        "ui.table-arity"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "table",
+            "props": {
+              "columns": [
+                "A",
+                "B"
+              ],
+              "rows": [
+                [
+                  "1",
+                  "2",
+                  "3"
+                ],
+                [
+                  "4",
+                  "5"
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "markdown dentro de props",
+      "source": "{\"components\":[{\"type\":\"stat\",\"props\":{\"label\":\"Receita\",\"value\":\"R$ 10\",\"hint\":\"**forte**\"}}]}",
+      "warnings": [
+        "ui.markdown-in-props"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "stat",
+            "props": {
+              "label": "Receita",
+              "value": "R$ 10",
+              "hint": "**forte**"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "emoji decorativo",
+      "source": "{\"components\":[{\"type\":\"badge\",\"props\":{\"label\":\"Novo 📊\"}}]}",
+      "warnings": [
+        "ui.emoji"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "badge",
+            "props": {
+              "label": "Novo 📊"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "rótulo com ponto final",
+      "source": "{\"components\":[{\"type\":\"badge\",\"props\":{\"label\":\"Novo.\"}}]}",
+      "warnings": [
+        "ui.label-period"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "badge",
+            "props": {
+              "label": "Novo."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "texto em caixa alta",
+      "source": "{\"components\":[{\"type\":\"badge\",\"props\":{\"label\":\"ATENÇÃO GERAL\"}}]}",
+      "warnings": [
+        "ui.shouting"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "badge",
+            "props": {
+              "label": "ATENÇÃO GERAL"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ações duplicadas",
+      "source": "{\"components\":[{\"type\":\"actions\",\"props\":{\"items\":[{\"label\":\"Repetir\",\"prompt\":\"a\"},{\"label\":\"Repetir\",\"prompt\":\"b\"}]}}]}",
+      "warnings": [
+        "ui.duplicate-action"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "actions",
+            "props": {
+              "items": [
+                {
+                  "label": "Repetir",
+                  "prompt": "a"
+                },
+                {
+                  "label": "Repetir",
+                  "prompt": "b"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "duas ações primárias",
+      "source": "{\"components\":[{\"type\":\"actions\",\"props\":{\"items\":[{\"label\":\"Abrir resumo\",\"prompt\":\"a\",\"tone\":\"primary\"},{\"label\":\"Copiar tudo\",\"copy\":\"x\",\"tone\":\"primary\"}]}}]}",
+      "warnings": [
+        "ui.action-primary"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "actions",
+            "props": {
+              "items": [
+                {
+                  "label": "Abrir resumo",
+                  "prompt": "a",
+                  "tone": "primary"
+                },
+                {
+                  "label": "Copiar tudo",
+                  "copy": "x",
+                  "tone": "primary"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "rótulo de ação longo",
+      "source": "{\"components\":[{\"type\":\"actions\",\"props\":{\"items\":[{\"label\":\"Comparar todos os cenários de receita do trimestre\",\"prompt\":\"compare\"}]}}]}",
+      "warnings": [
+        "ui.action-label-long"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "actions",
+            "props": {
+              "items": [
+                {
+                  "label": "Comparar todos os cenários de receita do trimestre",
+                  "prompt": "compare"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "gráfico sem título",
+      "source": "{\"components\":[{\"type\":\"chart\",\"props\":{\"type\":\"bar\",\"data\":[{\"label\":\"A\",\"value\":1},{\"label\":\"B\",\"value\":2}]}}]}",
+      "warnings": [
+        "ui.chart-title"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "chart",
+            "props": {
+              "type": "bar",
+              "data": [
+                {
+                  "label": "A",
+                  "value": 1
+                },
+                {
+                  "label": "B",
+                  "value": 2
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "gráfico com um ponto",
+      "source": "{\"components\":[{\"type\":\"chart\",\"props\":{\"type\":\"bar\",\"title\":\"Receita\",\"data\":[{\"label\":\"A\",\"value\":1}]}}]}",
+      "warnings": [
+        "ui.chart-points-min"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "chart",
+            "props": {
+              "type": "bar",
+              "data": [
+                {
+                  "label": "A",
+                  "value": 1
+                }
+              ],
+              "title": "Receita"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "pizza com oito fatias",
+      "source": "{\"components\":[{\"type\":\"chart\",\"props\":{\"type\":\"pie\",\"title\":\"Distribuição\",\"data\":[{\"label\":\"Categoria 0\",\"value\":1},{\"label\":\"Categoria 1\",\"value\":2},{\"label\":\"Categoria 2\",\"value\":3},{\"label\":\"Categoria 3\",\"value\":4},{\"label\":\"Categoria 4\",\"value\":5},{\"label\":\"Categoria 5\",\"value\":6},{\"label\":\"Categoria 6\",\"value\":7},{\"label\":\"Categoria 7\",\"value\":8}]}}]}",
+      "warnings": [
+        "ui.chart-pie-slices"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "chart",
+            "props": {
+              "type": "pie",
+              "data": [
+                {
+                  "label": "Categoria 0",
+                  "value": 1
+                },
+                {
+                  "label": "Categoria 1",
+                  "value": 2
+                },
+                {
+                  "label": "Categoria 2",
+                  "value": 3
+                },
+                {
+                  "label": "Categoria 3",
+                  "value": 4
+                },
+                {
+                  "label": "Categoria 4",
+                  "value": 5
+                },
+                {
+                  "label": "Categoria 5",
+                  "value": 6
+                },
+                {
+                  "label": "Categoria 6",
+                  "value": 7
+                },
+                {
+                  "label": "Categoria 7",
+                  "value": 8
+                }
+              ],
+              "title": "Distribuição"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "tabela com nove colunas",
+      "source": "{\"components\":[{\"type\":\"table\",\"props\":{\"columns\":[\"Coluna 0\",\"Coluna 1\",\"Coluna 2\",\"Coluna 3\",\"Coluna 4\",\"Coluna 5\",\"Coluna 6\",\"Coluna 7\",\"Coluna 8\"],\"rows\":[[\"c0\",\"c1\",\"c2\",\"c3\",\"c4\",\"c5\",\"c6\",\"c7\",\"c8\"]]}}]}",
+      "warnings": [
+        "ui.table-columns"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "table",
+            "props": {
+              "columns": [
+                "Coluna 0",
+                "Coluna 1",
+                "Coluna 2",
+                "Coluna 3",
+                "Coluna 4",
+                "Coluna 5",
+                "Coluna 6",
+                "Coluna 7",
+                "Coluna 8"
+              ],
+              "rows": [
+                [
+                  "c0",
+                  "c1",
+                  "c2",
+                  "c3",
+                  "c4",
+                  "c5",
+                  "c6",
+                  "c7",
+                  "c8"
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "métrica com rótulo longo",
+      "source": "{\"components\":[{\"type\":\"stat\",\"props\":{\"label\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"value\":\"1\"}}]}",
+      "warnings": [
+        "ui.stat-long"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "stat",
+            "props": {
+              "label": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "value": "1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "lista longa",
+      "source": "{\"components\":[{\"type\":\"list\",\"props\":{\"items\":[{\"text\":\"item 0\"},{\"text\":\"item 1\"},{\"text\":\"item 2\"},{\"text\":\"item 3\"},{\"text\":\"item 4\"},{\"text\":\"item 5\"},{\"text\":\"item 6\"},{\"text\":\"item 7\"},{\"text\":\"item 8\"},{\"text\":\"item 9\"},{\"text\":\"item 10\"},{\"text\":\"item 11\"},{\"text\":\"item 12\"},{\"text\":\"item 13\"},{\"text\":\"item 14\"},{\"text\":\"item 15\"},{\"text\":\"item 16\"},{\"text\":\"item 17\"},{\"text\":\"item 18\"},{\"text\":\"item 19\"},{\"text\":\"item 20\"}]}}]}",
+      "warnings": [
+        "ui.list-long"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "list",
+            "props": {
+              "items": [
+                {
+                  "text": "item 0"
+                },
+                {
+                  "text": "item 1"
+                },
+                {
+                  "text": "item 2"
+                },
+                {
+                  "text": "item 3"
+                },
+                {
+                  "text": "item 4"
+                },
+                {
+                  "text": "item 5"
+                },
+                {
+                  "text": "item 6"
+                },
+                {
+                  "text": "item 7"
+                },
+                {
+                  "text": "item 8"
+                },
+                {
+                  "text": "item 9"
+                },
+                {
+                  "text": "item 10"
+                },
+                {
+                  "text": "item 11"
+                },
+                {
+                  "text": "item 12"
+                },
+                {
+                  "text": "item 13"
+                },
+                {
+                  "text": "item 14"
+                },
+                {
+                  "text": "item 15"
+                },
+                {
+                  "text": "item 16"
+                },
+                {
+                  "text": "item 17"
+                },
+                {
+                  "text": "item 18"
+                },
+                {
+                  "text": "item 19"
+                },
+                {
+                  "text": "item 20"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "linha do tempo longa",
+      "source": "{\"components\":[{\"type\":\"timeline\",\"props\":{\"items\":[{\"title\":\"evento 0\"},{\"title\":\"evento 1\"},{\"title\":\"evento 2\"},{\"title\":\"evento 3\"},{\"title\":\"evento 4\"},{\"title\":\"evento 5\"},{\"title\":\"evento 6\"},{\"title\":\"evento 7\"},{\"title\":\"evento 8\"},{\"title\":\"evento 9\"},{\"title\":\"evento 10\"},{\"title\":\"evento 11\"},{\"title\":\"evento 12\"}]}}]}",
+      "warnings": [
+        "ui.timeline-long"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "timeline",
+            "props": {
+              "items": [
+                {
+                  "title": "evento 0"
+                },
+                {
+                  "title": "evento 1"
+                },
+                {
+                  "title": "evento 2"
+                },
+                {
+                  "title": "evento 3"
+                },
+                {
+                  "title": "evento 4"
+                },
+                {
+                  "title": "evento 5"
+                },
+                {
+                  "title": "evento 6"
+                },
+                {
+                  "title": "evento 7"
+                },
+                {
+                  "title": "evento 8"
+                },
+                {
+                  "title": "evento 9"
+                },
+                {
+                  "title": "evento 10"
+                },
+                {
+                  "title": "evento 11"
+                },
+                {
+                  "title": "evento 12"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "passos longos",
+      "source": "{\"components\":[{\"type\":\"steps\",\"props\":{\"items\":[{\"title\":\"passo 0\"},{\"title\":\"passo 1\"},{\"title\":\"passo 2\"},{\"title\":\"passo 3\"},{\"title\":\"passo 4\"},{\"title\":\"passo 5\"},{\"title\":\"passo 6\"},{\"title\":\"passo 7\"},{\"title\":\"passo 8\"},{\"title\":\"passo 9\"},{\"title\":\"passo 10\"}]}}]}",
+      "warnings": [
+        "ui.steps-long"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "steps",
+            "props": {
+              "items": [
+                {
+                  "title": "passo 0"
+                },
+                {
+                  "title": "passo 1"
+                },
+                {
+                  "title": "passo 2"
+                },
+                {
+                  "title": "passo 3"
+                },
+                {
+                  "title": "passo 4"
+                },
+                {
+                  "title": "passo 5"
+                },
+                {
+                  "title": "passo 6"
+                },
+                {
+                  "title": "passo 7"
+                },
+                {
+                  "title": "passo 8"
+                },
+                {
+                  "title": "passo 9"
+                },
+                {
+                  "title": "passo 10"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "keyvalue longo",
+      "source": "{\"components\":[{\"type\":\"keyvalue\",\"props\":{\"items\":[{\"label\":\"campo 0\",\"value\":\"ok\"},{\"label\":\"campo 1\",\"value\":\"ok\"},{\"label\":\"campo 2\",\"value\":\"ok\"},{\"label\":\"campo 3\",\"value\":\"ok\"},{\"label\":\"campo 4\",\"value\":\"ok\"},{\"label\":\"campo 5\",\"value\":\"ok\"},{\"label\":\"campo 6\",\"value\":\"ok\"},{\"label\":\"campo 7\",\"value\":\"ok\"},{\"label\":\"campo 8\",\"value\":\"ok\"},{\"label\":\"campo 9\",\"value\":\"ok\"},{\"label\":\"campo 10\",\"value\":\"ok\"},{\"label\":\"campo 11\",\"value\":\"ok\"},{\"label\":\"campo 12\",\"value\":\"ok\"}]}}]}",
+      "warnings": [
+        "ui.keyvalue-long"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "keyvalue",
+            "props": {
+              "items": [
+                {
+                  "label": "campo 0",
+                  "value": "ok"
+                },
+                {
+                  "label": "campo 1",
+                  "value": "ok"
+                },
+                {
+                  "label": "campo 2",
+                  "value": "ok"
+                },
+                {
+                  "label": "campo 3",
+                  "value": "ok"
+                },
+                {
+                  "label": "campo 4",
+                  "value": "ok"
+                },
+                {
+                  "label": "campo 5",
+                  "value": "ok"
+                },
+                {
+                  "label": "campo 6",
+                  "value": "ok"
+                },
+                {
+                  "label": "campo 7",
+                  "value": "ok"
+                },
+                {
+                  "label": "campo 8",
+                  "value": "ok"
+                },
+                {
+                  "label": "campo 9",
+                  "value": "ok"
+                },
+                {
+                  "label": "campo 10",
+                  "value": "ok"
+                },
+                {
+                  "label": "campo 11",
+                  "value": "ok"
+                },
+                {
+                  "label": "campo 12",
+                  "value": "ok"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "abas demais",
+      "source": "{\"components\":[{\"type\":\"tabs\",\"children\":[{\"type\":\"stack\",\"props\":{\"label\":\"Aba 0\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]},{\"type\":\"stack\",\"props\":{\"label\":\"Aba 1\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]},{\"type\":\"stack\",\"props\":{\"label\":\"Aba 2\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]},{\"type\":\"stack\",\"props\":{\"label\":\"Aba 3\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]},{\"type\":\"stack\",\"props\":{\"label\":\"Aba 4\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]},{\"type\":\"stack\",\"props\":{\"label\":\"Aba 5\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]},{\"type\":\"stack\",\"props\":{\"label\":\"Aba 6\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]}]}]}",
+      "warnings": [
+        "ui.tabs-count"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "tabs",
+            "children": [
+              {
+                "type": "stack",
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "x"
+                    }
+                  }
+                ],
+                "props": {
+                  "label": "Aba 0"
+                }
+              },
+              {
+                "type": "stack",
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "x"
+                    }
+                  }
+                ],
+                "props": {
+                  "label": "Aba 1"
+                }
+              },
+              {
+                "type": "stack",
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "x"
+                    }
+                  }
+                ],
+                "props": {
+                  "label": "Aba 2"
+                }
+              },
+              {
+                "type": "stack",
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "x"
+                    }
+                  }
+                ],
+                "props": {
+                  "label": "Aba 3"
+                }
+              },
+              {
+                "type": "stack",
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "x"
+                    }
+                  }
+                ],
+                "props": {
+                  "label": "Aba 4"
+                }
+              },
+              {
+                "type": "stack",
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "x"
+                    }
+                  }
+                ],
+                "props": {
+                  "label": "Aba 5"
+                }
+              },
+              {
+                "type": "stack",
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "x"
+                    }
+                  }
+                ],
+                "props": {
+                  "label": "Aba 6"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "densidade alta",
+      "source": "{\"components\":[{\"type\":\"stack\",\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}},{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]}]}",
+      "warnings": [
+        "ui.density"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "stack",
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "raiz com muitos componentes",
+      "source": "{\"components\":[{\"type\":\"badge\",\"props\":{\"label\":\"b0\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b1\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b2\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b3\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b4\"}}]}",
+      "warnings": [
+        "ui.root-count"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "badge",
+            "props": {
+              "label": "b0"
+            }
+          },
+          {
+            "type": "badge",
+            "props": {
+              "label": "b1"
+            }
+          },
+          {
+            "type": "badge",
+            "props": {
+              "label": "b2"
+            }
+          },
+          {
+            "type": "badge",
+            "props": {
+              "label": "b3"
+            }
+          },
+          {
+            "type": "badge",
+            "props": {
+              "label": "b4"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "muitos cards",
+      "source": "{\"components\":[{\"type\":\"card\",\"props\":{\"title\":\"Card 0\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]},{\"type\":\"card\",\"props\":{\"title\":\"Card 1\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]},{\"type\":\"card\",\"props\":{\"title\":\"Card 2\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]},{\"type\":\"card\",\"props\":{\"title\":\"Card 3\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]},{\"type\":\"card\",\"props\":{\"title\":\"Card 4\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]}]}",
+      "warnings": [
+        "ui.cards-count",
+        "ui.root-count"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "card",
+            "props": {
+              "title": "Card 0"
+            },
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              }
+            ]
+          },
+          {
+            "type": "card",
+            "props": {
+              "title": "Card 1"
+            },
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              }
+            ]
+          },
+          {
+            "type": "card",
+            "props": {
+              "title": "Card 2"
+            },
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              }
+            ]
+          },
+          {
+            "type": "card",
+            "props": {
+              "title": "Card 3"
+            },
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              }
+            ]
+          },
+          {
+            "type": "card",
+            "props": {
+              "title": "Card 4"
+            },
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "card de topo sem título",
+      "source": "{\"components\":[{\"type\":\"card\",\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]}]}",
+      "warnings": [
+        "ui.card-title"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "card",
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "card dentro de card",
+      "source": "{\"components\":[{\"type\":\"card\",\"props\":{\"title\":\"Externo\"},\"children\":[{\"type\":\"card\",\"props\":{\"title\":\"Interno\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]}]}]}",
+      "warnings": [
+        "ui.card-nested"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "card",
+            "props": {
+              "title": "Externo"
+            },
+            "children": [
+              {
+                "type": "card",
+                "props": {
+                  "title": "Interno"
+                },
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "x"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "grid com filhos sobrando",
+      "source": "{\"components\":[{\"type\":\"grid\",\"props\":{\"columns\":2},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"1\"}},{\"type\":\"badge\",\"props\":{\"label\":\"2\"}},{\"type\":\"badge\",\"props\":{\"label\":\"3\"}}]}]}",
+      "warnings": [
+        "ui.grid-orphans"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "grid",
+            "props": {
+              "columns": 2
+            },
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "1"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "2"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "3"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "grid apertado",
+      "source": "{\"components\":[{\"type\":\"grid\",\"props\":{\"columns\":1},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"1\"}},{\"type\":\"badge\",\"props\":{\"label\":\"2\"}},{\"type\":\"badge\",\"props\":{\"label\":\"3\"}},{\"type\":\"badge\",\"props\":{\"label\":\"4\"}}]}]}",
+      "warnings": [
+        "ui.grid-crowded"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "grid",
+            "props": {
+              "columns": 1
+            },
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "1"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "2"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "3"
+                }
+              },
+              {
+                "type": "badge",
+                "props": {
+                  "label": "4"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "divisores demais",
+      "source": "{\"components\":[{\"type\":\"divider\",\"props\":{\"label\":\"um\"}},{\"type\":\"divider\",\"props\":{\"label\":\"dois\"}},{\"type\":\"divider\",\"props\":{\"label\":\"três\"}}]}",
+      "warnings": [
+        "ui.divider-count"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "divider",
+            "props": {
+              "label": "um"
+            }
+          },
+          {
+            "type": "divider",
+            "props": {
+              "label": "dois"
+            }
+          },
+          {
+            "type": "divider",
+            "props": {
+              "label": "três"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "container vazio",
+      "source": "{\"components\":[{\"type\":\"stack\",\"children\":[]}]}",
+      "warnings": [
+        "ui.empty-container"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "stack"
+          }
+        ]
+      }
+    },
+    {
+      "name": "version desconhecida",
+      "source": "{\"version\":1,\"components\":[{\"type\":\"badge\",\"props\":{\"label\":\"ok\"}}]}",
+      "warnings": [
+        "ui.version-mismatch"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "badge",
+            "props": {
+              "label": "ok"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "boolean em texto é convertido",
+      "source": "{\"components\":[{\"type\":\"reveal\",\"props\":{\"title\":\"Mais\",\"open\":\"true\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]}]}",
+      "warnings": [
+        "ui.coerced"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "reveal",
+            "props": {
+              "title": "Mais",
+              "open": true
+            },
+            "children": [
+              {
+                "type": "badge",
+                "props": {
+                  "label": "x"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "JSON inválido",
+      "source": "{\"components\":[",
+      "errors": [
+        "ui.invalid-json"
+      ]
+    },
+    {
+      "name": "bloco vazio",
+      "source": "",
+      "errors": [
+        "ui.invalid-json"
+      ]
+    },
+    {
+      "name": "raiz inválida",
+      "source": "{\"foo\":1}",
+      "errors": [
+        "ui.invalid-root"
+      ]
+    },
+    {
+      "name": "components vazio",
+      "source": "{\"components\":[]}",
+      "errors": [
+        "ui.empty"
+      ]
+    },
+    {
+      "name": "componente desconhecido",
+      "source": "{\"components\":[{\"type\":\"iframe\",\"props\":{}}]}",
+      "errors": [
+        "ui.unknown-type"
+      ]
+    },
+    {
+      "name": "componente sem type",
+      "source": "{\"components\":[{\"props\":{\"label\":\"x\"}}]}",
+      "errors": [
+        "ui.missing-type"
+      ]
+    },
+    {
+      "name": "componente não objeto",
+      "source": "{\"components\":[\"x\"]}",
+      "errors": [
+        "ui.invalid-component"
+      ]
+    },
+    {
+      "name": "children em componente folha",
+      "source": "{\"components\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"y\"}}]}]}",
+      "errors": [
+        "ui.children-not-allowed"
+      ]
+    },
+    {
+      "name": "children não é lista",
+      "source": "{\"components\":[{\"type\":\"card\",\"props\":{\"title\":\"x\"},\"children\":\"nope\"}]}",
+      "errors": [
+        "ui.invalid-children"
+      ]
+    },
+    {
+      "name": "props não é objeto",
+      "source": "{\"components\":[{\"type\":\"card\",\"props\":\"nope\",\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"novo\"}}]}]}",
+      "errors": [
+        "ui.invalid-props"
+      ]
+    },
+    {
+      "name": "prop obrigatória ausente",
+      "source": "{\"components\":[{\"type\":\"stat\",\"props\":{\"label\":\"Receita\"}}]}",
+      "errors": [
+        "ui.missing-prop"
+      ]
+    },
+    {
+      "name": "texto obrigatório vazio",
+      "source": "{\"components\":[{\"type\":\"badge\",\"props\":{\"label\":\"\"}}]}",
+      "errors": [
+        "ui.missing-prop"
+      ]
+    },
+    {
+      "name": "tipo de prop errado",
+      "source": "{\"components\":[{\"type\":\"stat\",\"props\":{\"label\":{\"x\":1},\"value\":\"1\"}}]}",
+      "errors": [
+        "ui.prop-type"
+      ]
+    },
+    {
+      "name": "URL inválida",
+      "source": "{\"components\":[{\"type\":\"link\",\"props\":{\"href\":\"javascript:alert(1)\",\"label\":\"x\"}}]}",
+      "errors": [
+        "ui.invalid-url"
+      ]
+    },
+    {
+      "name": "profundidade excessiva",
+      "source": "{\"components\":[{\"type\":\"card\",\"props\":{\"title\":\"n8\"},\"children\":[{\"type\":\"card\",\"props\":{\"title\":\"n7\"},\"children\":[{\"type\":\"card\",\"props\":{\"title\":\"n6\"},\"children\":[{\"type\":\"card\",\"props\":{\"title\":\"n5\"},\"children\":[{\"type\":\"card\",\"props\":{\"title\":\"n4\"},\"children\":[{\"type\":\"card\",\"props\":{\"title\":\"n3\"},\"children\":[{\"type\":\"card\",\"props\":{\"title\":\"n2\"},\"children\":[{\"type\":\"card\",\"props\":{\"title\":\"n1\"},\"children\":[{\"type\":\"card\",\"props\":{\"title\":\"n0\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]}]}]}]}]}]}]}]}]}]}",
+      "errors": [
+        "ui.too-deep"
+      ]
+    },
+    {
+      "name": "número de nós excessivo",
+      "source": "{\"components\":[{\"type\":\"badge\",\"props\":{\"label\":\"b0\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b1\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b2\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b3\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b4\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b5\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b6\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b7\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b8\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b9\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b10\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b11\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b12\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b13\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b14\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b15\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b16\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b17\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b18\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b19\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b20\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b21\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b22\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b23\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b24\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b25\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b26\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b27\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b28\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b29\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b30\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b31\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b32\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b33\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b34\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b35\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b36\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b37\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b38\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b39\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b40\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b41\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b42\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b43\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b44\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b45\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b46\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b47\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b48\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b49\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b50\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b51\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b52\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b53\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b54\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b55\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b56\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b57\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b58\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b59\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b60\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b61\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b62\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b63\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b64\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b65\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b66\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b67\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b68\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b69\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b70\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b71\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b72\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b73\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b74\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b75\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b76\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b77\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b78\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b79\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b80\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b81\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b82\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b83\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b84\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b85\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b86\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b87\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b88\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b89\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b90\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b91\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b92\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b93\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b94\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b95\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b96\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b97\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b98\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b99\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b100\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b101\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b102\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b103\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b104\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b105\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b106\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b107\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b108\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b109\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b110\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b111\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b112\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b113\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b114\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b115\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b116\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b117\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b118\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b119\"}},{\"type\":\"badge\",\"props\":{\"label\":\"b120\"}}]}",
+      "errors": [
+        "ui.too-many-nodes"
+      ]
+    },
+    {
+      "name": "array abaixo do mínimo",
+      "source": "{\"components\":[{\"type\":\"table\",\"props\":{\"columns\":[\"A\"],\"rows\":[[\"1\"]]}}]}",
+      "errors": [
+        "ui.array-size"
+      ]
+    },
+    {
+      "name": "ação sem intenção única (dois campos)",
+      "source": "{\"components\":[{\"type\":\"actions\",\"props\":{\"items\":[{\"label\":\"Ver\",\"prompt\":\"a\",\"copy\":\"b\"}]}}]}",
+      "errors": [
+        "ui.action-invalid"
+      ]
+    },
+    {
+      "name": "ação sem intenção única (nenhum campo)",
+      "source": "{\"components\":[{\"type\":\"actions\",\"props\":{\"items\":[{\"label\":\"Ver\"}]}}]}",
+      "errors": [
+        "ui.action-invalid"
+      ]
+    },
+    {
+      "name": "aba sem rótulo",
+      "source": "{\"components\":[{\"type\":\"tabs\",\"children\":[{\"type\":\"stack\",\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"x\"}}]}]}]}",
+      "errors": [
+        "ui.tabs-label"
+      ]
+    },
+    {
+      "name": "tabs sem painéis",
+      "source": "{\"components\":[{\"type\":\"tabs\",\"children\":[]}]}",
+      "errors": [
+        "ui.tabs-empty"
+      ]
+    },
+    {
+      "name": "enum inválido sem default",
+      "source": "{\"components\":[{\"type\":\"chart\",\"props\":{\"type\":\"pie3d\",\"data\":[{\"label\":\"A\",\"value\":1},{\"label\":\"B\",\"value\":2}]}}]}",
+      "errors": [
+        "ui.prop-type"
+      ]
+    },
+    {
+      "name": "erros e avisos juntos",
+      "source": "{\"version\":1,\"components\":[{\"type\":\"iframe\",\"props\":{}}]}",
+      "errors": [
+        "ui.unknown-type"
+      ],
+      "warnings": [
+        "ui.version-mismatch"
+      ]
+    },
+    {
+      "name": "legado: painel de tabs com title",
+      "source": "{\"components\":[{\"type\":\"tabs\",\"children\":[{\"type\":\"stack\",\"props\":{\"title\":\"Geral\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"a\"}}]}]}]}",
+      "warnings": [
+        "ui.legacy-shape"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "tabs",
+            "children": [
+              {
+                "type": "stack",
+                "props": {
+                  "label": "Geral"
+                },
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "a"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "tipo herdado de Object.prototype: constructor",
+      "source": "{\"components\":[{\"type\":\"constructor\",\"props\":{}}]}",
+      "errors": [
+        "ui.unknown-type"
+      ]
+    },
+    {
+      "name": "tipo herdado de Object.prototype: toString",
+      "source": "{\"components\":[{\"type\":\"toString\",\"props\":{}}]}",
+      "errors": [
+        "ui.unknown-type"
+      ]
+    },
+    {
+      "name": "tipo herdado de Object.prototype: __proto__",
+      "source": "{\"components\":[{\"type\":\"__proto__\",\"props\":{}}]}",
+      "errors": [
+        "ui.unknown-type"
+      ]
+    },
+    {
+      "name": "legado: keyvalue com duas chaves (ordem canônica)",
+      "source": "{\"components\":[{\"type\":\"keyvalue\",\"props\":{\"items\":{\"Zeta\":\"1\",\"Alfa\":\"2\"}}}]}",
+      "warnings": [
+        "ui.legacy-shape"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "keyvalue",
+            "props": {
+              "items": [
+                {
+                  "label": "Alfa",
+                  "value": "2"
+                },
+                {
+                  "label": "Zeta",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "tabs: painel reveal preserva title",
+      "source": "{\"components\":[{\"type\":\"tabs\",\"children\":[{\"type\":\"reveal\",\"props\":{\"label\":\"Metodologia\",\"title\":\"Como calculamos\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"ok\"}}]}]}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "tabs",
+            "children": [
+              {
+                "type": "reveal",
+                "props": {
+                  "title": "Como calculamos",
+                  "label": "Metodologia"
+                },
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "ok"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "tabs: painel reveal com title e sem label",
+      "source": "{\"components\":[{\"type\":\"tabs\",\"children\":[{\"type\":\"reveal\",\"props\":{\"title\":\"Como calculamos\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"ok\"}}]}]}]}",
+      "errors": [
+        "ui.tabs-label"
+      ]
+    },
+    {
+      "name": "tabs: painel card preserva title",
+      "source": "{\"components\":[{\"type\":\"tabs\",\"children\":[{\"type\":\"card\",\"props\":{\"label\":\"Visão\",\"title\":\"Receita\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"ok\"}}]}]}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "tabs",
+            "children": [
+              {
+                "type": "card",
+                "props": {
+                  "title": "Receita",
+                  "label": "Visão"
+                },
+                "children": [
+                  {
+                    "type": "badge",
+                    "props": {
+                      "label": "ok"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "ações acima do máximo são truncadas",
+      "source": "{\"components\":[{\"type\":\"actions\",\"props\":{\"items\":[{\"label\":\"Ação 1\",\"prompt\":\"p1\"},{\"label\":\"Ação 2\",\"prompt\":\"p2\"},{\"label\":\"Ação 3\",\"prompt\":\"p3\"},{\"label\":\"Ação 4\",\"prompt\":\"p4\"},{\"label\":\"Ação 5\",\"prompt\":\"p5\"}]}}]}",
+      "warnings": [
+        "ui.array-truncated"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "actions",
+            "props": {
+              "items": [
+                {
+                  "label": "Ação 1",
+                  "prompt": "p1"
+                },
+                {
+                  "label": "Ação 2",
+                  "prompt": "p2"
+                },
+                {
+                  "label": "Ação 3",
+                  "prompt": "p3"
+                },
+                {
+                  "label": "Ação 4",
+                  "prompt": "p4"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

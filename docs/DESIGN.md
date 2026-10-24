@@ -84,10 +84,10 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 - Alinhada à esquerda, sem bolha (fundo transparente), avatar 24px (orbe) no topo esquerdo.
 - Markdown completo (headings, listas, tabelas, código com header + botão copiar, KaTeX, mermaid, `ui` blocks).
 - **Raciocínio**: bloco colapsável acima do texto com linha vertical sutil, shimmer enquanto streama, ícone `Brain`/`Sparkles`, título "Pensando…" (durante) ou "Raciocínio" (concluído), contador de tempo.
-- **Ferramentas**: cards compactos com ícone (`Globe`, `FileText`, `FilePlus`), nome amigável, argumento resumido, spinner/check/erro, expandir para ver resultado.
+- **Ferramentas**: cards compactos com ícone (`Globe`, `FileText`, `FilePlus`, `ShieldCheck`), nome amigável, argumento resumido, spinner/check/erro, expandir para ver resultado. A autovalidação da UI generativa aparece como “Validar interface”.
 - **Citações**: chips de fonte em linha (`favicon`/letra do domínio, título truncado), abrem no navegador.
 - **Artefatos**: card com ícone por tipo, nome, tamanho, botões "Visualizar" e "Salvar".
-- **UI generativa**: renderizada inline no fluxo do markdown.
+- **UI generativa**: renderizada inline no fluxo do markdown usando o design system (tokens, tipografia e raios do chat). Blocos interativos (`actions`, `tabs`, `reveal`) seguem regras próprias de UI/UX — ver `docs/GENUI.md` e §16.
 - Rodapé da mensagem (hover): copiar, regenerar, feedback (like/dislike visual), modelo usado e tokens (se `showTokenUsage`).
 - Streaming: caret `accent` piscando após o último caractere.
 
@@ -114,28 +114,33 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 - Botão enviar: círculo 32px, `bg-foreground` (light) / `bg-foreground` (dark), ícone `ArrowUp`; desabilitado quando vazio; vira `Square` (parar) durante streaming.
 - Anexar: seletor de arquivos nativo (`@tauri-apps/plugin-dialog`), também drag & drop na janela.
 - Pills de ferramentas: `Busca web` e `Criar arquivos` com estado on/off (accent-soft quando ligado).
-- Seletor de modelo (padrão): pill segmentado em duas partes — ① avatar + nome do modelo: abre o **dropdown em duas etapas**: a lista de modelos (Favoritos + famílias; ao passar o mouse/focar em um modelo, um painel lateral mostra os detalhes dele — sem hover, a lista ocupa a largura toda) e, ao escolher um modelo, a mesma lista troca para os **modos de pensamento** (Desligado / esforços / orçamento); ② rótulo do pensamento (ex.: "Alto"): atalho que abre direto a etapa de pensamento. O item **"Ver todos os modelos…"** no rodapé da lista abre o **seletor completo** (modal com busca, provedores e capacidades) — não há botão extra na interface do chat.
+- Seletor de modelo (padrão, no composer e no titlebar): pill segmentado em duas partes — ① avatar + nome do modelo; ② rótulo do pensamento (ex.: "Alto"). O pill abre um **popover em duas etapas**: a lista de modelos (busca com foco automático, alternância Go/Zen, Favoritos + famílias) e, ao escolher um modelo, a mesma superfície troca para os **modos de pensamento** (Desligado / esforços / orçamento), com a descrição de cada modo e botão de voltar. Os **detalhes do modelo** (contexto, custo, protocolo, capacidades, favoritar) aparecem numa **bolha flutuante ao lado do popover**, como uma tooltip: surge no hover ou na navegação por teclado, nunca empurra o layout. O segmento ② abre direto a etapa de pensamento; modelos sem controle de raciocínio mostram o segmento desabilitado ("Padrão"). A busca do popover consulta os dois provedores. O item **"Ver todos os modelos…"** no rodapé abre o **seletor completo** (dialog) — não há botão extra na interface do chat.
+- **Bloqueio de modelo**: depois do primeiro envio o modelo da conversa fica travado (cadeado no pill, com explicação ao clicar) — trocar de modelo no meio da conversa misturaria respostas de modelos diferentes e invalidaria o replay do raciocínio. O **modo de pensamento continua ajustável** pelo segmento ✦. "Novo chat" volta ao modelo padrão configurado; ao abrir uma conversa existente, o seletor reflete o modelo com que ela foi iniciada.
 - Dica de rodapé: "Lumina pode cometer erros. Verifique informações importantes." (11–12px, muted).
 
 ## 8. Model Picker (dialog completo)
 
-> O caminho padrão é o pill com o dropdown em duas etapas (DESIGN §7). Este
+> O caminho padrão é o pill com o popover em duas etapas (DESIGN §7). Este
 > diálogo é o modo avançado, aberto por "Ver todos os modelos…" no rodapé da lista.
 
-- Largura 720px, altura 560px, `rounded-2xl`.
-- Header com busca e tabs de provedor: `OpenCode Go` / `OpenCode Zen` (badge de chave configurada).
-- Lista virtualizada por família, cada linha: nome, badges (Grátis/Visão/Raciocínio/Preview), contexto, preço, check no selecionado, estrela de favorito.
-- Coluna direita (detalhe do modelo selecionado): descrição, contexto, custo, protocolo, **seletor de modo de pensamento** (segmented: Desligado + esforços; slider para `budget_tokens`), botão "Usar este modelo".
-- Modelos indisponíveis aparecem desabilitados com motivo.
+- Largura 760px, altura 580px, `rounded-2xl`, com `max-w`/`max-h` para janelas pequenas (mín. da janela: 900×620).
+- Header: título "Selecionar modelo", descrição curta, busca (global, nos dois provedores) e chips de filtro — Favoritos, Visão, Raciocínio, Grátis (`aria-pressed`) — com contagem de modelos.
+- Abas de provedor `OpenCode Go` / `OpenCode Zen` com dot de status da chave (tooltip com a origem). Com busca ativa, as abas dão lugar a "Todos os provedores" e os grupos viram "Go · Claude", "Zen · Claude", etc.
+- Lista agrupada por família (favoritos primeiro, "Outros" por último); cada linha: avatar, nome, badges (Grátis/Visão/Raciocínio/Preview), contexto, preço, check no modelo em uso e estrela de favorito (visível no hover/foco).
+- Coluna direita (300px): identidade do modelo (nome, provedor, id), badges, descrição, especificações (contexto, saída máxima, custo, protocolo, entrada, conhecimento, lançamento), aviso de status (indisponível/preview/grátis), aviso de chave ausente com "Configurar" e **seletor de modo de pensamento** (segmented: Desligado + esforços; slider para `budget_tokens`).
+- Interação: clique = prévia; duplo-clique, Enter na busca ou "Usar este modelo" = confirma. Setas/Home/End navegam e atualizam a prévia. Esc limpa a busca antes de fechar.
+- Rodapé fixo com dicas de teclado (↑↓, ↵, Esc), badge "Em uso" e botão "Usar este modelo".
+- Modelos indisponíveis aparecem desabilitados com motivo; o estado é remontado a cada abertura.
+- Se o modelo da conversa está bloqueado (conversa já iniciada), o dialog mostra um aviso compacto com o modelo em uso e a dica de ajustar o pensamento pelo ✦, em vez do seletor.
 
 ## 9. Configurações (dialog)
 
 Tabs à esquerda (180px), conteúdo à direita (520px):
 1. **Geral**: tema (Claro/Escuro/Sistema), idioma, tamanho da fonte, enviar com Enter/Ctrl+Enter, reduzir movimento.
 2. **Provedores**: OpenCode Go e Zen — campo de API key (mascarado), status (Configurada via settings/env/CLI OpenCode), botão testar conexão, link para o console, aviso de privacidade.
-3. **Modelo padrão**: provider + modelo + modo de pensamento padrão.
+3. **Modelo padrão**: provider + modelo + modo de pensamento padrão (com uma conversa em andamento, alterações aqui valem apenas para novas conversas).
 4. **Instruções do sistema**: textarea com o prompt customizado (placeholder mostra o padrão), contador de caracteres.
-5. **Ferramentas**: busca web (on/off), criação de arquivos (on/off), máximo de passos do agente (1–16).
+5. **Ferramentas**: busca web (on/off), criação de arquivos (on/off), máximo de passos do agente (1–1000, padrão 64).
 6. **Dados**: abrir pasta de dados, exportar todas as conversas, limpar todos os dados (confirmação dupla).
 7. **Sobre**: versão, Tauri, commits do catálogo, link do projeto.
 
@@ -150,6 +155,7 @@ Tabs à esquerda (180px), conteúdo à direita (520px):
 | --- | --- |
 | Mensagem nova | fade-in-up 260ms |
 | Diálogos | fade + scale 0.97→1 (180ms) |
+| Popover do seletor de modelo | fade + scale 0.97→1 (180ms) |
 | Sidebar | width/translate 220ms ease-out-soft |
 | Artifact panel | slide-in 240ms |
 | Pensando | shimmer no texto + pulso do orbe |
@@ -167,6 +173,7 @@ Com `reduceMotion` (config ou media query), remover transformações e shimmer; 
 - Contraste mínimo 4.5:1 para texto normal; placeholders ≥3:1.
 - Alvos de toque ≥32px; foco visível com anel `accent`.
 - Navegação completa por teclado: composer, lista, sidebar, dialogs.
+- Seletor de modelos: combobox + listbox com `aria-activedescendant`; busca focada ao abrir; setas/Home/End/Enter/Esc; grupos com `aria-label`; favoritos com `aria-pressed`; modelos indisponíveis com `aria-disabled`; foco devolvido ao pill ao fechar.
 
 ## 13. Responsivo
 
@@ -176,7 +183,7 @@ Com `reduceMotion` (config ou media query), remover transformações e shimmer; 
 
 ## 14. Microcopy (pt-BR)
 
-- Novo chat, Buscar conversas, Configurações, Modelo padrão, Modo de pensamento, Anexar arquivos, Busca web, Criar arquivos, Pensando…, Parar, Copiar, Regenerar, Salvar como…, Abrir, Excluir, Fixar, Renomear, Exportar, Limpar dados.
+- Novo chat, Buscar conversas, Configurações, Modelo padrão, Modo de pensamento, Buscar modelos…, Limpar busca, Usar este modelo, Configurar, Modelo bloqueado nesta conversa, Anexar arquivos, Busca web, Criar arquivos, Pensando…, Parar, Copiar, Regenerar, Salvar como…, Abrir, Excluir, Fixar, Renomear, Exportar, Limpar dados.
 - Erros: "Não foi possível concluir", "Chave de API ausente", "Limite de uso atingido", "Tente novamente em instantes".
 
 ## 15. Anti-padrões proibidos
@@ -186,3 +193,34 @@ Com `reduceMotion` (config ou media query), remover transformações e shimmer; 
 - Cards dentro de cards sem hierarquia.
 - Animações > 300ms em interações.
 - Texto cinza claro sobre fundo claro, ou `opacity` como substituto de cor.
+- **UI generativa**: props de estilo (cores, fontes, raios, sombras) — o agente
+  usa apenas os componentes e tokens do design system; card dentro de card;
+  containers vazios; `grid` com linha incompleta; tabela/gráfico sem título;
+  botões que enviam mensagem sem o usuário revisar; duas ações `primary`;
+  emojis e Markdown dentro de props. Detalhes e limites: `docs/GENUI.md`.
+
+## 16. UI generativa no chat (interfaces do agente)
+
+Regras de apresentação específicas das interfaces que o agente cria durante a
+execução (contrato e regras completas em `docs/GENUI.md`):
+
+- **Mesmo sistema visual do chat**: superfícies `surface-raised`, borda de 1px,
+  raio `rounded-xl`/`rounded-2xl`, tipografia 12–13,5px, números `tabular-nums`.
+  Componentes não aceitam props de cor/tamanho — não há “tema paralelo”.
+- **Hierarquia**: um `card` raiz com `title`; dentro dele `grid`/`chart`/
+  `table`/`callout`; `actions` por último. Sem card aninhado, sem container
+  vazio, sem divisor decorativo.
+- **Densidade**: 1 bloco por resposta (máx. 2), ~60 componentes (máx. 120),
+  linhas de leitura confortáveis; conteúdo longo vai para Markdown/artefato.
+- **Interação**: `actions` são botões do design system (sm, 32px) em grupo
+  acessível; `primary` única, `secondary`/`ghost` para o resto; clicar em
+  `prompt` preenche o composer (o usuário revisa e envia) e `copy` copia com
+  toast discreto. `reveal` usa `<details>` com chevron 150ms; `tabs` usa Radix.
+- **Estados**: bloco inválido degrada para código + diagnóstico discreto
+  (nunca tela quebrada); avisos de design aparecem só em DEV; carregamento de
+  imagem tem fallback; tabela vazia/gráfico inválido têm mensagem muted.
+- **Acessibilidade**: contraste AA, foco visível (`ring-accent`), alvos ≥32px,
+  teclado completo, `aria-label` em ícones e grupos, `alt` obrigatório em
+  imagens, `prefers-reduced-motion` respeitado.
+- **Copy**: título e rótulos curtos em pt-BR, sentence case, sem ponto final em
+  botões, sem emojis decorativos, sem repetir o que o Markdown já diz.

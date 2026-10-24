@@ -11,7 +11,7 @@ use crate::providers::ToolDefinition;
 
 pub mod create_file;
 pub mod fetch_url;
-pub mod render_ui;
+pub mod genui;
 pub mod web_search;
 
 /// Upper bound for the text fed back to the model from a single tool call.
@@ -70,6 +70,8 @@ pub fn definitions(options: &TurnOptions) -> Vec<ToolDefinition> {
     if options.create_files {
         tools.push(create_file::definition());
     }
+    // Sempre disponível: o agente valida o JSON do bloco `ui` antes de emitir.
+    tools.push(genui::definition());
     tools
 }
 
@@ -90,6 +92,8 @@ pub async fn execute(rt: &ToolRuntime, call: &ToolCallRecord) -> ToolOutcome {
             ToolOutcome::error("a criação de arquivos está desativada nesta conversa")
         }
         "create_file" => create_file::run(rt, &arguments).await,
+        // Validação local do bloco `ui`; não depende de flags do turno.
+        "validate_ui" => genui::run(&arguments),
         other => ToolOutcome::error(format!("ferramenta desconhecida: {other}")),
     };
     truncate_outcome(outcome)
@@ -218,12 +222,16 @@ mod tests {
         options.web_search = true;
         options.create_files = true;
         let names: Vec<String> = definitions(&options).into_iter().map(|tool| tool.name).collect();
-        assert_eq!(names, vec!["web_search", "fetch_url", "create_file"]);
+        assert_eq!(
+            names,
+            vec!["web_search", "fetch_url", "create_file", "validate_ui"]
+        );
 
         options.web_search = false;
         options.create_files = false;
         let names: Vec<String> = definitions(&options).into_iter().map(|tool| tool.name).collect();
-        assert_eq!(names, vec!["fetch_url"]);
+        // `validate_ui` é sempre exposta, mesmo sem ferramentas de dados.
+        assert_eq!(names, vec!["fetch_url", "validate_ui"]);
     }
 
     #[test]

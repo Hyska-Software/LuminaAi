@@ -3,6 +3,7 @@ import {
   Copy,
   Download,
   FileText,
+  Lock,
   MessageSquarePlus,
   PanelLeft,
   Search,
@@ -14,7 +15,15 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { resolveDark, useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import {
+  MODEL_LOCKED_DESCRIPTION,
+  MODEL_LOCKED_TITLE,
+  resolveDark,
+  selectModelLocked,
+  useAppStore,
+  useChatStore,
+  useUiStore,
+} from '@/lib/store';
 import { cn, copyText, modKey } from '@/lib/utils';
 import { Dialog, DialogContent, DialogDescription, DialogTitle, Kbd } from '@/components/ui';
 
@@ -94,6 +103,7 @@ function clearAttachments() {
 export function CommandPalette() {
   const open = useUiStore((state) => state.commandPaletteOpen);
   const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
+  const locked = useChatStore(selectModelLocked);
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
   const activeRef = useRef<HTMLButtonElement | null>(null);
@@ -160,10 +170,16 @@ export function CommandPalette() {
         id: 'switch-model',
         group: 'Navegação',
         label: 'Trocar modelo',
-        description: 'Escolher modelo e modo de pensamento',
-        icon: Sparkles,
+        description: locked ? MODEL_LOCKED_DESCRIPTION : 'Escolher modelo e modo de pensamento',
+        icon: locked ? Lock : Sparkles,
         keywords: 'modelo raciocínio pensamento',
-        run: () => useUiStore.getState().setModelPickerOpen(true),
+        run: () => {
+          if (locked) {
+            toast.info(MODEL_LOCKED_TITLE, { description: MODEL_LOCKED_DESCRIPTION });
+            return;
+          }
+          useUiStore.getState().setModelPickerOpen(true);
+        },
       },
       {
         id: 'toggle-sidebar',
@@ -194,7 +210,7 @@ export function CommandPalette() {
         run: toggleTheme,
       },
     ],
-    [],
+    [locked],
   );
 
   const filtered = useMemo(() => {

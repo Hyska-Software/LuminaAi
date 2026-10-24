@@ -1,0 +1,88 @@
+{
+  "version": 2,
+  "components": [
+    {
+      "type": "card",
+      "props": {
+        "title": "Receita do trimestre",
+        "subtitle": "Consolidado por mês e por canal"
+      },
+      "children": [
+        {
+          "type": "grid",
+          "props": { "columns": 2 },
+          "children": [
+            {
+              "type": "stat",
+              "props": {
+                "label": "Receita",
+                "value": "R$ 12,4 mi",
+                "trend": "up",
+                "hint": "+12% vs. trimestre anterior"
+              }
+            },
+            {
+              "type": "stat",
+              "props": {
+                "label": "Churn",
+                "value": "3,1%",
+                "trend": "down",
+                "hint": "Menor valor em 12 meses"
+              }
+            }
+          ]
+        },
+        {
+          "type": "chart",
+          "props": {
+            "type": "bar",
+            "title": "Receita mensal (R$ milhões)",
+            "suffix": " mi",
+            "data": [
+              { "label": "Jul", "value": 3.8 },
+              { "label": "Ago", "value": 4.1 },
+              { "label": "Set", "value": 4.5 }
+            ]
+          }
+        },
+        {
+          "type": "table",
+          "props": {
+            "columns": ["Canal", "Receita", "Crescimento"],
+            "rows": [
+              ["Direto", "R$ 6,2 mi", "+9%"],
+              ["Parceiros", "R$ 4,1 mi", "+15%"],
+              ["Marketplace", "R$ 2,1 mi", "+6%"]
+            ]
+          }
+        },
+        {
+          "type": "callout",
+          "props": {
+            "variant": "warning",
+            "title": "Atenção",
+            "text": "A margem bruta caiu 2 pontos por causa do desconto no marketplace."
+          }
+        },
+        {
+          "type": "actions",
+          "props": {
+            "items": [
+              {
+                "label": "Comparar com o trimestre anterior",
+                "prompt": "Compare a receita deste trimestre com a do trimestre anterior, canal por canal.",
+                "tone": "primary",
+                "icon": "arrow-right"
+              },
+              {
+                "label": "Gerar plano de margem",
+                "prompt": "Monte um plano de ações para recuperar 2 pontos de margem no próximo trimestre.",
+                "icon": "lightbulb"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -13,6 +13,12 @@ import type {
   SettingsView,
 } from '../types';
 
+/** Upper bound accepted for the agent loop steps per turn. */
+export const MAX_STEPS_LIMIT = 1000;
+
+/** Default number of agent loop steps per turn (fresh installs). */
+export const MAX_STEPS_DEFAULT = 64;
+
 const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   locale: 'pt-BR',
@@ -22,7 +28,7 @@ const DEFAULT_SETTINGS: Settings = {
   systemPrompt: '',
   webSearchEnabled: true,
   fileCreationEnabled: true,
-  maxSteps: 8,
+  maxSteps: MAX_STEPS_DEFAULT,
   sendKey: 'enter',
   showTokenUsage: true,
   reduceMotion: false,
@@ -48,6 +54,12 @@ interface AppState {
   saveSettings: (patch: Partial<Settings>) => Promise<void>;
   setProviderKey: (providerId: string, key: string | null) => Promise<void>;
   setSelection: (selection: ModelSelection) => void;
+  /**
+   * Updates the active selection without touching the persisted defaults.
+   * Used when opening an existing conversation (its model is locked in) and
+   * when "Novo chat" resets to the configured defaults.
+   */
+  setActiveSelection: (selection: ModelSelection) => void;
   setReasoning: (reasoning: ReasoningSelection | null) => void;
   toggleFavorite: (modelId: string) => void;
   isFavorite: (modelId: string) => boolean;
@@ -142,6 +154,8 @@ export const useAppStore = create<AppState>()(
       },
 
       setReasoning: (reasoning) => set((state) => ({ selection: { ...state.selection, reasoning } })),
+
+      setActiveSelection: (selection) => set({ selection }),
 
       toggleFavorite: (modelId) =>
         set((state) => ({

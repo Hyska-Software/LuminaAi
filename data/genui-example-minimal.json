@@ -1,0 +1,43 @@
+{
+  "version": 2,
+  "components": [
+    {
+      "type": "stack",
+      "props": { "gap": "md" },
+      "children": [
+        {
+          "type": "callout",
+          "props": {
+            "variant": "info",
+            "title": "Resumo",
+            "text": "Três pontos merecem atenção antes de fechar o trimestre."
+          },
+          "children": [
+            {
+              "type": "list",
+              "props": {
+                "items": [
+                  { "text": "Margem bruta caiu 2 pontos" },
+                  { "text": "Marketplace cresceu acima do plano" },
+                  { "text": "Churn estável no plano base" }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "actions",
+          "props": {
+            "items": [
+              {
+                "label": "Ver detalhes por canal",
+                "prompt": "Detalhe a receita e a margem por canal no trimestre.",
+                "tone": "primary"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

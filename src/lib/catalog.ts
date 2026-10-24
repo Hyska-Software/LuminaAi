@@ -78,6 +78,16 @@ export function defaultReasoningFor(model?: ModelInfo | null): ReasoningSelectio
     return { mode: 'effort', effort: preferred ?? effort.values[0] ?? null };
   }
   if (hasToggle) return { mode: 'off' };
+  const budget = model.reasoningOptions.find((o) => o.type === 'budget_tokens') as
+    | { type: 'budget_tokens'; min?: number; max?: number }
+    | undefined;
+  if (budget) {
+    // Budget-only models have no on/off switch: always send a concrete budget so
+    // the slider value shown in the UI matches what is committed.
+    const min = budget.min ?? 1_024;
+    const max = budget.max ?? 65_536;
+    return { mode: 'budget', budget: Math.min(max, Math.max(min, 8_192)) };
+  }
   return null;
 }
 
@@ -161,8 +171,9 @@ export function reasoningLabel(
 export function formatContextWindow(tokens: number): string {
   if (!tokens) return '—';
   if (tokens >= 1_000_000) {
-    const v = tokens / 1_000_000;
-    return `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}M`;
+    // 1_048_576 is "1M", not "1.0M": round to one decimal and drop the ".0".
+    const rounded = Math.round((tokens / 1_000_000) * 10) / 10;
+    return Number.isInteger(rounded) ? `${rounded.toFixed(0)}M` : `${rounded.toFixed(1)}M`;
   }
   if (tokens >= 1000) return `${Math.round(tokens / 1000)}K`;
   return String(tokens);
@@ -170,6 +181,7 @@ export function formatContextWindow(tokens: number): string {
 
 export function formatPrice(cost?: ModelInfo['cost']): string {
   if (!cost || cost.input == null || cost.output == null) return '—';
+  if (cost.input === 0 && cost.output === 0) return 'Grátis';
   const fmt = (v: number) => (v === 0 ? 'grátis' : `$${v.toFixed(2)}`);
   return `${fmt(cost.input)} / ${fmt(cost.output)}`;
 }

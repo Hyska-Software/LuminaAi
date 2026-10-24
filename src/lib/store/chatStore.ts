@@ -14,6 +14,8 @@ import type {
   TurnResult,
 } from '../types';
 import { deriveTitle, newId } from '../utils';
+import { defaultSelection, getModel } from '../catalog';
+import { reasoningForModel } from '../modelMenu';
 import { useAppStore } from './appStore';
 import { useUiStore } from './uiStore';
 
@@ -66,6 +68,72 @@ export interface SendOptions {
 }
 
 const EMPTY: ChatMessage[] = [];
+
+/**
+ * A conversation's model is locked in as soon as it has messages (or a turn is
+ * running). Switching models mid-conversation would mix answers from different
+ * models and invalidate the reasoning/provider_state replay.
+ */
+export function selectModelLocked(state: ChatState): boolean {
+  if (state.streaming) return true;
+  const conversationId = state.activeId;
+  if (!conversationId) return false;
+  const messages = state.messagesByConversation[conversationId];
+  if (messages && messages.length > 0) return true;
+  const conversation = state.conversations.find((entry) => entry.id === conversationId);
+  return (conversation?.messageCount ?? 0) > 0;
+}
+
+/** Copy shared by every surface that blocks model switching. */
+export const MODEL_LOCKED_TITLE = 'Modelo bloqueado nesta conversa';
+export const MODEL_LOCKED_DESCRIPTION =
+  'O modelo não pode ser alterado depois de iniciar a conversa. Ajuste o modo de pensamento pelo botão ✦.';
+
+/** Aligns the active selection with the model a conversation was started with. */
+function syncSelectionToConversation(conversation: Conversation, messageCount: number): void {
+  if (messageCount === 0) return;
+  const model = getModel(conversation.providerId, conversation.modelId);
+  if (!model) return;
+  const app = useAppStore.getState();
+  const current = app.selection;
+  if (
+    current.providerId === conversation.providerId &&
+    current.modelId === conversation.modelId
+  ) {
+    return;
+  }
+  app.setActiveSelection({
+    providerId: conversation.providerId,
+    modelId: conversation.modelId,
+    reasoning: reasoningForModel(model, current.reasoning),
+  });
+}
+
+/**
+ * Hard guarantee for started conversations: the model used by a turn always
+ * comes from the conversation, never from a stale/mutated global selection.
+ * Returns `null` when the model is not locked (new/custom turns keep the
+ * selection from the composer).
+ */
+function lockedSelectionFor(state: ChatState): ModelSelection | null {
+  if (!selectModelLocked(state)) return null;
+  const conversationId = state.activeId;
+  if (!conversationId) return null;
+  const conversation = state.conversations.find((entry) => entry.id === conversationId);
+  if (!conversation) return null;
+  const model = getModel(conversation.providerId, conversation.modelId);
+  if (!model) return null;
+  const current = useAppStore.getState().selection;
+  const reasoning =
+    current.providerId === conversation.providerId && current.modelId === conversation.modelId
+      ? current.reasoning
+      : reasoningForModel(model, current.reasoning);
+  return {
+    providerId: conversation.providerId,
+    modelId: conversation.modelId,
+    reasoning,
+  };
+}
 
 function turnOptionsFromSettings(overrides?: Partial<TurnOptions>): TurnOptions {
   const settings = useAppStore.getState().settings;
@@ -429,6 +497,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
             conversations: state.conversations.map((c) => (c.id === id ? detail.conversation : c)),
             loadingConversationId: null,
           }));
+          // The conversation's model is locked in once it has messages; mirror
+          // it in the composer so the locked pill shows the right model.
+          syncSelectionToConversation(detail.conversation, detail.messages.length);
         } else {
           set({ loadingConversationId: null });
         }
@@ -440,6 +511,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
     },
 
     startNewConversation: async () => {
+      // Leaving a started conversation resets the composer to the configured
+      // default model (the previous conversation's model is locked to it).
+      if (selectModelLocked(get())) {
+        useAppStore
+          .getState()
+          .setActiveSelection(defaultSelection(useAppStore.getState().settings));
+      }
       const selection = useAppStore.getState().selection;
       try {
         const conversation = await api.createConversation(
@@ -543,7 +621,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (!trimmed && !attachments.length) return;
 
       const app = useAppStore.getState();
-      const selection = options?.selection ?? app.selection;
+      // A started conversation keeps its model even if some other surface
+      // changed the global selection (defense in depth for the model lock).
+      const selection = options?.selection ?? lockedSelectionFor(state) ?? app.selection;
       const reasoning = options?.reasoning !== undefined ? options.reasoning : selection.reasoning;
       const turnId = newId();
       let conversationId: string;
@@ -634,7 +714,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (!lastAssistant || !lastUser) return;
 
       const app = useAppStore.getState();
-      const selection = app.selection;
+      // Regenerating keeps the model the conversation was started with.
+      const selection = lockedSelectionFor(state) ?? app.selection;
       const turnId = newId();
       try {
         await api.truncateConversation(conversationId, lastAssistant.id);

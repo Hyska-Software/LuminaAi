@@ -1,0 +1,401 @@
+// @vitest-environment jsdom
+/**
+ * Verificação independente (task-5) — casos adversariais do `ModelPickerDialog`.
+ *
+ * Complementa `ModelPickerDialog.test.tsx` (dono: ui-dialog) sem repetir seus
+ * cenários: catálogo Zen completo (82), busca de 1 letra com contagem coerente,
+ * query gigante/emoji/espaços, acentos com provedor injetado, modelos
+ * indisponível/sem raciocínio/só-orçamento/esforço+orçamento, seleção e provedor
+ * degenerados (fantasma/vazio), Home/End, setas entre abas e reancoragem do
+ * destaque ao filtrar (Enter confirma o destaque, não a prévia antiga).
+ */
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { TooltipProvider } from '@/components/ui';
+import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
+import { catalog } from '@/lib/catalog';
+import type { ModelInfo, ProviderInfo } from '@/lib/types';
+import { useAppStore, useUiStore } from '@/lib/store';
+
+afterEach(() => cleanup());
+
+const CURRENT_PROVIDER = 'opencode-go';
+const CURRENT_MODEL = 'deepseek-v4.1-flash';
+const FAVORITES = ['glm-5.3-flash', 'deepseek-v4.1-flash', 'claude-haiku-5-5', 'gpt-6-luna'];
+
+beforeEach(() => {
+  useUiStore.setState({ modelPickerOpen: true, settingsOpen: false });
+  useAppStore.setState({
+    providers: [],
+    selection: {
+      providerId: CURRENT_PROVIDER,
+      modelId: CURRENT_MODEL,
+      reasoning: { mode: 'effort', effort: 'max' },
+    },
+    favorites: [...FAVORITES],
+    keys: [
+      { providerId: 'opencode-go', hasKey: true, source: 'settings' },
+      { providerId: 'opencode-zen', hasKey: true, source: 'settings' },
+    ],
+  });
+});
+
+function searchField(): HTMLInputElement {
+  return screen.getByRole('combobox', { name: 'Buscar modelos' }) as HTMLInputElement;
+}
+
+function modelCount(): string {
+  return screen.getByText(/^\d+ modelos?$/).textContent ?? '';
+}
+
+function activeOption(): HTMLElement | null {
+  const id = searchField().getAttribute('aria-activedescendant');
+  return id ? document.getElementById(id) : null;
+}
+
+async function renderOpenDialog() {
+  render(
+    <TooltipProvider>
+      <ModelPickerDialog />
+    </TooltipProvider>,
+  );
+  await screen.findByRole('dialog');
+  await waitFor(() => expect(document.activeElement).toBe(searchField()));
+}
+
+/** Catalog stand-in with a single provider; used to inject hostile/dirty data. */
+function providerWith(models: ProviderInfo['models']): ProviderInfo {
+  const base = catalog.providers[0];
+  return { ...base, id: 'cosmico', name: 'Provedor Cósmico', shortName: 'Cósmico', models };
+}
+
+function modelWith(overrides: Partial<ModelInfo>): ModelInfo {
+  return { ...catalog.providers[0].models[0], ...overrides };
+}
+
+describe('ModelPickerDialog (edge) — reancoragem do destaque', () => {
+  it('Enter sem navegar confirma o primeiro resultado destacado da busca', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.type(searchField(), 'glm');
+    await waitFor(() => {
+      const highlighted = activeOption();
+      expect(highlighted).toBeTruthy();
+      expect(highlighted?.textContent).toContain('GLM-5.1');
+    });
+
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    expect(useAppStore.getState().selection).toMatchObject({
+      providerId: 'opencode-go',
+      modelId: 'glm-5.1',
+    });
+  });
+
+  it('filtro que esconde a prévia reancora o destaque e o Enter confirma o destaque', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Grátis' }));
+
+    await waitFor(() => {
+      const highlighted = activeOption();
+      expect(highlighted).toBeTruthy();
+      expect(highlighted?.textContent).toContain('LongCat 2.5 Preview Free');
+    });
+
+    // Devolve o foco à busca antes de confirmar pelo teclado.
+    await user.click(searchField());
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    expect(useAppStore.getState().selection.modelId).toBe('longcat-2.5-preview-free');
+  });
+
+  it('filtros sem nenhum resultado mostram o estado vazio e "Limpar busca e filtros" restaura', async () => {
+    useAppStore.setState({ favorites: [] });
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Favoritos' }));
+
+    expect(screen.getByText('Nenhum modelo encontrado')).toBeTruthy();
+    expect(screen.queryAllByRole('option')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Favoritos' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Limpar busca e filtros' }));
+
+    expect(screen.getAllByRole('option')).toHaveLength(38);
+    expect(modelCount()).toBe('38 modelos');
+    expect(screen.getByRole('button', { name: 'Favoritos' }).getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+  });
+});
+
+describe('ModelPickerDialog (edge) — catálogo grande e busca hostil', () => {
+  it('catálogo Zen completo: 82 modelos e busca de 1 letra com contagem/ids coerentes', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('tab', { name: 'Zen' }));
+
+    const zenOptions = screen.getAllByRole('option');
+    expect(zenOptions).toHaveLength(82);
+    expect(modelCount()).toBe('82 modelos');
+    expect(new Set(zenOptions.map((option) => option.id)).size).toBe(82);
+
+    await user.type(searchField(), 'o');
+
+    // 1 letra casa nos dois provedores: 38 no Go + 82 no Zen.
+    expect(screen.getAllByRole('option')).toHaveLength(120);
+    expect(modelCount()).toBe('120 modelos');
+    expect(new Set(screen.getAllByRole('option').map((option) => option.id)).size).toBe(120);
+    expect(screen.getByText('Todos os provedores')).toBeTruthy();
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    // O destaque é reancorado no primeiro resultado e aponta para um id real.
+    expect(activeOption()).toBeTruthy();
+    expect(activeOption()?.getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('query gigante, só espaços e emoji não quebram a busca', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.click(searchField());
+    await user.paste('a'.repeat(3000));
+
+    expect(screen.getByText('Nenhum modelo encontrado')).toBeTruthy();
+    expect(modelCount()).toBe('0 modelos');
+    expect(screen.queryAllByRole('option')).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Limpar busca e filtros' }));
+    expect(screen.getAllByRole('option')).toHaveLength(38);
+
+    await user.type(searchField(), '    ');
+    expect(screen.queryAllByRole('tab')).toHaveLength(2);
+    expect(modelCount()).toBe('38 modelos');
+    expect(screen.queryByText('Todos os provedores')).toBeNull();
+
+    await user.clear(searchField());
+    await user.type(searchField(), '🚀');
+    expect(screen.getByText('Nenhum modelo encontrado')).toBeTruthy();
+  });
+
+  it('busca ignora maiúsculas e acentos (provedor injetado com "Céu Profundo Ômega")', async () => {
+    const model = modelWith({
+      id: 'ceu-profundo',
+      name: 'Céu Profundo Ômega',
+      family: 'custom',
+      description: 'Modelo Órbita para testes de normalização',
+      tags: ['vision'],
+      reasoningOptions: [],
+      status: 'stable',
+    });
+    useAppStore.setState({
+      providers: [providerWith([model])],
+      selection: { providerId: 'cosmico', modelId: 'ceu-profundo', reasoning: null },
+      keys: [{ providerId: 'cosmico', hasKey: true, source: 'settings' }],
+    });
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.type(searchField(), 'CEU PROFUNDO');
+    expect(screen.getAllByRole('option')).toHaveLength(1);
+    expect(modelCount()).toBe('1 modelo');
+    expect(screen.getByRole('option', { name: /Céu Profundo Ômega/ })).toBeTruthy();
+
+    await user.clear(searchField());
+    await user.type(searchField(), 'órbita');
+    expect(screen.getAllByRole('option')).toHaveLength(1);
+
+    await user.clear(searchField());
+    await user.type(searchField(), '🚀');
+    expect(screen.getByText('Nenhum modelo encontrado')).toBeTruthy();
+  });
+});
+
+describe('ModelPickerDialog (edge) — estados de modelo e provedor', () => {
+  it('modelo indisponível: aria-disabled, motivo no badge de status e CTA bloqueado', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.type(searchField(), 'mimo-v2.5-pro');
+    await user.keyboard('{ArrowDown}');
+
+    expect(screen.getByRole('heading', { name: 'MiMo-V2.5-Pro' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: /MiMo-V2\.5-Pro/ }).getAttribute('aria-disabled')).toBe(
+      'true',
+    );
+    // O motivo fica no title do badge de status (tooltip nativa, acessível).
+    const statusBadges = screen.getAllByText('Indisponível');
+    expect(
+      statusBadges.some((badge) =>
+        (badge.getAttribute('title') ?? '').includes('Indisponível no gateway'),
+      ),
+    ).toBe(true);
+    expect((screen.getByRole('button', { name: 'Usar este modelo' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it('modelo sem controle de raciocínio: nota no painel, nenhum controle e commit com reasoning nulo', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.type(searchField(), 'MiMo-V2.6-Flash');
+
+    // A busca global acha a variante Go e a Zen (Free); clique na Go para a prévia.
+    const options = screen.getAllByRole('option');
+    expect(options).toHaveLength(2);
+    const goOption = options.find((option) => !(option.textContent ?? '').includes('Free'));
+    expect(goOption).toBeTruthy();
+    await user.click(goOption as HTMLElement);
+    expect(screen.getByRole('heading', { name: 'MiMo-V2.6-Flash' })).toBeTruthy();
+
+    expect(
+      screen.getByText(/Este modelo não expõe controle de raciocínio/),
+    ).toBeTruthy();
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+    expect(screen.queryAllByRole('slider')).toHaveLength(0);
+    expect(
+      (screen.getByRole('button', { name: 'Usar este modelo' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+
+    await user.click(screen.getByRole('button', { name: 'Usar este modelo' }));
+
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    expect(useAppStore.getState().selection).toEqual({
+      providerId: 'opencode-go',
+      modelId: 'mimo-v2.6-flash',
+      reasoning: null,
+    });
+  });
+
+  it('modelo só com orçamento: slider presente e interação aplica o orçamento no commit', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.type(searchField(), 'claude-haiku-4-5');
+    await user.keyboard('{ArrowDown}');
+
+    const slider = screen.getByRole('slider', {
+      name: 'Orçamento de raciocínio em tokens',
+    }) as HTMLInputElement;
+    expect(slider.min).toBe('1024');
+    expect(slider.max).toBe('65536');
+    expect(screen.getByText('8.192 tokens')).toBeTruthy();
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+
+    fireEvent.change(slider, { target: { value: '16384' } });
+
+    await waitFor(() => expect(screen.getByText('16.384 tokens')).toBeTruthy());
+
+    await user.click(screen.getByRole('button', { name: 'Usar este modelo' }));
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    expect(useAppStore.getState().selection).toEqual({
+      providerId: 'opencode-zen',
+      modelId: 'claude-haiku-4-5',
+      reasoning: { mode: 'budget', budget: 16384 },
+    });
+  });
+
+  it('modelo com esforços + orçamento: "Orçamento" revela o slider e o commit aplica budget', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.type(searchField(), 'claude-opus-4-6');
+    await user.keyboard('{ArrowDown}');
+
+    expect(screen.getByRole('heading', { name: 'Claude Opus 4.6' })).toBeTruthy();
+    expect(screen.queryAllByRole('slider')).toHaveLength(0);
+    expect(screen.getByRole('radio', { name: 'Alto' })).toBeTruthy();
+
+    await user.click(screen.getByRole('radio', { name: 'Orçamento' }));
+
+    expect(
+      screen.getByRole('slider', { name: 'Orçamento de raciocínio em tokens' }),
+    ).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Usar este modelo' }));
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    expect(useAppStore.getState().selection).toEqual({
+      providerId: 'opencode-zen',
+      modelId: 'claude-opus-4-6',
+      reasoning: { mode: 'budget', budget: 8192 },
+    });
+  });
+
+  it('seleção fora do catálogo (id fantasma) abre no provedor padrão sem quebrar', async () => {
+    useAppStore.setState({
+      selection: { providerId: 'desaparecido', modelId: 'fantasma', reasoning: null },
+    });
+    await renderOpenDialog();
+
+    expect(screen.getByRole('heading', { name: 'DeepSeek V4.1 Flash' })).toBeTruthy();
+    expect(screen.queryByText('Em uso')).toBeNull();
+    expect(screen.getAllByRole('option')).toHaveLength(38);
+    expect(
+      (screen.getByRole('button', { name: 'Usar este modelo' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it('provedor sem modelos: estado vazio, CTA desabilitado e Esc fecha', async () => {
+    const base = catalog.providers[0];
+    useAppStore.setState({
+      providers: [{ ...base, models: [] }],
+      selection: { providerId: base.id, modelId: 'fantasma', reasoning: null },
+    });
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    expect(screen.getByText('Nenhum modelo disponível')).toBeTruthy();
+    expect(screen.queryAllByRole('tab')).toHaveLength(1);
+    expect(
+      (screen.getByRole('button', { name: 'Usar este modelo' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    // Sem busca/filtros não há o que limpar: o botão não é oferecido.
+    expect(screen.queryByRole('button', { name: 'Limpar busca e filtros' })).toBeNull();
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+  });
+});
+
+describe('ModelPickerDialog (edge) — teclado', () => {
+  it('Home/End navegam a lista e atualizam a prévia sem perder o aria-activedescendant', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.keyboard('{End}');
+    expect(activeOption()).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 3 }).textContent).toBe('Omen Alpha');
+
+    await user.keyboard('{Home}');
+    expect(activeOption()).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 3 }).textContent).toBe('Claude Haiku 5.5');
+  });
+
+  it('setas nas abas de provedor trocam o provedor e a contagem acompanha', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('tab', { name: 'Go' }));
+    expect(screen.getByRole('tab', { name: 'Go' }).getAttribute('aria-selected')).toBe('true');
+
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: 'Zen' }).getAttribute('aria-selected')).toBe('true');
+    expect(modelCount()).toBe('82 modelos');
+
+    await user.keyboard('{ArrowLeft}');
+    expect(screen.getByRole('tab', { name: 'Go' }).getAttribute('aria-selected')).toBe('true');
+    expect(modelCount()).toBe('38 modelos');
+  });
+});
+
+

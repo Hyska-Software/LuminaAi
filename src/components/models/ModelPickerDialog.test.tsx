@@ -1,0 +1,474 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { TooltipProvider } from '@/components/ui';
+import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
+import { providers } from '@/lib/catalog';
+import type { ChatMessage, Conversation } from '@/lib/types';
+import {
+  MODEL_LOCKED_DESCRIPTION,
+  MODEL_LOCKED_TITLE,
+  useAppStore,
+  useChatStore,
+  useUiStore,
+} from '@/lib/store';
+
+afterEach(() => cleanup());
+
+const CURRENT_PROVIDER = 'opencode-go';
+const CURRENT_MODEL = 'deepseek-v4.1-flash';
+const FAVORITES = ['glm-5.3-flash', 'deepseek-v4.1-flash', 'claude-haiku-5-5', 'gpt-6-luna'];
+
+beforeEach(() => {
+  useUiStore.setState({ modelPickerOpen: true, settingsOpen: false });
+  // Every test starts before the first message, so the model is still editable.
+  useChatStore.setState({
+    activeId: null,
+    conversations: [],
+    messagesByConversation: {},
+    streaming: null,
+  });
+  useAppStore.setState({
+    providers: [],
+    selection: {
+      providerId: CURRENT_PROVIDER,
+      modelId: CURRENT_MODEL,
+      reasoning: { mode: 'effort', effort: 'max' },
+    },
+    favorites: [...FAVORITES],
+    keys: [
+      { providerId: 'opencode-go', hasKey: true, source: 'settings' },
+      { providerId: 'opencode-zen', hasKey: true, source: 'settings' },
+    ],
+  });
+});
+
+function searchField(): HTMLInputElement {
+  return screen.getByRole('combobox', { name: 'Buscar modelos' }) as HTMLInputElement;
+}
+
+function modelCount(): number {
+  const node = screen.getByText(/^\d+ modelos?$/);
+  return Number.parseInt(node.textContent ?? '0', 10);
+}
+
+async function renderDialog() {
+  render(
+    <TooltipProvider>
+      <ModelPickerDialog />
+    </TooltipProvider>,
+  );
+  return screen.findByRole('dialog');
+}
+
+async function renderOpenDialog() {
+  await renderDialog();
+  await waitFor(() => expect(document.activeElement).toBe(searchField()));
+}
+
+function selectedModelName(): string | undefined {
+  const { providerId, modelId } = useAppStore.getState().selection;
+  return providers()
+    .find((provider) => provider.id === providerId)
+    ?.models.find((model) => model.id === modelId)?.name;
+}
+
+/** Starts a conversation with messages, which locks the model selection. */
+function lockConversation(): void {
+  const conversation: Conversation = {
+    id: 'conv-locked',
+    title: 'Conversa em andamento',
+    createdAt: Date.now() - 1000,
+    updatedAt: Date.now(),
+    pinned: false,
+    providerId: CURRENT_PROVIDER,
+    modelId: CURRENT_MODEL,
+    messageCount: 2,
+    preview: 'Olá',
+  };
+  const messages: ChatMessage[] = [
+    {
+      id: 'message-1',
+      conversationId: conversation.id,
+      role: 'user',
+      content: 'Olá',
+      status: 'complete',
+      toolCalls: [],
+      citations: [],
+      attachments: [],
+      createdAt: Date.now() - 1000,
+    },
+    {
+      id: 'message-2',
+      conversationId: conversation.id,
+      role: 'assistant',
+      content: 'Oi! Como posso ajudar?',
+      status: 'complete',
+      toolCalls: [],
+      citations: [],
+      attachments: [],
+      createdAt: Date.now() - 500,
+    },
+  ];
+  useChatStore.setState({
+    activeId: conversation.id,
+    conversations: [conversation],
+    messagesByConversation: { [conversation.id]: messages },
+    streaming: null,
+  });
+}
+
+describe('ModelPickerDialog', () => {
+  it('abre com título, busca focada e o modelo atual marcado como "Em uso"', async () => {
+    await renderOpenDialog();
+
+    expect(screen.getByRole('heading', { name: 'Selecionar modelo' })).toBeTruthy();
+    expect(screen.getByText('Em uso')).toBeTruthy();
+
+    const search = searchField();
+    expect(search.getAttribute('role')).toBe('combobox');
+    expect(search.getAttribute('aria-expanded')).toBe('true');
+
+    const listbox = screen.getByRole('listbox', { name: 'Modelos do provedor' });
+    expect(search.getAttribute('aria-controls')).toBe(listbox.id);
+
+    const current = screen.getByRole('option', { name: /DeepSeek V4\.1 Flash/ });
+    expect(current.getAttribute('aria-selected')).toBe('true');
+    expect(current.getAttribute('aria-disabled')).toBeNull();
+    expect(search.getAttribute('aria-activedescendant')).toBe(current.id);
+  });
+
+  it('busca global encontra modelos dos dois provedores', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.type(searchField(), 'opus');
+
+    expect(screen.getByText('Todos os provedores')).toBeTruthy();
+    expect(screen.getByText('Zen · Claude')).toBeTruthy();
+    expect(screen.getByRole('option', { name: /Claude Opus 5\.5/ })).toBeTruthy();
+    expect(modelCount()).toBe(6);
+    // As abas dão lugar ao rótulo da busca global.
+    expect(screen.queryByRole('tab', { name: 'Go' })).toBeNull();
+    expect(screen.getByRole('listbox', { name: 'Resultados da busca de modelos' })).toBeTruthy();
+  });
+
+  it('alterna de provedor pelas abas e move a prévia para o modelo padrão', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    const goTab = screen.getByRole('tab', { name: 'Go' });
+    expect(goTab.getAttribute('aria-selected')).toBe('true');
+    expect(goTab.getAttribute('title')).toBe('Chave configurada');
+    expect(modelCount()).toBe(38);
+
+    await user.click(screen.getByRole('tab', { name: 'Zen' }));
+
+    expect(screen.getByRole('tab', { name: 'Zen' }).getAttribute('aria-selected')).toBe('true');
+    expect(modelCount()).toBe(82);
+    // O Zen não tem Omen Alpha (exclusivo do Go).
+    expect(screen.queryByRole('option', { name: /Omen Alpha/ })).toBeNull();
+    // A prévia passa para o modelo padrão do provedor.
+    expect(screen.getByRole('heading', { name: 'GPT 6 Luna' })).toBeTruthy();
+  });
+
+  it('filtros de capability reduzem a lista e combinam entre si', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    expect(modelCount()).toBe(38);
+
+    const vision = screen.getByRole('button', { name: 'Visão' });
+    await user.click(vision);
+    expect(vision.getAttribute('aria-pressed')).toBe('true');
+    expect(modelCount()).toBe(26);
+
+    const free = screen.getByRole('button', { name: 'Grátis' });
+    await user.click(free);
+    expect(free.getAttribute('aria-pressed')).toBe('true');
+    // Visão + Grátis: só o LongCat 2.5 Preview Free.
+    expect(modelCount()).toBe(1);
+    expect(screen.getByText('1 modelo')).toBeTruthy();
+    expect(screen.getByRole('option', { name: /LongCat 2\.5 Preview Free/ })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: /Beam Free/ })).toBeNull();
+
+    // Desligando "Visão", "Grátis" sozinho mostra o Beam Free.
+    await user.click(vision);
+    expect(vision.getAttribute('aria-pressed')).toBe('false');
+    expect(modelCount()).toBe(2);
+    expect(screen.getByRole('option', { name: /Beam Free/ })).toBeTruthy();
+  });
+
+  it('mostra o estado vazio e limpa busca e filtros', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Grátis' }));
+    await user.click(searchField());
+    await user.type(searchField(), 'modelo-inexistente');
+
+    expect(screen.getByText('Nenhum modelo encontrado')).toBeTruthy();
+    expect(screen.queryByRole('option')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Limpar busca e filtros' }));
+
+    expect(searchField().value).toBe('');
+    expect(screen.getByRole('button', { name: 'Grátis' }).getAttribute('aria-pressed')).toBe('false');
+    expect(modelCount()).toBe(38);
+  });
+
+  it('clique na linha atualiza a prévia e "Usar este modelo" confirma e fecha', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('option', { name: /GLM-5\.3-Flash/ }));
+
+    // Prévia mudou; a seleção só muda no commit.
+    expect(screen.getByRole('heading', { name: 'GLM-5.3-Flash' })).toBeTruthy();
+    expect(screen.queryByText('Em uso')).toBeNull();
+    expect(useAppStore.getState().selection.modelId).toBe(CURRENT_MODEL);
+
+    const useButton = screen.getByRole('button', { name: 'Usar este modelo' }) as HTMLButtonElement;
+    expect(useButton.disabled).toBe(false);
+    await user.click(useButton);
+
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(useAppStore.getState().selection.providerId).toBe('opencode-go');
+    expect(useAppStore.getState().selection.modelId).toBe('glm-5.3-flash');
+  });
+
+  it('duplo-clique na linha confirma direto', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.dblClick(screen.getByRole('option', { name: /Claude Haiku 5\.5/ }));
+
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    expect(useAppStore.getState().selection.modelId).toBe('claude-haiku-5-5');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('Enter na busca confirma a prévia ativa', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    const search = searchField();
+    await user.click(search);
+    await user.keyboard('{ArrowDown}');
+
+    const activeId = search.getAttribute('aria-activedescendant');
+    expect(activeId).toBeTruthy();
+    const activeOption = document.getElementById(activeId as string);
+    expect(activeOption).toBeTruthy();
+    const activeText = activeOption?.textContent ?? '';
+    // A prévia acompanha a navegação por teclado.
+    const previewName = screen.getByRole('heading', { level: 3 }).textContent ?? '';
+    expect(previewName).not.toBe('DeepSeek V4.1 Flash');
+    expect(activeText).toContain(previewName);
+
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    expect(selectedModelName()).toBe(previewName);
+  });
+
+  it('modelo indisponível fica aria-disabled e não pode ser confirmado', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.type(searchField(), 'mimo-v2.5-pro');
+    // Seta: o único resultado (indisponível) vira prévia para mostrar o motivo.
+    await user.keyboard('{ArrowDown}');
+
+    const unavailable = screen.getByRole('option', { name: /MiMo-V2\.5-Pro/ });
+    expect(unavailable.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('heading', { name: 'MiMo-V2.5-Pro' })).toBeTruthy();
+
+    const useButton = screen.getByRole('button', { name: 'Usar este modelo' }) as HTMLButtonElement;
+    expect(useButton.disabled).toBe(true);
+
+    // Clique não altera prévia nem seleção.
+    await user.click(unavailable);
+    expect(screen.getByRole('heading', { name: 'MiMo-V2.5-Pro' })).toBeTruthy();
+    expect(useUiStore.getState().modelPickerOpen).toBe(true);
+    expect(useAppStore.getState().selection.modelId).toBe(CURRENT_MODEL);
+
+    // Enter na busca também não confirma um modelo indisponível.
+    await user.keyboard('{Enter}');
+    expect(useUiStore.getState().modelPickerOpen).toBe(true);
+  });
+
+  it('aviso de chave ausente abre Configurações e fecha o dialog', async () => {
+    useAppStore.setState({
+      keys: [
+        { providerId: 'opencode-go', hasKey: false, source: 'none' },
+        { providerId: 'opencode-zen', hasKey: true, source: 'settings' },
+      ],
+    });
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    expect(screen.getByRole('tab', { name: 'Go' }).getAttribute('title')).toBe(
+      'Sem chave de API',
+    );
+    expect(screen.getByText(/Sem chave de API para OpenCode Go/)).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Configurar' }));
+
+    await waitFor(() => expect(useUiStore.getState().settingsOpen).toBe(true));
+    expect(useUiStore.getState().modelPickerOpen).toBe(false);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('Esc limpa a busca antes de fechar', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    const search = searchField();
+    await user.type(search, 'glm');
+    expect(search.value).toBe('glm');
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(search.value).toBe(''));
+    expect(screen.queryByRole('dialog')).toBeTruthy();
+    expect(useUiStore.getState().modelPickerOpen).toBe(true);
+    expect(modelCount()).toBe(38);
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('reabrir o dialog reseta busca, filtros e prévia', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.type(searchField(), 'glm');
+    await user.click(screen.getByRole('button', { name: 'Visão' }));
+    // O foco foi para o chip de filtro: volta para a busca antes de navegar.
+    await user.click(searchField());
+    await user.keyboard('{ArrowDown}');
+    const previewName = screen.getByRole('heading', { level: 3 }).textContent ?? '';
+    expect(previewName).not.toBe('DeepSeek V4.1 Flash');
+
+    await user.click(screen.getByRole('button', { name: 'Fechar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    act(() => useUiStore.getState().setModelPickerOpen(true));
+    await screen.findByRole('dialog');
+    await waitFor(() => expect(document.activeElement).toBe(searchField()));
+
+    expect(searchField().value).toBe('');
+    expect(screen.getByRole('button', { name: 'Visão' }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('heading', { name: 'DeepSeek V4.1 Flash' })).toBeTruthy();
+    expect(screen.getByText('Em uso')).toBeTruthy();
+    expect(modelCount()).toBe(38);
+  });
+
+  it('mudar o modo de pensamento altera a prévia e o commit aplica o reasoning', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    const dialog = screen.getByRole('dialog');
+    const max = within(dialog).getByRole('radio', { name: 'Máximo' });
+    expect(max.getAttribute('aria-checked')).toBe('true');
+
+    await user.click(within(dialog).getByRole('radio', { name: 'Alto' }));
+    expect(
+      within(dialog).getByRole('radio', { name: 'Alto' }).getAttribute('aria-checked'),
+    ).toBe('true');
+    // A prévia continua no mesmo modelo — ainda não houve commit.
+    expect(useAppStore.getState().selection.reasoning).toEqual({ mode: 'effort', effort: 'max' });
+
+    await user.click(screen.getByRole('button', { name: 'Usar este modelo' }));
+
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    expect(useAppStore.getState().selection.modelId).toBe(CURRENT_MODEL);
+    expect(useAppStore.getState().selection.reasoning).toEqual({ mode: 'effort', effort: 'high' });
+  });
+});
+
+describe('ModelPickerDialog (modelo bloqueado após iniciar a conversa)', () => {
+  it('mostra o aviso e o modelo em uso no lugar do seletor', async () => {
+    lockConversation();
+    await renderDialog();
+
+    expect(screen.getByRole('heading', { name: MODEL_LOCKED_TITLE })).toBeTruthy();
+    expect(screen.getByText(MODEL_LOCKED_DESCRIPTION)).toBeTruthy();
+    // Resumo do modelo em uso (avatar + nome + provedor).
+    expect(screen.getByText('DeepSeek V4.1 Flash')).toBeTruthy();
+    expect(screen.getByText('OpenCode Go')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Você pode ajustar o modo de pensamento pelo botão ✦ no composer.',
+      ),
+    ).toBeTruthy();
+
+    // Nada de seletor: sem busca, lista, abas ou confirmação.
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.queryByRole('tab')).toBeNull();
+    expect(screen.queryByRole('option')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Usar este modelo' })).toBeNull();
+    expect(screen.queryByText('Em uso')).toBeNull();
+  });
+
+  it('"Fechar" recebe o foco inicial e fecha o dialog', async () => {
+    lockConversation();
+    await renderDialog();
+    const user = userEvent.setup();
+
+    const close = screen.getByRole('button', { name: 'Fechar' });
+    await waitFor(() => expect(document.activeElement).toBe(close));
+
+    await user.click(close);
+
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(useAppStore.getState().selection.modelId).toBe(CURRENT_MODEL);
+  });
+
+  it('bloqueia também durante o streaming, mesmo sem conversa carregada', async () => {
+    useChatStore.setState({
+      activeId: null,
+      streaming: {
+        turnId: 'turn-1',
+        conversationId: 'conv-streaming',
+        assistantId: 'assistant-1',
+        userMessageId: null,
+        phase: 'starting',
+        step: 1,
+        startedAt: Date.now(),
+      },
+    });
+    await renderDialog();
+
+    expect(screen.getByRole('heading', { name: MODEL_LOCKED_TITLE })).toBeTruthy();
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+
+  it('não bloqueia quando a conversa com mensagens não está ativa', async () => {
+    lockConversation();
+    useChatStore.setState({ activeId: null });
+
+    await renderOpenDialog();
+
+    expect(screen.getByRole('heading', { name: 'Selecionar modelo' })).toBeTruthy();
+    expect(screen.getByText('Em uso')).toBeTruthy();
+  });
+
+  it('mostra o id quando o modelo da seleção não existe no catálogo', async () => {
+    lockConversation();
+    useAppStore.setState({
+      selection: { providerId: 'desaparecido', modelId: 'fantasma', reasoning: null },
+    });
+
+    await renderDialog();
+
+    expect(screen.getByRole('heading', { name: MODEL_LOCKED_TITLE })).toBeTruthy();
+    expect(screen.getByText('fantasma')).toBeTruthy();
+    expect(screen.getByText('desaparecido')).toBeTruthy();
+  });
+});

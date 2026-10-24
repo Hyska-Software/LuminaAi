@@ -239,6 +239,13 @@ pub struct ReasoningSelection {
     pub budget: Option<u32>,
 }
 
+/// Upper bound accepted for the agent loop steps per turn. The renderer,
+/// the settings file and the harness all clamp to this value.
+pub const MAX_STEPS_LIMIT: u32 = 1_000;
+
+/// Default number of agent loop steps per turn (fresh installs).
+pub const MAX_STEPS_DEFAULT: u32 = 64;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TurnOptions {
@@ -256,7 +263,7 @@ impl Default for TurnOptions {
         Self {
             web_search: true,
             create_files: true,
-            max_steps: 8,
+            max_steps: MAX_STEPS_DEFAULT,
             temperature: None,
             system_prompt_override: None,
             regenerate: false,
@@ -422,7 +429,7 @@ impl Default for Settings {
             system_prompt: String::new(),
             web_search_enabled: true,
             file_creation_enabled: true,
-            max_steps: 8,
+            max_steps: MAX_STEPS_DEFAULT,
             send_key: "enter".into(),
             show_token_usage: true,
             reduce_motion: false,

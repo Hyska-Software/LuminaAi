@@ -164,24 +164,89 @@ Fatos descobertos por sondagem (ver `docs/MODELS.md`):
 | `web_search` | busca no DuckDuckGo (HTML/lite) + fallback Bing; retorna até 8 resultados com título, URL e snippet | JSON compacto + citações para a UI |
 | `fetch_url` | GET + extração de conteúdo legível (scraper), limite de ~120k chars, respeita `text/html` | texto com metadados e URL final |
 | `create_file` | cria artefato (md, html, csv, json, código, svg) no disco e registra no DB | confirmação + id do artefato |
+| `validate_ui` | valida um bloco ` ```ui ` (JSON declarativo) contra o contrato: normaliza, valida e roda o lint de design | `{ ok, errors, warnings, normalized }` |
+
+`validate_ui` está sempre disponível e não conta no orçamento de ferramentas de
+dados — é o mecanismo de autovalidação do agente para a UI generativa (ver §9).
 
 ## 9. UI generativa
 
-O agente emite blocos cercados com a linguagem `ui`:
+O agente emite blocos cercados com a linguagem `ui` contendo **um objeto JSON declarativo**. A interface normaliza o JSON e desenha somente componentes da whitelist — **nunca** `eval`, HTML ou JavaScript arbitrário.
 
 ````
 ```ui
-{ "components": [
+{ "version": 2, "components": [
   { "type": "card", "props": { "title": "Resumo" }, "children": [
-    { "type": "stat", "props": { "label": "Receita", "value": "R$ 12.400" } }
+    { "type": "stat", "props": { "label": "Receita", "value": "R$ 12.400" } },
+    { "type": "actions", "props": { "items": [
+      { "label": "Comparar trimestres", "prompt": "Compare este trimestre com o anterior.", "tone": "primary" }
+    ]}}
   ]}
 ]}
 ```
 ````
 
-O renderer (`src/components/genui/`) valida o JSON contra um schema e renderiza somente **componentes da whitelist** (≈18 primitivas: card, stack, grid, tabs, table, chart, stat, progress, timeline, steps, callout, quote, code, list, image, badge, divider, link). Componentes desconhecidos degradam para um bloco de código. Nada de JS arbitrário.
+### Contrato único
 
-Fenced blocks extras com rendering especial: `mermaid` (diagramas), `chart` (JSON de dados → SVG), `html`/`svg` (preview em iframe sandbox), `ui`.
+A fonte de verdade é **`data/genui-contract.json`** (v2): tipos, props, limites
+rígidos, ícones, semântica das ações e as **regras de design** que o agente deve
+seguir. Ele é consumido pelos três lados, sem listas duplicadas:
+
+| Consumidor | Uso |
+| --- | --- |
+| `src-tauri/src/tools/genui` | normalizador + validador + lint + ferramenta `validate_ui` |
+| `src-tauri/src/harness/prompt.rs` | gera o system prompt (catálogo, regras, limites, exemplo) |
+| `src/lib/genui` + `src/components/genui` | normalização/validação defensiva final e renderer |
+
+### Pipeline
+
+1. **Normalização** (determinística, igual nos dois lados): coerções seguras
+   (`number`→`text`, string numérica→`number`, enum case-insensitive), formas
+   legadas (`labels`+`values`→`data`, `keyvalue` objeto→`items`), truncamento
+   de textos/arrays nos limites rígidos, clamp de `progress`/`grid.columns`.
+2. **Validação estrutural** contra o contrato: whitelist de 21 componentes
+   (`card`, `stack`, `grid`, `tabs`, `reveal`, `divider`, `table`, `chart`,
+   `stat`, `progress`, `timeline`, `steps`, `keyvalue`, `list`, `code`,
+   `quote`, `callout`, `badge`, `image`, `link`, `actions`), props
+   obrigatórias/tipos/enums/URLs, `children` só em containers, profundidade 8
+   e 120 nós. Erro → o bloco degrada para código com o diagnóstico exato.
+3. **Lint de design**: 27 regras do contrato (hierarquia, densidade, copy
+   pt-BR, acessibilidade, interação) viram avisos com `code`/`path`/`hint`.
+   Avisos não bloqueiam: a árvore normalizada é renderizada. O máximo de blocos
+   por mensagem é orientação do prompt (`blocks.maxPerMessage`), não regra de
+   lint por bloco.
+
+### Autovalidação durante a execução
+
+A ferramenta **`validate_ui(block)`** (sempre disponível, não conta no orçamento
+de ferramentas de dados) recebe o JSON candidato e devolve
+`{ ok, summary, errors, warnings, normalized }`. O system prompt instrui o
+agente a validar o bloco e emitir só depois de `ok: true` (orientação de até 2
+validações por resposta; não há contador imposto pelo harness), corrigindo os
+`errors` e os `warnings` de design. O campo `normalized` é o JSON canônico para
+a emissão final.
+
+### Interação
+
+`actions` são declarativas e seguras: `prompt` **preenche o composer** (evento
+`lumina:suggest`) — nunca envia sozinho — e `copy` copia texto. `tabs` e
+`reveal` usam Radix/`<details>` do design system. Não existem campos de
+formulário dentro da interface (o composer é o input).
+
+### Garantias
+
+`data/genui-fixtures.json` é o corpus de paridade executado por
+`cargo test` **e** `pnpm test`: para todos os casos válidos a árvore normalizada
+inteira e os códigos de erro/aviso são idênticos nos dois lados (casos com erro
+comparam os códigos e a ausência de spec). O renderer valida de novo (defesa em
+profundidade), os exemplos de `docs/GENUI.md` são validados por teste e o prompt é gerado a partir
+do contrato — nenhuma documentação de UI pode divergir do validador.
+
+Fenced blocks extras com rendering especial: `mermaid` (diagramas), `chart`
+(JSON de dados → SVG), `html`/`svg` (preview em iframe sandbox), `ui`.
+
+> Regras completas de UI/UX, catálogo de props e checklist do agente:
+> **`docs/GENUI.md`**.
 
 ## 10. Anexos
 
@@ -238,8 +303,8 @@ pnpm app:dev            # dev com HMR
 
 A verificação é feita por testes automatizados — unitários e de integração — e por build:
 
-1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, schema e sanitização da UI generativa, parser CSV e o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento).
-2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, validadores de UI generativa, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), SQLite (conversas/mensagens/anexos/artefatos/usage), settings/segredos, exportação e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor e cancelamento.
+1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV e o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento).
+2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui`, o system prompt gerado do contrato, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), SQLite (conversas/mensagens/anexos/artefatos/usage), settings/segredos, exportação e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor e cancelamento.
 3. **Integração com o gateway real** (testes `#[ignore]`, executados sob demanda): streaming nos 4 protocolos, tool call + replay de `provider_state`, fallback de protocolo, mapeamento de 401, cancelamento e o caso canônico **DeepSeek V4.1 Flash com esforço máximo**.
 4. **Build**: `pnpm typecheck`, `pnpm build` e `pnpm tauri build --no-bundle` (artefato em `src-tauri/target/release/lumina.exe`).
 5. **Manual (release)**: abrir o app e validar visualmente os fluxos principais.

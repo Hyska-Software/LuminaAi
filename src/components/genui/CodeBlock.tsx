@@ -94,9 +94,9 @@ export function CodeBlock({
                 label={copied ? 'Copiado' : 'Copiar código'}
                 size="sm"
                 onClick={handleCopy}
-                className="size-7 text-foreground-subtle hover:text-foreground"
+                className="size-8 text-foreground-subtle hover:text-foreground"
               >
-                {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
+                {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
               </IconButton>
             </Tooltip>
           ) : null}

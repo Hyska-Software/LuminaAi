@@ -71,6 +71,13 @@ describe('defaultReasoningFor', () => {
     expect(defaultReasoningFor(claude)).toEqual({ mode: 'effort', effort: 'medium' });
     expect(defaultReasoningFor(undefined)).toBeNull();
   });
+
+  it('returns a concrete budget for budget-only models', () => {
+    // Zen's Claude Haiku 4.5 only accepts budget_tokens (no toggle/effort), so
+    // the slider value shown by the UI must also be the value that is committed.
+    const budgetOnly = getModel('opencode-zen', 'claude-haiku-4-5')!;
+    expect(defaultReasoningFor(budgetOnly)).toEqual({ mode: 'budget', budget: 8_192 });
+  });
 });
 
 describe('reasoning labels', () => {
@@ -92,6 +99,7 @@ describe('reasoning labels', () => {
 describe('formatting helpers', () => {
   it('formats context windows', () => {
     expect(formatContextWindow(1_000_000)).toBe('1M');
+    expect(formatContextWindow(1_048_576)).toBe('1M');
     expect(formatContextWindow(1_050_000)).toBe('1.1M');
     expect(formatContextWindow(262_144)).toBe('262K');
     expect(formatContextWindow(0)).toBe('—');
@@ -99,6 +107,7 @@ describe('formatting helpers', () => {
 
   it('formats prices', () => {
     expect(formatPrice(glm.cost)).toBe('$0.15 / $0.50');
+    expect(formatPrice(getModel('opencode-go', 'beam-free')!.cost)).toBe('Grátis');
     expect(formatPrice(null)).toBe('—');
   });
 
@@ -136,7 +145,7 @@ describe('defaultSelection', () => {
     systemPrompt: '',
     webSearchEnabled: true,
     fileCreationEnabled: true,
-    maxSteps: 8,
+    maxSteps: 64,
     sendKey: 'enter',
     showTokenUsage: true,
     reduceMotion: false,

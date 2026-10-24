@@ -125,7 +125,7 @@ export function CodeBlock({ code, language = 'text', label, className }: CodeBlo
           onClick={() => void handleCopy()}
           aria-label={copied ? 'Código copiado' : 'Copiar código'}
           className={cn(
-            'ml-auto flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-foreground-subtle',
+            'ml-auto flex h-8 items-center gap-1 rounded-md px-2 text-[11px] text-foreground-subtle',
             'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
           )}

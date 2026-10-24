@@ -58,17 +58,17 @@ export function GenUIStat({ props }: GenUINodeProps) {
 
 export function GenUIProgress({ props }: GenUINodeProps) {
   const label = propString(props, 'label');
-  const max = Math.abs(propNumber(props, 'max', 100) ?? 100) || 100;
-  const rawValue = propNumber(props, 'value', 0) ?? 0;
   const suffix = propString(props, 'suffix');
-  // A model may send either a percentage (0–100), a fraction (0–1) or `value/max`.
-  const value = max === 1 ? Math.min(1, Math.max(0, rawValue)) * 100 : Math.min(max, Math.max(0, rawValue));
-  const pct = Math.round((value / (max === 1 ? 100 : max)) * 100);
+  const max = Math.abs(propNumber(props, 'max', 100) ?? 100) || 100;
+  const rawValue = Math.min(max, Math.max(0, propNumber(props, 'value', 0) ?? 0));
+  // `max: 1` costuma representar uma fração 0–1: a leitura correta é a
+  // porcentagem, nunca "50/1". Com `max: 100` a barra também é percentual.
+  const pct = Math.round((max === 1 ? rawValue : rawValue / max) * 100);
   const display = suffix
-    ? `${value.toLocaleString('pt-BR')}${suffix}`
-    : max === 100
-      ? `${Math.round(value)}%`
-      : `${value.toLocaleString('pt-BR')}/${max.toLocaleString('pt-BR')}`;
+    ? `${rawValue.toLocaleString('pt-BR')}${suffix}`
+    : max === 100 || max === 1
+      ? `${pct}%`
+      : `${rawValue.toLocaleString('pt-BR')}/${max.toLocaleString('pt-BR')}`;
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -83,11 +83,11 @@ export function GenUIProgress({ props }: GenUINodeProps) {
 
 /* ------------------------------- timeline ----------------------------- */
 
-const TIMELINE_DOT = {
-  done: 'bg-success',
-  active: 'bg-accent',
-  pending: 'bg-border-strong',
-  error: 'bg-danger',
+const TIMELINE_STATUS = {
+  done: { dot: 'bg-success', text: 'text-success', label: 'Concluído' },
+  active: { dot: 'bg-accent', text: 'text-accent', label: 'Em andamento' },
+  pending: { dot: 'bg-border-strong', text: 'text-foreground-subtle', label: 'Pendente' },
+  error: { dot: 'bg-danger', text: 'text-danger', label: 'Erro' },
 } as const;
 
 export function GenUITimeline({ props }: GenUINodeProps) {
@@ -99,21 +99,30 @@ export function GenUITimeline({ props }: GenUINodeProps) {
       <span aria-hidden className="absolute inset-y-1 left-[5px] w-px bg-border" />
       {items.map((item, index) => {
         const statusRaw = propString(item, 'status', 'pending');
-        const status = statusRaw in TIMELINE_DOT ? (statusRaw as keyof typeof TIMELINE_DOT) : 'pending';
+        const status = statusRaw in TIMELINE_STATUS ? (statusRaw as keyof typeof TIMELINE_STATUS) : 'pending';
+        const { dot, text: statusText, label: statusLabel } = TIMELINE_STATUS[status];
         const title = propString(item, 'title', `Etapa ${index + 1}`);
         const description = propString(item, 'description');
         const time = propString(item, 'time');
         return (
-          <li key={index} className="relative">
+          <li key={index} data-status={status} className="relative">
             <span
               aria-hidden
               className={cn(
                 'absolute -left-4 top-1 size-2.5 rounded-full ring-4 ring-surface-raised',
-                TIMELINE_DOT[status],
+                dot,
               )}
             />
             <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-              <span className="text-[12.5px] font-medium text-foreground">{title}</span>
+              <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                <span className="text-[12.5px] font-medium text-foreground">{title}</span>
+                {/* O status nunca depende só da cor do dot. */}
+                {status === 'pending' ? (
+                  <span className="sr-only">{statusLabel}</span>
+                ) : (
+                  <span className={cn('text-[11px] font-medium', statusText)}>{statusLabel}</span>
+                )}
+              </span>
               {time ? <span className="text-[11px] tabular-nums text-foreground-subtle">{time}</span> : null}
             </div>
             {description ? (
@@ -130,7 +139,9 @@ export function GenUITimeline({ props }: GenUINodeProps) {
 
 export function GenUISteps({ props }: GenUINodeProps) {
   const rawItems = propArray(props, 'items') ?? [];
+  // No contrato `current` é 1-based (0 = nenhum passo atual).
   const current = propNumber(props, 'current', 0) ?? 0;
+  const activeIndex = current > 0 ? current - 1 : -1;
   const items = rawItems
     .map((entry) => {
       if (typeof entry === 'string' || typeof entry === 'number') {
@@ -150,7 +161,7 @@ export function GenUISteps({ props }: GenUINodeProps) {
   return (
     <ol className="flex flex-col gap-2.5">
       {items.map((item, index) => {
-        const state = index < current ? 'done' : index === current ? 'active' : 'todo';
+        const state = index < activeIndex ? 'done' : index === activeIndex ? 'active' : 'todo';
         return (
           <li key={index} className="flex gap-2.5">
             <span
@@ -165,7 +176,10 @@ export function GenUISteps({ props }: GenUINodeProps) {
               {state === 'done' ? <CheckCircle2 className="size-3" /> : index + 1}
             </span>
             <div className="min-w-0 pt-0.5">
-              <p className={cn('text-[12.5px] font-medium', state === 'todo' ? 'text-foreground-muted' : 'text-foreground')}>
+              <p
+                aria-current={state === 'active' ? 'step' : undefined}
+                className={cn('text-[12.5px] font-medium', state === 'todo' ? 'text-foreground-muted' : 'text-foreground')}
+              >
                 {item.title}
               </p>
               {item.description ? (
@@ -311,11 +325,12 @@ const BADGE_TONES = {
 
 export function GenUIBadge({ props }: GenUINodeProps) {
   const label = propString(props, 'label', propString(props, 'text'));
-  const toneRaw = propString(props, 'tone', propString(props, 'variant', 'accent'));
+  // Default do contrato: `neutral`. `variant` é aceito como legado.
+  const toneRaw = propString(props, 'tone', propString(props, 'variant', 'neutral'));
   const tone = (toneRaw in BADGE_TONES ? toneRaw : 'neutral') as keyof typeof BADGE_TONES;
   if (!label) return null;
   return (
-    <div>
+    <div data-tone={tone}>
       <Badge tone={tone} size="md">
         {label}
       </Badge>

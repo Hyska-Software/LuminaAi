@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import * as Collapsible from '@radix-ui/react-collapsible';
-import { Check, ChevronDown, FilePlus, FileText, Globe, TriangleAlert, Wrench, type LucideIcon } from 'lucide-react';
+import { Check, ChevronDown, FilePlus, FileText, Globe, ShieldCheck, TriangleAlert, Wrench, type LucideIcon } from 'lucide-react';
 import { Spinner } from '@/components/ui';
 import type { Citation, ToolCallRecord } from '@/lib/types';
 import { cn, formatDuration, safeJsonParse, truncate } from '@/lib/utils';
@@ -15,6 +15,8 @@ const TOOL_META: Record<string, ToolMeta> = {
   web_search: { label: 'Busca web', icon: Globe },
   fetch_url: { label: 'Ler página', icon: FileText },
   create_file: { label: 'Criar arquivo', icon: FilePlus },
+  // Autovalidação da UI generativa (documentada em docs/GENUI.md §10).
+  validate_ui: { label: 'Validar interface', icon: ShieldCheck },
 };
 
 /** Argument keys that make a good one-line summary, in priority order. */

@@ -1,50 +1,65 @@
-import { useState } from 'react';
-import { Check, Search, Star } from 'lucide-react';
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
+import { Search } from 'lucide-react';
 import {
   defaultReasoningFor,
-  formatContextWindow,
-  formatPrice,
   getModel,
-  groupByFamily,
+  getProvider,
   providers as catalogProviders,
 } from '@/lib/catalog';
-import type { ModelInfo, ProviderKeyStatus, ProviderInfo, ReasoningSelection } from '@/lib/types';
+import {
+  buildModelGroups,
+  entryKey,
+  firstSelectable,
+  flattenGroups,
+  keyStatusFor,
+  keyStatusLabel,
+  modelFilterOptions,
+  modelKey,
+  normalizeSearch,
+  providerHasKey,
+  reasoningForModel,
+  selectionKey,
+  type ModelFilter,
+  type ModelListEntry,
+} from '@/lib/modelMenu';
+import type { ModelInfo, ModelSelection, ProviderInfo, ReasoningSelection } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { useAppStore, useUiStore } from '@/lib/store';
+import {
+  MODEL_LOCKED_DESCRIPTION,
+  MODEL_LOCKED_TITLE,
+  selectModelLocked,
+  useAppStore,
+  useChatStore,
+  useUiStore,
+} from '@/lib/store';
 import {
   Badge,
   Button,
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  IconButton,
-  Input,
-  ScrollArea,
+  Kbd,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-  Tooltip,
 } from '@/components/ui';
-import { CapabilityBadges } from './CapabilityBadges';
+import { ModelDetailPanel } from './ModelDetailPanel';
 import { FamilyAvatar } from './FamilyAvatar';
+import { ModelList } from './ModelList';
+import { ModelSearchField } from './ModelSearchField';
+import { modelOptionId } from './ModelRow';
 import { ThinkingSelector } from './ThinkingSelector';
-
-const PROTOCOL_LABELS: Record<string, string> = {
-  'openai-chat': 'OpenAI Chat',
-  'openai-responses': 'OpenAI Responses',
-  anthropic: 'Anthropic',
-  google: 'Google',
-};
-
-const KEY_SOURCE_LABELS: Record<ProviderKeyStatus['source'], string> = {
-  settings: 'Configurada',
-  env: 'Variável de ambiente',
-  'opencode-cli': 'OpenCode CLI',
-  none: 'Ausente',
-};
 
 interface PreviewState {
   providerId: string;
@@ -52,33 +67,79 @@ interface PreviewState {
   reasoning: ReasoningSelection | null;
 }
 
-function keyFor(keys: ProviderKeyStatus[], providerId: string): ProviderKeyStatus | undefined {
-  return keys.find((key) => key.providerId === providerId);
-}
-
-function matchesQuery(model: ModelInfo, query: string): boolean {
-  if (!query) return true;
-  const needle = query.toLowerCase();
+function defaultModelFor(provider?: ProviderInfo): ModelInfo | undefined {
+  if (!provider) return undefined;
   return (
-    model.name.toLowerCase().includes(needle) ||
-    model.id.toLowerCase().includes(needle) ||
-    (model.family ?? '').toLowerCase().includes(needle) ||
-    (model.description ?? '').toLowerCase().includes(needle)
+    provider.models.find(
+      (model) => model.id === provider.defaultModelId && model.status !== 'unavailable',
+    ) ??
+    provider.models.find((model) => model.status !== 'unavailable') ??
+    provider.models[0]
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function initialProviderId(providerList: ProviderInfo[], selection: ModelSelection): string {
   return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-border py-1.5 last:border-b-0">
-      <dt className="shrink-0 text-[11px] text-foreground-subtle">{label}</dt>
-      <dd className="min-w-0 truncate text-right text-[12px] font-medium text-foreground">{value}</dd>
+    providerList.find((provider) => provider.id === selection.providerId)?.id ??
+    providerList[0]?.id ??
+    ''
+  );
+}
+
+/** Opening state of the preview: the committed selection whenever it exists. */
+function initialPreview(providerList: ProviderInfo[], selection: ModelSelection): PreviewState {
+  const provider =
+    providerList.find((entry) => entry.id === selection.providerId) ?? providerList[0];
+  const model =
+    provider?.models.find((entry) => entry.id === selection.modelId) ?? defaultModelFor(provider);
+  if (!provider || !model) {
+    return {
+      providerId: selection.providerId,
+      modelId: selection.modelId,
+      reasoning: selection.reasoning,
+    };
+  }
+  return {
+    providerId: provider.id,
+    modelId: model.id,
+    reasoning:
+      model.id === selection.modelId
+        ? reasoningForModel(model, selection.reasoning)
+        : defaultReasoningFor(model),
+  };
+}
+
+function EmptyResults({ onClear, canClear }: { onClear: () => void; canClear: boolean }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+      <Search aria-hidden className="size-5 text-foreground-subtle" />
+      <p className="text-[13px] font-medium text-foreground">
+        {canClear ? 'Nenhum modelo encontrado' : 'Nenhum modelo disponível'}
+      </p>
+      <p className="text-xs text-foreground-muted">
+        {canClear
+          ? 'Tente outro termo ou ajuste os filtros.'
+          : 'O catálogo deste provedor está vazio no momento.'}
+      </p>
+      {canClear ? (
+        <Button variant="secondary" size="sm" onClick={onClear} className="mt-1">
+          Limpar busca e filtros
+        </Button>
+      ) : null}
     </div>
   );
 }
 
-export function ModelPickerDialog() {
-  const open = useUiStore((state) => state.modelPickerOpen);
-  const setOpen = useUiStore((state) => state.setModelPickerOpen);
+interface ModelPickerDialogBodyProps {
+  onClose: () => void;
+}
+
+/**
+ * Everything inside the dialog lives here so it is mounted from scratch on every
+ * opening: search, filters and the preview are born empty instead of being reset
+ * by effects during render (the old `wasOpen` hack).
+ */
+function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
   const selection = useAppStore((state) => state.selection);
   const favorites = useAppStore((state) => state.favorites);
   const keys = useAppStore((state) => state.keys);
@@ -87,369 +148,495 @@ export function ModelPickerDialog() {
   const setSelection = useAppStore((state) => state.setSelection);
   const setReasoning = useAppStore((state) => state.setReasoning);
 
-  const providerList: ProviderInfo[] = storeProviders.length ? storeProviders : catalogProviders();
+  const providerList = useMemo<ProviderInfo[]>(
+    () => (storeProviders.length ? storeProviders : catalogProviders()),
+    [storeProviders],
+  );
+
+  const searchRef = useRef<HTMLInputElement>(null);
+  const rawId = useId();
+  const listId = useMemo(
+    () => `model-picker-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`,
+    [rawId],
+  );
 
   const [query, setQuery] = useState('');
-  const [providerId, setProviderId] = useState(selection.providerId);
-  const [preview, setPreview] = useState<PreviewState>({
-    providerId: selection.providerId,
-    modelId: selection.modelId,
-    reasoning: selection.reasoning,
-  });
+  const [filters, setFilters] = useState<ModelFilter[]>([]);
+  const [providerId, setProviderId] = useState(() => initialProviderId(providerList, selection));
+  const [preview, setPreview] = useState<PreviewState>(() => initialPreview(providerList, selection));
+  const [activeKey, setActiveKey] = useState<string | null>(() =>
+    modelKey(preview.providerId, preview.modelId),
+  );
 
-  const [wasOpen, setWasOpen] = useState(false);
-  if (open && !wasOpen) {
-    // Reset state as soon as the dialog opens (render-time state sync).
-    setWasOpen(true);
-    setQuery('');
-    setProviderId(selection.providerId);
-    setPreview({
-      providerId: selection.providerId,
-      modelId: selection.modelId,
-      reasoning: selection.reasoning,
-    });
-  } else if (!open && wasOpen) {
-    setWasOpen(false);
-  }
+  const searching = normalizeSearch(query).length > 0;
+  const groups = useMemo(
+    () =>
+      searching
+        ? buildModelGroups(providerList, {
+            query,
+            filters,
+            favorites,
+            includeUnavailable: true,
+          })
+        : buildModelGroups(providerList, {
+            providerId,
+            filters,
+            favorites,
+            includeUnavailable: true,
+          }),
+    [providerList, providerId, query, filters, favorites, searching],
+  );
+  const entries = useMemo(() => flattenGroups(groups), [groups]);
+  const entryCount = entries.length;
 
-  const activeProvider = providerList.find((provider) => provider.id === providerId) ?? providerList[0];
-  const activeModels = (activeProvider?.models ?? []).filter((model) => matchesQuery(model, query));
-  const groups = groupByFamily(activeModels);
-  const previewModel = getModel(preview.providerId, preview.modelId);
-  const previewProvider = providerList.find((provider) => provider.id === preview.providerId);
-  const previewKey = keyFor(keys, preview.providerId);
-  const previewUnavailable = previewModel?.status === 'unavailable';
-  const isCurrent = selection.providerId === preview.providerId && selection.modelId === preview.modelId;
+  const activeEntry = useMemo(
+    () => entries.find((entry) => entryKey(entry) === activeKey) ?? null,
+    [entries, activeKey],
+  );
 
-  const selectProvider = (nextId: string) => {
-    setProviderId(nextId);
-    if (preview.providerId === nextId) return;
-    const provider = providerList.find((entry) => entry.id === nextId);
-    if (!provider) return;
-    const fallback =
-      provider.models.find((model) => model.id === provider.defaultModelId && model.status !== 'unavailable') ??
-      provider.models.find((model) => model.status !== 'unavailable') ??
-      provider.models[0];
-    if (!fallback) return;
-    setPreview({
-      providerId: provider.id,
-      modelId: fallback.id,
-      reasoning: defaultReasoningFor(fallback),
-    });
-  };
-
-  const selectModel = (model: ModelInfo) => {
-    if (model.status === 'unavailable') return;
+  // Typing/filtering can hide the highlighted row. Re-anchor the highlight AND
+  // the preview on the first visible result so Enter and "Usar este modelo"
+  // always agree with what the user is looking at (task-5, achado A2).
+  useEffect(() => {
+    if (activeEntry) return;
+    const next = firstSelectable(groups);
+    if (!next) {
+      setActiveKey(null);
+      return;
+    }
+    setActiveKey(entryKey(next));
     setPreview((current) => ({
-      providerId: providerId,
-      modelId: model.id,
+      providerId: next.providerId,
+      modelId: next.model.id,
       reasoning:
-        current.providerId === providerId && current.modelId === model.id
+        current.providerId === next.providerId && current.modelId === next.model.id
           ? current.reasoning
-          : defaultReasoningFor(model),
+          : reasoningForModel(next.model, current.reasoning),
+    }));
+  }, [activeEntry, groups]);
+
+  const previewProvider = providerList.find((provider) => provider.id === preview.providerId);
+  const previewModel = previewProvider?.models.find((model) => model.id === preview.modelId);
+  const previewEntry = useMemo<ModelListEntry | null>(
+    () =>
+      previewProvider && previewModel
+        ? {
+            providerId: previewProvider.id,
+            providerName: previewProvider.name,
+            providerShortName: previewProvider.shortName,
+            model: previewModel,
+            favorite: favorites.includes(previewModel.id),
+          }
+        : null,
+    [previewProvider, previewModel, favorites],
+  );
+  const previewKeyStatus = keyStatusFor(keys, preview.providerId);
+  const previewUnavailable = previewModel?.status === 'unavailable';
+  const isCurrent =
+    preview.providerId === selection.providerId && preview.modelId === selection.modelId;
+  const selectedKey = selectionKey(selection);
+
+  /** Highlight only — hovering never moves the details panel (DESIGN §8). */
+  const highlight = (entry: ModelListEntry) => setActiveKey(entryKey(entry));
+
+  /** Highlight + preview: used by arrow keys, clicks and provider switches. */
+  const previewEntryModel = (entry: ModelListEntry) => {
+    setActiveKey(entryKey(entry));
+    setPreview((current) => ({
+      providerId: entry.providerId,
+      modelId: entry.model.id,
+      reasoning:
+        current.providerId === entry.providerId && current.modelId === entry.model.id
+          ? current.reasoning
+          : reasoningForModel(entry.model, current.reasoning),
     }));
   };
 
-  const commit = () => {
-    if (!previewModel || previewUnavailable) return;
-    setSelection({
-      providerId: preview.providerId,
-      modelId: preview.modelId,
-      reasoning: preview.reasoning,
+  const moveActive = (target: 'next' | 'previous' | 'first' | 'last') => {
+    if (!entries.length) return;
+    const index = activeEntry ? entries.indexOf(activeEntry) : -1;
+    let nextIndex: number;
+    switch (target) {
+      case 'first':
+        nextIndex = 0;
+        break;
+      case 'last':
+        nextIndex = entries.length - 1;
+        break;
+      case 'next':
+        nextIndex = index < 0 ? 0 : Math.min(entries.length - 1, index + 1);
+        break;
+      case 'previous':
+        nextIndex = index < 0 ? entries.length - 1 : Math.max(0, index - 1);
+        break;
+    }
+    previewEntryModel(entries[nextIndex]);
+  };
+
+  const changeProvider = (nextProviderId: string) => {
+    setProviderId(nextProviderId);
+    if (preview.providerId === nextProviderId) {
+      setActiveKey(modelKey(preview.providerId, preview.modelId));
+      return;
+    }
+    const provider = providerList.find((entry) => entry.id === nextProviderId);
+    const model = defaultModelFor(provider);
+    if (!provider || !model) return;
+    setActiveKey(modelKey(provider.id, model.id));
+    setPreview({
+      providerId: provider.id,
+      modelId: model.id,
+      reasoning: defaultReasoningFor(model),
     });
-    setReasoning(preview.reasoning);
-    setOpen(false);
+  };
+
+  const toggleFilter = (filter: ModelFilter) => {
+    setFilters((current) =>
+      current.includes(filter)
+        ? current.filter((value) => value !== filter)
+        : [...current, filter],
+    );
+  };
+
+  const clearSearchAndFilters = () => {
+    setQuery('');
+    setFilters([]);
+  };
+
+  const commitSelection = (next: PreviewState) => {
+    if (!next.modelId) return;
+    setSelection({ providerId: next.providerId, modelId: next.modelId, reasoning: next.reasoning });
+    setReasoning(next.reasoning);
+    onClose();
+  };
+
+  const commitPreview = () => {
+    if (!previewModel || previewUnavailable) return;
+    commitSelection(preview);
+  };
+
+  const commitEntry = (entry: ModelListEntry) => {
+    if (entry.model.status === 'unavailable') return;
+    const same =
+      preview.providerId === entry.providerId && preview.modelId === entry.model.id;
+    commitSelection({
+      providerId: entry.providerId,
+      modelId: entry.model.id,
+      reasoning: same ? preview.reasoning : reasoningForModel(entry.model, preview.reasoning),
+    });
+  };
+
+  const changeReasoning = (reasoning: ReasoningSelection | null) => {
+    setPreview((current) => ({ ...current, reasoning }));
+  };
+
+  const openProviderSettings = () => {
+    onClose();
+    useUiStore.getState().setSettingsOpen(true);
+  };
+
+  const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        moveActive('next');
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        moveActive('previous');
+        break;
+      case 'Home':
+        event.preventDefault();
+        moveActive('first');
+        break;
+      case 'End':
+        event.preventDefault();
+        moveActive('last');
+        break;
+      case 'Enter':
+        event.preventDefault();
+        // The highlighted option wins; with no visible results there is nothing
+        // safe to confirm (the preview may no longer be in the list).
+        if (activeEntry) commitEntry(activeEntry);
+        else if (entries.length > 0) commitPreview();
+        break;
+      default:
+        break;
+    }
+  };
+
+  /**
+   * Esc clears the search first (and keeps the dialog open). `stopPropagation`
+   * also keeps the app-level Esc shortcut from closing every overlay.
+   */
+  const handleEscapeKeyDown = (event: KeyboardEvent) => {
+    if (!normalizeSearch(query)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setQuery('');
+    searchRef.current?.focus();
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent
-        showClose
-        className="h-[560px] w-[720px] max-w-[calc(100vw-2rem)] gap-0 p-0"
-        aria-describedby={undefined}
-      >
-        <DialogHeader className="gap-2.5 pr-14">
-          <div>
-            <DialogTitle>Modelo</DialogTitle>
-            <DialogDescription>
-              Escolha o modelo e ajuste o modo de pensamento antes de conversar.
-            </DialogDescription>
-          </div>
-          <div className="relative">
-            <Search
-              aria-hidden
-              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-subtle"
-            />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar por nome, identificador ou família…"
-              aria-label="Buscar modelos"
-              className="pl-9"
-              autoFocus
-            />
-          </div>
-        </DialogHeader>
-
-        <div className="flex min-h-0 flex-1 border-t border-border">
-          <Tabs
-            value={activeProvider?.id ?? ''}
-            onValueChange={selectProvider}
-            className="flex min-h-0 min-w-0 flex-1 flex-col"
-          >
-            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
-              <TabsList className="bg-surface">
-                {providerList.map((provider) => {
-                  const key = keyFor(keys, provider.id);
-                  const hasKey = Boolean(key?.hasKey);
-                  return (
-                    <TabsTrigger key={provider.id} value={provider.id} variant="pill" className="gap-1.5">
-                      {provider.shortName}
-                      <span
-                        aria-hidden
-                        title={`Chave ${KEY_SOURCE_LABELS[key?.source ?? 'none']}`}
-                        className={cn('size-1.5 rounded-full', hasKey ? 'bg-success' : 'bg-border-strong')}
-                      />
-                    </TabsTrigger>
-                  );
-                })}
-              </TabsList>
-              <span className="shrink-0 pl-2 text-[11px] tabular-nums text-foreground-subtle">
-                {activeModels.length} {activeModels.length === 1 ? 'modelo' : 'modelos'}
-              </span>
-              {activeProvider ? (
-                <Badge
-                  tone={keyFor(keys, activeProvider.id)?.hasKey ? 'success' : 'warning'}
-                  title={`Chave ${KEY_SOURCE_LABELS[keyFor(keys, activeProvider.id)?.source ?? 'none']}`}
-                  className="shrink-0"
-                >
-                  {keyFor(keys, activeProvider.id)?.hasKey ? 'Chave OK' : 'Sem chave'}
-                </Badge>
-              ) : null}
-            </div>
-
-            {providerList.map((provider) => (
-              <TabsContent
-                key={provider.id}
-                value={provider.id}
-                className="min-h-0 flex-1 data-[state=inactive]:hidden"
-              >
-                <ScrollArea className="h-full" type="auto">
-                  {provider.id !== activeProvider?.id ? null : groups.length ? (
-                    <div className="py-1">
-                      {groups.map((group) => (
-                        <section key={group.family}>
-                          <h4 className="sticky top-0 z-10 bg-surface-raised/95 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-foreground-subtle backdrop-blur">
-                            {group.family}
-                          </h4>
-                          {group.models.map((model) => {
-                            const isPreview =
-                              preview.providerId === provider.id && preview.modelId === model.id;
-                            const isSelected =
-                              selection.providerId === provider.id && selection.modelId === model.id;
-                            const unavailable = model.status === 'unavailable';
-                            const favorite = favorites.includes(model.id);
-
-                            const row = (
-                              <div
-                                className={cn(
-                                  'group flex items-center gap-1.5 px-2 py-1',
-                                  isPreview && 'bg-accent-soft/50',
-                                  unavailable && 'opacity-50',
-                                )}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => selectModel(model)}
-                                  disabled={unavailable}
-                                  aria-current={isSelected ? 'true' : undefined}
-                                  className={cn(
-                                    'flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left',
-                                    'transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                                    'disabled:cursor-not-allowed disabled:hover:bg-transparent',
-                                  )}
-                                >
-                                  <FamilyAvatar family={model.family} name={model.name} size={24} />
-                                  <span className="min-w-0 flex-1">
-                                    <span className="flex items-center gap-1.5">
-                                      <span className="truncate text-[13px] font-medium text-foreground">
-                                        {model.name}
-                                      </span>
-                                      <CapabilityBadges model={model} max={3} className="shrink-0" />
-                                    </span>
-                                    <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-foreground-subtle">
-                                      <span className="tabular-nums">
-                                        {formatContextWindow(model.contextWindow)} contexto
-                                      </span>
-                                      <span aria-hidden>·</span>
-                                      <span className="tabular-nums">{formatPrice(model.cost)}</span>
-                                    </span>
-                                  </span>
-                                  {isSelected ? <Check aria-hidden className="size-4 shrink-0 text-accent" /> : null}
-                                </button>
-                                <Tooltip
-                                  content={favorite ? 'Remover dos favoritos' : 'Favoritar modelo'}
-                                  side="left"
-                                >
-                                  <IconButton
-                                    label={favorite ? `Remover ${model.name} dos favoritos` : `Favoritar ${model.name}`}
-                                    size="sm"
-                                    onClick={() => toggleFavorite(model.id)}
-                                    className={cn(
-                                      'size-7 text-foreground-subtle',
-                                      favorite && 'text-warning hover:text-warning',
-                                    )}
-                                  >
-                                    <Star className={cn('size-3.5', favorite && 'fill-current')} />
-                                  </IconButton>
-                                </Tooltip>
-                              </div>
-                            );
-
-                            return unavailable ? (
-                              <Tooltip
-                                key={model.id}
-                                content="Indisponível no gateway — seleção desabilitada."
-                                side="right"
-                              >
-                                <div>{row}</div>
-                              </Tooltip>
-                            ) : (
-                              <div key={model.id}>{row}</div>
-                            );
-                          })}
-                        </section>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex h-full flex-col items-center justify-center gap-2 px-6 py-10 text-center">
-                      <Search aria-hidden className="size-5 text-foreground-subtle" />
-                      <p className="text-[13px] font-medium text-foreground">Nenhum modelo encontrado</p>
-                      <p className="text-xs text-foreground-muted">
-                        Tente outro termo ou limpe a busca.
-                      </p>
-                    </div>
-                  )}
-                </ScrollArea>
-              </TabsContent>
-            ))}
-          </Tabs>
-
-          <aside className="flex w-[296px] shrink-0 flex-col bg-surface/40">
-            {previewModel ? (
-              <>
-                <div className="flex items-start gap-2.5 border-b border-border px-4 py-3">
-                  <FamilyAvatar family={previewModel.family} name={previewModel.name} size={32} />
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-[14px] font-semibold tracking-tight text-foreground">
-                      {previewModel.name}
-                    </h3>
-                    <p className="mt-0.5 truncate text-[11px] text-foreground-subtle">
-                      {previewProvider?.name ?? preview.providerId} · {previewModel.id}
-                    </p>
-                  </div>
-                  <Tooltip
-                    content={favorites.includes(previewModel.id) ? 'Remover dos favoritos' : 'Favoritar modelo'}
-                    side="left"
-                  >
-                    <IconButton
-                      label={
-                        favorites.includes(previewModel.id)
-                          ? `Remover ${previewModel.name} dos favoritos`
-                          : `Favoritar ${previewModel.name}`
-                      }
-                      size="sm"
-                      onClick={() => toggleFavorite(previewModel.id)}
-                      className={cn(
-                        'size-7 shrink-0 text-foreground-subtle',
-                        favorites.includes(previewModel.id) && 'text-warning hover:text-warning',
-                      )}
-                    >
-                      <Star
-                        className={cn('size-3.5', favorites.includes(previewModel.id) && 'fill-current')}
-                      />
-                    </IconButton>
-                  </Tooltip>
-                </div>
-
-                <ScrollArea className="min-h-0 flex-1" type="auto">
-                  <div className="flex flex-col gap-4 px-4 py-3.5">
-                    <div className="flex flex-col gap-2">
-                      <CapabilityBadges model={previewModel} max={6} />
-                      <p className="text-[12px] leading-relaxed text-foreground-muted">
-                        {previewModel.description ?? 'Sem descrição no catálogo.'}
-                      </p>
-                    </div>
-
-                    <dl className="flex flex-col">
-                      <DetailRow label="Contexto" value={formatContextWindow(previewModel.contextWindow)} />
-                      <DetailRow label="Saída máxima" value={formatContextWindow(previewModel.maxOutput)} />
-                      <DetailRow label="Custo (entrada / saída)" value={formatPrice(previewModel.cost)} />
-                      <DetailRow
-                        label="Protocolo"
-                        value={previewModel.protocols
-                          .map((protocol) => PROTOCOL_LABELS[protocol] ?? protocol)
-                          .join(' · ')}
-                      />
-                      {previewModel.knowledge ? (
-                        <DetailRow label="Conhecimento até" value={previewModel.knowledge} />
-                      ) : null}
-                      {previewModel.releaseDate ? (
-                        <DetailRow label="Lançamento" value={previewModel.releaseDate} />
-                      ) : null}
-                    </dl>
-
-                    <div className="rounded-xl border border-border bg-surface-raised p-3">
-                      <ThinkingSelector
-                        model={previewModel}
-                        value={preview.reasoning}
-                        onChange={(reasoning) =>
-                          setPreview((current) => ({ ...current, reasoning }))
-                        }
-                        compact
-                      />
-                    </div>
-
-                    {previewUnavailable ? (
-                      <p className="rounded-lg bg-danger-soft px-3 py-2 text-[11px] leading-relaxed text-danger">
-                        Este modelo está indisponível no gateway e não pode ser selecionado.
-                      </p>
-                    ) : previewKey && !previewKey.hasKey ? (
-                      <p className="rounded-lg bg-warning-soft px-3 py-2 text-[11px] leading-relaxed text-warning">
-                        Chave de API ausente para {previewProvider?.name ?? preview.providerId}. Configure em
-                        Configurações › Provedores.
-                      </p>
-                    ) : null}
-                  </div>
-                </ScrollArea>
-
-                <div className="flex shrink-0 items-center gap-2 border-t border-border px-4 py-3">
-                  {isCurrent ? (
-                    <Badge tone="accent" className="shrink-0">
-                      Em uso
-                    </Badge>
-                  ) : null}
-                  <Button
-                    variant="primary"
-                    onClick={commit}
-                    disabled={previewUnavailable}
-                    className="ml-auto"
-                  >
-                    Usar este modelo
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-                <p className="text-[13px] font-medium text-foreground">Selecione um modelo</p>
-                <p className="text-xs text-foreground-muted">
-                  Os detalhes e o modo de pensamento aparecem aqui.
-                </p>
-              </div>
-            )}
-          </aside>
+    <DialogContent
+      showClose
+      className={cn(
+        'flex h-[580px] w-[760px] gap-0 rounded-2xl p-0',
+        'max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-2rem)]',
+      )}
+      onEscapeKeyDown={handleEscapeKeyDown}
+    >
+      <DialogHeader className="shrink-0 gap-2.5 px-4 pb-3 pr-12 pt-4">
+        <div className="flex flex-col gap-1">
+          <DialogTitle>Selecionar modelo</DialogTitle>
+          <DialogDescription>
+            Busque por nome, família, identificador ou capacidade e ajuste o pensamento antes de
+            confirmar.
+          </DialogDescription>
         </div>
-      </DialogContent>
+
+        <ModelSearchField
+          ref={searchRef}
+          value={query}
+          onChange={setQuery}
+          ariaLabel="Buscar modelos"
+          controls={entries.length ? listId : undefined}
+          activeDescendant={activeEntry ? modelOptionId(listId, activeEntry) : undefined}
+          expanded
+          autoFocus
+          onKeyDown={handleSearchKeyDown}
+          onClear={() => searchRef.current?.focus()}
+        />
+
+        <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <div
+            role="group"
+            aria-label="Filtros de modelos"
+            className="flex flex-wrap items-center gap-1.5"
+          >
+            {modelFilterOptions().map((option) => {
+              const pressed = filters.includes(option.value);
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={pressed}
+                  title={option.title}
+                  onClick={() => toggleFilter(option.value)}
+                  className={cn(
+                    'inline-flex h-8 items-center rounded-full border px-3 text-[12px] font-medium',
+                    'transition-colors duration-150 motion-reduce:transition-none',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                    pressed
+                      ? 'border-accent/40 bg-accent-soft text-accent'
+                      : 'border-border bg-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                  )}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          <span className="shrink-0 text-[11px] tabular-nums text-foreground-subtle">
+            {`${entryCount} ${entryCount === 1 ? 'modelo' : 'modelos'}`}
+          </span>
+        </div>
+      </DialogHeader>
+
+      <div className="flex min-h-0 flex-1 border-t border-border">
+        <Tabs
+          value={providerId}
+          onValueChange={changeProvider}
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+        >
+          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2">
+            {searching ? (
+              <span className="px-1 text-[11px] font-medium uppercase tracking-wider text-foreground-subtle">
+                Todos os provedores
+              </span>
+            ) : (
+              <TabsList aria-label="Provedores" className="h-8 gap-0.5 bg-transparent p-0">
+                {providerList.map((provider) => (
+                  <TabsTrigger
+                    key={provider.id}
+                    value={provider.id}
+                    variant="pill"
+                    title={keyStatusLabel(keyStatusFor(keys, provider.id))}
+                    className="h-8 gap-1.5 px-3 text-[12.5px]"
+                  >
+                    {provider.shortName}
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'size-1.5 rounded-full',
+                        providerHasKey(keys, provider.id) ? 'bg-success' : 'bg-border-strong',
+                      )}
+                    />
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            )}
+          </div>
+
+          <TabsContent value={providerId} className="min-h-0 flex-1">
+            <ModelList
+              groups={groups}
+              listId={listId}
+              ariaLabel={searching ? 'Resultados da busca de modelos' : 'Modelos do provedor'}
+              activeKey={activeEntry ? entryKey(activeEntry) : null}
+              selectedKey={selectedKey}
+              onActivate={(key) => {
+                const entry = entries.find((candidate) => entryKey(candidate) === key);
+                if (entry) highlight(entry);
+              }}
+              onPick={previewEntryModel}
+              onCommit={commitEntry}
+              onFavoriteToggle={toggleFavorite}
+              variant="dialog"
+              showProvider={searching}
+              emptyState={
+                <EmptyResults
+                  onClear={clearSearchAndFilters}
+                  canClear={searching || filters.length > 0}
+                />
+              }
+            />
+          </TabsContent>
+        </Tabs>
+
+        <aside
+          aria-label="Detalhes do modelo"
+          className="w-[300px] shrink-0 border-l border-border bg-surface/40"
+        >
+          <ModelDetailPanel
+            entry={previewEntry}
+            favorite={previewEntry?.favorite ?? false}
+            onFavoriteToggle={() => {
+              if (previewEntry) toggleFavorite(previewEntry.model.id);
+            }}
+            variant="dialog"
+            reasoning={
+              <ThinkingSelector
+                model={previewModel}
+                value={preview.reasoning}
+                onChange={changeReasoning}
+                compact
+              />
+            }
+            keyStatus={previewKeyStatus}
+            onConfigureProvider={openProviderSettings}
+            className="h-full min-h-0"
+          />
+        </aside>
+      </div>
+
+      <DialogFooter className="shrink-0 justify-between gap-3 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3 text-[11px] text-foreground-subtle">
+          <span className="inline-flex items-center gap-1">
+            <Kbd>↑↓</Kbd>
+            navegar
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Kbd>↵</Kbd>
+            usar
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Kbd>Esc</Kbd>
+            fechar
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {isCurrent ? <Badge tone="accent">Em uso</Badge> : null}
+          <Button
+            variant="primary"
+            onClick={commitPreview}
+            disabled={!previewModel || previewUnavailable || entries.length === 0}
+          >
+            Usar este modelo
+          </Button>
+        </div>
+      </DialogFooter>
+    </DialogContent>
+  );
+}
+
+/**
+ * Shown instead of the selector once the conversation has started: the model is
+ * locked for the rest of the conversation, so the dialog only explains why and
+ * summarizes the model in use (the thinking mode stays editable in the composer).
+ */
+function ModelLockedDialog({ onClose }: { onClose: () => void }) {
+  const selection = useAppStore((state) => state.selection);
+  const model = getModel(selection.providerId, selection.modelId);
+  const provider = getProvider(selection.providerId);
+  const modelName = model?.name ?? selection.modelId;
+  const providerName = provider?.name ?? selection.providerId;
+
+  return (
+    <DialogContent
+      showClose={false}
+      className="w-[440px] max-w-[calc(100vw-2rem)] gap-0 p-0"
+    >
+      <DialogHeader className="gap-3 px-5 pb-4 pt-5">
+        <div className="flex flex-col gap-1">
+          <DialogTitle>{MODEL_LOCKED_TITLE}</DialogTitle>
+          <DialogDescription>{MODEL_LOCKED_DESCRIPTION}</DialogDescription>
+        </div>
+
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5">
+          <FamilyAvatar family={model?.family} name={modelName} size={32} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13px] font-semibold text-foreground" title={modelName}>
+              {modelName}
+            </p>
+            <p
+              className="truncate text-[11px] text-foreground-subtle"
+              title={providerName}
+            >
+              {providerName}
+            </p>
+          </div>
+        </div>
+
+        <p className="text-[12px] leading-relaxed text-foreground-muted">
+          Você pode ajustar o modo de pensamento pelo botão ✦ no composer.
+        </p>
+      </DialogHeader>
+
+      <DialogFooter className="justify-end px-5 py-3">
+        <Button variant="secondary" onClick={onClose} autoFocus>
+          Fechar
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  );
+}
+
+/**
+ * Full model selector (DESIGN §8): global search, quick filters, provider tabs,
+ * preview panel and an explicit "Usar este modelo" confirmation.
+ *
+ * Mounted once in `App` and driven by `useUiStore.modelPickerOpen`; the dialog
+ * body is only rendered while open, so every opening starts from a clean state.
+ * Once the conversation has messages (or a turn is streaming) the model cannot
+ * change anymore: the same dialog then shows the locked explanation instead of
+ * the selector (`selectModelLocked`).
+ */
+export function ModelPickerDialog() {
+  const open = useUiStore((state) => state.modelPickerOpen);
+  const setOpen = useUiStore((state) => state.setModelPickerOpen);
+  const locked = useChatStore(selectModelLocked);
+  const onClose = () => setOpen(false);
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      {open ? (
+        locked ? (
+          <ModelLockedDialog onClose={onClose} />
+        ) : (
+          <ModelPickerDialogBody onClose={onClose} />
+        )
+      ) : null}
     </Dialog>
   );
 }

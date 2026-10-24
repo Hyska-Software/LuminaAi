@@ -1,0 +1,1034 @@
+{
+  "version": 2,
+  "name": "Lumina Generative UI",
+  "description": "Contrato único da UI generativa declarativa (blocos ```ui). É consumido pelo system prompt (Rust), pelo validador/ferramenta do agente (Rust) e pelo renderer (TypeScript). Alterar este arquivo exige atualizar a implementação dos dois lados — os testes de paridade (data/genui-fixtures.json) garantem que isso aconteça.",
+  "format": {
+    "root": "objeto JSON { \"version\"?: 2, \"components\": [...] }; também aceita um array cru de componentes (normalizado).",
+    "version": 2,
+    "notes": [
+      "Cada componente é { \"type\": string, \"props\"?: objeto, \"children\"?: array }.",
+      "`children` só é aceito em containers (card, stack, grid, tabs, reveal, callout).",
+      "Profundidade máxima de 8 níveis e no máximo 120 componentes por bloco.",
+      "Propriedades desconhecidas são ignoradas com aviso; nomes de props são exatamente os do contrato.",
+      "Formas antigas são normalizadas: chart com `labels`+`values`, keyvalue como objeto, list/steps items como strings.",
+      "Texto puro: Markdown não é renderizado dentro de props; nada de HTML/JS/CSS.",
+      "URLs em image.src/link.href precisam ser http(s); image.src também aceita data:image/png|jpeg|webp|gif."
+    ]
+  },
+  "blocks": {
+    "maxPerMessage": 2,
+    "recommendedPerMessage": 1
+  },
+  "limits": {
+    "sourceChars": 200000,
+    "depth": 8,
+    "nodes": 120,
+    "props": 24,
+    "arrayItems": 200,
+    "stringChars": 4000,
+    "diagnosticsPerCode": 3
+  },
+  "icons": [
+    "arrow-right",
+    "calendar",
+    "check",
+    "chevron-right",
+    "clock",
+    "copy",
+    "download",
+    "external-link",
+    "file-text",
+    "globe",
+    "lightbulb",
+    "list-checks",
+    "plus",
+    "refresh-cw",
+    "search",
+    "sparkles"
+  ],
+  "interactions": {
+    "description": "Componentes interativos são declarativos e seguros: nenhum código do agente é executado.",
+    "actionKinds": [
+      {
+        "kind": "prompt",
+        "label": "Sugerir pergunta",
+        "description": "Preenche o composer com o texto da ação; o usuário revisa e envia quando quiser.",
+        "maxChars": 400
+      },
+      {
+        "kind": "copy",
+        "label": "Copiar",
+        "description": "Copia o texto para a área de transferência do usuário.",
+        "maxChars": 4000
+      }
+    ],
+    "rules": [
+      "Use `actions` para oferecer 1–4 próximos passos concretos depois de entregar a resposta.",
+      "Rótulos de ação: verbo + objeto curto (ex.: \"Comparar cenários\"), sem ponto final.",
+      "Ações `prompt` preenchem o composer — nunca enviam mensagem sozinhas.",
+      "No máximo uma ação `primary` por grupo; as demais são `secondary` ou `ghost`.",
+      "Não use `actions` quando a resposta já termina em uma pergunta simples ou quando não há próximo passo útil."
+    ]
+  },
+  "components": [
+    {
+      "type": "card",
+      "kind": "container",
+      "category": "layout",
+      "summary": "Superfície com título/subtítulo/rodapé que agrupa uma unidade de conteúdo.",
+      "doc": "`title?` (≤ 80), `subtitle?` (≤ 160), `footer?` (≤ 120), `variant?` (`default|accent|muted`); aceita `children`.",
+      "acceptsChildren": true,
+      "props": {
+        "title": {
+          "type": "text",
+          "maxChars": 120
+        },
+        "subtitle": {
+          "type": "text",
+          "maxChars": 240
+        },
+        "footer": {
+          "type": "text",
+          "maxChars": 200
+        },
+        "variant": {
+          "type": "enum",
+          "values": [
+            "default",
+            "accent",
+            "muted"
+          ],
+          "default": "default"
+        }
+      }
+    },
+    {
+      "type": "stack",
+      "kind": "container",
+      "category": "layout",
+      "summary": "Container flex para empilhar ou alinhar componentes.",
+      "doc": "`direction?` (`column|row`), `gap?` (`none|sm|md|lg`), `align?` (`start|center|end|stretch`), `justify?` (`start|center|between|end`), `wrap?` (boolean); aceita `children`.",
+      "acceptsChildren": true,
+      "props": {
+        "direction": {
+          "type": "enum",
+          "values": [
+            "column",
+            "row"
+          ],
+          "default": "column"
+        },
+        "gap": {
+          "type": "enum",
+          "values": [
+            "none",
+            "sm",
+            "md",
+            "lg"
+          ],
+          "default": "md"
+        },
+        "align": {
+          "type": "enum",
+          "values": [
+            "start",
+            "center",
+            "end",
+            "stretch"
+          ],
+          "default": "stretch"
+        },
+        "justify": {
+          "type": "enum",
+          "values": [
+            "start",
+            "center",
+            "between",
+            "end"
+          ],
+          "default": "start"
+        },
+        "wrap": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    {
+      "type": "grid",
+      "kind": "container",
+      "category": "layout",
+      "summary": "Grade responsiva para métricas e cartões lado a lado.",
+      "doc": "`columns?` (1–4, padrão 2), `gap?` (`none|sm|md|lg`); aceita `children`; o número de filhos deve completar as colunas.",
+      "acceptsChildren": true,
+      "props": {
+        "columns": {
+          "type": "number",
+          "min": 1,
+          "max": 4,
+          "default": 2
+        },
+        "gap": {
+          "type": "enum",
+          "values": [
+            "none",
+            "sm",
+            "md",
+            "lg"
+          ],
+          "default": "md"
+        }
+      }
+    },
+    {
+      "type": "tabs",
+      "kind": "container",
+      "category": "layout",
+      "summary": "Abas para alternar entre visões do mesmo assunto.",
+      "doc": "Aceita `children` com 1 painel por aba; cada painel precisa de `props.label` com o nome da aba (≤ 40 recomendado; limite rígido 80).",
+      "acceptsChildren": true,
+      "props": {
+        "label": {
+          "type": "text",
+          "maxChars": 80,
+          "required": false
+        }
+      }
+    },
+    {
+      "type": "reveal",
+      "kind": "container",
+      "category": "layout",
+      "summary": "Seção recolhível para detalhes que não precisam ocupar espaço.",
+      "doc": "`title` (obrigatório, ≤ 80), `open?` (boolean, padrão false); aceita `children`.",
+      "acceptsChildren": true,
+      "props": {
+        "title": {
+          "type": "text",
+          "maxChars": 120,
+          "required": true
+        },
+        "open": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    {
+      "type": "divider",
+      "kind": "leaf",
+      "category": "layout",
+      "summary": "Separador horizontal com rótulo opcional.",
+      "doc": "`label?` (≤ 40).",
+      "acceptsChildren": false,
+      "props": {
+        "label": {
+          "type": "text",
+          "maxChars": 60
+        }
+      }
+    },
+    {
+      "type": "table",
+      "kind": "leaf",
+      "category": "data",
+      "summary": "Tabela de dados compacta com cabeçalho fixo.",
+      "doc": "`columns` (2–10 strings, ≤ 60 chars), `rows` (1–200 arrays de células), `caption?` (≤ 160).",
+      "acceptsChildren": false,
+      "props": {
+        "columns": {
+          "type": "array",
+          "required": true,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 10,
+            "item": {
+              "type": "text",
+              "maxChars": 80
+            }
+          }
+        },
+        "rows": {
+          "type": "array",
+          "required": true,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "item": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10,
+              "item": {
+                "type": "scalar"
+              }
+            }
+          }
+        },
+        "caption": {
+          "type": "text",
+          "maxChars": 200
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "kind": "leaf",
+      "category": "data",
+      "summary": "Gráfico SVG de barras, linha ou pizza para séries numéricas.",
+      "doc": "`type` (`bar|line|pie`), `data` (2–60 `{label, value}`), `title` (recomendado: métrica + unidade, ≤ 80), `suffix?` (unidade, ≤ 12).",
+      "acceptsChildren": false,
+      "props": {
+        "type": {
+          "type": "enum",
+          "required": true,
+          "values": [
+            "bar",
+            "line",
+            "pie"
+          ]
+        },
+        "data": {
+          "type": "array",
+          "required": true,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 60,
+            "item": {
+              "type": "object",
+              "props": {
+                "label": {
+                  "type": "text",
+                  "required": true,
+                  "maxChars": 80
+                },
+                "value": {
+                  "type": "number",
+                  "required": true
+                }
+              }
+            }
+          }
+        },
+        "title": {
+          "type": "text",
+          "maxChars": 120
+        },
+        "suffix": {
+          "type": "text",
+          "maxChars": 24
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "kind": "leaf",
+      "category": "data",
+      "summary": "Métrica única com rótulo, valor e tendência.",
+      "doc": "`label` (≤ 32), `value` (≤ 20), `trend?` (`up|down|flat`), `hint?` (≤ 100).",
+      "acceptsChildren": false,
+      "props": {
+        "label": {
+          "type": "text",
+          "required": true,
+          "maxChars": 60
+        },
+        "value": {
+          "type": "text",
+          "required": true,
+          "maxChars": 32
+        },
+        "trend": {
+          "type": "enum",
+          "values": [
+            "up",
+            "down",
+            "flat"
+          ]
+        },
+        "hint": {
+          "type": "text",
+          "maxChars": 200
+        }
+      }
+    },
+    {
+      "type": "progress",
+      "kind": "leaf",
+      "category": "data",
+      "summary": "Barra de progresso para uma fração concluída.",
+      "doc": "`value` (0–`max`), `max?` (padrão 100), `label?` (≤ 60), `suffix?` (≤ 12).",
+      "acceptsChildren": false,
+      "props": {
+        "value": {
+          "type": "number",
+          "required": true,
+          "min": 0,
+          "max": 1000000
+        },
+        "max": {
+          "type": "number",
+          "min": 1,
+          "max": 1000000,
+          "default": 100
+        },
+        "label": {
+          "type": "text",
+          "maxChars": 100
+        },
+        "suffix": {
+          "type": "text",
+          "maxChars": 24
+        }
+      }
+    },
+    {
+      "type": "timeline",
+      "kind": "leaf",
+      "category": "data",
+      "summary": "Linha do tempo de eventos com status.",
+      "doc": "`items` (2–20 `{title, time?, description?, status?}`; status `done|active|pending|error`).",
+      "acceptsChildren": false,
+      "props": {
+        "items": {
+          "type": "array",
+          "required": true,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 20,
+            "item": {
+              "type": "object",
+              "props": {
+                "title": {
+                  "type": "text",
+                  "required": true,
+                  "maxChars": 120
+                },
+                "time": {
+                  "type": "text",
+                  "maxChars": 32
+                },
+                "description": {
+                  "type": "text",
+                  "maxChars": 240
+                },
+                "status": {
+                  "type": "enum",
+                  "values": [
+                    "done",
+                    "active",
+                    "pending",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "steps",
+      "kind": "leaf",
+      "category": "data",
+      "summary": "Passos numerados com passo atual destacado.",
+      "doc": "`items` (2–16 `{title, description?}`), `current?` (índice 1-based do passo atual; 0 = nenhum).",
+      "acceptsChildren": false,
+      "props": {
+        "items": {
+          "type": "array",
+          "required": true,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 16,
+            "item": {
+              "type": "object",
+              "props": {
+                "title": {
+                  "type": "text",
+                  "required": true,
+                  "maxChars": 120
+                },
+                "description": {
+                  "type": "text",
+                  "maxChars": 240
+                }
+              }
+            }
+          }
+        },
+        "current": {
+          "type": "number",
+          "min": 0,
+          "max": 1000,
+          "default": 0
+        }
+      }
+    },
+    {
+      "type": "keyvalue",
+      "kind": "leaf",
+      "category": "data",
+      "summary": "Pares rótulo/valor para especificações curtas.",
+      "doc": "`items` (1–20 `{label, value}`) — para muitas linhas use `table`.",
+      "acceptsChildren": false,
+      "props": {
+        "items": {
+          "type": "array",
+          "required": true,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "item": {
+              "type": "object",
+              "props": {
+                "label": {
+                  "type": "text",
+                  "required": true,
+                  "maxChars": 60
+                },
+                "value": {
+                  "type": "text",
+                  "required": true,
+                  "maxChars": 200
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "list",
+      "kind": "leaf",
+      "category": "data",
+      "summary": "Lista com marcadores ou numerada, com descrições opcionais.",
+      "doc": "`items` (1–40 strings ou `{text, description?}`), `ordered?` (boolean).",
+      "acceptsChildren": false,
+      "props": {
+        "items": {
+          "type": "array",
+          "required": true,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 40,
+            "item": {
+              "type": "object",
+              "props": {
+                "text": {
+                  "type": "text",
+                  "required": true,
+                  "maxChars": 400
+                },
+                "description": {
+                  "type": "text",
+                  "maxChars": 400
+                }
+              }
+            }
+          }
+        },
+        "ordered": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    {
+      "type": "code",
+      "kind": "leaf",
+      "category": "content",
+      "summary": "Bloco de código com realce e botão copiar.",
+      "doc": "`code` (até 20.000 chars), `language?`, `title?` (nome do arquivo).",
+      "acceptsChildren": false,
+      "props": {
+        "code": {
+          "type": "text",
+          "required": true,
+          "maxChars": 20000
+        },
+        "language": {
+          "type": "text",
+          "maxChars": 32
+        },
+        "title": {
+          "type": "text",
+          "maxChars": 120
+        }
+      }
+    },
+    {
+      "type": "quote",
+      "kind": "leaf",
+      "category": "content",
+      "summary": "Citação curta com atribuição.",
+      "doc": "`text` (≤ 600), `cite?` (≤ 120).",
+      "acceptsChildren": false,
+      "props": {
+        "text": {
+          "type": "text",
+          "required": true,
+          "maxChars": 1000
+        },
+        "cite": {
+          "type": "text",
+          "maxChars": 200
+        }
+      }
+    },
+    {
+      "type": "callout",
+      "kind": "container",
+      "category": "content",
+      "summary": "Destaque de informação, aviso, sucesso ou erro.",
+      "doc": "`variant?` (`info|warning|success|danger`), `title?` (≤ 80), `text?` (≤ 500); aceita `children` opcionais.",
+      "acceptsChildren": true,
+      "props": {
+        "variant": {
+          "type": "enum",
+          "values": [
+            "info",
+            "warning",
+            "success",
+            "danger"
+          ],
+          "default": "info"
+        },
+        "title": {
+          "type": "text",
+          "maxChars": 120
+        },
+        "text": {
+          "type": "text",
+          "maxChars": 800
+        }
+      }
+    },
+    {
+      "type": "badge",
+      "kind": "leaf",
+      "category": "content",
+      "summary": "Etiqueta curta de status.",
+      "doc": "`label` (≤ 24), `tone?` (`neutral|accent|success|warning|danger|outline`).",
+      "acceptsChildren": false,
+      "props": {
+        "label": {
+          "type": "text",
+          "required": true,
+          "maxChars": 40
+        },
+        "tone": {
+          "type": "enum",
+          "values": [
+            "neutral",
+            "accent",
+            "success",
+            "warning",
+            "danger",
+            "outline"
+          ],
+          "default": "neutral"
+        }
+      }
+    },
+    {
+      "type": "image",
+      "kind": "leaf",
+      "category": "content",
+      "summary": "Imagem remota ou data URI com legenda.",
+      "doc": "`src` (http(s) ou data:image/png|jpeg|webp|gif), `alt` (obrigatório, ≤ 160), `caption?` (≤ 160).",
+      "acceptsChildren": false,
+      "props": {
+        "src": {
+          "type": "imageSrc",
+          "required": true
+        },
+        "alt": {
+          "type": "text",
+          "required": true,
+          "maxChars": 300
+        },
+        "caption": {
+          "type": "text",
+          "maxChars": 200
+        }
+      }
+    },
+    {
+      "type": "link",
+      "kind": "leaf",
+      "category": "content",
+      "summary": "Link externo que abre no navegador padrão.",
+      "doc": "`href` (http(s)), `label` (≤ 80).",
+      "acceptsChildren": false,
+      "props": {
+        "href": {
+          "type": "url",
+          "required": true
+        },
+        "label": {
+          "type": "text",
+          "required": true,
+          "maxChars": 120
+        }
+      }
+    },
+    {
+      "type": "actions",
+      "kind": "leaf",
+      "category": "interaction",
+      "summary": "Linha de ações sugeridas que preenchem o composer ou copiam texto.",
+      "doc": "`items` (1–4 `{label, prompt? OU copy?, tone? (`primary|secondary|ghost`), icon?}`), `align?` (`start|end`); `prompt` preenche o composer.",
+      "acceptsChildren": false,
+      "props": {
+        "items": {
+          "type": "array",
+          "required": true,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "item": {
+              "type": "object",
+              "props": {
+                "label": {
+                  "type": "text",
+                  "required": true,
+                  "maxChars": 60
+                },
+                "prompt": {
+                  "type": "text",
+                  "maxChars": 400
+                },
+                "copy": {
+                  "type": "text",
+                  "maxChars": 4000
+                },
+                "tone": {
+                  "type": "enum",
+                  "values": [
+                    "primary",
+                    "secondary",
+                    "ghost"
+                  ],
+                  "default": "secondary"
+                },
+                "icon": {
+                  "type": "icon"
+                }
+              }
+            }
+          }
+        },
+        "align": {
+          "type": "enum",
+          "values": [
+            "start",
+            "end"
+          ],
+          "default": "start"
+        }
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "ui.root-count",
+      "severity": "warning",
+      "scope": "block",
+      "category": "structure",
+      "params": {
+        "max": 4
+      },
+      "message": "A raiz tem componentes demais.",
+      "hint": "Agrupe tudo em um `card` ou `stack` raiz e distribua o conteúdo dentro dele.",
+      "prompt": "Agrupe o conteúdo em 1 `card`/`stack` raiz (máx. 4 componentes raiz)."
+    },
+    {
+      "id": "ui.card-title",
+      "severity": "warning",
+      "scope": "block",
+      "category": "structure",
+      "message": "Card de topo sem `title`: a hierarquia fica ambígua.",
+      "hint": "Adicione um `title` curto ou use `stack`/`divider` se não for um cartão.",
+      "prompt": "Todo `card` de topo precisa de `title`."
+    },
+    {
+      "id": "ui.card-nested",
+      "severity": "warning",
+      "scope": "block",
+      "category": "structure",
+      "message": "Card dentro de card duplica a hierarquia.",
+      "hint": "Use `stack`, `divider` ou `callout` para separar seções internas.",
+      "prompt": "Nunca aninhe `card` dentro de `card`."
+    },
+    {
+      "id": "ui.cards-count",
+      "severity": "warning",
+      "scope": "block",
+      "category": "structure",
+      "params": {
+        "max": 4
+      },
+      "message": "Muitos cards no mesmo bloco.",
+      "hint": "No máximo 4 cards; combine métricas em `grid` de `stat`.",
+      "prompt": "Máximo 4 `card` por bloco."
+    },
+    {
+      "id": "ui.grid-orphans",
+      "severity": "warning",
+      "scope": "block",
+      "category": "structure",
+      "message": "O número de filhos do `grid` não completa as colunas.",
+      "hint": "Ajuste `columns` ou o número de filhos para fechar as linhas.",
+      "prompt": "Em `grid`, o número de filhos deve completar as colunas."
+    },
+    {
+      "id": "ui.grid-crowded",
+      "severity": "warning",
+      "scope": "block",
+      "category": "structure",
+      "params": {
+        "factor": 3
+      },
+      "message": "Grid com muitos filhos por linha.",
+      "hint": "Divida em mais de um grid ou reduza o conteúdo.",
+      "prompt": "No máximo 3 filhos por coluna em `grid`."
+    },
+    {
+      "id": "ui.divider-count",
+      "severity": "warning",
+      "scope": "block",
+      "category": "structure",
+      "params": {
+        "max": 2
+      },
+      "message": "Divisores demais fragmentam o conteúdo.",
+      "hint": "Prefira espaçamento entre grupos a divisores.",
+      "prompt": "Use no máximo 2 `divider`."
+    },
+    {
+      "id": "ui.empty-container",
+      "severity": "warning",
+      "scope": "block",
+      "category": "structure",
+      "message": "Container sem filhos não tem conteúdo.",
+      "hint": "Remova o container vazio ou adicione filhos.",
+      "prompt": "Não emita containers vazios."
+    },
+    {
+      "id": "ui.chart-title",
+      "severity": "warning",
+      "scope": "block",
+      "category": "data",
+      "message": "Gráfico sem `title`.",
+      "hint": "O título deve dizer a métrica e a unidade.",
+      "prompt": "Todo `chart` precisa de `title`."
+    },
+    {
+      "id": "ui.chart-points-min",
+      "severity": "warning",
+      "scope": "block",
+      "category": "data",
+      "params": {
+        "min": 2
+      },
+      "message": "Gráfico com menos de 2 pontos.",
+      "hint": "Para um valor único use `stat`; `chart` é para séries.",
+      "prompt": "`chart` precisa de 2+ pontos; valor único vai em `stat`."
+    },
+    {
+      "id": "ui.chart-pie-slices",
+      "severity": "warning",
+      "scope": "block",
+      "category": "data",
+      "params": {
+        "max": 7
+      },
+      "message": "Gráfico de pizza com fatias demais fica ilegível.",
+      "hint": "Agrupe categorias menores em \"Outros\" ou use barras.",
+      "prompt": "Pizza: no máximo 7 fatias."
+    },
+    {
+      "id": "ui.table-columns",
+      "severity": "warning",
+      "scope": "block",
+      "category": "data",
+      "params": {
+        "max": 8
+      },
+      "message": "Tabela com muitas colunas.",
+      "hint": "Mostre as colunas essenciais; o restante pode virar artefato CSV.",
+      "prompt": "Tabela: no máximo 8 colunas."
+    },
+    {
+      "id": "ui.table-arity",
+      "severity": "warning",
+      "scope": "block",
+      "category": "data",
+      "message": "Há linha com número de células diferente das colunas.",
+      "hint": "Cada linha deve ter exatamente uma célula por coluna.",
+      "prompt": "Cada linha da tabela deve ter o mesmo número de colunas."
+    },
+    {
+      "id": "ui.stat-long",
+      "severity": "warning",
+      "scope": "block",
+      "category": "data",
+      "message": "Métrica com texto longo demais.",
+      "hint": "Mantenha `label` ≤ 32, `value` ≤ 20 e `hint` ≤ 100 caracteres.",
+      "prompt": "`stat`: label ≤ 32, value ≤ 20, hint ≤ 100.",
+      "params": {
+        "label": 32,
+        "value": 20,
+        "hint": 100
+      }
+    },
+    {
+      "id": "ui.list-long",
+      "severity": "warning",
+      "scope": "block",
+      "category": "data",
+      "params": {
+        "max": 20
+      },
+      "message": "Lista muito longa.",
+      "hint": "Divida em seções ou use `table`.",
+      "prompt": "`list`: no máximo 20 itens."
+    },
+    {
+      "id": "ui.timeline-long",
+      "severity": "warning",
+      "scope": "block",
+      "category": "data",
+      "params": {
+        "max": 12
+      },
+      "message": "Linha do tempo muito longa.",
+      "hint": "Mostre os eventos principais; o restante pode virar texto.",
+      "prompt": "`timeline`: no máximo 12 itens."
+    },
+    {
+      "id": "ui.steps-long",
+      "severity": "warning",
+      "scope": "block",
+      "category": "data",
+      "params": {
+        "max": 10
+      },
+      "message": "Passos demais para uma UI compacta.",
+      "hint": "Agrupe etapas ou use `timeline`.",
+      "prompt": "`steps`: no máximo 10 itens."
+    },
+    {
+      "id": "ui.keyvalue-long",
+      "severity": "warning",
+      "scope": "block",
+      "category": "data",
+      "params": {
+        "max": 12
+      },
+      "message": "Muitos pares chave/valor.",
+      "hint": "Use `table` quando passar de 12 linhas.",
+      "prompt": "`keyvalue`: no máximo 12 pares."
+    },
+    {
+      "id": "ui.tabs-count",
+      "severity": "warning",
+      "scope": "block",
+      "category": "data",
+      "params": {
+        "max": 6
+      },
+      "message": "Abas demais.",
+      "hint": "Mantenha de 2 a 4 abas com objetivos distintos.",
+      "prompt": "`tabs`: no máximo 6 abas (ideal 2–4)."
+    },
+    {
+      "id": "ui.density",
+      "severity": "warning",
+      "scope": "block",
+      "category": "data",
+      "params": {
+        "nodes": 60,
+        "depth": 5
+      },
+      "message": "UI densa demais para uma mensagem de chat.",
+      "hint": "Reduza ao essencial; conteúdo longo pertence ao Markdown ou a um artefato.",
+      "prompt": "UI compacta: ~60 componentes e 5 níveis no máximo."
+    },
+    {
+      "id": "ui.markdown-in-props",
+      "severity": "warning",
+      "scope": "block",
+      "category": "copy",
+      "message": "Há sintaxe Markdown dentro de props (não é renderizada).",
+      "hint": "Props são texto puro; use Markdown só fora do bloco `ui`.",
+      "prompt": "Props são texto puro: nada de `**`, `#` ou links Markdown dentro do bloco."
+    },
+    {
+      "id": "ui.emoji",
+      "severity": "warning",
+      "scope": "block",
+      "category": "copy",
+      "message": "Emoji decorativo em título/rótulo de UI.",
+      "hint": "Emojis só quando o conteúdo do usuário os trouxer.",
+      "prompt": "Sem emojis decorativos em títulos/rótulos."
+    },
+    {
+      "id": "ui.label-period",
+      "severity": "warning",
+      "scope": "block",
+      "category": "copy",
+      "message": "Rótulo terminando com ponto final.",
+      "hint": "Rótulos curtos vão sem pontuação final.",
+      "prompt": "Sem ponto final em rótulos e botões."
+    },
+    {
+      "id": "ui.shouting",
+      "severity": "warning",
+      "scope": "block",
+      "category": "copy",
+      "message": "Texto em caixa alta demais.",
+      "hint": "Use capitalização normal (sentence case).",
+      "prompt": "Sem CAIXA ALTA em rótulos."
+    },
+    {
+      "id": "ui.duplicate-action",
+      "severity": "warning",
+      "scope": "block",
+      "category": "interaction",
+      "message": "Ações repetidas no mesmo bloco.",
+      "hint": "Cada ação deve ter um objetivo distinto.",
+      "prompt": "Ações com rótulos distintos."
+    },
+    {
+      "id": "ui.action-primary",
+      "severity": "warning",
+      "scope": "block",
+      "category": "interaction",
+      "message": "Mais de uma ação primária.",
+      "hint": "Só uma ação principal; as demais ficam `secondary` ou `ghost`.",
+      "prompt": "No máximo 1 ação `primary` por bloco."
+    },
+    {
+      "id": "ui.action-label-long",
+      "severity": "warning",
+      "scope": "block",
+      "category": "interaction",
+      "params": {
+        "max": 40
+      },
+      "message": "Rótulo de ação longo.",
+      "hint": "Use verbo + objeto curto (ex.: \"Comparar custos\").",
+      "prompt": "Rótulos de `actions`: verbo + objeto, ≤ 40 chars."
+    }
+  ],
+  "promptIntro": "Você pode renderizar interfaces declarativas na conversa usando um bloco cercado com a linguagem `ui` e um objeto JSON. A interface valida o JSON e desenha apenas componentes da whitelist — nada de HTML, JS ou CSS arbitrário."
+}

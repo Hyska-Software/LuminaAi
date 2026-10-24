@@ -98,6 +98,9 @@ export default function App() {
   // Global keyboard shortcuts.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // Overlays may consume the key first (e.g. the model picker clears its
+      // search on Escape before the dialog closes).
+      if (event.defaultPrevented) return;
       const mod = event.metaKey || event.ctrlKey;
       const ui = useUiStore.getState();
       if (mod && event.key.toLowerCase() === 'k') {

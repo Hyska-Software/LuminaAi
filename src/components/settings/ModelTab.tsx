@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Lock } from 'lucide-react';
 import {
   defaultReasoningFor,
   formatContextWindow,
@@ -7,7 +8,7 @@ import {
   providers as catalogProviders,
 } from '@/lib/catalog';
 import type { ProviderInfo, ReasoningSelection, Settings } from '@/lib/types';
-import { useAppStore } from '@/lib/store';
+import { selectModelLocked, useAppStore, useChatStore } from '@/lib/store';
 import { Badge, NativeSelect } from '@/components/ui';
 import { CapabilityBadges } from '@/components/models';
 import { ThinkingSelector } from '@/components/models/ThinkingSelector';
@@ -39,34 +40,59 @@ export function ModelTab() {
   const setSelection = useAppStore((state) => state.setSelection);
   const setReasoning = useAppStore((state) => state.setReasoning);
   const saveSettings = useAppStore((state) => state.saveSettings);
+  const locked = useChatStore(selectModelLocked);
 
   const providerList: ProviderInfo[] = storeProviders.length ? storeProviders : catalogProviders();
+
+  // This tab edits the *default* model (used by new conversations). Once a
+  // conversation has started its model is locked, so the tab must never touch
+  // the active selection — only the persisted defaults.
+  const [displayProviderId, setDisplayProviderId] = useState(
+    settings.defaultProvider || selection.providerId,
+  );
+  const [displayModelId, setDisplayModelId] = useState(settings.defaultModel || selection.modelId);
+
+  useEffect(() => {
+    setDisplayProviderId(settings.defaultProvider || selection.providerId);
+    setDisplayModelId(settings.defaultModel || selection.modelId);
+  }, [settings.defaultProvider, settings.defaultModel, selection.providerId, selection.modelId]);
+
   const activeProvider =
-    providerList.find((provider) => provider.id === selection.providerId) ?? providerList[0];
-  const model = activeProvider ? getModel(activeProvider.id, selection.modelId) : undefined;
+    providerList.find((provider) => provider.id === displayProviderId) ?? providerList[0];
   const availableModels = useMemo(
     () => (activeProvider?.models ?? []).filter((entry) => entry.status !== 'unavailable'),
     [activeProvider],
   );
+  const resolvedModelId = availableModels.some((entry) => entry.id === displayModelId)
+    ? displayModelId
+    : (availableModels[0]?.id ?? '');
+  const model = activeProvider ? getModel(activeProvider.id, resolvedModelId) : undefined;
 
-  const [pendingReasoning, setPendingReasoning] = useState<ReasoningSelection | null>(selection.reasoning);
+  const [pendingReasoning, setPendingReasoning] = useState<ReasoningSelection | null>(() =>
+    defaultReasoningFor(model),
+  );
   useEffect(() => {
-    setPendingReasoning(selection.reasoning);
-  }, [selection.providerId, selection.modelId, selection.reasoning]);
+    setPendingReasoning(defaultReasoningFor(model));
+  }, [model]);
 
   const commit = (
     providerId: string,
     modelId: string,
     reasoning: ReasoningSelection | null,
   ) => {
-    setSelection({ providerId, modelId, reasoning });
-    setReasoning(reasoning);
+    setDisplayProviderId(providerId);
+    setDisplayModelId(modelId);
+    setPendingReasoning(reasoning);
     void saveSettings({
       defaultProvider: providerId,
       defaultModel: modelId,
       reasoningDefault: reasoningDefaultOf(reasoning),
     });
-    setPendingReasoning(reasoning);
+    // A started conversation keeps its model; only future chats use the default.
+    if (!locked) {
+      setSelection({ providerId, modelId, reasoning });
+      setReasoning(reasoning);
+    }
   };
 
   const handleProviderChange = (providerId: string) => {
@@ -92,6 +118,16 @@ export function ModelTab() {
         title="Modelo padrão"
         description="Usado em novas conversas e como seleção inicial do composer."
       >
+        {locked ? (
+          <SettingsBlock>
+            <p className="flex items-start gap-2 text-[11px] leading-relaxed text-warning">
+              <Lock aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+              A conversa atual está com o modelo bloqueado. As alterações abaixo valem apenas para as
+              próximas conversas.
+            </p>
+          </SettingsBlock>
+        ) : null}
+
         <SettingRow label="Provedor" description="OpenCode Go (assinatura) ou OpenCode Zen (créditos).">
           <NativeSelect
             value={activeProvider?.id ?? ''}
@@ -109,7 +145,7 @@ export function ModelTab() {
 
         <SettingRow label="Modelo" description="Modelos indisponíveis não aparecem nesta lista.">
           <NativeSelect
-            value={selection.modelId}
+            value={resolvedModelId}
             onChange={(event) => handleModelChange(event.target.value)}
             aria-label="Modelo padrão"
             wrapperClassName="w-[220px]"
@@ -136,7 +172,7 @@ export function ModelTab() {
                 value={pendingReasoning}
                 onChange={(reasoning) => {
                   setPendingReasoning(reasoning);
-                  setReasoning(reasoning);
+                  if (!locked) setReasoning(reasoning);
                   void saveSettings({ reasoningDefault: reasoningDefaultOf(reasoning) });
                 }}
               />

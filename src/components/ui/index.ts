@@ -81,6 +81,9 @@ export type { SegmentedControlProps, SegmentedOption } from './segmented-control
 export { ScrollArea } from './scroll-area';
 export type { ScrollAreaProps } from './scroll-area';
 
+export { Popover, PopoverAnchor, PopoverClose, PopoverContent, PopoverTrigger } from './popover';
+export type { PopoverContentProps } from './popover';
+
 export { ProgressBar } from './progress-bar';
 export type { ProgressBarProps } from './progress-bar';
 

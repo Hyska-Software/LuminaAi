@@ -13,7 +13,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-use crate::domain::{ProviderKeyStatus, Settings};
+use crate::domain::{ProviderKeyStatus, Settings, MAX_STEPS_LIMIT};
 
 /* ------------------------------------------------------------------ */
 /* Paths                                                               */
@@ -49,7 +49,7 @@ pub fn secrets_path(app: &AppHandle) -> PathBuf {
 fn normalize_settings(mut settings: Settings) -> Settings {
     let defaults = Settings::default();
 
-    settings.max_steps = settings.max_steps.clamp(1, 32);
+    settings.max_steps = settings.max_steps.clamp(1, MAX_STEPS_LIMIT);
 
     if !settings.font_scale.is_finite() {
         settings.font_scale = defaults.font_scale;
@@ -315,9 +315,15 @@ mod tests {
     }
 
     #[test]
+    fn defaults_to_64_steps() {
+        assert_eq!(Settings::default().max_steps, crate::domain::MAX_STEPS_DEFAULT);
+        assert_eq!(Settings::default().max_steps, 64);
+    }
+
+    #[test]
     fn normalizes_out_of_range_settings() {
         let settings = Settings {
-            max_steps: 999,
+            max_steps: 5_000,
             font_scale: 4.0,
             theme: "neon".into(),
             locale: "xx".into(),
@@ -329,7 +335,7 @@ mod tests {
             ..Settings::default()
         };
         let normalized = normalize_settings(settings);
-        assert_eq!(normalized.max_steps, 32);
+        assert_eq!(normalized.max_steps, MAX_STEPS_LIMIT);
         assert_eq!(normalized.font_scale, 1.3);
         assert_eq!(normalized.theme, "system");
         assert_eq!(normalized.locale, "pt-BR");

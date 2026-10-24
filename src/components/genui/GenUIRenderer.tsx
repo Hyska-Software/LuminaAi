@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import { cn } from '@/lib/utils';
-import { GENUI_LIMITS, propString, type GenUIComponent, type GenUISpec } from '@/lib/genui/schema';
+import { GENUI_LIMITS, propString, type GenUIComponent, type GenUISpec } from '@/lib/genui';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { GenUICard, GenUIGrid, GenUIStack } from './components/GenUILayout';
 import { GenUIChart, GenUITable } from './components/GenUIData';
@@ -19,10 +19,21 @@ import {
   GenUISteps,
   GenUITimeline,
 } from './components/GenUIBlocks';
+import { GenUIActions } from './GenUIActions';
+import { GenUIReveal } from './GenUIReveal';
 
 interface RenderNodeProps {
   node: GenUIComponent;
   depth: number;
+}
+
+/** Fallback discreto: nunca descartar um componente em silêncio. */
+function GenUIFallback({ message }: { message: string }) {
+  return (
+    <p className="rounded-xl border border-dashed border-border bg-surface px-3 py-2.5 text-xs text-foreground-subtle">
+      {message}
+    </p>
+  );
 }
 
 function renderChildren(node: GenUIComponent, depth: number) {
@@ -30,7 +41,10 @@ function renderChildren(node: GenUIComponent, depth: number) {
 }
 
 function GenUINode({ node, depth }: RenderNodeProps) {
-  if (depth > GENUI_LIMITS.depth) return null;
+  if (depth > GENUI_LIMITS.depth) {
+    return <GenUIFallback message="Nível de aninhamento excedido nesta UI." />;
+  }
+
   const children = renderChildren(node, depth);
   const props = node.props;
 
@@ -43,6 +57,8 @@ function GenUINode({ node, depth }: RenderNodeProps) {
       return <GenUIGrid props={props}>{children}</GenUIGrid>;
     case 'tabs':
       return <GenUITabs node={node} depth={depth} />;
+    case 'reveal':
+      return <GenUIReveal props={props}>{children}</GenUIReveal>;
     case 'table':
       return <GenUITable props={props} />;
     case 'chart':
@@ -73,8 +89,12 @@ function GenUINode({ node, depth }: RenderNodeProps) {
       return <GenUILink props={props} />;
     case 'keyvalue':
       return <GenUIKeyValue props={props} />;
+    case 'actions':
+      return <GenUIActions props={props} />;
     default:
-      return null;
+      // O parser já rejeita tipos fora da whitelist; este ramo é só uma rede de
+      // segurança para specs construídos fora do parseGenUI.
+      return <GenUIFallback message={`Componente "${String(node.type)}" não suportado.`} />;
   }
 }
 
@@ -82,11 +102,12 @@ function GenUINode({ node, depth }: RenderNodeProps) {
 function GenUITabs({ node, depth }: { node: GenUIComponent; depth: number }) {
   const baseId = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const panels = node.children ?? [];
-  if (!panels.length) return null;
+  if (!panels.length) return <GenUIFallback message="Abas sem painéis." />;
 
   return (
     <Tabs defaultValue={`${baseId}-0`} className="w-full">
-      <TabsList className="mb-3 max-w-full flex-wrap">
+      {/* h-auto + p-0.5: o pill agora tem 32px e pode quebrar linha sem vazar do fundo. */}
+      <TabsList className="mb-3 h-auto max-w-full flex-wrap p-0.5">
         {panels.map((panel, index) => (
           <TabsTrigger key={index} value={`${baseId}-${index}`} variant="pill">
             {propString(panel.props, 'label', propString(panel.props, 'title', `Aba ${index + 1}`))}
