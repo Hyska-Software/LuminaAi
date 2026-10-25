@@ -1,398 +1,547 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Copy,
-  Download,
-  FileText,
-  Lock,
-  MessageSquarePlus,
-  PanelLeft,
-  Search,
-  Settings,
-  Sparkles,
-  SunMoon,
-  Trash2,
-  type LucideIcon,
-} from 'lucide-react';
+import { Search } from 'lucide-react';
 import { toast } from 'sonner';
-import { api } from '@/lib/api';
 import {
-  MODEL_LOCKED_DESCRIPTION,
-  MODEL_LOCKED_TITLE,
-  resolveDark,
-  selectModelLocked,
-  useAppStore,
-  useChatStore,
-  useUiStore,
-} from '@/lib/store';
-import { cn, copyText, modKey } from '@/lib/utils';
-import { Dialog, DialogContent, DialogDescription, DialogTitle, Kbd } from '@/components/ui';
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  Kbd,
+  Spinner,
+} from '@/components/ui';
+import {
+  PALETTE_GROUPS,
+  PALETTE_SECTION_LABELS,
+  type PaletteCommandResult,
+  type PaletteItem,
+  type PaletteSection,
+  type PaletteScope,
+} from '@/lib/palette/types';
+import { parsePaletteQuery, rankCommands, rankConversations } from '@/lib/palette/search';
+import {
+  orderByRecents,
+  readRecentCommandIds,
+  recordRecentCommandId,
+} from '@/lib/palette/recents';
+import { useChatStore, useUiStore } from '@/lib/store';
+import { modKey } from '@/lib/utils';
+import { ConversationRow } from './ConversationRow';
+import { PaletteRow } from './PaletteRow';
+import { usePaletteActions } from './usePaletteActions';
+import { useConversationSearch } from './useConversationSearch';
 
-interface PaletteAction {
-  id: string;
-  label: string;
-  description?: string;
-  group: string;
-  icon: LucideIcon;
-  shortcut?: string;
-  keywords?: string;
-  run: () => void | Promise<void>;
+/** Number of rows moved by PageUp/PageDown (list is ~11 rows tall). */
+const PAGE_SIZE = 10;
+const SUGGESTIONS_LIMIT = 5;
+const RECENT_CONVERSATIONS_LIMIT = 5;
+
+/** Suggested commands when there is no recent history yet. */
+const QUICK_ACTIONS = [
+  'nova-conversa',
+  'trocar-modelo',
+  'abrir-configuracoes',
+  'alternar-tema',
+  'focar-composer',
+] as const;
+
+function optionDomId(key: string): string {
+  return `lumina-palette-${key}`;
 }
 
-const GROUP_ORDER = ['Conversas', 'Navegação', 'Aparência'] as const;
-
-async function copyLastAnswer() {
-  const chat = useChatStore.getState();
-  const conversationId = chat.activeId;
-  if (!conversationId) {
-    toast.info('Nenhuma conversa aberta');
-    return;
+function groupSections(commandResults: readonly PaletteCommandResult[]): PaletteSection[] {
+  const sections: PaletteSection[] = [];
+  for (const group of PALETTE_GROUPS) {
+    const items = commandResults.filter((result) => result.action.group === group.id);
+    if (items.length) {
+      sections.push({ id: `group-${group.id}`, label: group.label, items });
+    }
   }
-  const messages = chat.messagesFor(conversationId);
-  const last = [...messages].reverse().find((message) => message.role === 'assistant' && message.content.trim());
-  if (!last) {
-    toast.info('Nenhuma resposta para copiar ainda');
-    return;
-  }
-  const ok = await copyText(last.content);
-  if (ok) toast.success('Resposta copiada');
-  else toast.error('Não foi possível copiar');
+  return sections;
 }
 
-async function exportActiveConversation() {
-  const conversationId = useChatStore.getState().activeId;
-  if (!conversationId) {
-    toast.info('Nenhuma conversa aberta');
-    return;
-  }
-  try {
-    const path = await api.exportConversation(conversationId, 'markdown');
-    if (path) toast.success('Conversa exportada', { description: path });
-  } catch (error) {
-    toast.error('Não foi possível exportar', {
-      description: error instanceof Error ? error.message : String(error),
-    });
-  }
+function buildSuggestions(
+  commandResults: readonly PaletteCommandResult[],
+  recentIds: readonly string[],
+): PaletteCommandResult[] {
+  const byId = new Map(commandResults.map((result) => [result.action.id, result]));
+  const ordered = orderByRecents(
+    [...recentIds, ...QUICK_ACTIONS],
+    recentIds,
+    (id) => byId.has(id),
+  ).slice(0, SUGGESTIONS_LIMIT);
+  return ordered.flatMap((id) => {
+    const result = byId.get(id);
+    return result ? [result] : [];
+  });
 }
 
-function toggleTheme() {
-  const ui = useUiStore.getState();
-  const next = resolveDark(ui.theme) ? 'light' : 'dark';
-  ui.setTheme(next);
-  void useAppStore.getState().saveSettings({ theme: next });
+function LoadingRows() {
+  return (
+    <div className="flex flex-col gap-1 px-2.5 py-1" aria-hidden>
+      {[0, 1].map((index) => (
+        <div
+          key={index}
+          className="h-9 animate-pulse rounded-lg bg-surface-hover motion-reduce:animate-none"
+        />
+      ))}
+    </div>
+  );
 }
 
-function openArtifacts() {
-  const ui = useUiStore.getState();
-  if (!ui.artifacts.length) {
-    toast.info('Nenhum artefato nesta conversa');
-    return;
-  }
-  ui.openArtifactList();
-}
+function EmptyState({ query, scope }: { query: string; scope: PaletteScope }) {
+  const title = query
+    ? `Nenhum resultado para “${query}”`
+    : scope === 'conversations'
+      ? 'Nenhuma conversa ainda'
+      : 'Nenhum comando encontrado';
+  const hint =
+    scope === 'commands'
+      ? 'Tente outro termo.'
+      : scope === 'conversations'
+        ? query.length === 1
+          ? 'Digite ao menos 2 caracteres para buscar no histórico.'
+          : 'Digite o título ou um trecho de uma mensagem.'
+        : 'Tente outro termo ou use > para comandos e # para conversas.';
 
-function clearAttachments() {
-  useChatStore.getState().clearAttachments();
-  toast.success('Anexos removidos');
+  return (
+    <div className="flex flex-col items-center gap-1.5 px-6 py-10 text-center">
+      <Search aria-hidden className="size-5 text-foreground-subtle" />
+      <p className="text-[13px] font-medium text-foreground">{title}</p>
+      <p className="text-xs text-foreground-muted">{hint}</p>
+    </div>
+  );
 }
 
 /**
- * Command palette (DESIGN §10): ⌘K opens a 640px overlay with searchable
- * actions, ↑/↓/Enter navigation and shortcut hints. Visibility is driven by
- * `useUiStore.commandPaletteOpen` (the global hotkey lives in AppShell).
+ * Runs a command after the palette has closed and Radix restored focus to the
+ * previous surface. Scheduling on the next tick avoids two FocusScopes fighting
+ * when the command opens another dialog (Settings / Model Picker) or focuses the
+ * composer (docs/COMMAND_PALETTE.md §4.5).
  */
-export function CommandPalette() {
-  const open = useUiStore((state) => state.commandPaletteOpen);
-  const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
-  const locked = useChatStore(selectModelLocked);
-  const [query, setQuery] = useState('');
-  const [index, setIndex] = useState(0);
-  const activeRef = useRef<HTMLButtonElement | null>(null);
-
-  const actions = useMemo<PaletteAction[]>(
-    () => [
-      {
-        id: 'new-chat',
-        group: 'Conversas',
-        label: 'Novo chat',
-        description: 'Comece uma conversa em branco',
-        icon: MessageSquarePlus,
-        shortcut: `${modKey}+N`,
-        keywords: 'nova conversa criar',
-        run: () => void useChatStore.getState().startNewConversation(),
-      },
-      {
-        id: 'search-conversations',
-        group: 'Conversas',
-        label: 'Buscar conversas',
-        description: 'Pesquise no histórico local',
-        icon: Search,
-        keywords: 'histórico procurar',
-        run: () => useUiStore.getState().setSearchOpen(true),
-      },
-      {
-        id: 'export-conversation',
-        group: 'Conversas',
-        label: 'Exportar conversa',
-        description: 'Salvar a conversa atual em Markdown',
-        icon: Download,
-        keywords: 'salvar markdown arquivo',
-        run: () => void exportActiveConversation(),
-      },
-      {
-        id: 'copy-last-answer',
-        group: 'Conversas',
-        label: 'Copiar última resposta',
-        description: 'Copia o texto da resposta mais recente',
-        icon: Copy,
-        keywords: 'copiar clipboard',
-        run: () => void copyLastAnswer(),
-      },
-      {
-        id: 'clear-attachments',
-        group: 'Conversas',
-        label: 'Limpar anexos',
-        description: 'Remove os anexos pendentes do composer',
-        icon: Trash2,
-        keywords: 'arquivos remover',
-        run: clearAttachments,
-      },
-      {
-        id: 'open-settings',
-        group: 'Navegação',
-        label: 'Abrir configurações',
-        description: 'Tema, provedores, modelo padrão e ferramentas',
-        icon: Settings,
-        shortcut: `${modKey}+,`,
-        keywords: 'preferências ajustes',
-        run: () => useUiStore.getState().setSettingsOpen(true),
-      },
-      {
-        id: 'switch-model',
-        group: 'Navegação',
-        label: 'Trocar modelo',
-        description: locked ? MODEL_LOCKED_DESCRIPTION : 'Escolher modelo e modo de pensamento',
-        icon: locked ? Lock : Sparkles,
-        keywords: 'modelo raciocínio pensamento',
-        run: () => {
-          if (locked) {
-            toast.info(MODEL_LOCKED_TITLE, { description: MODEL_LOCKED_DESCRIPTION });
-            return;
-          }
-          useUiStore.getState().setModelPickerOpen(true);
-        },
-      },
-      {
-        id: 'toggle-sidebar',
-        group: 'Navegação',
-        label: 'Alternar barra lateral',
-        description: 'Mostrar ou ocultar o histórico',
-        icon: PanelLeft,
-        shortcut: `${modKey}+B`,
-        keywords: 'sidebar histórico',
-        run: () => useUiStore.getState().toggleSidebar(),
-      },
-      {
-        id: 'open-artifacts',
-        group: 'Navegação',
-        label: 'Abrir painel de artefatos',
-        description: 'Prévia e ações dos arquivos da conversa',
-        icon: FileText,
-        keywords: 'arquivos canvas prévia',
-        run: openArtifacts,
-      },
-      {
-        id: 'toggle-theme',
-        group: 'Aparência',
-        label: 'Alternar tema',
-        description: 'Troca entre claro e escuro',
-        icon: SunMoon,
-        keywords: 'dark light escuro claro aparência',
-        run: toggleTheme,
-      },
-    ],
-    [locked],
-  );
-
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return actions;
-    return actions.filter((action) =>
-      [action.label, action.description, action.keywords, action.group]
-        .filter(Boolean)
-        .some((field) => (field as string).toLowerCase().includes(needle)),
-    );
-  }, [actions, query]);
-
-  const groups = useMemo(
-    () =>
-      GROUP_ORDER.map((group) => ({ group, items: filtered.filter((action) => action.group === group) })).filter(
-        (entry) => entry.items.length > 0,
-      ),
-    [filtered],
-  );
-
-  const flat = useMemo(() => groups.flatMap((group) => group.items), [groups]);
-  const selectedIndex = Math.min(index, Math.max(0, flat.length - 1));
-
-  useEffect(() => {
-    if (!open) return;
-    setQuery('');
-    setIndex(0);
-  }, [open]);
-
-  useEffect(() => {
-    setIndex(0);
-  }, [query]);
-
-  useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [selectedIndex, open]);
-
-  const execute = (action: PaletteAction) => {
-    setOpen(false);
-    void Promise.resolve(action.run()).catch((error: unknown) => {
+function scheduleAfterClose(run: () => void | Promise<void>): void {
+  window.setTimeout(() => {
+    void Promise.resolve(run()).catch((error: unknown) => {
       toast.error('Não foi possível executar a ação', {
         description: error instanceof Error ? error.message : String(error),
       });
     });
+  }, 0);
+}
+
+/**
+ * Command palette (DESIGN §10, docs/COMMAND_PALETTE.md): searchable commands
+ * plus inline conversation search, full keyboard navigation and shortcut
+ * hints. Visibility lives in `useUiStore.commandPaletteOpen` (the global hotkey
+ * lives in App.tsx / lib/hotkeys.ts).
+ */
+export function CommandPalette() {
+  const open = useUiStore((state) => state.commandPaletteOpen);
+  const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
+  const conversations = useChatStore((state) => state.conversations);
+
+  const [rawQuery, setRawQuery] = useState('');
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [recentIds, setRecentIds] = useState<string[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const rowRefs = useRef(new Map<string, HTMLButtonElement | null>());
+
+  const actions = usePaletteActions();
+  const parsed = useMemo(() => parsePaletteQuery(rawQuery), [rawQuery]);
+  const hasQuery = parsed.query.trim().length > 0;
+  const conversationSearch = useConversationSearch(
+    hasQuery ? parsed.query : '',
+    open && parsed.scope !== 'commands',
+  );
+
+  const commandResults = useMemo(() => {
+    if (parsed.scope === 'conversations') return [];
+    return rankCommands(actions, parsed.query, recentIds);
+  }, [actions, parsed.query, parsed.scope, recentIds]);
+
+  const recentConversations = useMemo(() => {
+    if (hasQuery || parsed.scope === 'commands') return [];
+    return rankConversations(conversations, '', { limit: RECENT_CONVERSATIONS_LIMIT });
+  }, [conversations, hasQuery, parsed.scope]);
+
+  const sections = useMemo<PaletteSection[]>(() => {
+    if (parsed.scope === 'commands') return groupSections(commandResults);
+
+    if (!hasQuery) {
+      const list: PaletteSection[] = [];
+      if (recentConversations.length) {
+        list.push({
+          id: 'recent-conversations',
+          label: PALETTE_SECTION_LABELS.recentConversations,
+          items: recentConversations,
+        });
+      }
+      if (parsed.scope === 'all') {
+        const suggestions = buildSuggestions(commandResults, recentIds);
+        if (suggestions.length) {
+          list.push({
+            id: 'suggestions',
+            label: PALETTE_SECTION_LABELS.suggestions,
+            items: suggestions,
+          });
+        }
+        const suggestedIds = new Set(suggestions.map((item) => item.action.id));
+        list.push(...groupSections(commandResults.filter((item) => !suggestedIds.has(item.action.id))));
+      }
+      return list;
+    }
+
+    const list: PaletteSection[] = [];
+    if (
+      conversationSearch.loading ||
+      conversationSearch.results.length > 0 ||
+      conversationSearch.fallback
+    ) {
+      list.push({
+        id: 'conversation-results',
+        label: PALETTE_SECTION_LABELS.conversations,
+        items: conversationSearch.results,
+        loading: conversationSearch.loading,
+        fallback: conversationSearch.fallback,
+      });
+    }
+    if (parsed.scope === 'conversations') return list;
+    list.push(...groupSections(commandResults));
+    return list;
+  }, [commandResults, conversationSearch, hasQuery, parsed.scope, recentConversations, recentIds]);
+
+  const flat = useMemo(() => sections.flatMap((section) => section.items), [sections]);
+  const flatSignature = useMemo(() => flat.map((item) => item.key).join('|'), [flat]);
+
+  const activeIndex = flat.findIndex((item) => item.key === activeKey);
+  const activeItem = activeIndex >= 0 ? flat[activeIndex] : undefined;
+
+  /* Reset the search and reload recents on every opening. The selected row is
+     re-picked by the anchoring effect below, which must re-run even when the
+     result signature is identical to the previous opening (common path:
+     ⌘K → Enter on the first suggestion). */
+  const resetSelectionRef = useRef(false);
+  useEffect(() => {
+    if (!open) return;
+    setRawQuery('');
+    setRecentIds(readRecentCommandIds());
+    resetSelectionRef.current = true;
+  }, [open]);
+
+  /* Keep the highlight anchored to a real item as results change (async
+     conversation rows, contextual commands appearing/disappearing, typing). A
+     selection that still exists survives the keystroke; otherwise the first
+     selectable row wins. Reopening always starts from the first row — the reset
+     is consumed only after the query is cleared, so a reopen that still renders
+     the previous query for one frame cannot keep a stale selection. */
+  useEffect(() => {
+    const keys = flatSignature ? flatSignature.split('|') : [];
+    const forceFirst = resetSelectionRef.current && rawQuery === '';
+    if (forceFirst) resetSelectionRef.current = false;
+    setActiveKey((current) => {
+      if (!forceFirst && current && keys.includes(current)) return current;
+      return keys[0] ?? null;
+    });
+  }, [flatSignature, rawQuery, open]);
+
+  /* Keep the highlighted row visible while navigating with the keyboard. */
+  useEffect(() => {
+    if (!open || !activeKey) return;
+    rowRefs.current.get(activeKey)?.scrollIntoView({ block: 'nearest' });
+  }, [activeKey, open]);
+
+  /* When async conversation results arrive, move the selection onto the first
+     visible row (a conversation) instead of leaving it on a command the user
+     never chose — Enter should open what was just searched. */
+  const wasSearchingRef = useRef(false);
+  useEffect(() => {
+    if (conversationSearch.loading) {
+      wasSearchingRef.current = true;
+      return;
+    }
+    if (!wasSearchingRef.current) return;
+    wasSearchingRef.current = false;
+    if (conversationSearch.results.length > 0 && flat.length > 0) {
+      setActiveKey(flat[0].key);
+    }
+  }, [conversationSearch.loading, conversationSearch.results.length, flat]);
+
+  const selectIndex = (index: number) => {
+    if (!flat.length) return;
+    const bounded = Math.min(Math.max(index, 0), flat.length - 1);
+    setActiveKey(flat[bounded].key);
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      setIndex(Math.min(flat.length - 1, selectedIndex + 1));
+  const moveActive = (delta: number) => {
+    if (!flat.length) return;
+    const current = activeIndex;
+    if (current < 0) {
+      selectIndex(delta >= 0 ? 0 : flat.length - 1);
       return;
     }
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      setIndex(Math.max(0, selectedIndex - 1));
+    const next = (((current + delta) % flat.length) + flat.length) % flat.length;
+    setActiveKey(flat[next].key);
+  };
+
+  const executeItem = (item: PaletteItem) => {
+    setOpen(false);
+    if (item.kind === 'conversation') {
+      void useChatStore.getState().openConversation(item.conversation.id);
       return;
     }
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      const action = flat[selectedIndex];
-      if (action) execute(action);
+    setRecentIds(recordRecentCommandId(item.action.id));
+    scheduleAfterClose(item.action.run);
+  };
+
+  const runSecondary = () => {
+    if (activeItem?.kind !== 'conversation') return;
+    const { conversation } = activeItem;
+    void useChatStore.getState().togglePinned(conversation.id);
+    toast.success(conversation.pinned ? 'Conversa desafixada' : 'Conversa fixada', {
+      description: conversation.title,
+    });
+  };
+
+  /**
+   * Single owner of Escape: always prevents the Radix default (so nothing
+   * cascades to the global handler / panels), then clears the search or closes.
+   */
+  const handleEscapeKeyDown = (event: KeyboardEvent) => {
+    event.preventDefault();
+    if (event.isComposing) return;
+    if (rawQuery.length > 0) {
+      setRawQuery('');
+      setActiveKey(null);
+      inputRef.current?.focus();
       return;
     }
-    if (event.key === 'Escape') {
+    setOpen(false);
+  };
+
+  const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    const native = event.nativeEvent;
+    if (native.isComposing) return;
+    const mod = event.metaKey || event.ctrlKey;
+
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        moveActive(1);
+        return;
+      case 'ArrowUp':
+        event.preventDefault();
+        moveActive(-1);
+        return;
+      case 'Home':
+        event.preventDefault();
+        selectIndex(0);
+        return;
+      case 'End':
+        event.preventDefault();
+        selectIndex(flat.length - 1);
+        return;
+      case 'PageDown':
+        event.preventDefault();
+        moveActive(PAGE_SIZE);
+        return;
+      case 'PageUp':
+        event.preventDefault();
+        moveActive(-PAGE_SIZE);
+        return;
+      case 'Enter':
+        event.preventDefault();
+        if (!activeItem) return;
+        if (mod) runSecondary();
+        else executeItem(activeItem);
+        return;
+      default:
+        break;
+    }
+
+    if (event.ctrlKey && !event.metaKey && event.key.toLowerCase() === 'n') {
       event.preventDefault();
-      setOpen(false);
+      moveActive(1);
+      return;
+    }
+    if (event.ctrlKey && !event.metaKey && event.key.toLowerCase() === 'p') {
+      event.preventDefault();
+      moveActive(-1);
     }
   };
 
-  let flatOffset = -1;
+  const placeholder =
+    parsed.scope === 'commands'
+      ? 'Buscar comandos…'
+      : parsed.scope === 'conversations'
+        ? 'Buscar conversas…'
+        : 'Buscar conversas ou comandos…';
+
+  const commandCount = flat.filter((item) => item.kind === 'command').length;
+  const conversationCount = flat.length - commandCount;
+  const announcement = conversationSearch.loading
+    ? 'Buscando conversas'
+    : `${flat.length} ${flat.length === 1 ? 'resultado' : 'resultados'}`;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
         showClose={false}
         aria-describedby={undefined}
+        onEscapeKeyDown={handleEscapeKeyDown}
         className="mt-[9vh] w-[640px] max-w-[calc(100vw-2rem)] flex-none gap-0 self-start overflow-hidden p-0"
       >
         <DialogTitle className="sr-only">Paleta de comandos</DialogTitle>
         <DialogDescription className="sr-only">
-          Busque e execute ações do Lumina. Use as setas para navegar e Enter para executar.
+          Busque conversas ou execute comandos do Lumina. Use as setas para navegar, Enter para
+          executar e Esc para limpar a busca ou fechar.
         </DialogDescription>
 
         <div className="flex shrink-0 items-center gap-2.5 border-b border-border px-4">
           <Search aria-hidden className="size-4 shrink-0 text-foreground-subtle" />
           <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Digite um comando…"
-            aria-label="Buscar comandos"
+            ref={inputRef}
+            value={rawQuery}
+            onChange={(event) => {
+              setRawQuery(event.target.value);
+            }}
+            onKeyDown={handleInputKeyDown}
+            placeholder={placeholder}
+            aria-label="Buscar conversas ou comandos"
             role="combobox"
             aria-expanded
-            aria-controls="lumina-command-list"
+            aria-controls="lumina-palette-list"
             aria-autocomplete="list"
-            aria-activedescendant={
-              flat[selectedIndex] ? `lumina-command-${flat[selectedIndex].id}` : undefined
-            }
+            aria-activedescendant={activeItem ? optionDomId(activeItem.key) : undefined}
             autoFocus
             spellCheck={false}
+            autoComplete="off"
             className="h-12 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-foreground-subtle"
           />
+          {conversationSearch.loading ? (
+            <Spinner size="xs" label="Buscando conversas" className="text-foreground-subtle" />
+          ) : null}
           <Kbd>Esc</Kbd>
         </div>
 
-        <div
-          id="lumina-command-list"
-          role="listbox"
-          aria-label="Comandos"
-          className="max-h-[360px] overflow-y-auto p-1.5"
-        >
-          {groups.length ? (
-            groups.map((group) => (
-              <div key={group.group} className="flex flex-col">
-                <span className="px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-foreground-subtle">
-                  {group.group}
+        <div className="max-h-[min(420px,calc(100vh-220px))] overflow-y-auto overscroll-contain">
+          <div
+            id="lumina-palette-list"
+            role="listbox"
+            aria-label="Comandos e conversas"
+            className={sections.length ? 'p-1.5' : 'hidden'}
+          >
+            {sections.map((section) => (
+              <div
+                key={section.id}
+                role="group"
+                aria-labelledby={`lumina-palette-section-${section.id}`}
+                className="flex flex-col"
+              >
+                <span
+                  id={`lumina-palette-section-${section.id}`}
+                  className="px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-foreground-subtle"
+                >
+                  {section.label}
                 </span>
-                {group.items.map((action) => {
-                  flatOffset += 1;
-                  const itemIndex = flatOffset;
-                  const isSelected = itemIndex === selectedIndex;
-                  const Icon = action.icon;
-                  return (
-                    <button
-                      key={action.id}
-                      id={`lumina-command-${action.id}`}
-                      type="button"
-                      role="option"
-                      aria-selected={isSelected}
-                      tabIndex={-1}
-                      ref={isSelected ? activeRef : undefined}
-                      onMouseEnter={() => setIndex(itemIndex)}
-                      onClick={() => execute(action)}
-                      className={cn(
-                        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-100',
-                        isSelected ? 'bg-surface-hover' : 'hover:bg-surface-hover',
-                        'focus-visible:outline-none',
-                      )}
-                    >
-                      <Icon aria-hidden className="size-4 shrink-0 text-foreground-subtle" strokeWidth={1.9} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium text-foreground">
-                          {action.label}
-                        </span>
-                        {action.description ? (
-                          <span className="block truncate text-[11px] text-foreground-subtle">
-                            {action.description}
-                          </span>
-                        ) : null}
-                      </span>
-                      {action.shortcut ? (
-                        <span className="flex shrink-0 items-center gap-1">
-                          {action.shortcut.split('+').map((part) => (
-                            <Kbd key={part}>{part}</Kbd>
-                          ))}
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
+                {section.loading ? <LoadingRows /> : null}
+                {section.fallback ? (
+                  <p className="px-2.5 pb-1 text-[11px] leading-relaxed text-foreground-subtle">
+                    Busca no histórico indisponível; mostrando título e prévia.
+                  </p>
+                ) : null}
+                {section.items.map((item) =>
+                  item.kind === 'command' ? (
+                    <PaletteRow
+                      key={item.key}
+                      id={optionDomId(item.key)}
+                      action={item.action}
+                      labelRanges={item.labelRanges}
+                      descriptionRanges={item.descriptionRanges}
+                      active={item.key === activeKey}
+                      onActivate={() => setActiveKey(item.key)}
+                      onExecute={() => executeItem(item)}
+                      refCallback={(element) => {
+                        if (element) rowRefs.current.set(item.key, element);
+                        else rowRefs.current.delete(item.key);
+                      }}
+                    />
+                  ) : (
+                    <ConversationRow
+                      key={item.key}
+                      id={optionDomId(item.key)}
+                      conversation={item.conversation}
+                      titleRanges={item.titleRanges}
+                      previewRanges={item.previewRanges}
+                      active={item.key === activeKey}
+                      matchedInContent={
+                        hasQuery && item.titleRanges.length === 0 && item.previewRanges.length === 0
+                      }
+                      onActivate={() => setActiveKey(item.key)}
+                      onExecute={() => executeItem(item)}
+                      refCallback={(element) => {
+                        if (element) rowRefs.current.set(item.key, element);
+                        else rowRefs.current.delete(item.key);
+                      }}
+                    />
+                  ),
+                )}
               </div>
-            ))
-          ) : (
-            <div className="flex flex-col items-center gap-1.5 px-6 py-10 text-center">
-              <Search aria-hidden className="size-5 text-foreground-subtle" />
-              <p className="text-[13px] font-medium text-foreground">Nenhum comando encontrado</p>
-              <p className="text-xs text-foreground-muted">Tente outro termo.</p>
-            </div>
-          )}
+            ))}
+          </div>
+          {sections.length === 0 ? (
+            conversationSearch.loading ? (
+              <LoadingRows />
+            ) : (
+              <EmptyState query={parsed.query} scope={parsed.scope} />
+            )
+          ) : null}
         </div>
 
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-3 py-2 text-[11px] text-foreground-subtle">
-          <span className="flex items-center gap-1.5">
-            <Kbd>↑</Kbd>
-            <Kbd>↓</Kbd>
-            navegar
-            <Kbd>↵</Kbd>
-            executar
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border px-3 py-2 text-[11px] text-foreground-subtle">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="flex items-center gap-1">
+              <Kbd>↑</Kbd>
+              <Kbd>↓</Kbd>
+              navegar
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>↵</Kbd>
+              executar
+            </span>
+            {activeItem?.kind === 'conversation' ? (
+              <span className="flex items-center gap-1">
+                <Kbd>{modKey}</Kbd>
+                <Kbd>↵</Kbd>
+                {activeItem.conversation.pinned ? 'desafixar' : 'fixar'}
+              </span>
+            ) : null}
+            <span className="flex items-center gap-1">
+              <Kbd>esc</Kbd>
+              {rawQuery ? 'limpar busca' : 'fechar'}
+            </span>
+            {!rawQuery ? (
+              <span className="hidden sm:inline">&gt; comandos · # conversas</span>
+            ) : null}
           </span>
           <span className="tabular-nums">
-            {flat.length} {flat.length === 1 ? 'comando' : 'comandos'}
+            {conversationSearch.loading && flat.length === 0 ? (
+              'Buscando conversas…'
+            ) : (
+              <>
+                {commandCount > 0
+                  ? `${commandCount} ${commandCount === 1 ? 'comando' : 'comandos'}`
+                  : null}
+                {commandCount > 0 && conversationCount > 0 ? ' · ' : null}
+                {conversationCount > 0
+                  ? `${conversationCount} ${conversationCount === 1 ? 'conversa' : 'conversas'}`
+                  : null}
+                {commandCount === 0 && conversationCount === 0 ? 'Nenhum resultado' : null}
+              </>
+            )}
           </span>
+        </div>
+
+        <div aria-live="polite" className="sr-only">
+          {announcement}
         </div>
       </DialogContent>
     </Dialog>

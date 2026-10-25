@@ -12,6 +12,7 @@ import {
   sortArtifacts,
   useUiStore,
 } from '@/lib/store/uiStore';
+import { DEFAULT_SETTINGS_TAB, type SettingsTabId } from '@/lib/settingsTabs';
 import type { Artifact } from '@/lib/types';
 
 function artifact(overrides: Partial<Artifact> = {}): Artifact {
@@ -351,5 +352,73 @@ describe('useUiStore — painéis laterais mutuamente exclusivos', () => {
     expect(
       useUiStore.getState().artifactPanelOpen && useUiStore.getState().sourcesPanelOpen,
     ).toBe(false);
+  });
+});
+
+describe('useUiStore — abas de Configurações (deep-link da paleta)', () => {
+  beforeEach(() => {
+    useUiStore.setState({ settingsOpen: false, settingsTab: DEFAULT_SETTINGS_TAB });
+  });
+
+  it('starts on the general tab', () => {
+    expect(useUiStore.getState().settingsTab).toBe('general');
+  });
+
+  it('openSettings opens the dialog on the requested tab', () => {
+    useUiStore.getState().openSettings('tools');
+
+    expect(useUiStore.getState().settingsOpen).toBe(true);
+    expect(useUiStore.getState().settingsTab).toBe('tools');
+  });
+
+  it('openSettings without a tab preserves the current one', () => {
+    useUiStore.getState().setSettingsTab('data');
+    useUiStore.getState().openSettings();
+
+    expect(useUiStore.getState().settingsOpen).toBe(true);
+    expect(useUiStore.getState().settingsTab).toBe('data');
+  });
+
+  it('setSettingsTab normalizes unknown values back to the default', () => {
+    useUiStore.getState().setSettingsTab('nope' as unknown as SettingsTabId);
+    expect(useUiStore.getState().settingsTab).toBe(DEFAULT_SETTINGS_TAB);
+  });
+
+  it('setSettingsOpen keeps the tab (legacy call sites)', () => {
+    useUiStore.getState().setSettingsTab('providers');
+    useUiStore.getState().setSettingsOpen(true);
+    expect(useUiStore.getState().settingsOpen).toBe(true);
+    expect(useUiStore.getState().settingsTab).toBe('providers');
+  });
+});
+
+describe('useUiStore — cutover de estado órfão', () => {
+  it('does not expose the removed search/attachments/font persistence flags', () => {
+    const state = useUiStore.getState() as unknown as Record<string, unknown>;
+
+    expect(state.searchOpen).toBeUndefined();
+    expect(state.setSearchOpen).toBeUndefined();
+    expect(state.attachmentsOpen).toBeUndefined();
+    expect(state.setAttachmentsOpen).toBeUndefined();
+    expect(state.fontScale).toBeUndefined();
+    expect(state.reduceMotion).toBeUndefined();
+  });
+
+  it('closeAllOverlays closes the palette, settings, model picker and sources', () => {
+    useUiStore.setState({
+      settingsOpen: true,
+      modelPickerOpen: true,
+      commandPaletteOpen: true,
+      sourcesPanelOpen: true,
+    });
+
+    useUiStore.getState().closeAllOverlays();
+
+    expect(useUiStore.getState()).toMatchObject({
+      settingsOpen: false,
+      modelPickerOpen: false,
+      commandPaletteOpen: false,
+      sourcesPanelOpen: false,
+    });
   });
 });

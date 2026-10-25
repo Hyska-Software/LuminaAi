@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { DEFAULT_SETTINGS_TAB, isSettingsTabId, type SettingsTabId } from '../settingsTabs';
 import type { Artifact, ThemeMode } from '../types';
 
 /**
@@ -63,10 +64,10 @@ interface UiState {
   /** Persisted width of the desktop sidebar, in px (docs/DESIGN.md §5). */
   sidebarWidth: number;
   settingsOpen: boolean;
+  /** Active tab of the settings dialog, shared with the command palette. */
+  settingsTab: SettingsTabId;
   modelPickerOpen: boolean;
   commandPaletteOpen: boolean;
-  searchOpen: boolean;
-  attachmentsOpen: boolean;
   artifactPanelOpen: boolean;
   artifactPanelView: ArtifactPanelView;
   /** Side panel listing every source (citation) used in the conversation. */
@@ -78,8 +79,6 @@ interface UiState {
   activeView: MainView;
   activeArtifactId: string | null;
   artifacts: Artifact[];
-  fontScale: number;
-  reduceMotion: boolean;
 
   setTheme: (theme: ThemeMode) => void;
   toggleSidebar: () => void;
@@ -91,10 +90,11 @@ interface UiState {
   /** Persists the overlay/docked preference (responsive fallback lives in lib/sidePanel). */
   setSidePanelMode: (mode: SidePanelMode) => void;
   setSettingsOpen: (open: boolean) => void;
+  /** Opens the settings dialog, optionally jumping straight to a tab. */
+  openSettings: (tab?: SettingsTabId) => void;
+  setSettingsTab: (tab: SettingsTabId) => void;
   setModelPickerOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
-  setSearchOpen: (open: boolean) => void;
-  setAttachmentsOpen: (open: boolean) => void;
   /** Switches the main content between the chat and the skills manager. */
   setActiveView: (view: MainView) => void;
   /** Opens the panel on the artifact preview (or the list when there is none). */
@@ -141,10 +141,9 @@ export const useUiStore = create<UiState>()(
       sidebarOpen: true,
       sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
       settingsOpen: false,
+      settingsTab: DEFAULT_SETTINGS_TAB,
       modelPickerOpen: false,
       commandPaletteOpen: false,
-      searchOpen: false,
-      attachmentsOpen: false,
       artifactPanelOpen: false,
       artifactPanelView: 'list',
       sourcesPanelOpen: false,
@@ -153,8 +152,6 @@ export const useUiStore = create<UiState>()(
       activeView: 'chat',
       activeArtifactId: null,
       artifacts: [],
-      fontScale: 1,
-      reduceMotion: false,
 
       setTheme: (theme) => {
         set({ theme });
@@ -166,10 +163,15 @@ export const useUiStore = create<UiState>()(
       setSidePanelWidth: (sidePanelWidth) => set({ sidePanelWidth: clampSidePanelWidth(sidePanelWidth) }),
       setSidePanelMode: (sidePanelMode) => set({ sidePanelMode }),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+      openSettings: (tab) =>
+        set((state) => ({
+          settingsOpen: true,
+          settingsTab: tab && isSettingsTabId(tab) ? tab : state.settingsTab,
+        })),
+      setSettingsTab: (settingsTab) =>
+        set({ settingsTab: isSettingsTabId(settingsTab) ? settingsTab : DEFAULT_SETTINGS_TAB }),
       setModelPickerOpen: (modelPickerOpen) => set({ modelPickerOpen }),
       setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
-      setSearchOpen: (searchOpen) => set({ searchOpen }),
-      setAttachmentsOpen: (attachmentsOpen) => set({ attachmentsOpen }),
       setActiveView: (activeView) => set({ activeView }),
       openArtifactPanel: (artifactId) =>
         set((state) => {
@@ -224,8 +226,6 @@ export const useUiStore = create<UiState>()(
           settingsOpen: false,
           modelPickerOpen: false,
           commandPaletteOpen: false,
-          searchOpen: false,
-          attachmentsOpen: false,
           sourcesPanelOpen: false,
         }),
       applyTheme: () => {
@@ -244,8 +244,6 @@ export const useUiStore = create<UiState>()(
         sidebarWidth: state.sidebarWidth,
         sidePanelWidth: state.sidePanelWidth,
         sidePanelMode: state.sidePanelMode,
-        fontScale: state.fontScale,
-        reduceMotion: state.reduceMotion,
       }),
       /**
        * Rehydrated layouts may carry an out-of-range width (manually edited

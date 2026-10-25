@@ -152,8 +152,34 @@ Tabs à esquerda (180px), conteúdo à direita (520px):
 
 ## 10. Paleta de comandos (⌘K / Ctrl+K)
 
-- Overlay 640px com input e lista de ações: novo chat, buscar conversas, abrir configurações, trocar modelo, alternar tema, alternar sidebar, exportar conversa, copiar última resposta.
-- Navegação com ↑/↓ e Enter; agrupamento por categoria.
+> Contrato completo (auditoria, catálogo e decisões): `docs/COMMAND_PALETTE.md`.
+
+- Overlay 640px, topo ~9vh, lista com scroll (máx. 420px), fundo
+  `surface-raised` e mesmos tokens do design system.
+- **Duas fontes na mesma lista**: comandos locais (capability-aware: só aparece
+  o que pode rodar no contexto) e conversas do histórico (busca no backend por
+  título/conteúdo, 160ms de debounce, mínimo 2 caracteres, até 5 resultados,
+  com fallback local normalizado). Query vazia: “Conversas recentes” → “Sugestões”
+  (comandos recentes; fallback: novo chat, trocar modelo, configurações, tema,
+  focar composer) → grupos de comandos. Query preenchida: “Conversas
+  encontradas” → grupos de comandos.
+- **Busca tolerante**: sem acentos/caixa, multi-token (AND) e fuzzy com
+  subsequência; trecho casado em `<mark>` (`bg-accent-soft text-accent`).
+  Resultado que casou só no conteúdo mostra o selo “Conteúdo”.
+- **Escopos**: `>` só comandos, `#` só conversas (prefixo opcional).
+- **Teclado**: ↑/↓ com wrap, Ctrl+N/P, Home/End, PageUp/PageDown, Enter executa,
+  ⌘/Ctrl+Enter fixa/desafixa a conversa ativa (mantém aberta), Esc limpa a busca
+  (primeiro) e fecha (segundo), ⌘K fecha. Com a paleta aberta nenhum outro
+  atalho global age no fundo. IME nunca dispara Enter.
+- **Ações** que abrem outra superfície fecham a paleta e agendam o efeito para o
+  próximo tick (foco devolvido antes do dialog destino). Rodapé mostra dicas
+  contextuais e a contagem (“N comandos · M conversas”).
+- **Acessibilidade**: combobox com `aria-activedescendant`, listbox com grupos
+  `role="group"`/`aria-labelledby`, opções com `aria-selected`/`aria-label`,
+  região `aria-live` com a contagem, foco visível e foco inicial no input.
+- **Atalhos exibidos**: novo chat (⌘N), configurações (⌘,), sidebar (⌘B), focar
+  composer (⌘J). Ações contextuais: parar/regenerar (streaming), limpar anexos
+  (pendentes), exportar/copiar/fixar (conversa ativa), skills (quando ligadas).
 
 ## 11. Motion
 
@@ -199,6 +225,7 @@ Com `reduceMotion` (config ou media query), remover transformações e shimmer; 
 - Novo chat, Buscar conversas, Configurações, Modelo padrão, Modo de pensamento, Buscar modelos…, Limpar busca, Usar este modelo, Configurar, Modelo bloqueado nesta conversa, Anexar arquivos, Busca web, Criar arquivos, Pensando…, Executando ferramentas…, Pensou por 10s, Encontrou 8 páginas web, Leu 3 páginas, Criou 2 arquivos, Validou a interface, Parar, Copiar, Regenerar, Artefatos, Ver lista de artefatos, Ver todos (N), Nenhum artefato nesta conversa, Fontes, Nenhuma fonte nesta conversa, Abre no navegador padrão, Salvar como…, Abrir, Excluir, Fixar, Renomear, Exportar, Limpar dados.
 - Prévia de artefatos (v1.5): Controles da imagem, Ajustar à janela, Tamanho real, Aumentar/Diminuir zoom, Documento, Código, Árvore, Quebrar linhas, Rolagem horizontal, Primeiros N bytes, Mostrando X de Y entradas, Carregando prévia…, Tentar novamente, “Arquivo grande demais para reprodução inline; use Abrir/Salvar”, “Formato sem prévia no visualizador”.
 - Painel lateral direito: Fixar painel ao lado do chat, Soltar painel sobre o chat, Aumente a janela para fixar o painel, Redimensionar painel de artefatos/fontes.
+- Paleta de comandos: Buscar conversas ou comandos…, Conversas recentes, Sugestões, Conversas encontradas, Buscando conversas…, Nenhum resultado para “x”, Busca no histórico indisponível; mostrando título e prévia, Conteúdo, navegar, executar, fixar/desafixar, limpar busca, fechar.
 - Erros: "Não foi possível concluir", "Chave de API ausente", "Limite de uso atingido", "Tente novamente em instantes".
 
 ## 15. Anti-padrões proibidos

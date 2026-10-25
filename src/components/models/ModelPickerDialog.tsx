@@ -332,7 +332,8 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
 
   const openProviderSettings = () => {
     onClose();
-    useUiStore.getState().setSettingsOpen(true);
+    // "Configurar" is about the missing API key: deep-link to Provedores.
+    useUiStore.getState().openSettings('providers');
   };
 
   const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {

@@ -458,22 +458,7 @@ export interface ModelSelection {
   reasoning: ReasoningSelection | null;
 }
 
-export interface AttachmentDraft {
-  info: AttachmentInfo;
-  status: 'ready' | 'uploading' | 'error';
-  error?: string;
-}
-
 export interface ConversationGroup {
   label: string;
   conversations: Conversation[];
-}
-
-export interface CommandItem {
-  id: string;
-  label: string;
-  description?: string;
-  icon?: string;
-  shortcut?: string;
-  action: () => void;
 }

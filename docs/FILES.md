@@ -847,6 +847,50 @@ de código com syntax highlight”.
   - `pnpm build` → OK (chunk principal ~1,79 MB com as grammars extras; apenas o
     aviso de tamanho do Vite; `pdf-*.js` e `pdf.worker.min-*.mjs` seguem lazy).
 
+### v1.6 — paleta de comandos 2.0 (⌘K)
+
+Auditoria completa e contrato: `docs/COMMAND_PALETTE.md`; plano e evidências:
+`docs/goals/command-palette-v1/`.
+
+- **Fim do código morto**: “Buscar conversas” ligava `uiStore.searchOpen`, sem
+  nenhum consumidor. A ação foi substituída por busca real de conversas inline;
+  `searchOpen`, `attachmentsOpen`, `fontScale`/`reduceMotion` (uiStore) e
+  `CommandItem`/`AttachmentDraft` (types) foram removidos.
+- **Busca de conversas**: `api.searchConversations` (título + conteúdo) com
+  debounce de 160ms, mínimo 2 caracteres, token de corrida, limite 5, merge
+  sempre com matches locais normalizados (o `LIKE` do SQLite não dobra acentos)
+  e fallback local quando o backend falha. Enter abre a conversa; ⌘/Ctrl+Enter
+  fixa/desafixa sem fechar; resultado só em conteúdo mostra o selo “Conteúdo”
+  (o IPC não devolve trecho de mensagem).
+- **Busca de comandos**: normalização NFD, multi-token, fuzzy com subsequência,
+  ranking por campo (label > keywords > description > grupo) + recência,
+  destaque `<mark>` e recentes em `localStorage` (`lumina.palette.recents`).
+- **Catálogo único** em `src/components/palette/usePaletteActions.ts` (31
+  comandos capability-aware: conversas, navegação, ferramentas, aparência,
+  configurações com deep-link por aba, sistema). Grupos/ordem em
+  `src/lib/palette/types.ts`; abas em `src/lib/settingsTabs.ts` (fonte única,
+  compartilhada com `SettingsDialog`; “Configurar” do ModelPicker abre
+  Provedores).
+- **Teclado**: ↑/↓ com wrap, Ctrl+N/P, Home/End, PageUp/PageDown, Enter,
+  ⌘/Ctrl+Enter secundário, Esc limpa a busca antes de fechar (dono único em
+  `DialogContent.onEscapeKeyDown`), guarda de composição IME. Atalhos globais
+  resolvidos por `src/lib/hotkeys.ts` (com a paleta aberta só ⌘K age).
+- **Foco/estados**: comandos que abrem outra superfície executam no tick
+  seguinte ao fechamento (foco do Radix restaurado antes); loading, fallback,
+  vazio, `aria-live`, `role="group"` e `aria-activedescendant` com
+  `aria-label` explícito (o destaque em spans quebrava o nome acessível).
+- **Arquivos novos**: `src/lib/palette/{types,search,recents}.ts`,
+  `src/lib/settingsTabs.ts`, `src/lib/hotkeys.ts`,
+  `src/components/palette/{usePaletteActions,useConversationSearch}.ts`,
+  `{PaletteRow,ConversationRow,HighlightedText}.tsx`,
+  `src/components/settings/tabIcons.ts`; testes
+  `src/lib/palette/__tests__/*`, `src/lib/__tests__/hotkeys.test.ts`,
+  `src/components/palette/CommandPalette.test.tsx`.
+- **Evidências**: `pnpm typecheck` OK; `pnpm test` **58 arquivos / 1267
+  testes** (baseline: 53/1176; +91: busca 32, recents 8, hotkeys 8, paleta 33,
+  SettingsDialog 3, uiStore +7); `pnpm build` OK. Sem mudanças de backend
+  (`cargo` não alterado).
+
 ## 15. Critérios de aceite
 
 1. `run_code` habilitado gera DOCX, XLSX, PPTX e PDF via scripts das skills, e

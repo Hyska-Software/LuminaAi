@@ -11,6 +11,7 @@ import { SkillsView } from '@/components/skills';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { TooltipProvider } from '@/components/ui';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { resolveHotkey, type HotkeyCommand } from '@/lib/hotkeys';
 import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { SplashScreen } from '@/components/SplashScreen';
@@ -39,16 +40,41 @@ function applyFontScale(scale: number) {
   document.documentElement.style.fontSize = `${(16 * safe).toFixed(2)}px`;
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  return (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    tag === 'SELECT' ||
-    target.isContentEditable ||
-    target.closest('[contenteditable="true"]') !== null
-  );
+/** Runs the command resolved by `lib/hotkeys`. */
+function runHotkey(command: HotkeyCommand, event: KeyboardEvent): void {
+  const ui = useUiStore.getState();
+  const chat = useChatStore.getState();
+  event.preventDefault();
+  switch (command) {
+    case 'toggle-command-palette':
+      ui.setCommandPaletteOpen(!ui.commandPaletteOpen);
+      break;
+    case 'toggle-sidebar':
+      ui.toggleSidebar();
+      break;
+    case 'new-conversation':
+      void chat.startNewConversation();
+      break;
+    case 'open-settings':
+      ui.openSettings();
+      break;
+    case 'close-overlays':
+      ui.closeAllOverlays();
+      ui.closeArtifactPanel();
+      ui.closeSourcesPanel();
+      break;
+    case 'return-to-chat':
+      ui.setActiveView('chat');
+      break;
+    case 'stop-streaming':
+      void chat.stop();
+      break;
+    case 'focus-composer':
+      window.dispatchEvent(new CustomEvent('lumina:focus-composer'));
+      break;
+    default:
+      break;
+  }
 }
 
 export default function App() {
@@ -99,60 +125,21 @@ export default function App() {
     useAppStore.getState().setError(null);
   }, [error]);
 
-  // Global keyboard shortcuts.
+  // Global keyboard shortcuts. The decision itself is pure (lib/hotkeys), so
+  // precedence (palette ownership, Esc cascade, editable targets) is unit-tested.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      // Overlays may consume the key first (e.g. the model picker clears its
-      // search on Escape before the dialog closes).
-      if (event.defaultPrevented) return;
-      const mod = event.metaKey || event.ctrlKey;
       const ui = useUiStore.getState();
-      if (mod && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        ui.setCommandPaletteOpen(!ui.commandPaletteOpen);
-        return;
-      }
-      if (mod && event.key.toLowerCase() === 'b') {
-        event.preventDefault();
-        ui.toggleSidebar();
-        return;
-      }
-      if (mod && event.key.toLowerCase() === 'n') {
-        event.preventDefault();
-        void useChatStore.getState().startNewConversation();
-        return;
-      }
-      if (mod && event.key === ',') {
-        event.preventDefault();
-        ui.setSettingsOpen(true);
-        return;
-      }
-      if (event.key === 'Escape') {
-        if (ui.commandPaletteOpen) {
-          ui.setCommandPaletteOpen(false);
-          return;
-        }
-        if (ui.modelPickerOpen || ui.settingsOpen || ui.artifactPanelOpen || ui.sourcesPanelOpen) {
-          ui.closeAllOverlays();
-          ui.closeArtifactPanel();
-          ui.closeSourcesPanel();
-          return;
-        }
-        // Skills is a main view, not an overlay: Escape returns to the chat.
-        if (ui.activeView === 'skills') {
-          ui.setActiveView('chat');
-          return;
-        }
-        if (useChatStore.getState().streaming) {
-          void useChatStore.getState().stop();
-        }
-        return;
-      }
-      if (mod && event.key.toLowerCase() === 'j' && !isEditableTarget(event.target)) {
-        // Focus composer shortcut.
-        event.preventDefault();
-        window.dispatchEvent(new CustomEvent('lumina:focus-composer'));
-      }
+      const command = resolveHotkey(event, {
+        commandPaletteOpen: ui.commandPaletteOpen,
+        modelPickerOpen: ui.modelPickerOpen,
+        settingsOpen: ui.settingsOpen,
+        artifactPanelOpen: ui.artifactPanelOpen,
+        sourcesPanelOpen: ui.sourcesPanelOpen,
+        skillsView: ui.activeView === 'skills',
+        streaming: useChatStore.getState().streaming !== null,
+      });
+      if (command) runHotkey(command, event);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
