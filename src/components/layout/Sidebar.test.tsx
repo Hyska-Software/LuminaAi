@@ -99,6 +99,15 @@ describe('Sidebar — largura controlada pelo AppShell', () => {
     expect(aside.className).toContain('w-full');
     expect(aside.className).not.toContain('w-[272px]');
   });
+
+  it('funde-se ao chrome: fundo surface e nenhuma borda divisória à direita', () => {
+    render(<Sidebar />);
+
+    const aside = screen.getByRole('complementary', { name: 'Conversas' });
+    expect(aside.className).toContain('bg-surface');
+    // A divisão com o chat é o canto arredondado do painel, não uma linha.
+    expect(aside.className).not.toContain('border-r');
+  });
 });
 
 describe('Sidebar — item Skills', () => {

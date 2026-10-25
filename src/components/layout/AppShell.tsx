@@ -95,7 +95,7 @@ export function AppShell({ children, rightPanel, overlays }: AppShellProps) {
   const transition = { duration: reduceMotion ? 0 : 0.22, ease: EASE_OUT_SOFT };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface text-foreground">
         <TitleBar />
 
         <div className="relative flex min-h-0 flex-1">
@@ -125,7 +125,12 @@ export function AppShell({ children, rightPanel, overlays }: AppShellProps) {
             </div>
           ) : null}
 
-          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
+          {/* The chat is a rounded pane over the chrome (DESIGN §5): the topbar
+              and sidebar share the `surface` background and no divider lines,
+              so only the top-left corner radius separates the two surfaces. */}
+          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-tl-lg bg-background">
+            {children}
+          </main>
 
           {rightPanel}
         </div>

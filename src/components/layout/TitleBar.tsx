@@ -99,7 +99,7 @@ export function TitleBar() {
       onDoubleClick={handleDragDoubleClick}
       className={cn(
         'drag-region relative z-30 flex h-14 shrink-0 select-none items-center gap-2',
-        'border-b border-border bg-surface pl-2 pr-1',
+        'bg-surface pl-2 pr-1',
       )}
     >
       <Tooltip

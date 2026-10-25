@@ -146,6 +146,23 @@ describe('AppShell — sidebar redimensionável', () => {
   });
 });
 
+describe('AppShell — chrome contínuo e painel do chat', () => {
+  it('separa o chat do topbar/sidebar por um painel arredondado, sem bordas', () => {
+    renderShell();
+
+    const main = screen.getByTestId('content').closest('main');
+    expect(main).not.toBeNull();
+    const mainClass = main?.className ?? '';
+    // Só o canto superior esquerdo encontra o chrome: é ele que arredonda.
+    expect(mainClass).toContain('rounded-tl-lg');
+    expect(mainClass).toContain('bg-background');
+    expect(mainClass).not.toContain('border');
+
+    // O chrome (TitleBar + Sidebar) compartilha a superfície contínua.
+    expect(main?.parentElement?.parentElement?.className).toContain('bg-surface');
+  });
+});
+
 describe('AppShell — painel lateral direito', () => {
   it('renders the right panel as the last child of the content row, outside <main>', () => {
     render(

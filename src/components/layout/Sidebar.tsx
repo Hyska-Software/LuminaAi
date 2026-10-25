@@ -257,7 +257,7 @@ export function Sidebar({ className, onClose }: SidebarProps) {
   return (
     <aside
       aria-label="Conversas"
-      className={cn('flex h-full w-full min-w-0 flex-col border-r border-border bg-surface', className)}
+      className={cn('flex h-full w-full min-w-0 flex-col bg-surface', className)}
     >
       <div className="flex items-center gap-1.5 px-3 pb-1.5 pt-3">
         <Button

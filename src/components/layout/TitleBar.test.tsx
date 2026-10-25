@@ -43,4 +43,15 @@ describe('TitleBar', () => {
     expect(screen.queryByRole('button', { name: /Selecionar modo de pensamento/ })).toBeNull();
     expect(screen.queryByRole('dialog', { name: 'Selecionar modelo' })).toBeNull();
   });
+
+  it('funde-se ao chrome: fundo surface e nenhuma borda inferior', async () => {
+    render(<TitleBar />);
+
+    await waitFor(() => expect(windowMock.isMaximized).toHaveBeenCalled());
+
+    const header = screen.getByRole('banner');
+    expect(header.className).toContain('bg-surface');
+    // A divisão com o chat é feita pelo canto arredondado do painel, não por linha.
+    expect(header.className).not.toContain('border');
+  });
 });
