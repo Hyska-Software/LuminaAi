@@ -89,25 +89,31 @@ describe('parseGenUI', () => {
       'grid',
       'tabs',
       'reveal',
+      'section',
       'table',
       'chart',
       'stat',
       'progress',
       'timeline',
       'steps',
+      'checklist',
       'callout',
       'quote',
+      'text',
       'code',
       'list',
       'image',
+      'source',
       'badge',
       'divider',
       'link',
       'keyvalue',
       'actions',
+      'choices',
     ]) {
       expect(GENUI_TYPES).toContain(type);
     }
+    expect(GENUI_TYPES).toHaveLength(26);
   });
 
   it('keeps the limits aligned with the shared contract', () => {

@@ -181,7 +181,10 @@ O contrato completo (sintaxe suportada, decisões e matriz de testes) está em
   rodapé, autolinks, riscado), `remark-math` + `rehype-katex` (`$…$` inline e
   `$$…$$` display), `rehype-raw` para HTML cru e, em seguida, o sanitizador
   próprio `rehypeSafeHtml` (allowlist de tags/attrs/URLs, roda **antes** do
-  KaTeX para não descartar a saída dele).
+  KaTeX para não descartar a saída dele). Antes do parse, `protectEscapedDollars`
+  protege `\$` (o micromark de math não trata `\$` como escape e fecharia o span
+  antes da hora); `remarkRestoreMathDollars` devolve `\$` ao conteúdo de math e
+  `$` à prosa/código após o parse.
 - **Componentes**: código cercado com header de linguagem + botão copiar
   (Prism); fences especiais `ui`, `mermaid`, `chart`, `html`, `svg`; links
   externos e `mailto:` via plugin-opener; âncoras internas (notas de rodapé);
@@ -230,13 +233,17 @@ seguir. Ele é consumido pelos três lados, sem listas duplicadas:
    (`number`→`text`, string numérica→`number`, enum case-insensitive), formas
    legadas (`labels`+`values`→`data`, `keyvalue` objeto→`items`), truncamento
    de textos/arrays nos limites rígidos, clamp de `progress`/`grid.columns`.
-2. **Validação estrutural** contra o contrato: whitelist de 21 componentes
-   (`card`, `stack`, `grid`, `tabs`, `reveal`, `divider`, `table`, `chart`,
-   `stat`, `progress`, `timeline`, `steps`, `keyvalue`, `list`, `code`,
-   `quote`, `callout`, `badge`, `image`, `link`, `actions`), props
-   obrigatórias/tipos/enums/URLs, `children` só em containers, profundidade 8
-   e 120 nós. Erro → o bloco degrada para código com o diagnóstico exato.
-3. **Lint de design**: 27 regras do contrato (hierarquia, densidade, copy
+2. **Validação estrutural** contra o contrato: whitelist de 26 componentes
+   (`card`, `stack`, `grid`, `tabs`, `reveal`, `section`, `divider`, `table`,
+   `chart`, `stat`, `progress`, `timeline`, `steps`, `checklist`, `keyvalue`,
+   `list`, `code`, `quote`, `text`, `callout`, `badge`, `image`, `source`,
+   `link`, `actions`, `choices`), props obrigatórias/tipos/enums/URLs,
+   `children` só em containers, profundidade 8 e 120 nós. Erro → o bloco
+   degrada para código com o diagnóstico exato.
+   `callout` está **descontinuado** para novas respostas (regra
+   `ui.callout-style`): notas/ressalvas vão em Markdown; o componente segue
+   renderizando mensagens antigas.
+3. **Lint de design**: 30 regras do contrato (hierarquia, densidade, copy
    pt-BR, acessibilidade, interação) viram avisos com `code`/`path`/`hint`.
    Avisos não bloqueiam: a árvore normalizada é renderizada. O máximo de blocos
    por mensagem é orientação do prompt (`blocks.maxPerMessage`), não regra de
@@ -255,9 +262,13 @@ a emissão final.
 ### Interação
 
 `actions` são declarativas e seguras: `prompt` **preenche o composer** (evento
-`lumina:suggest`) — nunca envia sozinho — e `copy` copia texto. `tabs` e
-`reveal` usam Radix/`<details>` do design system. Não existem campos de
-formulário dentro da interface (o composer é o input).
+`lumina:suggest`) — nunca envia sozinho — e `copy` copia texto. `choices` é um
+formulário de seleção **com estado local** (rádio/checkbox/segmentado, contador
+e progresso sincronizados); o botão de envio preenche o composer com
+`submitPrefix + seleção`, mantendo a regra de ouro: a interface nunca dispara um
+turno sozinha. `tabs` e `reveal` usam Radix/`<details>` do design system; não há
+inputs de texto livres dentro da interface (o composer é o único campo de
+texto).
 
 ### Garantias
 

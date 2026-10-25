@@ -415,7 +415,10 @@
             ]
           }
         ]
-      }
+      },
+      "warnings": [
+        "ui.callout-style"
+      ]
     },
     {
       "name": "badge isolado",
@@ -525,7 +528,7 @@
     },
     {
       "name": "exemplo do system prompt é válido",
-      "source": "{\n  \"version\": 2,\n  \"components\": [\n    {\n      \"type\": \"card\",\n      \"props\": {\n        \"title\": \"Receita do trimestre\",\n        \"subtitle\": \"Consolidado por mês e por canal\"\n      },\n      \"children\": [\n        {\n          \"type\": \"grid\",\n          \"props\": { \"columns\": 2 },\n          \"children\": [\n            {\n              \"type\": \"stat\",\n              \"props\": {\n                \"label\": \"Receita\",\n                \"value\": \"R$ 12,4 mi\",\n                \"trend\": \"up\",\n                \"hint\": \"+12% vs. trimestre anterior\"\n              }\n            },\n            {\n              \"type\": \"stat\",\n              \"props\": {\n                \"label\": \"Churn\",\n                \"value\": \"3,1%\",\n                \"trend\": \"down\",\n                \"hint\": \"Menor valor em 12 meses\"\n              }\n            }\n          ]\n        },\n        {\n          \"type\": \"chart\",\n          \"props\": {\n            \"type\": \"bar\",\n            \"title\": \"Receita mensal (R$ milhões)\",\n            \"suffix\": \" mi\",\n            \"data\": [\n              { \"label\": \"Jul\", \"value\": 3.8 },\n              { \"label\": \"Ago\", \"value\": 4.1 },\n              { \"label\": \"Set\", \"value\": 4.5 }\n            ]\n          }\n        },\n        {\n          \"type\": \"table\",\n          \"props\": {\n            \"columns\": [\"Canal\", \"Receita\", \"Crescimento\"],\n            \"rows\": [\n              [\"Direto\", \"R$ 6,2 mi\", \"+9%\"],\n              [\"Parceiros\", \"R$ 4,1 mi\", \"+15%\"],\n              [\"Marketplace\", \"R$ 2,1 mi\", \"+6%\"]\n            ]\n          }\n        },\n        {\n          \"type\": \"callout\",\n          \"props\": {\n            \"variant\": \"warning\",\n            \"title\": \"Atenção\",\n            \"text\": \"A margem bruta caiu 2 pontos por causa do desconto no marketplace.\"\n          }\n        },\n        {\n          \"type\": \"actions\",\n          \"props\": {\n            \"items\": [\n              {\n                \"label\": \"Comparar com o trimestre anterior\",\n                \"prompt\": \"Compare a receita deste trimestre com a do trimestre anterior, canal por canal.\",\n                \"tone\": \"primary\",\n                \"icon\": \"arrow-right\"\n              },\n              {\n                \"label\": \"Gerar plano de margem\",\n                \"prompt\": \"Monte um plano de ações para recuperar 2 pontos de margem no próximo trimestre.\",\n                \"icon\": \"lightbulb\"\n              }\n            ]\n          }\n        }\n      ]\n    }\n  ]\n}\n",
+      "source": "{\"version\":2,\"components\":[{\"type\":\"card\",\"props\":{\"title\":\"Receita do trimestre\",\"subtitle\":\"Consolidado por mês e por canal\"},\"children\":[{\"type\":\"grid\",\"props\":{\"columns\":2},\"children\":[{\"type\":\"stat\",\"props\":{\"label\":\"Receita\",\"value\":\"R$ 12,4 mi\",\"trend\":\"up\",\"hint\":\"+12% vs. trimestre anterior\"}},{\"type\":\"stat\",\"props\":{\"label\":\"Churn\",\"value\":\"3,1%\",\"trend\":\"down\",\"hint\":\"Menor valor em 12 meses\"}}]},{\"type\":\"chart\",\"props\":{\"type\":\"bar\",\"title\":\"Receita mensal (R$ milhões)\",\"suffix\":\" mi\",\"data\":[{\"label\":\"Jul\",\"value\":3.8},{\"label\":\"Ago\",\"value\":4.1},{\"label\":\"Set\",\"value\":4.5}]}},{\"type\":\"table\",\"props\":{\"columns\":[\"Canal\",\"Receita\",\"Crescimento\"],\"rows\":[[\"Direto\",\"R$ 6,2 mi\",\"+9%\"],[\"Parceiros\",\"R$ 4,1 mi\",\"+15%\"],[\"Marketplace\",\"R$ 2,1 mi\",\"+6%\"]]}},{\"type\":\"quote\",\"props\":{\"text\":\"A margem bruta caiu 2 pontos por causa do desconto no marketplace.\",\"cite\":\"Relatório financeiro\"}},{\"type\":\"actions\",\"props\":{\"items\":[{\"label\":\"Comparar com o trimestre anterior\",\"prompt\":\"Compare a receita deste trimestre com a do trimestre anterior, canal por canal.\",\"tone\":\"primary\",\"icon\":\"arrow-right\"},{\"label\":\"Gerar plano de margem\",\"prompt\":\"Monte um plano de ações para recuperar 2 pontos de margem no próximo trimestre.\",\"icon\":\"lightbulb\"}]}}]}]}",
       "normalized": {
         "components": [
           {
@@ -611,11 +614,10 @@
                 }
               },
               {
-                "type": "callout",
+                "type": "quote",
                 "props": {
-                  "variant": "warning",
-                  "title": "Atenção",
-                  "text": "A margem bruta caiu 2 pontos por causa do desconto no marketplace."
+                  "text": "A margem bruta caiu 2 pontos por causa do desconto no marketplace.",
+                  "cite": "Relatório financeiro"
                 }
               },
               {
@@ -643,7 +645,7 @@
     },
     {
       "name": "exemplo mínimo é válido",
-      "source": "{\n  \"version\": 2,\n  \"components\": [\n    {\n      \"type\": \"stack\",\n      \"props\": { \"gap\": \"md\" },\n      \"children\": [\n        {\n          \"type\": \"callout\",\n          \"props\": {\n            \"variant\": \"info\",\n            \"title\": \"Resumo\",\n            \"text\": \"Três pontos merecem atenção antes de fechar o trimestre.\"\n          },\n          \"children\": [\n            {\n              \"type\": \"list\",\n              \"props\": {\n                \"items\": [\n                  { \"text\": \"Margem bruta caiu 2 pontos\" },\n                  { \"text\": \"Marketplace cresceu acima do plano\" },\n                  { \"text\": \"Churn estável no plano base\" }\n                ]\n              }\n            }\n          ]\n        },\n        {\n          \"type\": \"actions\",\n          \"props\": {\n            \"items\": [\n              {\n                \"label\": \"Ver detalhes por canal\",\n                \"prompt\": \"Detalhe a receita e a margem por canal no trimestre.\",\n                \"tone\": \"primary\"\n              }\n            ]\n          }\n        }\n      ]\n    }\n  ]\n}\n",
+      "source": "{\"version\":2,\"components\":[{\"type\":\"stack\",\"props\":{\"gap\":\"md\"},\"children\":[{\"type\":\"reveal\",\"props\":{\"title\":\"Ressalvas do trimestre\"},\"children\":[{\"type\":\"list\",\"props\":{\"items\":[{\"text\":\"Margem bruta caiu 2 pontos\"},{\"text\":\"Marketplace cresceu acima do plano\"},{\"text\":\"Churn estável no plano base\"}]}}]},{\"type\":\"actions\",\"props\":{\"items\":[{\"label\":\"Ver detalhes por canal\",\"prompt\":\"Detalhe a receita e a margem por canal no trimestre.\",\"tone\":\"primary\"}]}}]}]}",
       "normalized": {
         "components": [
           {
@@ -653,11 +655,9 @@
             },
             "children": [
               {
-                "type": "callout",
+                "type": "reveal",
                 "props": {
-                  "variant": "info",
-                  "title": "Resumo",
-                  "text": "Três pontos merecem atenção antes de fechar o trimestre."
+                  "title": "Ressalvas do trimestre"
                 },
                 "children": [
                   {
@@ -927,6 +927,7 @@
       "name": "enum com caixa diferente é canonicalizado",
       "source": "{\"components\":[{\"type\":\"callout\",\"props\":{\"variant\":\"Warning\",\"text\":\"ok\"}}]}",
       "warnings": [
+        "ui.callout-style",
         "ui.coerced"
       ],
       "normalized": {
@@ -2971,6 +2972,691 @@
           }
         ]
       }
+    },
+    {
+      "name": "feed de notícias com section, imagens e fontes",
+      "source": "{\"components\":[{\"type\":\"section\",\"props\":{\"eyebrow\":\"VCT Américas\",\"icon\":\"flame\",\"title\":\"Principais notícias\"},\"children\":[{\"type\":\"stack\",\"props\":{\"gap\":\"md\"},\"children\":[{\"type\":\"stack\",\"props\":{\"direction\":\"row\",\"gap\":\"md\",\"align\":\"start\"},\"children\":[{\"type\":\"image\",\"props\":{\"src\":\"https://example.com/mibr.png\",\"alt\":\"Equipe da MIBR no palco\",\"size\":\"thumb\"}},{\"type\":\"stack\",\"props\":{\"gap\":\"sm\"},\"children\":[{\"type\":\"stack\",\"props\":{\"direction\":\"row\",\"gap\":\"sm\",\"align\":\"center\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"Confirmado\",\"tone\":\"success\",\"icon\":\"check\"}},{\"type\":\"text\",\"props\":{\"text\":\"23 de outubro\",\"variant\":\"small\"}}]},{\"type\":\"text\",\"props\":{\"text\":\"MIBR coloca todo o elenco no banco\",\"variant\":\"strong\"}},{\"type\":\"text\",\"props\":{\"text\":\"Aspeas, zekken, Verno, Mazino e tex estão disponíveis para negociações. Os contratos continuam válidos, portanto isso não significa que todos serão vendidos ou dispensados.\"}},{\"type\":\"stack\",\"props\":{\"direction\":\"row\",\"gap\":\"sm\",\"wrap\":true},\"children\":[{\"type\":\"source\",\"props\":{\"label\":\"strafe.com\",\"href\":\"https://strafe.com\"}}]}]}]},{\"type\":\"divider\"},{\"type\":\"stack\",\"props\":{\"direction\":\"row\",\"gap\":\"md\",\"align\":\"start\"},\"children\":[{\"type\":\"image\",\"props\":{\"src\":\"https://example.com/loud.png\",\"alt\":\"Equipe da LOUD em campeonato\",\"size\":\"thumb\"}},{\"type\":\"stack\",\"props\":{\"gap\":\"sm\"},\"children\":[{\"type\":\"stack\",\"props\":{\"direction\":\"row\",\"gap\":\"sm\",\"align\":\"center\"},\"children\":[{\"type\":\"badge\",\"props\":{\"label\":\"Mercado em aberto\",\"tone\":\"warning\",\"icon\":\"clock\"}},{\"type\":\"text\",\"props\":{\"text\":\"19 de outubro\",\"variant\":\"small\"}}]},{\"type\":\"text\",\"props\":{\"text\":\"FURIA perde a vaga de parceira no VCT\",\"variant\":\"strong\"}},{\"type\":\"text\",\"props\":{\"text\":\"A organização ainda pode competir pelos classificatórios abertos de 2027.\"}},{\"type\":\"stack\",\"props\":{\"direction\":\"row\",\"gap\":\"sm\",\"wrap\":true},\"children\":[{\"type\":\"source\",\"props\":{\"label\":\"sheesports.com\",\"href\":\"https://sheesports.com\"}}]}]}]}]}]}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "section",
+            "props": {
+              "title": "Principais notícias",
+              "eyebrow": "VCT Américas",
+              "icon": "flame"
+            },
+            "children": [
+              {
+                "type": "stack",
+                "props": {
+                  "gap": "md"
+                },
+                "children": [
+                  {
+                    "type": "stack",
+                    "props": {
+                      "direction": "row",
+                      "gap": "md",
+                      "align": "start"
+                    },
+                    "children": [
+                      {
+                        "type": "image",
+                        "props": {
+                          "src": "https://example.com/mibr.png",
+                          "alt": "Equipe da MIBR no palco",
+                          "size": "thumb"
+                        }
+                      },
+                      {
+                        "type": "stack",
+                        "props": {
+                          "gap": "sm"
+                        },
+                        "children": [
+                          {
+                            "type": "stack",
+                            "props": {
+                              "direction": "row",
+                              "gap": "sm",
+                              "align": "center"
+                            },
+                            "children": [
+                              {
+                                "type": "badge",
+                                "props": {
+                                  "label": "Confirmado",
+                                  "tone": "success",
+                                  "icon": "check"
+                                }
+                              },
+                              {
+                                "type": "text",
+                                "props": {
+                                  "text": "23 de outubro",
+                                  "variant": "small"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "type": "text",
+                            "props": {
+                              "text": "MIBR coloca todo o elenco no banco",
+                              "variant": "strong"
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "props": {
+                              "text": "Aspeas, zekken, Verno, Mazino e tex estão disponíveis para negociações. Os contratos continuam válidos, portanto isso não significa que todos serão vendidos ou dispensados."
+                            }
+                          },
+                          {
+                            "type": "stack",
+                            "props": {
+                              "direction": "row",
+                              "gap": "sm",
+                              "wrap": true
+                            },
+                            "children": [
+                              {
+                                "type": "source",
+                                "props": {
+                                  "label": "strafe.com",
+                                  "href": "https://strafe.com"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "divider"
+                  },
+                  {
+                    "type": "stack",
+                    "props": {
+                      "direction": "row",
+                      "gap": "md",
+                      "align": "start"
+                    },
+                    "children": [
+                      {
+                        "type": "image",
+                        "props": {
+                          "src": "https://example.com/loud.png",
+                          "alt": "Equipe da LOUD em campeonato",
+                          "size": "thumb"
+                        }
+                      },
+                      {
+                        "type": "stack",
+                        "props": {
+                          "gap": "sm"
+                        },
+                        "children": [
+                          {
+                            "type": "stack",
+                            "props": {
+                              "direction": "row",
+                              "gap": "sm",
+                              "align": "center"
+                            },
+                            "children": [
+                              {
+                                "type": "badge",
+                                "props": {
+                                  "label": "Mercado em aberto",
+                                  "tone": "warning",
+                                  "icon": "clock"
+                                }
+                              },
+                              {
+                                "type": "text",
+                                "props": {
+                                  "text": "19 de outubro",
+                                  "variant": "small"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "type": "text",
+                            "props": {
+                              "text": "FURIA perde a vaga de parceira no VCT",
+                              "variant": "strong"
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "props": {
+                              "text": "A organização ainda pode competir pelos classificatórios abertos de 2027."
+                            }
+                          },
+                          {
+                            "type": "stack",
+                            "props": {
+                              "direction": "row",
+                              "gap": "sm",
+                              "wrap": true
+                            },
+                            "children": [
+                              {
+                                "type": "source",
+                                "props": {
+                                  "label": "sheesports.com",
+                                  "href": "https://sheesports.com"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "card de evento com ícone, texto e fonte",
+      "source": "{\"components\":[{\"type\":\"card\",\"props\":{\"title\":\"Próxima data importante\",\"icon\":\"calendar\"},\"children\":[{\"type\":\"text\",\"props\":{\"text\":\"2 de novembro de 2026\",\"variant\":\"lead\"}},{\"type\":\"text\",\"props\":{\"text\":\"É quando as equipes poderão formalizar novas contratações para o VCT 2027.\"}},{\"type\":\"stack\",\"props\":{\"direction\":\"row\",\"gap\":\"sm\",\"wrap\":true},\"children\":[{\"type\":\"source\",\"props\":{\"label\":\"pichauarena.com.br\",\"href\":\"https://pichauarena.com.br\"}}]}]}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "card",
+            "props": {
+              "title": "Próxima data importante",
+              "icon": "calendar"
+            },
+            "children": [
+              {
+                "type": "text",
+                "props": {
+                  "text": "2 de novembro de 2026",
+                  "variant": "lead"
+                }
+              },
+              {
+                "type": "text",
+                "props": {
+                  "text": "É quando as equipes poderão formalizar novas contratações para o VCT 2027."
+                }
+              },
+              {
+                "type": "stack",
+                "props": {
+                  "direction": "row",
+                  "gap": "sm",
+                  "wrap": true
+                },
+                "children": [
+                  {
+                    "type": "source",
+                    "props": {
+                      "label": "pichauarena.com.br",
+                      "href": "https://pichauarena.com.br"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "checklist de simulação",
+      "source": "{\"components\":[{\"type\":\"checklist\",\"props\":{\"items\":[{\"label\":\"Receber objetivo\",\"description\":\"Encontrar e qualificar 20 clínicas para prospecção comercial.\",\"status\":\"done\"},{\"label\":\"Planejamento\",\"description\":\"Etapa desabilitada\",\"status\":\"disabled\"},{\"label\":\"Buscar contexto\",\"description\":\"Consultar dados e critérios comerciais atualizados\",\"status\":\"done\"},{\"label\":\"Verificar execução\",\"description\":\"Etapa desabilitada\",\"status\":\"disabled\"}]}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "checklist",
+            "props": {
+              "items": [
+                {
+                  "label": "Receber objetivo",
+                  "description": "Encontrar e qualificar 20 clínicas para prospecção comercial.",
+                  "status": "done"
+                },
+                {
+                  "label": "Planejamento",
+                  "description": "Etapa desabilitada",
+                  "status": "disabled"
+                },
+                {
+                  "label": "Buscar contexto",
+                  "description": "Consultar dados e critérios comerciais atualizados",
+                  "status": "done"
+                },
+                {
+                  "label": "Verificar execução",
+                  "description": "Etapa desabilitada",
+                  "status": "disabled"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "choices single com envio",
+      "source": "{\"components\":[{\"type\":\"choices\",\"props\":{\"label\":\"Missão\",\"mode\":\"single\",\"layout\":\"list\",\"default\":[\"Agente pesquisador\"],\"options\":[{\"label\":\"Agente de CRM e captação de leads\",\"description\":\"Qualifica leads e organiza o funil comercial.\"},{\"label\":\"Agente programador\",\"description\":\"Implementa, revisa e testa código.\"},{\"label\":\"Agente pesquisador\",\"description\":\"Busca, compara e consolida fontes.\"}],\"submitLabel\":\"Enviar missão\",\"submitPrefix\":\"Configurar agente com a missão: \"}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "choices",
+            "props": {
+              "label": "Missão",
+              "mode": "single",
+              "layout": "list",
+              "options": [
+                {
+                  "label": "Agente de CRM e captação de leads",
+                  "description": "Qualifica leads e organiza o funil comercial."
+                },
+                {
+                  "label": "Agente programador",
+                  "description": "Implementa, revisa e testa código."
+                },
+                {
+                  "label": "Agente pesquisador",
+                  "description": "Busca, compara e consolida fontes."
+                }
+              ],
+              "default": [
+                "Agente pesquisador"
+              ],
+              "submitLabel": "Enviar missão",
+              "submitPrefix": "Configurar agente com a missão: "
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "choices multiple com contador",
+      "source": "{\"components\":[{\"type\":\"choices\",\"props\":{\"label\":\"Capacidades\",\"mode\":\"multiple\",\"layout\":\"list\",\"countLabel\":\"Capacidades habilitadas\",\"default\":[\"RAG e contexto\",\"Memória persistente\"],\"options\":[{\"label\":\"Planejamento\",\"description\":\"Divide objetivos complexos em tarefas menores.\"},{\"label\":\"RAG e contexto\",\"description\":\"Recupera informações relevantes quando necessário.\"},{\"label\":\"Ferramentas\",\"description\":\"Executa ações reais com APIs, código e serviços.\"},{\"label\":\"Memória persistente\",\"description\":\"Guarda informações úteis entre sessões e tarefas.\"}],\"submitLabel\":\"Enviar capacidades\",\"submitPrefix\":\"Configurar agente com as capacidades: \"}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "choices",
+            "props": {
+              "label": "Capacidades",
+              "mode": "multiple",
+              "layout": "list",
+              "options": [
+                {
+                  "label": "Planejamento",
+                  "description": "Divide objetivos complexos em tarefas menores."
+                },
+                {
+                  "label": "RAG e contexto",
+                  "description": "Recupera informações relevantes quando necessário."
+                },
+                {
+                  "label": "Ferramentas",
+                  "description": "Executa ações reais com APIs, código e serviços."
+                },
+                {
+                  "label": "Memória persistente",
+                  "description": "Guarda informações úteis entre sessões e tarefas."
+                }
+              ],
+              "default": [
+                "RAG e contexto",
+                "Memória persistente"
+              ],
+              "countLabel": "Capacidades habilitadas",
+              "submitLabel": "Enviar capacidades",
+              "submitPrefix": "Configurar agente com as capacidades: "
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "choices segmentado",
+      "source": "{\"components\":[{\"type\":\"choices\",\"props\":{\"label\":\"Modelo base\",\"mode\":\"single\",\"layout\":\"segmented\",\"default\":[\"Modelo básico\"],\"options\":[{\"label\":\"Modelo básico\",\"description\":\"Menor custo por chamada, mas pode ter dificuldade em problemas complexos.\"},{\"label\":\"Modelo mais capaz\",\"description\":\"Maior custo, melhor em tarefas complexas e raciocínio longo.\"}],\"submitLabel\":\"Escolher modelo\",\"submitPrefix\":\"Usar o \"}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "choices",
+            "props": {
+              "label": "Modelo base",
+              "mode": "single",
+              "layout": "segmented",
+              "options": [
+                {
+                  "label": "Modelo básico",
+                  "description": "Menor custo por chamada, mas pode ter dificuldade em problemas complexos."
+                },
+                {
+                  "label": "Modelo mais capaz",
+                  "description": "Maior custo, melhor em tarefas complexas e raciocínio longo."
+                }
+              ],
+              "default": [
+                "Modelo básico"
+              ],
+              "submitLabel": "Escolher modelo",
+              "submitPrefix": "Usar o "
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "lista com links externos",
+      "source": "{\"components\":[{\"type\":\"list\",\"props\":{\"items\":[{\"text\":\"VLR.gg\",\"description\":\"Transferências atualizadas\",\"href\":\"https://www.vlr.gg\"},{\"text\":\"THESPIKE Brasil\",\"description\":\"Notícias e bastidores\",\"href\":\"https://www.thespike.gg\"},{\"text\":\"Vzone\",\"description\":\"Vai e vem do VALORANT\",\"href\":\"https://vzone.gg\"}]}}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "list",
+            "props": {
+              "items": [
+                {
+                  "text": "VLR.gg",
+                  "description": "Transferências atualizadas",
+                  "href": "https://www.vlr.gg"
+                },
+                {
+                  "text": "THESPIKE Brasil",
+                  "description": "Notícias e bastidores",
+                  "href": "https://www.thespike.gg"
+                },
+                {
+                  "text": "Vzone",
+                  "description": "Vai e vem do VALORANT",
+                  "href": "https://vzone.gg"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "imagem avatar e texto forte",
+      "source": "{\"components\":[{\"type\":\"stack\",\"props\":{\"direction\":\"row\",\"gap\":\"md\",\"align\":\"center\"},\"children\":[{\"type\":\"image\",\"props\":{\"src\":\"https://example.com/avatar.png\",\"alt\":\"Foto do autor\",\"size\":\"avatar\"}},{\"type\":\"stack\",\"props\":{\"gap\":\"sm\"},\"children\":[{\"type\":\"text\",\"props\":{\"text\":\"Análise do mercado\",\"variant\":\"strong\"}},{\"type\":\"text\",\"props\":{\"text\":\"Leitura baseada em fontes públicas.\",\"variant\":\"muted\"}}]}]}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "stack",
+            "props": {
+              "direction": "row",
+              "gap": "md",
+              "align": "center"
+            },
+            "children": [
+              {
+                "type": "image",
+                "props": {
+                  "src": "https://example.com/avatar.png",
+                  "alt": "Foto do autor",
+                  "size": "avatar"
+                }
+              },
+              {
+                "type": "stack",
+                "props": {
+                  "gap": "sm"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "props": {
+                      "text": "Análise do mercado",
+                      "variant": "strong"
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "props": {
+                      "text": "Leitura baseada em fontes públicas.",
+                      "variant": "muted"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "exemplo interativo é válido",
+      "source": "{\"version\":2,\"components\":[{\"type\":\"section\",\"props\":{\"eyebrow\":\"Laboratório interativo\",\"icon\":\"sparkles\",\"title\":\"Configure seu agente\",\"description\":\"Ajuste a missão e as capacidades; a simulação mostra o que muda.\"},\"children\":[{\"type\":\"choices\",\"props\":{\"label\":\"Missão\",\"mode\":\"single\",\"layout\":\"list\",\"default\":[\"Agente de CRM e captação de leads\"],\"options\":[{\"label\":\"Agente de CRM e captação de leads\",\"description\":\"Qualifica leads e organiza o funil comercial.\"},{\"label\":\"Agente programador\",\"description\":\"Implementa, revisa e testa código.\"},{\"label\":\"Agente pesquisador\",\"description\":\"Busca, compara e consolida fontes.\"}],\"submitLabel\":\"Enviar missão\",\"submitPrefix\":\"Configurar agente com a missão: \"}},{\"type\":\"choices\",\"props\":{\"label\":\"Capacidades\",\"mode\":\"multiple\",\"layout\":\"list\",\"countLabel\":\"Capacidades habilitadas\",\"default\":[\"RAG e contexto\",\"Memória persistente\"],\"options\":[{\"label\":\"Planejamento\",\"description\":\"Divide objetivos complexos em tarefas menores.\"},{\"label\":\"RAG e contexto\",\"description\":\"Recupera informações relevantes quando necessário.\"},{\"label\":\"Ferramentas\",\"description\":\"Executa ações reais com APIs, código e serviços.\"},{\"label\":\"Memória persistente\",\"description\":\"Guarda informações úteis entre sessões e tarefas.\"},{\"label\":\"Verificação e autocorreção\",\"description\":\"Testa resultados e corrige erros detectados.\"}],\"submitLabel\":\"Enviar capacidades\",\"submitPrefix\":\"Configurar agente com as capacidades: \"}},{\"type\":\"checklist\",\"props\":{\"items\":[{\"label\":\"Receber objetivo\",\"description\":\"Encontrar e qualificar 20 clínicas para prospecção comercial.\",\"status\":\"done\"},{\"label\":\"Planejamento\",\"description\":\"Etapa desabilitada\",\"status\":\"disabled\"},{\"label\":\"Buscar contexto\",\"description\":\"Consultar dados e critérios comerciais atualizados\",\"status\":\"done\"},{\"label\":\"Verificar execução\",\"description\":\"Etapa desabilitada\",\"status\":\"disabled\"}]}}]}]}",
+      "normalized": {
+        "components": [
+          {
+            "type": "section",
+            "props": {
+              "title": "Configure seu agente",
+              "eyebrow": "Laboratório interativo",
+              "description": "Ajuste a missão e as capacidades; a simulação mostra o que muda.",
+              "icon": "sparkles"
+            },
+            "children": [
+              {
+                "type": "choices",
+                "props": {
+                  "label": "Missão",
+                  "mode": "single",
+                  "layout": "list",
+                  "options": [
+                    {
+                      "label": "Agente de CRM e captação de leads",
+                      "description": "Qualifica leads e organiza o funil comercial."
+                    },
+                    {
+                      "label": "Agente programador",
+                      "description": "Implementa, revisa e testa código."
+                    },
+                    {
+                      "label": "Agente pesquisador",
+                      "description": "Busca, compara e consolida fontes."
+                    }
+                  ],
+                  "default": [
+                    "Agente de CRM e captação de leads"
+                  ],
+                  "submitLabel": "Enviar missão",
+                  "submitPrefix": "Configurar agente com a missão: "
+                }
+              },
+              {
+                "type": "choices",
+                "props": {
+                  "label": "Capacidades",
+                  "mode": "multiple",
+                  "layout": "list",
+                  "options": [
+                    {
+                      "label": "Planejamento",
+                      "description": "Divide objetivos complexos em tarefas menores."
+                    },
+                    {
+                      "label": "RAG e contexto",
+                      "description": "Recupera informações relevantes quando necessário."
+                    },
+                    {
+                      "label": "Ferramentas",
+                      "description": "Executa ações reais com APIs, código e serviços."
+                    },
+                    {
+                      "label": "Memória persistente",
+                      "description": "Guarda informações úteis entre sessões e tarefas."
+                    },
+                    {
+                      "label": "Verificação e autocorreção",
+                      "description": "Testa resultados e corrige erros detectados."
+                    }
+                  ],
+                  "default": [
+                    "RAG e contexto",
+                    "Memória persistente"
+                  ],
+                  "countLabel": "Capacidades habilitadas",
+                  "submitLabel": "Enviar capacidades",
+                  "submitPrefix": "Configurar agente com as capacidades: "
+                }
+              },
+              {
+                "type": "checklist",
+                "props": {
+                  "items": [
+                    {
+                      "label": "Receber objetivo",
+                      "description": "Encontrar e qualificar 20 clínicas para prospecção comercial.",
+                      "status": "done"
+                    },
+                    {
+                      "label": "Planejamento",
+                      "description": "Etapa desabilitada",
+                      "status": "disabled"
+                    },
+                    {
+                      "label": "Buscar contexto",
+                      "description": "Consultar dados e critérios comerciais atualizados",
+                      "status": "done"
+                    },
+                    {
+                      "label": "Verificar execução",
+                      "description": "Etapa desabilitada",
+                      "status": "disabled"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "section sem cabeçalho",
+      "source": "{\"components\":[{\"type\":\"section\",\"children\":[{\"type\":\"text\",\"props\":{\"text\":\"Conteúdo sem título.\"}}]}]}",
+      "warnings": [
+        "ui.section-header"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "section",
+            "children": [
+              {
+                "type": "text",
+                "props": {
+                  "text": "Conteúdo sem título."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "choices sem ação de envio",
+      "source": "{\"components\":[{\"type\":\"choices\",\"props\":{\"options\":[{\"label\":\"Opção A\"},{\"label\":\"Opção B\"}]}}]}",
+      "warnings": [
+        "ui.choices-submit"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "choices",
+            "props": {
+              "options": [
+                {
+                  "label": "Opção A"
+                },
+                {
+                  "label": "Opção B"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "imagem com tamanho inválido usa default",
+      "source": "{\"components\":[{\"type\":\"image\",\"props\":{\"src\":\"https://example.com/x.png\",\"alt\":\"Exemplo\",\"size\":\"banner\"}}]}",
+      "warnings": [
+        "ui.enum-default"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "image",
+            "props": {
+              "src": "https://example.com/x.png",
+              "alt": "Exemplo",
+              "size": "full"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "texto acima do limite é truncado",
+      "source": "{\"components\":[{\"type\":\"text\",\"props\":{\"text\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]}",
+      "warnings": [
+        "ui.text-truncated"
+      ],
+      "normalized": {
+        "components": [
+          {
+            "type": "text",
+            "props": {
+              "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "source sem href",
+      "source": "{\"components\":[{\"type\":\"source\",\"props\":{\"label\":\"exemplo.com\"}}]}",
+      "errors": [
+        "ui.missing-prop"
+      ]
+    },
+    {
+      "name": "choices com uma opção",
+      "source": "{\"components\":[{\"type\":\"choices\",\"props\":{\"options\":[{\"label\":\"Só uma\"}],\"submitLabel\":\"Enviar\"}}]}",
+      "errors": [
+        "ui.array-size"
+      ]
+    },
+    {
+      "name": "checklist sem label no item",
+      "source": "{\"components\":[{\"type\":\"checklist\",\"props\":{\"items\":[{\"description\":\"Sem label\"}]}}]}",
+      "errors": [
+        "ui.missing-prop"
+      ]
+    },
+    {
+      "name": "text sem texto",
+      "source": "{\"components\":[{\"type\":\"text\",\"props\":{\"variant\":\"body\"}}]}",
+      "errors": [
+        "ui.missing-prop"
+      ]
+    },
+    {
+      "name": "item de lista com href inválido",
+      "source": "{\"components\":[{\"type\":\"list\",\"props\":{\"items\":[{\"text\":\"Link\",\"href\":\"ftp://example.com\"}]}}]}",
+      "errors": [
+        "ui.invalid-url"
+      ]
     }
   ]
 }

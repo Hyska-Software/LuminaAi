@@ -117,7 +117,8 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 - Botão enviar: círculo 32px, `bg-foreground` (light) / `bg-foreground` (dark), ícone `ArrowUp`; desabilitado quando vazio; vira `Square` (parar) durante streaming.
 - Anexar: seletor de arquivos nativo (`@tauri-apps/plugin-dialog`), também drag & drop na janela.
 - Pills de ferramentas: `Busca web` e `Criar arquivos` com estado on/off (accent-soft quando ligado).
-- Seletor de modelo (padrão, no composer e no titlebar): pill segmentado em duas partes — ① avatar + nome do modelo; ② rótulo do pensamento (ex.: "Alto"). O pill abre um **popover em duas etapas**: a lista de modelos (busca com foco automático, alternância Go/Zen, Favoritos + famílias) e, ao escolher um modelo, a mesma superfície troca para os **modos de pensamento** (Desligado / esforços / orçamento), com a descrição de cada modo e botão de voltar. Os **detalhes do modelo** (contexto, custo, protocolo, capacidades, favoritar) aparecem numa **bolha flutuante ao lado do popover**, como uma tooltip: surge no hover ou na navegação por teclado, nunca empurra o layout. O segmento ② abre direto a etapa de pensamento; modelos sem controle de raciocínio mostram o segmento desabilitado ("Padrão"). A busca do popover consulta os dois provedores. O item **"Ver todos os modelos…"** no rodapé abre o **seletor completo** (dialog) — não há botão extra na interface do chat.
+- Seletor de modelo (padrão, no composer e no titlebar): pill segmentado em duas partes — ① glifo da marca do modelo (LobeHub, mono, tingido por tokens) + nome; ② rótulo do pensamento (ex.: "Alto"). O pill abre um **popover em duas etapas**: a lista de modelos (busca com foco automático, alternância Go/Zen, Favoritos + famílias) e, ao escolher um modelo, a mesma superfície troca para os **modos de pensamento** (Desligado / esforços / orçamento), com a descrição de cada modo e botão de voltar. Os **detalhes do modelo** (contexto, custo, protocolo, capacidades, favoritar) aparecem numa **bolha flutuante ao lado do popover**, como uma tooltip: surge no hover ou na navegação por teclado, nunca empurra o layout. O segmento ② abre direto a etapa de pensamento; modelos sem controle de raciocínio mostram o segmento desabilitado ("Padrão"). A busca do popover consulta os dois provedores. O item **"Ver todos os modelos…"** no rodapé abre o **seletor completo** (dialog) — não há botão extra na interface do chat.
+- **Ícones de marca**: o avatar de cada modelo (pill, lista do popover, bolha de detalhes e dialog) usa os glifos oficiais da [LobeHub Icons](https://icons.lobehub.com) (`@lobehub/icons-static-svg`, MIT) na variante mono, tingidos pelo token de cor da família; famílias sem marca oficial caem nas iniciais do nome. Mapa, decisão e licença em `docs/MODEL_ICONS.md`.
 - **Bloqueio de modelo**: depois do primeiro envio o modelo da conversa fica travado (cadeado no pill, com explicação ao clicar) — trocar de modelo no meio da conversa misturaria respostas de modelos diferentes e invalidaria o replay do raciocínio. O **modo de pensamento continua ajustável** pelo segmento ✦. "Novo chat" volta ao modelo padrão configurado; ao abrir uma conversa existente, o seletor reflete o modelo com que ela foi iniciada.
 - Dica de rodapé: "Lumina pode cometer erros. Verifique informações importantes." (11–12px, muted).
 
@@ -129,7 +130,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 - Largura 760px, altura 580px, `rounded-2xl`, com `max-w`/`max-h` para janelas pequenas (mín. da janela: 900×620).
 - Header: título "Selecionar modelo", descrição curta, busca (global, nos dois provedores) e chips de filtro — Favoritos, Visão, Raciocínio, Grátis (`aria-pressed`) — com contagem de modelos.
 - Abas de provedor `OpenCode Go` / `OpenCode Zen` com dot de status da chave (tooltip com a origem). Com busca ativa, as abas dão lugar a "Todos os provedores" e os grupos viram "Go · Claude", "Zen · Claude", etc.
-- Lista agrupada por família (favoritos primeiro, "Outros" por último); cada linha: avatar, nome, badges (Grátis/Visão/Raciocínio/Preview), contexto, preço, check no modelo em uso e estrela de favorito (visível no hover/foco).
+- Lista agrupada por família (favoritos primeiro, "Outros" por último); cada linha: glifo da marca do modelo (LobeHub, mono, tingido por tokens), nome, badges (Grátis/Visão/Raciocínio/Preview), contexto, preço, check no modelo em uso e estrela de favorito (visível no hover/foco).
 - Coluna direita (300px): identidade do modelo (nome, provedor, id), badges, descrição, especificações (contexto, saída máxima, custo, protocolo, entrada, conhecimento, lançamento), aviso de status (indisponível/preview/grátis), aviso de chave ausente com "Configurar" e **seletor de modo de pensamento** (segmented: Desligado + esforços; slider para `budget_tokens`).
 - Interação: clique = prévia; duplo-clique, Enter na busca ou "Usar este modelo" = confirma. Setas/Home/End navegam e atualizam a prévia. Esc limpa a busca antes de fechar.
 - Rodapé fixo com dicas de teclado (↑↓, ↵, Esc), badge "Em uso" e botão "Usar este modelo".
@@ -201,7 +202,8 @@ Com `reduceMotion` (config ou media query), remover transformações e shimmer; 
   usa apenas os componentes e tokens do design system; card dentro de card;
   containers vazios; `grid` com linha incompleta; tabela/gráfico sem título;
   botões que enviam mensagem sem o usuário revisar; duas ações `primary`;
-  emojis e Markdown dentro de props. Detalhes e limites: `docs/GENUI.md`.
+  **caixas de nota coloridas (`callout`, descontinuado)**; emojis e Markdown
+  dentro de props. Detalhes e limites: `docs/GENUI.md`.
 
 ## 16. UI generativa no chat (interfaces do agente)
 
@@ -211,15 +213,23 @@ execução (contrato e regras completas em `docs/GENUI.md`):
 - **Mesmo sistema visual do chat**: superfícies `surface-raised`, borda de 1px,
   raio `rounded-xl`/`rounded-2xl`, tipografia 12–13,5px, números `tabular-nums`.
   Componentes não aceitam props de cor/tamanho — não há “tema paralelo”.
-- **Hierarquia**: um `card` raiz com `title`; dentro dele `grid`/`chart`/
-  `table`/`callout`; `actions` por último. Sem card aninhado, sem container
-  vazio, sem divisor decorativo.
+- **Hierarquia**: um `card` raiz com `title` (ou `section` para feeds/listas);
+  dentro dele `grid`/`chart`/`table`/`text`/`source`; `actions`/`choices` por
+  último. Sem card aninhado, sem container vazio, sem divisor decorativo.
 - **Densidade**: 1 bloco por resposta (máx. 2), ~60 componentes (máx. 120),
-  linhas de leitura confortáveis; conteúdo longo vai para Markdown/artefato.
+  até 6 níveis; linhas de leitura confortáveis; conteúdo longo vai para
+  Markdown/artefato.
 - **Interação**: `actions` são botões do design system (sm, 32px) em grupo
   acessível; `primary` única, `secondary`/`ghost` para o resto; clicar em
   `prompt` preenche o composer (o usuário revisa e envia) e `copy` copia com
-  toast discreto. `reveal` usa `<details>` com chevron 150ms; `tabs` usa Radix.
+  toast discreto. `choices` é um formulário de seleção local (rádio/checkbox/
+  segmentado) com contador e progresso sincronizados; o botão de envio preenche
+  o composer com `submitPrefix + seleção` — nunca envia sozinho. `reveal` usa
+  `<details>` com chevron 150ms; `tabs` usa Radix.
+- **Feed/conteúdo rico**: `section` + `stack` `direction: row` + `image`
+  (`size: thumb`) + `badge` + `text` + `source` monta cartões de notícia como
+  no feed; `source` e itens de `list` com `href` abrem no navegador padrão;
+  `checklist` mostra etapas/capacidades com ícone e status.
 - **Estados**: bloco inválido degrada para código + diagnóstico discreto
   (nunca tela quebrada); avisos de design vão apenas para o console do DevTools
   em DEV, nunca para a mensagem; carregamento de

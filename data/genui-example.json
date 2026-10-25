@@ -57,11 +57,10 @@
           }
         },
         {
-          "type": "callout",
+          "type": "quote",
           "props": {
-            "variant": "warning",
-            "title": "Atenção",
-            "text": "A margem bruta caiu 2 pontos por causa do desconto no marketplace."
+            "text": "A margem bruta caiu 2 pontos por causa do desconto no marketplace.",
+            "cite": "Relatório financeiro"
           }
         },
         {

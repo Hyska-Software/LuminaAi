@@ -2,6 +2,7 @@ import {
   Children,
   isValidElement,
   memo,
+  useMemo,
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from 'react';
@@ -16,6 +17,7 @@ import { CodeBlock, normalizeLanguage } from './CodeBlock';
 import { GitHubAlert, parseGitHubAlert } from './markdown/GitHubAlert';
 import { MarkdownImage } from './markdown/MarkdownImage';
 import { MarkdownLink } from './markdown/MarkdownLink';
+import { protectEscapedDollars, remarkRestoreMathDollars } from './markdown/mathDollars';
 import { childrenToText, isIgnorableNode } from './markdown/reactText';
 import { rehypeSafeHtml } from './markdown/rehypeSafeHtml';
 
@@ -163,7 +165,7 @@ const COMPONENTS: Components = {
   h2: MarkdownHeading2,
 };
 
-const REMARK_PLUGINS = [remarkGfm, remarkMath];
+const REMARK_PLUGINS = [remarkGfm, remarkMath, remarkRestoreMathDollars];
 const REHYPE_PLUGINS = [rehypeRaw, rehypeSafeHtml, rehypeKatex];
 
 export interface MarkdownProps {
@@ -175,10 +177,14 @@ export interface MarkdownProps {
 
 /** GFM + math markdown renderer tuned by the global `.lumina-prose` styles. */
 export const Markdown = memo(function Markdown({ content, className, streaming = false }: MarkdownProps) {
+  // `\$` must be protected before parsing (see `markdown/mathDollars.ts`);
+  // `remarkRestoreMathDollars` puts the per-node semantics back afterwards.
+  const source = useMemo(() => protectEscapedDollars(content), [content]);
+
   return (
     <div className={cn('lumina-prose text-[15px]', streaming && 'lumina-prose--streaming', className)}>
       <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={COMPONENTS}>
-        {content}
+        {source}
       </ReactMarkdown>
     </div>
   );

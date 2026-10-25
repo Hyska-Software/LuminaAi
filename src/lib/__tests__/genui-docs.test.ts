@@ -66,8 +66,8 @@ describe('docs/GENUI.md', () => {
     expect(doc).toContain('validate_ui');
   });
 
-  it('o exemplo "Ruim" (§12.4) realmente é inválido pelo motivo documentado', () => {
-    const section = doc.slice(doc.indexOf('### 12.4 Ruim'));
+  it('o exemplo "Ruim" (§12.6) realmente é inválido pelo motivo documentado', () => {
+    const section = doc.slice(doc.indexOf('### 12.6 Ruim'));
     const match = /```json\r?\n([\s\S]*?)```/.exec(section);
     expect(match).not.toBeNull();
     const result = parseGenUI(match?.[1] ?? '');
@@ -81,7 +81,11 @@ describe('docs/GENUI.md', () => {
 });
 
 describe('exemplos canônicos do system prompt', () => {
-  for (const file of ['data/genui-example.json', 'data/genui-example-minimal.json']) {
+  for (const file of [
+    'data/genui-example.json',
+    'data/genui-example-minimal.json',
+    'data/genui-example-interactive.json',
+  ]) {
     it(`${file} é válido e sem avisos`, () => {
       const result = parseGenUI(readFileSync(file, 'utf8'));
       expect(result.error).toBeNull();

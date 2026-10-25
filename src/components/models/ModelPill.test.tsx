@@ -225,7 +225,9 @@ describe('ModelPill (model step)', () => {
 
     // Groups: favorites first, then the families.
     expect(within(dialog).getByText('Favoritos')).toBeTruthy();
-    expect(within(dialog).getByText('DeepSeek')).toBeTruthy();
+    // Group header (not row text): the LobeHub `<title>DeepSeek</title>` of the
+    // brand glyph also matches the family label, so query the group by role.
+    expect(within(dialog).getByRole('group', { name: 'DeepSeek' })).toBeTruthy();
     expect(within(dialog).getByText('GLM')).toBeTruthy();
     expect(within(dialog).getByRole('button', { name: /Ver todos os modelos/ })).toBeTruthy();
 

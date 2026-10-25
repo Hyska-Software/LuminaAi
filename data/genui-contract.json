@@ -44,7 +44,16 @@
     "plus",
     "refresh-cw",
     "search",
-    "sparkles"
+    "sparkles",
+    "atom",
+    "book-open",
+    "database",
+    "flame",
+    "layers",
+    "settings",
+    "shield-check",
+    "target",
+    "wrench"
   ],
   "interactions": {
     "description": "Componentes interativos são declarativos e seguros: nenhum código do agente é executado.",
@@ -75,8 +84,8 @@
       "type": "card",
       "kind": "container",
       "category": "layout",
-      "summary": "Superfície com título/subtítulo/rodapé que agrupa uma unidade de conteúdo.",
-      "doc": "`title?` (≤ 80), `subtitle?` (≤ 160), `footer?` (≤ 120), `variant?` (`default|accent|muted`); aceita `children`.",
+      "summary": "Superfície com título/subtítulo/rodapé/ícone que agrupa uma unidade de conteúdo.",
+      "doc": "`title?` (≤ 80), `subtitle?` (≤ 160), `footer?` (≤ 120), `variant?` (`default|accent|muted`), `icon?`; aceita `children`.",
       "acceptsChildren": true,
       "props": {
         "title": {
@@ -99,6 +108,9 @@
             "muted"
           ],
           "default": "default"
+        },
+        "icon": {
+          "type": "icon"
         }
       }
     },
@@ -209,6 +221,35 @@
           "required": true
         },
         "open": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    {
+      "type": "section",
+      "kind": "container",
+      "category": "layout",
+      "summary": "Cabeçalho de seção (eyebrow, título, ícone, descrição e divisor) com conteúdo abaixo — sem moldura de card.",
+      "doc": "`title?` (≤ 100), `eyebrow?` (≤ 40), `description?` (≤ 200), `icon?`, `divider?`; aceita `children`. Use para feeds de notícias, listas numeradas e blocos temáticos.",
+      "acceptsChildren": true,
+      "props": {
+        "title": {
+          "type": "text",
+          "maxChars": 100
+        },
+        "eyebrow": {
+          "type": "text",
+          "maxChars": 40
+        },
+        "description": {
+          "type": "text",
+          "maxChars": 200
+        },
+        "icon": {
+          "type": "icon"
+        },
+        "divider": {
           "type": "boolean",
           "default": false
         }
@@ -470,6 +511,52 @@
       }
     },
     {
+      "type": "checklist",
+      "kind": "leaf",
+      "category": "data",
+      "summary": "Lista com ícone/estado por item (simulações, etapas, capacidades).",
+      "doc": "`items` (1–20 `{label, description?, status? (`done|active|pending|disabled|error`), icon?}`). Use para simulações e etapas com estado.",
+      "acceptsChildren": false,
+      "props": {
+        "items": {
+          "type": "array",
+          "required": true,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "item": {
+              "type": "object",
+              "props": {
+                "label": {
+                  "type": "text",
+                  "required": true,
+                  "maxChars": 120
+                },
+                "description": {
+                  "type": "text",
+                  "maxChars": 200
+                },
+                "status": {
+                  "type": "enum",
+                  "values": [
+                    "done",
+                    "active",
+                    "pending",
+                    "disabled",
+                    "error"
+                  ]
+                },
+                "icon": {
+                  "type": "icon"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "type": "keyvalue",
       "kind": "leaf",
       "category": "data",
@@ -508,7 +595,7 @@
       "kind": "leaf",
       "category": "data",
       "summary": "Lista com marcadores ou numerada, com descrições opcionais.",
-      "doc": "`items` (1–40 strings ou `{text, description?}`), `ordered?` (boolean).",
+      "doc": "`items` (1–40 strings ou `{text, description?, href?, icon?, status?}`), `ordered?` (boolean). Com `href`, o item vira link externo.",
       "acceptsChildren": false,
       "props": {
         "items": {
@@ -529,6 +616,22 @@
                 "description": {
                   "type": "text",
                   "maxChars": 400
+                },
+                "href": {
+                  "type": "url"
+                },
+                "icon": {
+                  "type": "icon"
+                },
+                "status": {
+                  "type": "enum",
+                  "values": [
+                    "done",
+                    "active",
+                    "pending",
+                    "disabled",
+                    "error"
+                  ]
                 }
               }
             }
@@ -583,11 +686,37 @@
       }
     },
     {
+      "type": "text",
+      "kind": "leaf",
+      "category": "content",
+      "summary": "Parágrafo de texto puro dentro da UI generativa.",
+      "doc": "`text` (obrigatório, ≤ 1200), `variant?` (`body|muted|lead|strong|small`). Texto puro: Markdown não é renderizado dentro de props.",
+      "acceptsChildren": false,
+      "props": {
+        "text": {
+          "type": "text",
+          "required": true,
+          "maxChars": 1200
+        },
+        "variant": {
+          "type": "enum",
+          "values": [
+            "body",
+            "muted",
+            "lead",
+            "strong",
+            "small"
+          ],
+          "default": "body"
+        }
+      }
+    },
+    {
       "type": "callout",
       "kind": "container",
       "category": "content",
-      "summary": "Destaque de informação, aviso, sucesso ou erro.",
-      "doc": "`variant?` (`info|warning|success|danger`), `title?` (≤ 80), `text?` (≤ 500); aceita `children` opcionais.",
+      "summary": "Destaque colorido de informação/aviso — DESCONTINUADO: não emitir em novas respostas.",
+      "doc": "NÃO EMITA em novas respostas: `callout` (caixa colorida de nota) foi descontinuado. Notas/ressalvas vão em Markdown normal; status curtos em `badge`. Mantido apenas para renderizar mensagens antigas (`variant?`, `title?`, `text?`, children opcionais).",
       "acceptsChildren": true,
       "props": {
         "variant": {
@@ -615,7 +744,7 @@
       "kind": "leaf",
       "category": "content",
       "summary": "Etiqueta curta de status.",
-      "doc": "`label` (≤ 24), `tone?` (`neutral|accent|success|warning|danger|outline`).",
+      "doc": "`label` (≤ 24), `tone?` (`neutral|accent|success|warning|danger|outline`), `icon?`.",
       "acceptsChildren": false,
       "props": {
         "label": {
@@ -634,6 +763,9 @@
             "outline"
           ],
           "default": "neutral"
+        },
+        "icon": {
+          "type": "icon"
         }
       }
     },
@@ -642,7 +774,7 @@
       "kind": "leaf",
       "category": "content",
       "summary": "Imagem remota ou data URI com legenda.",
-      "doc": "`src` (http(s) ou data:image/png|jpeg|webp|gif), `alt` (obrigatório, ≤ 160), `caption?` (≤ 160).",
+      "doc": "`src` (http(s) ou data:image/png|jpeg|webp|gif), `alt` (obrigatório, ≤ 160), `caption?` (≤ 160), `size?` (`full|thumb|avatar`), `aspect?` (`auto|video|square|wide`). Em `stack` `direction: row`, use `size: thumb` para miniaturas.",
       "acceptsChildren": false,
       "props": {
         "src": {
@@ -657,6 +789,48 @@
         "caption": {
           "type": "text",
           "maxChars": 200
+        },
+        "size": {
+          "type": "enum",
+          "values": [
+            "full",
+            "thumb",
+            "avatar"
+          ],
+          "default": "full"
+        },
+        "aspect": {
+          "type": "enum",
+          "values": [
+            "auto",
+            "video",
+            "square",
+            "wide"
+          ],
+          "default": "auto"
+        }
+      }
+    },
+    {
+      "type": "source",
+      "kind": "leaf",
+      "category": "content",
+      "summary": "Chip de fonte/link externo com o nome do site.",
+      "doc": "`label` (domínio/site, ≤ 80), `href` (http(s)), `title?` (≤ 120) — abre no navegador padrão; use em `stack` `direction: row` (com `wrap`) para listas de fontes.",
+      "acceptsChildren": false,
+      "props": {
+        "label": {
+          "type": "text",
+          "required": true,
+          "maxChars": 80
+        },
+        "href": {
+          "type": "url",
+          "required": true
+        },
+        "title": {
+          "type": "text",
+          "maxChars": 120
         }
       }
     },
@@ -735,6 +909,86 @@
           "default": "start"
         }
       }
+    },
+    {
+      "type": "choices",
+      "kind": "leaf",
+      "category": "interaction",
+      "summary": "Grupo de opções interativo (rádio, checkbox ou segmentado) com contagem e envio da seleção ao composer.",
+      "doc": "`options` (2–12 `{label, description?, icon?}`), `mode?` (`single|multiple`), `layout?` (`list|segmented`), `label?` (≤ 80), `default?` (labels pré-selecionadas), `countLabel?` (≤ 60, ex.: \"Capacidades habilitadas\"), `submitLabel?` (≤ 40, ex.: \"Aplicar configuração\"), `submitPrefix?` (≤ 300). A interação é local; o envio preenche o composer com o prefixo + seleção — nunca envia sozinho.",
+      "acceptsChildren": false,
+      "props": {
+        "label": {
+          "type": "text",
+          "maxChars": 80
+        },
+        "mode": {
+          "type": "enum",
+          "values": [
+            "single",
+            "multiple"
+          ],
+          "default": "single"
+        },
+        "layout": {
+          "type": "enum",
+          "values": [
+            "list",
+            "segmented"
+          ],
+          "default": "list"
+        },
+        "options": {
+          "type": "array",
+          "required": true,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 12,
+            "item": {
+              "type": "object",
+              "props": {
+                "label": {
+                  "type": "text",
+                  "required": true,
+                  "maxChars": 60
+                },
+                "description": {
+                  "type": "text",
+                  "maxChars": 160
+                },
+                "icon": {
+                  "type": "icon"
+                }
+              }
+            }
+          }
+        },
+        "default": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 12,
+            "item": {
+              "type": "text",
+              "maxChars": 60
+            }
+          }
+        },
+        "countLabel": {
+          "type": "text",
+          "maxChars": 60
+        },
+        "submitLabel": {
+          "type": "text",
+          "maxChars": 40
+        },
+        "submitPrefix": {
+          "type": "text",
+          "maxChars": 300
+        }
+      }
     }
   ],
   "rules": [
@@ -767,6 +1021,15 @@
       "message": "Card dentro de card duplica a hierarquia.",
       "hint": "Use `stack`, `divider` ou `callout` para separar seções internas.",
       "prompt": "Nunca aninhe `card` dentro de `card`."
+    },
+    {
+      "id": "ui.callout-style",
+      "severity": "warning",
+      "scope": "block",
+      "category": "structure",
+      "message": "Caixa de destaque colorida (`callout`) não faz parte do padrão do chat.",
+      "hint": "Escreva notas e ressalvas em Markdown normal (texto ou citação); status curtos vão em `badge`. Não emita `callout`.",
+      "prompt": "NUNCA use `callout` (caixa colorida de nota): ressalvas vão em Markdown; status em `badge`."
     },
     {
       "id": "ui.cards-count",
@@ -957,11 +1220,11 @@
       "category": "data",
       "params": {
         "nodes": 60,
-        "depth": 5
+        "depth": 6
       },
       "message": "UI densa demais para uma mensagem de chat.",
       "hint": "Reduza ao essencial; conteúdo longo pertence ao Markdown ou a um artefato.",
-      "prompt": "UI compacta: ~60 componentes e 5 níveis no máximo."
+      "prompt": "UI compacta: ~60 componentes e 6 níveis no máximo."
     },
     {
       "id": "ui.markdown-in-props",
@@ -1028,6 +1291,24 @@
       "message": "Rótulo de ação longo.",
       "hint": "Use verbo + objeto curto (ex.: \"Comparar custos\").",
       "prompt": "Rótulos de `actions`: verbo + objeto, ≤ 40 chars."
+    },
+    {
+      "id": "ui.section-header",
+      "severity": "warning",
+      "scope": "block",
+      "category": "structure",
+      "message": "Seção sem cabeçalho não agrega hierarquia.",
+      "hint": "Informe `title` (ou `eyebrow`) na `section`, ou use um `stack` se não houver título.",
+      "prompt": "Toda `section` precisa de `title` ou `eyebrow`."
+    },
+    {
+      "id": "ui.choices-submit",
+      "severity": "warning",
+      "scope": "block",
+      "category": "interaction",
+      "message": "Grupo de escolhas sem ação de envio.",
+      "hint": "Defina `submitLabel` para o usuário enviar a seleção ao agente (o clique preenche o composer).",
+      "prompt": "Toda `choices` precisa de `submitLabel`."
     }
   ],
   "promptIntro": "Você pode renderizar interfaces declarativas na conversa usando um bloco cercado com a linguagem `ui` e um objeto JSON. A interface valida o JSON e desenha apenas componentes da whitelist — nada de HTML, JS ou CSS arbitrário."

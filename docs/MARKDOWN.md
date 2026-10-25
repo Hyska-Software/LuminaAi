@@ -81,6 +81,14 @@ Pipeline hoje (`src/components/chat/Markdown.tsx`):
 8. **Fences especiais inalteradas** (`ui`, `mermaid`, `chart`, `html`, `svg`)
    e sem duplicar catálogo/limites da UI generativa (fonte única:
    `data/genui-contract.json`).
+9. **Dólar escapado em math (`\$`).** O `remark-math`/micromark não trata `\$`
+   como escape: o `$` logo após a barra fecha o span de math, trunca a fórmula
+   e o texto seguinte vira math (cascata). O renderer faz um round-trip:
+   `protectEscapedDollars` troca todo `\$` por um sentinela (U+E000) **antes**
+   do parse e `remarkRestoreMathDollars` restaura por tipo de nó mdast —
+   `math`/`inlineMath` → `\$` (inclusive em `node.data.hChildren`, cache do
+   `mdast-util-math`), `text` → `$`, `code`/`inlineCode`/`html` → `\$`,
+   links/imagens/definições → `$`. Ver `src/components/chat/markdown/mathDollars.ts`.
 
 ## 4. Contrato de sintaxe suportada (fonte para prompt, docs e testes)
 
@@ -93,7 +101,8 @@ horizontal; notas de rodapé; HTML cru **do subconjunto seguro**.
 **Inline:** ênfase `*`/`_`, forte `**`/`__`, riscado `~~`, código inline,
 links inline/de referência/autolinks GFM (`www.`, `https://`, e-mail),
 imagens, quebra dura (2 espaços ou `\` no fim da linha), entidades/escapes,
-HTML inline seguro, referências de nota de rodapé, math inline `$…$`.
+HTML inline seguro, referências de nota de rodapé, math inline `$…$` (com
+cifrão escapado `\$` dentro da fórmula, ex.: `$\delta(q, \$, \$)$`).
 
 **Extensões do app:** math display `$$…$$` (KaTeX); fences `ui` (UI generativa,
 contrato v2), `mermaid` (diagrama), `chart` (JSON → SVG), `html`/`svg` (preview
@@ -111,6 +120,7 @@ links externos e `mailto:` abertos no navegador/app padrão; âncoras internas
 | F3 | Prompt do sistema: seção de formatação Markdown (contrato §4 + regras de uso) e testes Rust | harness-dev |
 | F4 | Docs (`DESIGN.md` §6.3, `ARCHITECTURE.md` pipeline) + este status | Lead |
 | F5 | Verificação independente (matriz abaixo), `pnpm typecheck`, `pnpm test`, `pnpm build`, `cargo test --lib` | verifier + Lead |
+| F6 | Correção de `\$` em math (sentinela + restauração por nó), orientação do agente e re-verificação | ui-core + harness-dev + verifier |
 
 ## 6. Matriz de testes e verificações
 
@@ -123,7 +133,10 @@ pt-BR, marcador removido, `[!FOO]` continua citação); links (externo abre via
 mocked opener, `mailto:`, âncora não abre navegador); imagens (alt, lazy,
 fallback em erro); código cercado (header + copiar, fences delegadas
 `ui/mermaid/chart/html/svg` continuam renderizando); código indentado e sem
-info string; quebra dura; autolinks GFM; math inline/display; notas de rodapé
+info string; quebra dura; autolinks GFM; math inline/display (incluindo
+`\$` dentro de math: `$\$$`, `\Gamma` com `\$`, `\delta(q, \$, \$)`,
+célula de tabela com `\$`, cascata do parágrafo do FOLLOW, prosa `custa \$5`,
+`\$` literal em inline code/fence, sem vazamento de sentinela); notas de rodapé
 (seção, ref, backref, rótulo oculto pt-BR); HTML seguro (`kbd`, `mark`, `sup`,
 `br`, `details/summary`) renderizado; `<pre>` de HTML cru preservado.
 
@@ -135,6 +148,7 @@ info string; quebra dura; autolinks GFM; math inline/display; notas de rodapé
 
 **Prompt (Rust):** `prompt_documents_markdown_formatting`,
 `prompt_documents_special_fences`, `prompt_documents_safe_html_rules`,
+`prompt_documents_math_dollar_escape` (orientação de `\$` dentro/fora de math),
 `prompt_does_not_duplicate_genui_contract` (garantir que segue derivado do
 contrato) + testes existentes.
 
@@ -146,8 +160,9 @@ contrato) + testes existentes.
 
 - [x] Todos os itens do §4 renderizam corretamente e sem HTML inseguro.
 - [x] `pnpm typecheck` limpo, `pnpm test` verde (sem regressões nos 418 atuais;
-      suíte final com 496 testes).
-- [x] `pnpm build` ok; `cargo test --lib` verde (154 testes).
+      suíte final com 23 arquivos/766 testes, incluindo a linha paralela de
+      genui/icons; o recorte do chat Markdown tem 97 testes).
+- [x] `pnpm build` ok; `cargo test --lib` verde (160 testes).
 - [x] Sem `any`/`@ts-ignore`, sem `dangerouslySetInnerHTML` novo, pt-BR na UI,
       cores/espaçamento só por tokens, acessibilidade mantida.
 - [x] Prompt do agente documenta o contrato §4 e não duplica o contrato genui.
@@ -182,6 +197,9 @@ contrato) + testes existentes.
   `#âncora`): decisão de segurança, não bug.
 - O preview de **artefatos** Markdown (painel lateral) continua em modo
   texto/código — fora do escopo do chat.
+- O caractere de uso privado `U+E000` é usado como sentinela interna do
+  round-trip de `\$`; se ele aparecer literalmente no texto do modelo, é
+  restaurado como `$` (impraticável na prática).
 
 ## 9. Registro de execução
 
@@ -210,6 +228,11 @@ contrato) + testes existentes.
   qualquer ancestral `li.task-list-item` (regressão coberta); classe morta
   `lumina-task-item` removida; texto do sandbox `html`/`svg` no prompt
   corrigido ("sandbox isolado do app, sem acesso ao IPC").
+- **Rodada 2 — `\$` em math** (`ui-core` + `harness-dev` + Lead): novo
+  `src/components/chat/markdown/mathDollars.ts` (sentinela + restauração por
+  nó), integração no `Markdown.tsx` (`useMemo` + plugin), `@types/mdast` (dev),
+  orientação de `\$` no prompt do agente e +9 testes de regressão no chat. Ver
+  detalhes abaixo.
 
 ### Verificação final (Lead, após as correções)
 
@@ -224,6 +247,37 @@ contrato) + testes existentes.
 Achados da verificação independente: 1 médio (task list loose) e 4 baixos; o
 médio e um baixo (texto do prompt) foram corrigidos, os demais são limitações
 documentadas em §8.1. Nenhum bloqueador e nenhuma falha de segurança.
+
+### Rodada 2 — correção de `\$` em math (imagens do usuário)
+
+**Sintoma reportado:** fórmulas com cifrão escapado (ex.: marcador de fundo de
+pilha) apareciam como source cru em vermelho (`.katex-error`) e o texto seguinte
+virava math em cascata (negrito quebrado).
+
+**Causa-raiz:** `micromark-extension-math`/`remark-math` **não** trata `\$` como
+escape — o `$` logo após a barra fecha o span de math. A mensagem real do
+usuário tinha **18 `.katex-error`**.
+
+**Correção:** round-trip com sentinela (`mathDollars.ts`) — protege `\$` antes do
+parse e restaura por tipo de nó mdast (`math`/`inlineMath` → `\$`, inclusive no
+cache `node.data.hChildren` do `mdast-util-math`; `text` → `$`; código/HTML →
+`\$`; links/imagens/definições → `$`). O prompt passou a ensinar
+`\$` dentro/fora de math (`prompt_documents_math_dollar_escape`).
+
+**Verificação independente (`verifier`, task-9): APROVADO, 0 falhas.**
+
+| Evidência | Resultado |
+| --- | --- |
+| Fixture real (8.073 chars) | **18 → 0** `.katex-error`; 115 annotations MathML corretas (`\Gamma...`, `(q,\ accb\$,\ S\$)`, `\delta(q,\$,\$)=...`) |
+| Sentinela U+E000 | ausente de textContent, innerHTML, atributos e annotations |
+| Casos adversariais próprios (22) | **197 checks / 0 falhas** (só math, vários `\$`, prosa, code/fence literal, `\\$`, display multilinha, math em tabela/lista/heading, spans múltiplos, math sem fechamento, URL/alt/HTML) |
+| Segurança | **3.696 checks / 0 falhas** + 14 checks combinando sentinela com XSS |
+| Regressões | matriz funcional **223 checks / 0 falhas** (task list loose, alertas, footnotes, fences genui, HTML, tabelas, caret) |
+| Comandos | `pnpm typecheck` 0; `pnpm test` 23 arquivos/**766**; `pnpm build` OK; `cargo test --lib` **160** passed |
+
+**Follow-up opcional:** `$$...$$` na mesma linha é tratado como math inline pelo
+`remark-math` (sem erro, só não vira bloco display); se o time quiser display
+garantido, orientar no prompt a colocar os delimitadores em linhas próprias.
 
 ### Follow-ups sugeridos (não bloqueiam)
 

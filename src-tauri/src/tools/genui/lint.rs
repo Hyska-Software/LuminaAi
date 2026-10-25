@@ -342,6 +342,23 @@ fn visit_node(
         "actions" => {
             lint_actions(state, props, path);
         }
+        "callout" => {
+            push_rule(state, "ui.callout-style", path);
+        }
+        "section" => {
+            // Seção sem cabeçalho (nem `title`, nem `eyebrow` não-vazios) não
+            // agrega hierarquia; use `stack` se não houver título.
+            if prop_string(props, "title", "").trim().is_empty()
+                && prop_string(props, "eyebrow", "").trim().is_empty()
+            {
+                push_rule(state, "ui.section-header", path);
+            }
+        }
+        "choices" => {
+            if prop_string(props, "submitLabel", "").trim().is_empty() {
+                push_rule(state, "ui.choices-submit", path);
+            }
+        }
         _ => {}
     }
 
@@ -621,6 +638,114 @@ mod tests {
             .filter(|diagnostic| diagnostic.code == "ui.divider-count")
             .count();
         assert_eq!(count, contract().limits.diagnostics_per_code);
+    }
+
+    #[test]
+    fn callout_style_fires_for_any_callout_anywhere() {
+        // Qualquer `variant` (e mesmo sem props) gera o aviso de descontinuação.
+        for source in [
+            r#"{"components":[{"type":"callout","props":{"variant":"info","text":"ok"}}]}"#,
+            r#"{"components":[{"type":"callout","props":{"variant":"warning","title":"Atenção"}}]}"#,
+            r#"{"components":[{"type":"callout","props":{"variant":"success","text":"ok"}}]}"#,
+            r#"{"components":[{"type":"callout","props":{"variant":"danger","text":"erro"}}]}"#,
+            r#"{"components":[{"type":"callout","props":{}}]}"#,
+        ] {
+            let ids = warning_ids(source);
+            assert!(
+                ids.iter().any(|id| id == "ui.callout-style"),
+                "todo callout deve gerar ui.callout-style; avisos: {ids:?}"
+            );
+        }
+
+        // Vale em qualquer profundidade e o path é o do nó no documento.
+        let nested = r#"{"components":[{"type":"card","props":{"title":"Resumo"},"children":[
+            {"type":"stack","children":[{"type":"callout","props":{"text":"nota"}}]}
+        ]}]}"#;
+        let analysis = analyze(nested);
+        assert!(
+            analysis.is_ok(),
+            "o aviso não bloqueia a renderização: {:?}",
+            analysis
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.clone())
+                .collect::<Vec<_>>()
+        );
+        let diagnostic = analysis
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "ui.callout-style")
+            .expect("aviso de callout aninhado");
+        assert_eq!(diagnostic.path, "components[0].children[0].children[0]");
+        assert_eq!(diagnostic.severity, Severity::Warning);
+        assert!(diagnostic.message.contains("não faz parte do padrão do chat"));
+        assert!(diagnostic.hint.is_some());
+    }
+
+    #[test]
+    fn callout_rule_prompt_is_documented_in_the_contract() {
+        // O prompt é gerado do contrato: o `rule.prompt` novo entra sozinho.
+        let rule = contract()
+            .rule("ui.callout-style")
+            .expect("regra ui.callout-style no contrato");
+        assert_eq!(rule.severity, "warning");
+        assert!(rule.prompt.contains("NUNCA use `callout`"));
+    }
+
+    #[test]
+    fn section_header_rule_requires_title_or_eyebrow() {
+        for source in [
+            r#"{"components":[{"type":"section","props":{"title":"Notícias"},"children":[{"type":"badge","props":{"label":"x"}}]}]}"#,
+            r#"{"components":[{"type":"section","props":{"eyebrow":"Mundo"},"children":[{"type":"badge","props":{"label":"x"}}]}]}"#,
+        ] {
+            assert!(
+                !warning_ids(source).iter().any(|id| id == "ui.section-header"),
+                "section com title/eyebrow não deve gerar ui.section-header"
+            );
+        }
+
+        for source in [
+            // Ausente.
+            r#"{"components":[{"type":"section","children":[{"type":"badge","props":{"label":"x"}}]}]}"#,
+            // Presente porém vazio (whitespace também não conta).
+            r#"{"components":[{"type":"section","props":{"title":"  ","eyebrow":""},"children":[{"type":"badge","props":{"label":"x"}}]}]}"#,
+        ] {
+            let analysis = analyze(source);
+            assert!(analysis.is_ok(), "o aviso não bloqueia a renderização");
+            let diagnostic = analysis
+                .diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == "ui.section-header")
+                .expect("ui.section-header para section sem cabeçalho");
+            assert_eq!(diagnostic.path, "components[0]");
+            assert!(diagnostic.hint.is_some());
+        }
+    }
+
+    #[test]
+    fn choices_submit_rule_requires_submit_label() {
+        let with_submit = r#"{"components":[{"type":"choices","props":{"options":[{"label":"A"},{"label":"B"}],"submitLabel":"Enviar"}}]}"#;
+        assert!(!warning_ids(with_submit)
+            .iter()
+            .any(|id| id == "ui.choices-submit"));
+
+        let without_submit = r#"{"components":[{"type":"choices","props":{"options":[{"label":"A"},{"label":"B"}]}}]}"#;
+        let analysis = analyze(without_submit);
+        assert!(analysis.is_ok(), "o aviso não bloqueia a renderização");
+        let diagnostic = analysis
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "ui.choices-submit")
+            .expect("ui.choices-submit para choices sem submitLabel");
+        assert_eq!(diagnostic.path, "components[0]");
+        assert!(diagnostic.message.contains("sem ação de envio"));
+        assert!(diagnostic.hint.is_some());
+
+        // `submitLabel` vazio também conta como ausência.
+        let empty_submit = r#"{"components":[{"type":"choices","props":{"options":[{"label":"A"},{"label":"B"}],"submitLabel":"   "}}]}"#;
+        assert!(warning_ids(empty_submit)
+            .iter()
+            .any(|id| id == "ui.choices-submit"));
     }
 
     #[test]

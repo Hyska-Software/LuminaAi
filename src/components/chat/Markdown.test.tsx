@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Markdown, type MarkdownProps } from './Markdown';
+import { protectEscapedDollars, SENTINEL } from './markdown/mathDollars';
 
 const external = vi.hoisted(() => ({ openExternalUrl: vi.fn(async () => true) }));
 
@@ -389,6 +390,87 @@ describe('Markdown — math', () => {
     expect(container.querySelector('.katex-display')).toBeTruthy();
     expect(container.querySelector('pre')).toBeNull();
     expect(container.querySelector('annotation')?.textContent).toContain('a + b = c');
+  });
+});
+
+describe('Markdown — cifrão escapado em math (\\$)', () => {
+  it('renders math whose content is a single escaped dollar', () => {
+    const { container } = renderMarkdown('$\\$$');
+
+    expect(container.querySelectorAll('.katex-error')).toHaveLength(0);
+    expect(container.querySelector('.katex')).toBeTruthy();
+    expect(container.querySelector('annotation')?.textContent).toContain('\\$');
+  });
+
+  it('renders the stack-alphabet definition with \\$ (real user case)', () => {
+    const { container } = renderMarkdown('$\\Gamma = \\{a, b, c, S, A, \\$\\}$');
+
+    expect(container.querySelectorAll('.katex-error')).toHaveLength(0);
+    const annotation = container.querySelector('annotation')?.textContent ?? '';
+    expect(annotation).toContain('\\$');
+    expect(annotation).toContain('\\Gamma');
+  });
+
+  it('renders the delta transition with several escaped dollars', () => {
+    const { container } = renderMarkdown('$\\delta(q, \\$, \\$) = (q_f, \\$)$');
+
+    expect(container.querySelectorAll('.katex-error')).toHaveLength(0);
+    expect(container.querySelector('annotation')?.textContent).toContain('\\$');
+  });
+
+  it('renders a table cell with the APD configuration containing \\$', () => {
+    const { container } = renderMarkdown(
+      '| Topo | Transição |\n|:---|:---|\n| $\\$$ | $(q,\\ accb\\$,\\ a\\,S\\,b\\,\\$)$ |',
+    );
+
+    expect(container.querySelectorAll('.katex-error')).toHaveLength(0);
+    const annotations = Array.from(container.querySelectorAll('annotation')).map((node) => node.textContent ?? '');
+    expect(annotations.some((annotation) => annotation.includes('accb') && annotation.includes('\\$'))).toBe(true);
+    expect(container.textContent).not.toContain(SENTINEL);
+  });
+
+  it('does not cascade into the following paragraph (FOLLOW real case)', () => {
+    const { container } = renderMarkdown(
+      'Repare no passo 8: o $A$ só pôde virar $\\varepsilon$ porque $\\$ \\in \\text{FOLLOW}(A)$ e o lookahead era $b$. ' +
+        '**É aqui que o FOLLOW entra em cena.** Sem ele, o autômato não saberia que a cadeia de $c$ terminou.',
+    );
+
+    expect(container.querySelectorAll('.katex-error')).toHaveLength(0);
+    const strong = container.querySelector('strong');
+    expect(strong?.textContent).toBe('É aqui que o FOLLOW entra em cena.');
+    expect(container.textContent).toContain('Sem ele, o autômato não saberia que a cadeia de');
+    expect(container.textContent).toContain('terminou.');
+    expect(container.textContent).not.toContain(SENTINEL);
+  });
+
+  it('restores \\$ as a literal dollar in prose', () => {
+    const { container } = renderMarkdown('custa \\$5 e mais \\$10 no total');
+
+    expect(container.querySelector('.katex')).toBeNull();
+    expect(container.textContent).toBe('custa $5 e mais $10 no total');
+    expect(container.textContent).not.toContain('\\$');
+  });
+
+  it('keeps \\$ literal inside inline code and fenced code', () => {
+    const { container } = renderMarkdown('texto `\\$` e fenced\n\n```ts\nconst preco = "\\$";\n```');
+
+    expect(container.querySelector('p code')?.textContent).toBe('\\$');
+    expect(container.textContent).toContain('const preco = "\\$";');
+    expect(container.querySelector('.katex')).toBeNull();
+    expect(container.textContent).not.toContain(SENTINEL);
+  });
+
+  it('never leaks the protection sentinel into the DOM', () => {
+    const { container } = renderMarkdown('$\\$ \\in \\text{FOLLOW}(A)$ e prosa \\$ aqui');
+
+    expect(container.textContent).not.toContain(SENTINEL);
+    expect(container.querySelectorAll('.katex-error')).toHaveLength(0);
+  });
+
+  it('protects only the escaped dollar pairs before parsing', () => {
+    expect(protectEscapedDollars('$\\$$')).toBe(`$${SENTINEL}$`);
+    expect(protectEscapedDollars('custa \\$5 e mais \\$10')).toBe(`custa ${SENTINEL}5 e mais ${SENTINEL}10`);
+    expect(protectEscapedDollars('$x^2$ sem escape')).toBe('$x^2$ sem escape');
   });
 });
 

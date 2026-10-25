@@ -66,6 +66,10 @@ O bloco é renderizado inline no fluxo da mensagem, com espaço próprio
    case, sem exclamações, sem emojis decorativos.
 10. **Determinismo**: o mesmo JSON produz a mesma árvore normalizada nos dois
     lados (Rust e TypeScript) — garantido pelos fixtures de paridade.
+11. **Sem caixas de nota coloridas**: `callout` está **descontinuado** para
+    novas respostas (regra `ui.callout-style`). Notas, ressalvas e lembretes
+    são texto normal ou citação em Markdown; `callout` só aparece em mensagens
+    antigas (compatibilidade de renderização).
 
 ## 3. Quando usar (e quando não usar)
 
@@ -76,7 +80,9 @@ O bloco é renderizado inline no fluxo da mensagem, com espaço próprio
 | Dados tabulares curtos | `table` (até 8 colunas) |
 | Cronograma/etapas | `timeline` ou `steps` |
 | Especificações curtas | `keyvalue` |
-| Aviso/erro/sucesso no meio de um resultado | `callout` |
+| Feed de notícias/cards com imagem, status e fonte | `section` + `stack` row + `image` (`size: thumb`) + `source` |
+| Nota/ressalva/lembrete no meio de um resultado | **Markdown normal** (texto ou `>` citação) — nunca `callout` |
+| Configuração/formulário de escolhas | `choices` (rádio/checkbox/segmentado + envio) |
 | Próximos passos concretos | `actions` (1–4 botões) |
 | Detalhe que pode ficar recolhido | `reveal` |
 | Alternar visões do mesmo assunto | `tabs` (2–4 abas) |
@@ -90,11 +96,12 @@ O bloco é renderizado inline no fluxo da mensagem, com espaço próprio
   também é aceito e normalizado. `version` ausente é válido.
 - Cada componente: `{ "type": string, "props"?: objeto, "children"?: array }`.
 - `children` **só** em containers: `card`, `stack`, `grid`, `tabs`, `reveal`,
-  `callout`.
-- Profundidade máxima: **8** níveis (recomendado ≤ 5); máximo de **120**
+  `section` (e no legado descontinuado `callout`).
+- Profundidade máxima: **8** níveis (recomendado ≤ 6); máximo de **120**
   componentes por bloco (recomendado ≤ 60).
 - Hierarquia recomendada: **1 `card` raiz** (título curto) → `grid` de
-  `stat`/`chart`/`table` → `callout` para ressalva → `actions` no fim.
+  `stat`/`chart`/`table` → `actions` no fim. Notas/ressalvas vão em Markdown,
+  fora do bloco (nunca em caixa colorida).
 - `grid`: escolha `columns` e preencha as linhas (2/4 filhos para 2 colunas;
   3 filhos para 3 colunas). Máximo 4 colunas.
 - `tabs`: cada painel é um componente (normalmente `stack`) com `props.label`
@@ -113,11 +120,12 @@ descartadas com aviso — use exatamente estes nomes.
 
 | Tipo | Props | Notas |
 | --- | --- | --- |
-| `card` | `title?` (≤ 80), `subtitle?` (≤ 160), `footer?` (≤ 120), `variant?` (`default\|accent\|muted`) | Agrupa uma unidade. Todo card de topo precisa de `title`. Nunca aninhe card em card. |
-| `stack` | `direction?` (`column\|row`), `gap?` (`none\|sm\|md\|lg`), `align?` (`start\|center\|end\|stretch`), `justify?` (`start\|center\|between\|end`), `wrap?` | Empilha/alinhа filhos. |
+| `card` | `title?` (≤ 80), `subtitle?` (≤ 160), `footer?` (≤ 120), `variant?` (`default\|accent\|muted`), `icon?` | Agrupa uma unidade. Todo card de topo precisa de `title`. Nunca aninhe card em card. |
+| `stack` | `direction?` (`column\|row`), `gap?` (`none\|sm\|md\|lg`), `align?` (`start\|center\|end\|stretch`), `justify?` (`start\|center\|between\|end`), `wrap?` | Empilha/alinhа filhos. Use `direction: row` para miniatura + conteúdo. |
 | `grid` | `columns?` (1–4, padrão 2), `gap?` | Métricas/cartões lado a lado. Preencha as colunas. |
 | `tabs` | — (children = painéis) | Cada painel precisa de `props.label` curto. 2–4 abas (máx. 6). |
 | `reveal` | `title` (obrigatório), `open?` | Seção recolhível para metodologia/detalhe. |
+| `section` | `title?` (≤ 100), `eyebrow?` (≤ 40), `description?` (≤ 200), `icon?`, `divider?` | Cabeçalho de seção + conteúdo, **sem** moldura de card. Use para feeds, listas temáticas e blocos numerados. |
 | `divider` | `label?` (≤ 40) | Máx. 2 por bloco. |
 
 ### 5.2 Dados
@@ -130,25 +138,29 @@ descartadas com aviso — use exatamente estes nomes.
 | `progress` | `value` (0–`max`), `max?` (padrão 100), `label?`, `suffix?` | Fração concluída. |
 | `timeline` | `items` (2–20 `{title, time?, description?, status?}`) | Status `done\|active\|pending\|error`; máx. 12 itens. |
 | `steps` | `items` (2–16 `{title, description?}`), `current?` | `current` é 1-based (0 = nenhum). Máx. 10 passos. |
+| `checklist` | `items` (1–20 `{label, description?, status?, icon?}`) | Status `done\|active\|pending\|disabled\|error` com ícone + texto acessível. Ideal para simulações e capacidades. |
 | `keyvalue` | `items` (1–20 `{label, value}`) | Pares curtos; > 12 use `table`. |
-| `list` | `items` (1–40 strings ou `{text, description?}`), `ordered?` | Máx. 20 itens. |
+| `list` | `items` (1–40 strings ou `{text, description?, href?, icon?, status?}`), `ordered?` | Com `href` vira link externo; máx. 20 itens. |
 
 ### 5.3 Conteúdo
 
 | Tipo | Props | Notas |
 | --- | --- | --- |
-| `callout` | `variant?` (`info\|warning\|success\|danger`), `title?`, `text?` | Pode conter `children`. |
+| `callout` | `variant?` (`info\|warning\|success\|danger`), `title?`, `text?` | **Descontinuado — não emitir.** Caixa colorida de nota; só renderiza mensagens antigas (regra `ui.callout-style`). |
 | `code` | `code`, `language?`, `title?` | Trecho curto; arquivos longos viram artefato. |
 | `quote` | `text` (≤ 600), `cite?` | Citação curta com atribuição. |
-| `badge` | `label` (≤ 24), `tone?` | Status/etiqueta curta. |
-| `image` | `src`, `alt` (obrigatório), `caption?` | `http(s)` ou `data:image/png\|jpeg\|webp\|gif`. |
+| `text` | `text` (obrigatório, ≤ 1200), `variant?` (`body\|muted\|lead\|strong\|small`) | Parágrafo de texto puro (Markdown não é renderizado dentro de props). |
+| `badge` | `label` (≤ 24), `tone?`, `icon?` | Status/etiqueta curta. |
+| `image` | `src`, `alt` (obrigatório), `caption?`, `size?` (`full\|thumb\|avatar`), `aspect?` (`auto\|video\|square\|wide`) | `http(s)` ou `data:image/...`; em `stack` row use `size: thumb`. |
+| `source` | `label` (≤ 80), `href` (http(s)), `title?` (≤ 120) | Chip de fonte/link externo (nome do site); abre no navegador padrão. |
 | `link` | `href`, `label` | Abre no navegador padrão. |
 
 ### 5.4 Interação
 
 | Tipo | Props | Notas |
 | --- | --- | --- |
-| `actions` | `items` (1–4 `{label, prompt? **ou** copy?, tone? (`primary\|secondary\|ghost`), icon?}`), `align?` (`start\|end`) | Cada ação tem **exatamente um** de `prompt` ou `copy`. No máximo uma `primary`. Rótulo = verbo + objeto curto, sem ponto final. `icon` vem da whitelist de 16 ícones do contrato. |
+| `actions` | `items` (1–4 `{label, prompt? **ou** copy?, tone? (`primary\|secondary\|ghost`), icon?}`), `align?` (`start\|end`) | Cada ação tem **exatamente um** de `prompt` ou `copy`. No máximo uma `primary`. Rótulo = verbo + objeto curto, sem ponto final. |
+| `choices` | `options` (2–12 `{label, description?, icon?}`), `mode?` (`single\|multiple`), `layout?` (`list\|segmented`), `label?` (≤ 80), `default?` (labels), `countLabel?` (≤ 60), `submitLabel?` (≤ 40), `submitPrefix?` (≤ 300) | Formulário de seleção com estado local (rádio, checkbox ou segmentado). Com `countLabel` mostra contador + barra de progresso sincronizados. O botão `submitLabel` preenche o composer com `submitPrefix + seleção` — nunca envia sozinho. |
 
 Semântica:
 
@@ -156,14 +168,20 @@ Semântica:
   o usuário revisar e enviar. Nunca envia sozinho; substitui o rascunho atual do
   composer, como as sugestões da tela inicial.
 - `copy`: copia o texto para a área de transferência (toast discreto).
-- Não há campos de formulário dentro da interface: o composer é o único input.
+- `choices`: a seleção é **local**; o envio monta
+  `submitPrefix + labels.join(', ')` e também preenche o composer (o usuário
+  revisa e envia). Toda `choices` precisa de `submitLabel` (regra
+  `ui.choices-submit`). Não há inputs de texto livres dentro da interface — o
+  composer continua sendo o único campo de texto.
 - `actions` deve encerrar a resposta com próximos passos reais (ex.: “Comparar
   cenários”, “Gerar plano de margem”); não use quando não há próximo passo.
-- `icon?` aceita somente a whitelist do contrato (16 nomes): `arrow-right`,
-  `calendar`, `check`, `chevron-right`, `clock`, `copy`, `download`,
-  `external-link`, `file-text`, `globe`, `lightbulb`, `list-checks`, `plus`,
-  `refresh-cw`, `search`, `sparkles`. Ícone fora da lista é omitido com aviso
-  `ui.icon-unknown`.
+- `icon?` (em `actions`, `choices`, `checklist`, `section`, `badge`, `card` e
+  `list`) aceita somente a whitelist do contrato (25 nomes): `arrow-right`,
+  `atom`, `book-open`, `calendar`, `check`, `chevron-right`, `clock`, `copy`,
+  `database`, `download`, `external-link`, `file-text`, `flame`, `globe`,
+  `layers`, `lightbulb`, `list-checks`, `plus`, `refresh-cw`, `search`,
+  `settings`, `shield-check`, `sparkles`, `target`, `wrench`. Ícone fora da
+  lista é omitido com aviso `ui.icon-unknown`.
 
 ## 6. Regras de UI/UX (lint de design)
 
@@ -177,12 +195,14 @@ renderização, mas o agente deve corrigi-las antes de emitir (a ferramenta
 | --- | --- |
 | `ui.root-count` | No máximo 4 componentes na raiz; agrupe em 1 `card`/`stack`. |
 | `ui.card-title` | Todo `card` de topo precisa de `title`. |
-| `ui.card-nested` | Nunca aninhe `card` dentro de `card` (use `stack`/`divider`/`callout`). |
+| `ui.card-nested` | Nunca aninhe `card` dentro de `card` (use `stack`/`divider`). |
 | `ui.cards-count` | No máximo 4 cards por bloco. |
 | `ui.grid-orphans` | Filhos do `grid` devem completar as colunas. |
 | `ui.grid-crowded` | No máximo 3 filhos por coluna. |
 | `ui.divider-count` | No máximo 2 divisores. |
 | `ui.empty-container` | Nada de containers vazios. |
+| `ui.callout-style` | **Nunca emita `callout`** (caixa colorida de nota): ressalvas vão em Markdown; status em `badge`. |
+| `ui.section-header` | Toda `section` precisa de `title` ou `eyebrow`. |
 
 > Máximo de blocos: a orientação de 1 bloco (máx. 2) por resposta vem de
 > `blocks.maxPerMessage` no contrato e é reforçada no system prompt — não é uma
@@ -204,7 +224,7 @@ renderização, mas o agente deve corrigi-las antes de emitir (a ferramenta
 | `ui.steps-long` | No máximo 10 passos. |
 | `ui.keyvalue-long` | No máximo 12 pares. |
 | `ui.tabs-count` | No máximo 6 abas (ideal 2–4). |
-| `ui.density` | No máximo ~60 componentes e 5 níveis por bloco. |
+| `ui.density` | No máximo ~60 componentes e 6 níveis por bloco. |
 
 ### 6.3 Copy (pt-BR)
 
@@ -222,6 +242,7 @@ renderização, mas o agente deve corrigi-las antes de emitir (a ferramenta
 | `ui.action-primary` | No máximo uma ação `primary`. |
 | `ui.action-label-long` | Rótulo de ação ≤ 40 caracteres (verbo + objeto). |
 | `ui.duplicate-action` | Ações com rótulos distintos. |
+| `ui.choices-submit` | Toda `choices` precisa de `submitLabel` (seleção interativa tem que ter envio). |
 
 ## 7. Acessibilidade (regras obrigatórias)
 
@@ -231,11 +252,15 @@ renderização, mas o agente deve corrigi-las antes de emitir (a ferramenta
 - Contraste, foco visível, alvos ≥ 32px, teclado e `prefers-reduced-motion` são
   responsabilidade do renderer/design system — a interface não expõe props de
   estilo justamente para não quebrar isso.
-- Nunca use cor como único indicador de significado; use `badge`/`callout` com
-  texto.
+- Nunca use cor como único indicador de significado; use `badge` com texto
+  (ou o próprio texto em Markdown).
 - O renderer marca grupos de ações com `role="group"` e rótulo acessível;
-  gráficos têm `<title>`/`aria-label`; imagens sem `alt` são recusadas pelo
-  validador.
+  `choices` usa `radiogroup`/`group` com `aria-checked` por opção e painel
+  segmentado com foco visível; `checklist` anuncia o status por texto
+  (`sr-only`) além do ícone; gráficos têm `<title>`/`aria-label`; imagens sem
+  `alt` são recusadas pelo validador.
+- `source` e itens de `list` com `href` são botões com `aria-label`
+  (“Abrir <site> em nova aba”) e nunca navegam dentro do webview.
 
 ## 8. Limites: rígidos × recomendados
 
@@ -243,12 +268,15 @@ renderização, mas o agente deve corrigi-las antes de emitir (a ferramenta
 | --- | --- | --- |
 | Fonte do bloco | 200.000 chars | — |
 | Componentes | 120 | 60 (`ui.density`) |
-| Profundidade | 8 | 5 (`ui.density`) |
+| Profundidade | 8 | 6 (`ui.density`) |
 | Texto por prop | `maxChars` da prop (ex.: `quote.text` 1.000) | limites de §6 |
 | Arrays | `maxItems` da prop (ex.: `list.items` 40) | limites de §6 |
 | `table.columns` | 2–10 | 8 (`ui.table-columns`) |
 | `chart.data` | 1–60 pontos | 2+ (`ui.chart-points-min`), pizza ≤ 7 |
 | `actions.items` | 1–4 | uma `primary`, rótulo ≤ 40 |
+| `choices.options` | 2–12 | `submitLabel` obrigatório (`ui.choices-submit`) |
+| `checklist.items` | 1–20 | status padronizados |
+| `text.text` | 1.200 chars | evite parágrafos longos dentro da UI |
 | `tabs` (rótulo do painel) | 80 chars | 40 (`props.label` curto) |
 | Props desconhecidas | descartadas | aviso `ui.unknown-prop` |
 | JSON inválido | erro `ui.invalid-json` | — |
@@ -379,7 +407,7 @@ legadas são **normalizadas** (`ui.legacy-shape`). O bloco só degrada quando h�
             ]
           }
         },
-        { "type": "callout", "props": { "variant": "warning", "title": "Atenção", "text": "A margem bruta caiu 2 pontos por causa do desconto no marketplace." } },
+        { "type": "quote", "props": { "text": "A margem bruta caiu 2 pontos por causa do desconto no marketplace.", "cite": "Relatório financeiro" } },
         {
           "type": "actions",
           "props": {
@@ -431,7 +459,7 @@ legadas são **normalizadas** (`ui.legacy-shape`). O bloco só degrada quando h�
 }
 ```
 
-### 12.3 Bom — tabela com ressalva e ação de copiar
+### 12.3 Bom — tabela com ação de copiar
 
 ```ui
 {
@@ -442,13 +470,13 @@ legadas são **normalizadas** (`ui.legacy-shape`). O bloco só degrada quando h�
       "children": [
         { "type": "table", "props": {
           "columns": ["Canal", "Receita", "Crescimento"],
+          "caption": "Crescimento compara com o trimestre anterior.",
           "rows": [
             ["Direto", "R$ 6,2 mi", "+9%"],
             ["Parceiros", "R$ 4,1 mi", "+15%"],
             ["Marketplace", "R$ 2,1 mi", "+6%"]
           ]
         } },
-        { "type": "callout", "props": { "variant": "info", "text": "Crescimento compara com o trimestre anterior." } },
         { "type": "actions", "props": { "items": [
           { "label": "Copiar tabela", "copy": "Direto;R$ 6,2 mi;+9%\nParceiros;R$ 4,1 mi;+15%\nMarketplace;R$ 2,1 mi;+6%" }
         ] } }
@@ -458,7 +486,119 @@ legadas são **normalizadas** (`ui.legacy-shape`). O bloco só degrada quando h�
 }
 ```
 
-### 12.4 Ruim (não emitir)
+### 12.4 Bom — feed de notícias com miniaturas, status e fontes
+
+```ui
+{
+  "components": [
+    {
+      "type": "section",
+      "props": { "eyebrow": "VCT Américas", "icon": "flame", "title": "Principais notícias" },
+      "children": [
+        {
+          "type": "stack",
+          "props": { "direction": "row", "gap": "md", "align": "start" },
+          "children": [
+            { "type": "image", "props": { "src": "https://example.com/mibr.png", "alt": "Equipe da MIBR no palco", "size": "thumb" } },
+            { "type": "stack", "props": { "gap": "sm" }, "children": [
+              { "type": "stack", "props": { "direction": "row", "gap": "sm", "align": "center" }, "children": [
+                { "type": "badge", "props": { "label": "Confirmado", "tone": "success", "icon": "check" } },
+                { "type": "text", "props": { "text": "23 de outubro", "variant": "small" } }
+              ] },
+              { "type": "text", "props": { "text": "MIBR coloca todo o elenco no banco", "variant": "strong" } },
+              { "type": "text", "props": { "text": "Aspeas, zekken, Verno, Mazino e tex estão disponíveis para negociações. Os contratos continuam válidos, portanto isso não significa que todos serão vendidos." } },
+              { "type": "source", "props": { "label": "strafe.com", "href": "https://strafe.com" } }
+            ] }
+          ]
+        },
+        { "type": "divider" },
+        {
+          "type": "stack",
+          "props": { "direction": "row", "gap": "md", "align": "start" },
+          "children": [
+            { "type": "image", "props": { "src": "https://example.com/loud.png", "alt": "Equipe da LOUD em campeonato", "size": "thumb" } },
+            { "type": "stack", "props": { "gap": "sm" }, "children": [
+              { "type": "stack", "props": { "direction": "row", "gap": "sm", "align": "center" }, "children": [
+                { "type": "badge", "props": { "label": "Mercado em aberto", "tone": "warning", "icon": "clock" } },
+                { "type": "text", "props": { "text": "19 de outubro", "variant": "small" } }
+              ] },
+              { "type": "text", "props": { "text": "FURIA perde a vaga de parceira no VCT", "variant": "strong" } },
+              { "type": "text", "props": { "text": "A organização ainda pode competir pelos classificatórios abertos de 2027." } },
+              { "type": "source", "props": { "label": "sheesports.com", "href": "https://sheesports.com" } }
+            ] }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### 12.5 Bom — laboratório interativo (choices + checklist)
+
+```ui
+{
+  "components": [
+    {
+      "type": "section",
+      "props": {
+        "eyebrow": "Laboratório interativo",
+        "icon": "sparkles",
+        "title": "Configure seu agente",
+        "description": "Ajuste a missão e as capacidades; a simulação mostra o que muda."
+      },
+      "children": [
+        {
+          "type": "choices",
+          "props": {
+            "label": "Missão",
+            "mode": "single",
+            "layout": "list",
+            "default": ["Agente pesquisador"],
+            "options": [
+              { "label": "Agente de CRM e captação de leads", "description": "Qualifica leads e organiza o funil comercial." },
+              { "label": "Agente programador", "description": "Implementa, revisa e testa código." },
+              { "label": "Agente pesquisador", "description": "Busca, compara e consolida fontes." }
+            ],
+            "submitLabel": "Enviar missão",
+            "submitPrefix": "Configurar agente com a missão: "
+          }
+        },
+        {
+          "type": "choices",
+          "props": {
+            "label": "Capacidades",
+            "mode": "multiple",
+            "layout": "list",
+            "countLabel": "Capacidades habilitadas",
+            "default": ["RAG e contexto", "Memória persistente"],
+            "options": [
+              { "label": "Planejamento", "description": "Divide objetivos complexos em tarefas menores." },
+              { "label": "RAG e contexto", "description": "Recupera informações relevantes quando necessário." },
+              { "label": "Ferramentas", "description": "Executa ações reais com APIs, código e serviços." },
+              { "label": "Memória persistente", "description": "Guarda informações úteis entre sessões e tarefas." },
+              { "label": "Verificação e autocorreção", "description": "Testa resultados e corrige erros detectados." }
+            ],
+            "submitLabel": "Enviar capacidades",
+            "submitPrefix": "Configurar agente com as capacidades: "
+          }
+        },
+        {
+          "type": "checklist",
+          "props": { "items": [
+            { "label": "Receber objetivo", "description": "Encontrar e qualificar 20 clínicas para prospecção comercial.", "status": "done" },
+            { "label": "Planejamento", "description": "Etapa desabilitada", "status": "disabled" },
+            { "label": "Buscar contexto", "description": "Consultar dados e critérios comerciais atualizados", "status": "done" },
+            { "label": "Verificar execução", "description": "Etapa desabilitada", "status": "disabled" }
+          ] }
+        }
+      ]
+    }
+  ]
+}
+```
+
+### 12.6 Ruim (não emitir)
 
 ```json
 {
@@ -476,7 +616,8 @@ legadas são **normalizadas** (`ui.legacy-shape`). O bloco só degrada quando h�
 
 Problemas: Markdown no título; card vazio e card sem título na raiz; grid de 4
 colunas com 1 filho; dois botões inválidos (um sem `prompt`/`copy`, outro com
-os dois) e com duas `primary`; rótulo com ponto final. Como há um erro
+os dois) e com duas `primary`; rótulo com ponto final. Caixas de nota
+(`callout`) também são proibidas (`ui.callout-style`). Como há um erro
 estrutural (`ui.action-invalid`), o validador para aí e o lint de design não
 roda. Corrigidos os erros, o lint apontaria `ui.markdown-in-props`,
 `ui.empty-container`, `ui.card-title`, `ui.grid-orphans`, `ui.action-primary`

@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { propNumber, propString, type GenUIValue } from '@/lib/genui/schema';
+import { genUIIcon } from '../icons';
+import { GenUIIconBadge } from './GenUIIconBadge';
 
 export interface GenUINodeProps {
   props?: Record<string, GenUIValue>;
@@ -13,24 +15,37 @@ const CARD_VARIANTS = {
   muted: 'border-border bg-surface',
 } as const;
 
-/** Bordered surface with optional title/subtitle/footer. */
+/** Bordered surface with optional title/subtitle/footer/icon. */
 export function GenUICard({ props, children }: GenUINodeProps) {
   const title = propString(props, 'title');
   const subtitle = propString(props, 'subtitle');
   const footer = propString(props, 'footer');
+  const icon = propString(props, 'icon');
+  const hasIcon = Boolean(genUIIcon(icon));
   const variantRaw = propString(props, 'variant', 'default');
-  const variant =
-    variantRaw === 'accent' || variantRaw === 'muted' ? variantRaw : 'default';
+  const variant = variantRaw === 'accent' || variantRaw === 'muted' ? variantRaw : 'default';
+  const hasHeader = Boolean(title || subtitle);
 
   return (
-    <section className={cn('overflow-hidden rounded-2xl border', CARD_VARIANTS[variant])}>
-      {title || subtitle ? (
-        <header className="border-b border-border px-4 py-3">
-          {title ? <h4 className="text-[13px] font-semibold tracking-tight text-foreground">{title}</h4> : null}
-          {subtitle ? <p className="mt-0.5 text-xs leading-relaxed text-foreground-muted">{subtitle}</p> : null}
+    <section className={cn('relative overflow-hidden rounded-2xl border', CARD_VARIANTS[variant])}>
+      {hasHeader ? (
+        <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="min-w-0">
+            {title ? (
+              <h4 className="text-[13px] font-semibold tracking-tight text-foreground">{title}</h4>
+            ) : null}
+            {subtitle ? (
+              <p className="mt-0.5 text-xs leading-relaxed text-foreground-muted">{subtitle}</p>
+            ) : null}
+          </div>
+          <GenUIIconBadge icon={icon} />
         </header>
+      ) : hasIcon ? (
+        <div className="pointer-events-none absolute right-3 top-3">
+          <GenUIIconBadge icon={icon} />
+        </div>
       ) : null}
-      <div className="flex flex-col gap-3 p-4">{children}</div>
+      <div className={cn('flex flex-col gap-3 p-4', !hasHeader && hasIcon && 'pr-12')}>{children}</div>
       {footer ? (
         <footer className="border-t border-border px-4 py-2.5 text-[11px] text-foreground-subtle">{footer}</footer>
       ) : null}

@@ -165,7 +165,8 @@ A interface renderiza **GFM completo** e as extensões abaixo. Use o recurso mai
 
 ## Matemática
 - Inline com `$...$` e display com `$$...$$`, renderizados pelo KaTeX. Escreva LaTeX válido, feche todos os delimitadores e não coloque math dentro de bloco de código.
-- Não invente comandos LaTeX; para `$` avulso (moeda), escape com `\$`.
+- Cifrão/marcador de fundo: dentro de math escreva `\$` (ex.: `$\delta(q, \$, \$) = (q_f, \$)$`); nunca use um `$` solto dentro de math, senão o delimitador fecha antes da hora. Fora de math, `\$` também produz um `$` literal.
+- Não invente comandos LaTeX.
 
 ## Fences especiais do app
 - ` ```mermaid `: diagramas (fluxo, sequência, estados). Use quando o diagrama explicar melhor que texto.
@@ -261,9 +262,16 @@ fn generative_ui_section(contract: &Contract) -> String {
          antes de emitir.\n\n",
     );
 
-    section.push_str("## Exemplo canônico\n\n");
+    section.push_str("## Exemplos canônicos\n\n");
+    section.push_str("Exemplo 1 — feed/relatório (dados, gráfico e próximos passos):\n\n");
     section.push_str("```ui\n");
     section.push_str(contract::EXAMPLE_JSON.trim());
+    section.push_str("\n```\n\n");
+    section.push_str(
+        "Exemplo 2 — laboratório interativo (seções, escolhas e checklist):\n\n",
+    );
+    section.push_str("```ui\n");
+    section.push_str(contract::EXAMPLE_INTERACTIVE_JSON.trim());
     section.push_str("\n```\n\n");
 
     section.push_str("## Regras de design (do contrato)\n");
@@ -554,23 +562,35 @@ mod tests {
     }
 
     #[test]
-    fn documented_ui_example_is_valid_and_lint_clean() {
+    fn documented_ui_examples_are_valid_and_lint_clean() {
         let prompt = default_prompt();
-        let analysis = analyze(contract::EXAMPLE_JSON);
-        assert!(
-            analysis.is_ok(),
-            "o exemplo do prompt precisa ser válido: {:?}",
-            analysis
-                .diagnostics
-                .iter()
-                .map(|diagnostic| diagnostic.code.clone())
-                .collect::<Vec<_>>()
-        );
-        assert!(
-            analysis.warnings().next().is_none(),
-            "o exemplo do prompt precisa ser lint-clean"
-        );
+        for (name, raw) in [
+            ("genui-example.json", contract::EXAMPLE_JSON),
+            (
+                "genui-example-interactive.json",
+                contract::EXAMPLE_INTERACTIVE_JSON,
+            ),
+        ] {
+            let analysis = analyze(raw);
+            assert!(
+                analysis.is_ok(),
+                "{name} precisa ser válido: {:?}",
+                analysis
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| diagnostic.code.clone())
+                    .collect::<Vec<_>>()
+            );
+            assert!(
+                analysis.warnings().next().is_none(),
+                "{name} precisa ser lint-clean"
+            );
+        }
+        assert!(prompt.contains("## Exemplos canônicos"));
+        assert!(prompt.contains("feed/relatório"));
+        assert!(prompt.contains("laboratório interativo"));
         assert!(prompt.contains("\"Receita do trimestre\""));
+        assert!(prompt.contains("\"Configure seu agente\""));
     }
 
     #[test]
@@ -670,6 +690,20 @@ mod tests {
         assert!(prompt.contains("`$$...$$`"));
         assert!(prompt.contains("KaTeX"));
         assert!(prompt.contains("LaTeX"));
+    }
+
+    #[test]
+    fn prompt_documents_math_dollar_escape() {
+        let prompt = default_prompt();
+        // `\$` equilibra os delimitadores dentro de math (ex.: marcador de fundo).
+        assert!(prompt.contains(r"$\delta(q, \$, \$) = (q_f, \$)$"));
+        assert!(prompt.contains("dentro de math"));
+        assert!(prompt.contains("nunca use um `$` solto dentro de math"));
+        // Fora de math, `\$` também vira `$` literal.
+        assert!(prompt.contains(r"Fora de math, `\$` também produz um `$` literal"));
+        // Orientações de LaTeX que continuam valendo.
+        assert!(prompt.contains("LaTeX válido"));
+        assert!(prompt.contains("não coloque math dentro de bloco de código"));
     }
 
     #[test]

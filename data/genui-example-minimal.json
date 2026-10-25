@@ -6,12 +6,8 @@
       "props": { "gap": "md" },
       "children": [
         {
-          "type": "callout",
-          "props": {
-            "variant": "info",
-            "title": "Resumo",
-            "text": "Três pontos merecem atenção antes de fechar o trimestre."
-          },
+          "type": "reveal",
+          "props": { "title": "Ressalvas do trimestre" },
           "children": [
             {
               "type": "list",

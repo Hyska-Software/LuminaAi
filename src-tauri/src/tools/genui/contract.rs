@@ -5,9 +5,11 @@
 //! pode duplicar listas, limites ou regras: tudo é lido do contrato em tempo de
 //! compilação (`include_str!`) para que o prompt e o validador nunca divirjam.
 //!
-//! `data/genui-example.json` é o exemplo canônico usado pelo system prompt e
-//! pelos testes (precisa ser válido e lint-clean); `genui-example-minimal.json`
-//! é a variante mínima usada em testes de documentação.
+//! `data/genui-example.json` (feed/relatório) e
+//! `data/genui-example-interactive.json` (laboratório interativo) são os
+//! exemplos canônicos usados pelo system prompt e pelos testes (precisam ser
+//! válidos e lint-clean); `genui-example-minimal.json` é a variante mínima usada
+//! em testes de documentação.
 
 use std::collections::BTreeMap;
 
@@ -17,8 +19,11 @@ use serde_json::Value;
 
 /// Contrato completo (fonte única).
 pub const CONTRACT_JSON: &str = include_str!("../../../../data/genui-contract.json");
-/// Exemplo canônico documentado no system prompt.
+/// Exemplo canônico de feed/relatório documentado no system prompt.
 pub const EXAMPLE_JSON: &str = include_str!("../../../../data/genui-example.json");
+/// Exemplo canônico interativo (seções, escolhas e checklist) do system prompt.
+pub const EXAMPLE_INTERACTIVE_JSON: &str =
+    include_str!("../../../../data/genui-example-interactive.json");
 /// Exemplo mínimo (usado nos testes de documentação).
 #[cfg(test)]
 pub const MINIMAL_EXAMPLE_JSON: &str =
@@ -326,7 +331,7 @@ mod tests {
             "promptIntro e description têm papéis diferentes"
         );
         assert!(!contract.components.is_empty());
-        assert_eq!(contract.rules.len(), 27, "o contrato declara 27 regras de design");
+        assert_eq!(contract.rules.len(), 30, "o contrato declara 30 regras de design");
         assert!(contract.limits.depth > 0);
         assert!(contract.limits.nodes > contract.limits.depth);
         assert!(contract.limits.diagnostics_per_code > 0);
@@ -418,9 +423,45 @@ mod tests {
 
     #[test]
     fn embeds_valid_examples() {
-        for raw in [EXAMPLE_JSON, MINIMAL_EXAMPLE_JSON] {
+        for raw in [EXAMPLE_JSON, EXAMPLE_INTERACTIVE_JSON, MINIMAL_EXAMPLE_JSON] {
             let value: Value = serde_json::from_str(raw).expect("exemplo embutido é JSON válido");
             assert!(value.get("components").and_then(Value::as_array).is_some());
+        }
+    }
+
+    #[test]
+    fn embedded_examples_are_valid_and_lint_clean() {
+        use crate::tools::genui::analyze;
+
+        for (name, raw) in [
+            ("genui-example.json", EXAMPLE_JSON),
+            ("genui-example-interactive.json", EXAMPLE_INTERACTIVE_JSON),
+            ("genui-example-minimal.json", MINIMAL_EXAMPLE_JSON),
+        ] {
+            let analysis = analyze(raw);
+            assert!(
+                analysis.is_ok(),
+                "{name} precisa ser válido; erros: {:?}",
+                analysis
+                    .diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic.severity == crate::tools::genui::Severity::Error)
+                    .map(|diagnostic| format!("{}@{}", diagnostic.code, diagnostic.path))
+                    .collect::<Vec<_>>()
+            );
+            assert!(
+                analysis.warnings().next().is_none(),
+                "{name} precisa ser lint-clean; avisos: {:?}",
+                analysis
+                    .diagnostics
+                    .iter()
+                    .filter(|diagnostic| {
+                        diagnostic.severity == crate::tools::genui::Severity::Warning
+                    })
+                    .map(|diagnostic| format!("{}@{}", diagnostic.code, diagnostic.path))
+                    .collect::<Vec<_>>()
+            );
+            assert!(analysis.normalized.is_some());
         }
     }
 

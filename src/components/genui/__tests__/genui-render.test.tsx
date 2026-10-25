@@ -2,7 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { toast } from 'sonner';
+import interactiveExample from '@data/genui-example-interactive.json';
 import { GENUI_ICONS, GENUI_TYPES, parseGenUI, type GenUISpec } from '@/lib/genui';
+import { openExternal } from '@/lib/genui/open-external';
 import { GenUIBlock } from '../GenUIBlock';
 import { GenUIRenderer } from '../GenUIRenderer';
 import { GENUI_ICON_MAP, genUIIcon } from '../icons';
@@ -16,6 +18,11 @@ vi.mock('sonner', () => ({
   },
 }));
 
+vi.mock('@/lib/genui/open-external', () => ({
+  openExternal: vi.fn(() => Promise.resolve(true)),
+  isExternalUrl: (url: string) => /^https?:\/\//i.test(url),
+}));
+
 const writeText = vi.fn<(text: string) => Promise<void>>();
 
 beforeEach(() => {
@@ -27,6 +34,7 @@ beforeEach(() => {
   });
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.error).mockClear();
+  vi.mocked(openExternal).mockClear();
 });
 
 afterEach(() => cleanup());
@@ -414,6 +422,412 @@ describe('a11y/UX das primitivas', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* GenUI v3 — section/text/source                                      */
+/* ------------------------------------------------------------------ */
+
+describe('v3 — conteúdo informativo', () => {
+  it('renderiza section com cabeçalho, divisor e children', () => {
+    renderBlock([
+      {
+        type: 'section',
+        props: {
+          eyebrow: 'Laboratório interativo',
+          title: 'Configure seu agente',
+          description: 'Ajuste a missão e as capacidades.',
+          icon: 'sparkles',
+          divider: true,
+        },
+        children: [
+          { type: 'text', props: { text: 'Escolha uma missão para começar.', variant: 'muted' } },
+        ],
+      },
+    ]);
+
+    expect(screen.getByText('Laboratório interativo')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Configure seu agente' })).toBeTruthy();
+    expect(screen.getByText('Ajuste a missão e as capacidades.')).toBeTruthy();
+    expect(screen.getByText('Escolha uma missão para começar.')).toBeTruthy();
+    expect(document.querySelector('section hr')).toBeTruthy();
+  });
+
+  it('renderiza text nos cinco variants do contrato', () => {
+    renderBlock([
+      { type: 'text', props: { text: 'Corpo do texto' } },
+      { type: 'text', props: { text: 'Texto atenuado', variant: 'muted' } },
+      { type: 'text', props: { text: 'Texto de abertura', variant: 'lead' } },
+      { type: 'text', props: { text: 'Texto forte', variant: 'strong' } },
+      { type: 'text', props: { text: 'Texto pequeno', variant: 'small' } },
+    ]);
+
+    expect(screen.getByText('Corpo do texto').className).toContain('text-[13px]');
+    expect(screen.getByText('Texto atenuado').className).toContain('text-foreground-muted');
+    expect(screen.getByText('Texto de abertura').className).toContain('text-[15px]');
+    expect(screen.getByText('Texto forte').className).toContain('font-semibold');
+    expect(screen.getByText('Texto pequeno').className).toContain('text-foreground-subtle');
+  });
+
+  it('source abre o link externo, expõe title e nome acessível em pt-BR', async () => {
+    renderBlock([
+      {
+        type: 'section',
+        props: { title: 'Fontes' },
+        children: [
+          {
+            type: 'source',
+            props: { label: 'reuters.com', href: 'https://reuters.com/noticia', title: 'Manchete original' },
+          },
+        ],
+      },
+    ]);
+
+    const chip = screen.getByRole('button', { name: 'Abrir reuters.com em nova aba' });
+    expect(chip.getAttribute('title')).toBe('Manchete original');
+    expect(screen.getByText('reuters.com')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(chip);
+    });
+    expect(openExternal).toHaveBeenCalledWith('https://reuters.com/noticia');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* GenUI v3 — choices                                                  */
+/* ------------------------------------------------------------------ */
+
+/** Escuta o evento que o Composer usa para preencher o textarea. */
+function captureSuggestions() {
+  const received: string[] = [];
+  const listener = (event: Event) => received.push((event as CustomEvent<string>).detail);
+  window.addEventListener('lumina:suggest', listener);
+  return {
+    received,
+    stop: () => window.removeEventListener('lumina:suggest', listener),
+  };
+}
+
+const SINGLE_CHOICES = [
+  {
+    type: 'choices',
+    props: {
+      label: 'Missão',
+      mode: 'single',
+      layout: 'list',
+      options: [
+        { label: 'Agente de CRM', description: 'Qualifica leads e organiza o funil.' },
+        { label: 'Agente programador', description: 'Implementa, revisa e testa código.' },
+      ],
+      submitLabel: 'Enviar missão',
+      submitPrefix: 'Configurar agente com a missão: ',
+    },
+  },
+];
+
+describe('v3 — choices', () => {
+  it('single (list): clique troca aria-checked e o envio preenche o composer', async () => {
+    const capture = captureSuggestions();
+    try {
+      renderBlock(SINGLE_CHOICES);
+
+      const first = screen.getByRole('radio', { name: /Agente de CRM/ });
+      const second = screen.getByRole('radio', { name: /Agente programador/ });
+      const submit = screen.getByRole('button', { name: 'Enviar missão' }) as HTMLButtonElement;
+
+      expect(screen.getByRole('group', { name: 'Missão' })).toBeTruthy();
+      expect(first.getAttribute('aria-checked')).toBe('false');
+      expect(second.getAttribute('aria-checked')).toBe('false');
+      expect(submit.disabled).toBe(true);
+
+      fireEvent.click(second);
+      expect(second.getAttribute('aria-checked')).toBe('true');
+      expect(first.getAttribute('aria-checked')).toBe('false');
+
+      // Comportamento de rádio: uma nova escolha substitui a anterior.
+      fireEvent.click(first);
+      expect(first.getAttribute('aria-checked')).toBe('true');
+      expect(second.getAttribute('aria-checked')).toBe('false');
+
+      await act(async () => {
+        fireEvent.click(submit);
+      });
+
+      await waitFor(() =>
+        expect(capture.received).toEqual(['Configurar agente com a missão: Agente de CRM']),
+      );
+      // Prompt só preenche o composer: nada de toast.
+      expect(toast.success).not.toHaveBeenCalled();
+    } finally {
+      capture.stop();
+    }
+  });
+
+  it('without selection: o envio fica desabilitado e não dispara sugestão', async () => {
+    const capture = captureSuggestions();
+    try {
+      renderBlock(SINGLE_CHOICES);
+      const submit = screen.getByRole('button', { name: 'Enviar missão' }) as HTMLButtonElement;
+
+      expect(submit.disabled).toBe(true);
+      await act(async () => {
+        fireEvent.click(submit);
+      });
+      expect(capture.received).toHaveLength(0);
+    } finally {
+      capture.stop();
+    }
+  });
+
+  it('multiple: contador e progresso mudam; envio respeita a ordem das options', async () => {
+    const capture = captureSuggestions();
+    try {
+      renderBlock([
+        {
+          type: 'choices',
+          props: {
+            label: 'Capacidades',
+            mode: 'multiple',
+            countLabel: 'Capacidades habilitadas',
+            default: ['RAG e contexto', 'Memória persistente'],
+            options: [
+              { label: 'Planejamento' },
+              { label: 'RAG e contexto' },
+              { label: 'Ferramentas' },
+              { label: 'Memória persistente' },
+            ],
+            submitLabel: 'Enviar capacidades',
+            submitPrefix: 'Configurar agente com as capacidades: ',
+          },
+        },
+      ]);
+
+      const group = screen.getByRole('group', { name: 'Capacidades' });
+      expect(group.getAttribute('data-selected-count')).toBe('2');
+      expect(screen.getByText('2/4')).toBeTruthy();
+      expect(
+        screen.getByRole('progressbar', { name: 'Capacidades habilitadas' }).getAttribute('aria-valuenow'),
+      ).toBe('50');
+
+      fireEvent.click(screen.getByRole('checkbox', { name: /Planejamento/ }));
+      expect(group.getAttribute('data-selected-count')).toBe('3');
+      expect(screen.getByText('3/4')).toBeTruthy();
+      expect(
+        screen.getByRole('progressbar', { name: 'Capacidades habilitadas' }).getAttribute('aria-valuenow'),
+      ).toBe('75');
+
+      fireEvent.click(screen.getByRole('checkbox', { name: /Ferramentas/ }));
+      expect(group.getAttribute('data-selected-count')).toBe('4');
+      expect(screen.getByText('4/4')).toBeTruthy();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Enviar capacidades' }));
+      });
+
+      await waitFor(() =>
+        expect(capture.received).toEqual([
+          'Configurar agente com as capacidades: Planejamento, RAG e contexto, Ferramentas, Memória persistente',
+        ]),
+      );
+      expect(toast.success).not.toHaveBeenCalled();
+    } finally {
+      capture.stop();
+    }
+  });
+
+  it('segmented: seleção única e descrição da opção ativa', () => {
+    renderBlock([
+      {
+        type: 'choices',
+        props: {
+          label: 'Tom',
+          layout: 'segmented',
+          default: ['Criativo'],
+          options: [
+            { label: 'Objetivo', description: 'Direto ao ponto.' },
+            { label: 'Criativo', description: 'Exploratório e aberto.' },
+          ],
+          submitLabel: 'Aplicar tom',
+        },
+      },
+    ]);
+
+    const creative = screen.getByRole('radio', { name: 'Criativo' });
+    expect(creative.getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByText('Exploratório e aberto.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Objetivo' }));
+    expect(screen.getByRole('radio', { name: 'Objetivo' }).getAttribute('aria-checked')).toBe('true');
+    expect(creative.getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText('Direto ao ponto.')).toBeTruthy();
+    expect(screen.queryByText('Exploratório e aberto.')).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* GenUI v3 — checklist                                                */
+/* ------------------------------------------------------------------ */
+
+describe('v3 — checklist', () => {
+  it('comunica cada estado com texto acessível e data-status', () => {
+    const { container } = renderBlock([
+      {
+        type: 'checklist',
+        props: {
+          items: [
+            { label: 'Receber objetivo', status: 'done', description: 'Objetivo qualificado.' },
+            { label: 'Planejamento', status: 'active' },
+            { label: 'Buscar contexto', status: 'pending' },
+            { label: 'Etapa desativada', status: 'disabled' },
+            { label: 'Verificar execução', status: 'error' },
+          ],
+        },
+      },
+    ]);
+
+    for (const statusText of ['Concluído', 'Em andamento', 'Pendente', 'Desativado', 'Erro']) {
+      expect(screen.getByText(statusText)).toBeTruthy();
+    }
+    expect(screen.getByText('Objetivo qualificado.')).toBeTruthy();
+
+    const rows = container.querySelectorAll('li[data-status]');
+    expect(rows).toHaveLength(5);
+    expect([...rows].map((row) => row.getAttribute('data-status'))).toEqual([
+      'done',
+      'active',
+      'pending',
+      'disabled',
+      'error',
+    ]);
+  });
+
+  it('item com icon próprio usa o ícone da whitelist em vez do ícone de status', () => {
+    const { container } = renderBlock([
+      {
+        type: 'checklist',
+        props: { items: [{ label: 'Com ícone próprio', status: 'pending', icon: 'target' }] },
+      },
+    ]);
+
+    const row = container.querySelector('li[data-status]');
+    expect(row?.getAttribute('data-status')).toBe('pending');
+    expect(row?.querySelector('svg')).toBeTruthy();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* GenUI v3 — extensões de list/image/badge/card                       */
+/* ------------------------------------------------------------------ */
+
+describe('v3 — extensões das primitivas', () => {
+  it('list: item com href abre o link externo e itens com icon/status têm ícone leading', async () => {
+    renderBlock([
+      {
+        type: 'list',
+        props: {
+          items: [
+            { text: 'Notícia no portal', href: 'https://example.com/noticia' },
+            { text: 'Etapa concluída', status: 'done' },
+            { text: 'Ferramenta', icon: 'wrench' },
+            { text: 'Item simples' },
+          ],
+        },
+      },
+    ]);
+
+    const link = screen.getByRole('button', { name: /Notícia no portal/ });
+    await act(async () => {
+      fireEvent.click(link);
+    });
+    expect(openExternal).toHaveBeenCalledWith('https://example.com/noticia');
+
+    const rows = screen.getAllByRole('listitem');
+    expect(rows).toHaveLength(4);
+    expect(rows[1].getAttribute('data-status')).toBe('done');
+    expect(rows[1].querySelector('svg')).toBeTruthy();
+    expect(rows[2].querySelector('svg')).toBeTruthy();
+    expect(rows[3].querySelector('svg')).toBeNull();
+  });
+
+  it('image: size/aspect expostos em data-* e classes visuais', () => {
+    renderBlock([
+      { type: 'image', props: { src: 'https://example.com/a.jpg', alt: 'Miniatura', size: 'thumb' } },
+      { type: 'image', props: { src: 'https://example.com/b.jpg', alt: 'Avatar', size: 'avatar' } },
+      {
+        type: 'image',
+        props: { src: 'https://example.com/c.jpg', alt: 'Capa', size: 'full', aspect: 'video' },
+      },
+    ]);
+
+    const thumb = screen.getByRole('img', { name: 'Miniatura' });
+    expect(thumb.getAttribute('data-size')).toBe('thumb');
+    expect(thumb.className).toContain('w-32');
+    expect(thumb.className).toContain('object-cover');
+
+    const avatar = screen.getByRole('img', { name: 'Avatar' });
+    expect(avatar.getAttribute('data-size')).toBe('avatar');
+    expect(avatar.className).toContain('rounded-full');
+
+    const cover = screen.getByRole('img', { name: 'Capa' });
+    expect(cover.getAttribute('data-aspect')).toBe('video');
+    expect(cover.className).toContain('aspect-video');
+  });
+
+  it('badge com icon renderiza o svg e mantém o tom', () => {
+    renderBlock([{ type: 'badge', props: { label: 'Banco de dados', tone: 'success', icon: 'database' } }]);
+
+    const badge = screen.getByText('Banco de dados').closest('[data-tone]');
+    expect(badge?.getAttribute('data-tone')).toBe('success');
+    expect(badge?.querySelector('svg')).toBeTruthy();
+  });
+
+  it('card com icon usa o header à direita e, sem header, flutua no corpo', () => {
+    const withHeader = renderBlock([
+      {
+        type: 'card',
+        props: { title: 'Card com ícone', icon: 'layers' },
+        children: [{ type: 'text', props: { text: 'Conteúdo do card' } }],
+      },
+    ]);
+    expect(withHeader.container.querySelector('section header svg')).toBeTruthy();
+    cleanup();
+
+    const floating = renderBlock([
+      {
+        type: 'card',
+        props: { icon: 'target' },
+        children: [{ type: 'text', props: { text: 'Conteúdo flutuante' } }],
+      },
+    ]);
+    expect(floating.container.querySelector('section')?.querySelector('svg')).toBeTruthy();
+    expect(screen.getByText('Conteúdo flutuante')).toBeTruthy();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* exemplo canônico interativo                                          */
+/* ------------------------------------------------------------------ */
+
+describe('v3 — exemplo canônico interativo do contrato', () => {
+  it('renderiza o data/genui-example-interactive.json sem degradar', () => {
+    const source = JSON.stringify(interactiveExample);
+    const parsed = parseGenUI(source);
+    expect(parsed.spec, parsed.error ?? '').not.toBeNull();
+    expect(parsed.error).toBeNull();
+
+    render(<GenUIBlock source={source} />);
+
+    expect(screen.getByText('Laboratório interativo')).toBeTruthy();
+    expect(screen.getByText('Configure seu agente')).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Missão' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Capacidades' })).toBeTruthy();
+    // Defaults do exemplo: 2 de 5 capacidades já selecionadas.
+    expect(screen.getByText('2/5')).toBeTruthy();
+    expect(screen.getByText('Receber objetivo')).toBeTruthy();
+    // Nenhum componente caiu no fallback de tipo não suportado.
+    expect(screen.queryByText(/não suportado/i)).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* mapa de ícones                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -429,7 +843,7 @@ describe('mapa de ícones do contrato', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* todos os 21 tipos têm caminho de render                             */
+/* todos os 26 tipos têm caminho de render                             */
 /* ------------------------------------------------------------------ */
 
 interface TypeFixture {
@@ -619,6 +1033,61 @@ const TYPE_FIXTURES: Record<string, TypeFixture> = {
       props: { items: [{ label: 'Ação primitiva', prompt: 'Próximo passo' }] },
     },
     assert: () => expect(screen.getByRole('button', { name: 'Ação primitiva' })).toBeTruthy(),
+  },
+  section: {
+    component: {
+      type: 'section',
+      props: { title: 'Seção de teste', eyebrow: 'Eyebrow' },
+      children: [{ type: 'badge', props: { label: 'Conteúdo da seção' } }],
+    },
+    assert: () => {
+      expect(screen.getByText('Seção de teste')).toBeTruthy();
+      expect(screen.getByText('Conteúdo da seção')).toBeTruthy();
+    },
+  },
+  text: {
+    component: { type: 'text', props: { text: 'Parágrafo de teste', variant: 'lead' } },
+    assert: () => expect(screen.getByText('Parágrafo de teste')).toBeTruthy(),
+  },
+  source: {
+    component: {
+      type: 'source',
+      props: { label: 'exemplo.com', href: 'https://exemplo.com/pagina' },
+    },
+    assert: () => {
+      expect(screen.getByRole('button', { name: 'Abrir exemplo.com em nova aba' })).toBeTruthy();
+      expect(screen.getByText('exemplo.com')).toBeTruthy();
+    },
+  },
+  choices: {
+    component: {
+      type: 'choices',
+      props: {
+        label: 'Opções de teste',
+        options: [{ label: 'Opção A' }, { label: 'Opção B' }],
+        submitLabel: 'Enviar',
+      },
+    },
+    assert: () => {
+      expect(screen.getByRole('group', { name: 'Opções de teste' })).toBeTruthy();
+      expect(screen.getByRole('radio', { name: 'Opção A' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Enviar' })).toBeTruthy();
+    },
+  },
+  checklist: {
+    component: {
+      type: 'checklist',
+      props: {
+        items: [
+          { label: 'Item concluído', status: 'done' },
+          { label: 'Item pendente', status: 'pending' },
+        ],
+      },
+    },
+    assert: () => {
+      expect(screen.getByText('Item concluído')).toBeTruthy();
+      expect(screen.getByText('Item pendente')).toBeTruthy();
+    },
   },
 };
 

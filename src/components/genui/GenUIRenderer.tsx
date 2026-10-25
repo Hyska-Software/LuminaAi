@@ -4,6 +4,7 @@ import { GENUI_LIMITS, propString, type GenUIComponent, type GenUISpec } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { GenUICard, GenUIGrid, GenUIStack } from './components/GenUILayout';
 import { GenUIChart, GenUITable } from './components/GenUIData';
+import { GenUIChecklist, GenUISection, GenUISource, GenUIText } from './components/GenUIStructure';
 import {
   GenUIBadge,
   GenUICallout,
@@ -20,6 +21,7 @@ import {
   GenUITimeline,
 } from './components/GenUIBlocks';
 import { GenUIActions } from './GenUIActions';
+import { GenUIChoices } from './GenUIChoices';
 import { GenUIReveal } from './GenUIReveal';
 
 interface RenderNodeProps {
@@ -59,6 +61,16 @@ function GenUINode({ node, depth }: RenderNodeProps) {
       return <GenUITabs node={node} depth={depth} />;
     case 'reveal':
       return <GenUIReveal props={props}>{children}</GenUIReveal>;
+    case 'section':
+      return <GenUISection props={props}>{children}</GenUISection>;
+    case 'text':
+      return <GenUIText props={props} />;
+    case 'source':
+      return <GenUISource props={props} />;
+    case 'choices':
+      return <GenUIChoices props={props} />;
+    case 'checklist':
+      return <GenUIChecklist props={props} />;
     case 'table':
       return <GenUITable props={props} />;
     case 'chart':

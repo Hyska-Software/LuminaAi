@@ -194,6 +194,23 @@ export function lintGenUI(spec: GenUISpec): GenUIDiagnostic[] {
         lintActions(propObjectArray(props, 'items'), path, push);
         break;
       }
+      case 'callout': {
+        // Estilo descontinuado (auditoria de produto): caixas coloridas de nota
+        // não fazem parte do padrão do chat. Mensagens antigas continuam
+        // renderizando; novas respostas recebem este aviso via validate_ui.
+        push('ui.callout-style', path);
+        break;
+      }
+      case 'section': {
+        if (!propString(props, 'title').trim() && !propString(props, 'eyebrow').trim()) {
+          push('ui.section-header', path);
+        }
+        break;
+      }
+      case 'choices': {
+        if (!propString(props, 'submitLabel').trim()) push('ui.choices-submit', path);
+        break;
+      }
       default:
         break;
     }

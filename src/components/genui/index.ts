@@ -13,6 +13,9 @@ export type { GenUIBlockProps } from './GenUIBlock';
 export { GenUIActions } from './GenUIActions';
 export type { GenUIActionsProps } from './GenUIActions';
 
+export { GenUIChoices } from './GenUIChoices';
+export type { GenUIChoicesProps } from './GenUIChoices';
+
 export { GenUIReveal } from './GenUIReveal';
 export type { GenUIRevealProps } from './GenUIReveal';
 

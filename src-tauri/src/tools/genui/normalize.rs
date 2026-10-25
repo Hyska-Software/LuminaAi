@@ -494,7 +494,7 @@ impl Normalizer<'_> {
                     format!("{path}.children"),
                     format!(
                         "`{}` não aceita `children`; use um container (card, stack, grid, tabs, \
-                         reveal, callout).",
+                         reveal, section, callout).",
                         spec.typ
                     ),
                 );

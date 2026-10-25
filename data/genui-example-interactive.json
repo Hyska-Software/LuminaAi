@@ -1,0 +1,70 @@
+{
+  "version": 2,
+  "components": [
+    {
+      "type": "section",
+      "props": {
+        "eyebrow": "Laboratório interativo",
+        "icon": "sparkles",
+        "title": "Configure seu agente",
+        "description": "Ajuste a missão e as capacidades; a simulação mostra o que muda."
+      },
+      "children": [
+        {
+          "type": "choices",
+          "props": {
+            "label": "Missão",
+            "mode": "single",
+            "layout": "list",
+            "default": ["Agente de CRM e captação de leads"],
+            "options": [
+              { "label": "Agente de CRM e captação de leads", "description": "Qualifica leads e organiza o funil comercial." },
+              { "label": "Agente programador", "description": "Implementa, revisa e testa código." },
+              { "label": "Agente pesquisador", "description": "Busca, compara e consolida fontes." }
+            ],
+            "submitLabel": "Enviar missão",
+            "submitPrefix": "Configurar agente com a missão: "
+          }
+        },
+        {
+          "type": "choices",
+          "props": {
+            "label": "Capacidades",
+            "mode": "multiple",
+            "layout": "list",
+            "countLabel": "Capacidades habilitadas",
+            "default": ["RAG e contexto", "Memória persistente"],
+            "options": [
+              { "label": "Planejamento", "description": "Divide objetivos complexos em tarefas menores." },
+              { "label": "RAG e contexto", "description": "Recupera informações relevantes quando necessário." },
+              { "label": "Ferramentas", "description": "Executa ações reais com APIs, código e serviços." },
+              { "label": "Memória persistente", "description": "Guarda informações úteis entre sessões e tarefas." },
+              { "label": "Verificação e autocorreção", "description": "Testa resultados e corrige erros detectados." }
+            ],
+            "submitLabel": "Enviar capacidades",
+            "submitPrefix": "Configurar agente com as capacidades: "
+          }
+        },
+        {
+          "type": "checklist",
+          "props": {
+            "items": [
+              {
+                "label": "Receber objetivo",
+                "description": "Encontrar e qualificar 20 clínicas para prospecção comercial.",
+                "status": "done"
+              },
+              { "label": "Planejamento", "description": "Etapa desabilitada", "status": "disabled" },
+              {
+                "label": "Buscar contexto",
+                "description": "Consultar dados e critérios comerciais atualizados",
+                "status": "done"
+              },
+              { "label": "Verificar execução", "description": "Etapa desabilitada", "status": "disabled" }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -22,6 +22,8 @@ import {
 } from '@/lib/genui/schema';
 import { Badge, ProgressBar } from '@/components/ui';
 import { CodeBlock } from '../CodeBlock';
+import { genUIIcon } from '../icons';
+import { statusKey, statusMeta } from './status';
 import type { GenUINodeProps } from './GenUILayout';
 
 /* -------------------------------- stat -------------------------------- */
@@ -246,34 +248,98 @@ export function GenUICode({ props }: GenUINodeProps) {
 
 /* --------------------------------- list ------------------------------- */
 
-export function GenUIList({ props }: GenUINodeProps) {
+interface GenUIListItem {
+  text: string;
+  description: string;
+  href: string;
+  icon: string;
+  status: string;
+}
+
+function readListItems(props: GenUINodeProps['props']): GenUIListItem[] {
   const rawItems = propArray(props, 'items') ?? [];
+  const items: GenUIListItem[] = [];
+  for (const entry of rawItems) {
+    if (typeof entry === 'string' || typeof entry === 'number') {
+      items.push({ text: String(entry), description: '', href: '', icon: '', status: '' });
+      continue;
+    }
+    if (typeof entry === 'object' && entry !== null && !Array.isArray(entry)) {
+      const text = propString(entry, 'text', propString(entry, 'title'));
+      if (!text) continue;
+      items.push({
+        text,
+        description: propString(entry, 'description'),
+        href: propString(entry, 'href'),
+        icon: propString(entry, 'icon'),
+        status: propString(entry, 'status'),
+      });
+    }
+  }
+  return items;
+}
+
+export function GenUIList({ props }: GenUINodeProps) {
+  const items = readListItems(props);
   const ordered = propBool(props, 'ordered');
-  const items = rawItems
-    .map((entry) => {
-      if (typeof entry === 'string' || typeof entry === 'number') {
-        return { text: String(entry), description: '' };
-      }
-      if (typeof entry === 'object' && entry !== null && !Array.isArray(entry)) {
-        return {
-          text: propString(entry, 'text', propString(entry, 'title', '')),
-          description: propString(entry, 'description'),
-        };
-      }
-      return null;
-    })
-    .filter((entry): entry is { text: string; description: string } => entry !== null && entry.text !== '');
   if (!items.length) return null;
 
+  const hasLeading = items.some((item) => Boolean(genUIIcon(item.icon)) || Boolean(item.status));
   const ListTag = ordered ? 'ol' : 'ul';
+
   return (
-    <ListTag className={cn('flex flex-col gap-1.5 pl-5', ordered ? 'list-decimal' : 'list-disc')}>
-      {items.map((item, index) => (
-        <li key={index} className="text-[12.5px] leading-relaxed text-foreground-muted marker:text-foreground-subtle">
-          <span className="text-foreground">{item.text}</span>
-          {item.description ? <span className="text-foreground-muted"> — {item.description}</span> : null}
-        </li>
-      ))}
+    <ListTag
+      className={cn(
+        'flex flex-col gap-1.5',
+        hasLeading ? 'list-none pl-0' : ordered ? 'list-decimal pl-5' : 'list-disc pl-5',
+      )}
+    >
+      {items.map((item, index) => {
+        const customIcon = genUIIcon(item.icon);
+        const meta = item.status ? statusMeta(item.status) : null;
+        const LeadingIcon = customIcon ?? meta?.icon ?? null;
+        const href = /^https?:\/\//i.test(item.href) ? item.href : '';
+        return (
+          <li
+            key={index}
+            data-status={item.status ? statusKey(item.status) : undefined}
+            className={cn(
+              'text-[12.5px] leading-relaxed text-foreground-muted marker:text-foreground-subtle',
+              LeadingIcon && 'flex items-start gap-2',
+            )}
+          >
+            {LeadingIcon ? (
+              <LeadingIcon
+                aria-hidden
+                className={cn(
+                  'mt-0.5 size-4 shrink-0',
+                  customIcon ? 'text-foreground-muted' : (meta?.className ?? 'text-foreground-subtle'),
+                )}
+              />
+            ) : null}
+            <span className="min-w-0">
+              {href ? (
+                <button
+                  type="button"
+                  onClick={() => void openExternal(href)}
+                  className={cn(
+                    'inline-flex max-w-full items-center gap-1 rounded-sm text-left font-medium text-accent',
+                    'underline-offset-2 transition-colors duration-150 hover:underline',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 motion-reduce:transition-none',
+                  )}
+                >
+                  <span className="min-w-0">{item.text}</span>
+                  <ExternalLink aria-hidden className="size-3 shrink-0" />
+                </button>
+              ) : (
+                <span className="text-foreground">{item.text}</span>
+              )}
+              {item.description ? <span className="text-foreground-muted"> — {item.description}</span> : null}
+              {meta ? <span className="sr-only"> {meta.label}</span> : null}
+            </span>
+          </li>
+        );
+      })}
     </ListTag>
   );
 }
@@ -284,11 +350,38 @@ function isSafeImageSrc(src: string): boolean {
   return /^https?:\/\//i.test(src) || /^data:image\//i.test(src);
 }
 
+const IMAGE_SIZES = ['full', 'thumb', 'avatar'] as const;
+type GenUIImageSize = (typeof IMAGE_SIZES)[number];
+
+const IMAGE_ASPECTS = ['auto', 'video', 'square', 'wide'] as const;
+type GenUIImageAspect = (typeof IMAGE_ASPECTS)[number];
+
+/** `aspect-*` só se aplica a imagem `full`; thumb/avatar têm caixa fixa. */
+const IMAGE_ASPECT_CLASSES: Record<Exclude<GenUIImageAspect, 'auto'>, string> = {
+  video: 'aspect-video object-cover',
+  square: 'aspect-square object-cover',
+  wide: 'aspect-[2/1] object-cover',
+};
+
+const IMAGE_SIZE_CLASSES: Record<GenUIImageSize, string> = {
+  full: '',
+  thumb: 'h-24 w-32 shrink-0 self-start rounded-lg border border-border object-cover',
+  avatar: 'size-10 shrink-0 self-start rounded-full object-cover',
+};
+
 export function GenUIImage({ props }: GenUINodeProps) {
   const [broken, setBroken] = useState(false);
   const src = propString(props, 'src');
   const alt = propString(props, 'alt', 'Imagem');
   const caption = propString(props, 'caption');
+  const sizeRaw = propString(props, 'size', 'full');
+  const size: GenUIImageSize = (IMAGE_SIZES as readonly string[]).includes(sizeRaw)
+    ? (sizeRaw as GenUIImageSize)
+    : 'full';
+  const aspectRaw = propString(props, 'aspect', 'auto');
+  const aspect: GenUIImageAspect = (IMAGE_ASPECTS as readonly string[]).includes(aspectRaw)
+    ? (aspectRaw as GenUIImageAspect)
+    : 'auto';
 
   if (!src || !isSafeImageSrc(src) || broken) {
     return (
@@ -305,7 +398,13 @@ export function GenUIImage({ props }: GenUINodeProps) {
         alt={alt}
         loading="lazy"
         onError={() => setBroken(true)}
-        className="max-h-[360px] w-full rounded-xl border border-border object-contain bg-surface"
+        data-size={size}
+        data-aspect={aspect}
+        className={cn(
+          size === 'full' && 'w-full rounded-xl border border-border bg-surface',
+          size === 'full' && (aspect === 'auto' ? 'max-h-[360px] object-contain' : IMAGE_ASPECT_CLASSES[aspect]),
+          IMAGE_SIZE_CLASSES[size],
+        )}
       />
       {caption ? <figcaption className="text-[11px] text-foreground-subtle">{caption}</figcaption> : null}
     </figure>
@@ -328,10 +427,12 @@ export function GenUIBadge({ props }: GenUINodeProps) {
   // Default do contrato: `neutral`. `variant` é aceito como legado.
   const toneRaw = propString(props, 'tone', propString(props, 'variant', 'neutral'));
   const tone = (toneRaw in BADGE_TONES ? toneRaw : 'neutral') as keyof typeof BADGE_TONES;
+  const Icon = genUIIcon(propString(props, 'icon'));
   if (!label) return null;
   return (
     <div data-tone={tone}>
       <Badge tone={tone} size="md">
+        {Icon ? <Icon aria-hidden className="size-3 shrink-0" /> : null}
         {label}
       </Badge>
     </div>

@@ -2,7 +2,7 @@ export { CapabilityBadges, capabilitiesOf } from './CapabilityBadges';
 export type { Capability, CapabilityBadgesProps } from './CapabilityBadges';
 
 export { FamilyAvatar, familyAvatarVisual } from './FamilyAvatar';
-export type { FamilyAvatarProps } from './FamilyAvatar';
+export type { FamilyAvatarProps, FamilyVisual } from './FamilyAvatar';
 
 export { ModelPickerDialog } from './ModelPickerDialog';
 
