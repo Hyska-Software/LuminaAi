@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ExternalLink, Globe, X } from 'lucide-react';
+import { useEffect, useMemo, useRef } from 'react';
+import { ExternalLink, Globe, PanelRight, X } from 'lucide-react';
 import { PanelResizer } from '@/components/layout/PanelResizer';
 import { Badge, IconButton, Tooltip } from '@/components/ui';
 import { citationDomain, conversationCitations } from '@/lib/citations';
+import { useSidePanelResize } from '@/lib/sidePanel';
 import {
-  clampSidePanelWidth,
   selectActiveMessages,
-  SIDE_PANEL_WIDTH_DEFAULT,
-  SIDE_PANEL_WIDTH_MAX,
   SIDE_PANEL_WIDTH_MIN,
   SIDE_PANEL_WIDTH_STEP,
   useChatStore,
@@ -69,45 +67,36 @@ function SourceRow({ citation }: { citation: Citation }) {
 
 /**
  * Side panel listing every source (citation) of the conversation (DESIGN §5),
- * in first-use order and deduplicated by URL. Same slide-in surface as the
- * artifact panel; visibility and mutual exclusion live in `useUiStore`.
+ * in first-use order and deduplicated by URL. Same surface as the artifact
+ * panel; visibility and mutual exclusion live in `useUiStore`.
+ *
+ * It either floats over the chat (overlay, translated 240ms) or, when there is
+ * room and the user pinned it, splits the content row as a docked column. The
+ * responsive decision and the persisted width live in `useSidePanelResize`.
  */
 export function SourcesPanel() {
   const open = useUiStore((state) => state.sourcesPanelOpen);
   const closeSourcesPanel = useUiStore((state) => state.closeSourcesPanel);
-  const sidePanelWidth = useUiStore((state) => state.sidePanelWidth);
-  const setSidePanelWidth = useUiStore((state) => state.setSidePanelWidth);
   const messages = useChatStore(selectActiveMessages);
   const sources = useMemo(() => conversationCitations(messages), [messages]);
   const panelRef = useRef<HTMLElement | null>(null);
+  const { layout, mode, setMode, onResize, onResizeEnd, onReset } = useSidePanelResize();
 
-  /** Width previewed while dragging; `null` means "use the persisted width". */
-  const [liveWidth, setLiveWidth] = useState<number | null>(null);
-  const effectiveWidth = clampSidePanelWidth(liveWidth ?? sidePanelWidth);
-
-  const handleResize = useCallback((next: number) => {
-    setLiveWidth(clampSidePanelWidth(next));
-  }, []);
-
-  const handleResizeEnd = useCallback(
-    (next: number) => {
-      // The store clamps as well; the local preview disappears in the same commit.
-      setSidePanelWidth(next);
-      setLiveWidth(null);
-    },
-    [setSidePanelWidth],
+  /** Pin/unpin action; the docked preference can outlive a narrow window. */
+  const modeToggleLabel = mode === 'docked' ? 'Soltar painel sobre o chat' : 'Fixar painel ao lado do chat';
+  const modeToggleDisabled = !layout.canDock && mode !== 'docked';
+  const modeTooltip = modeToggleDisabled ? 'Aumente a janela para fixar o painel' : modeToggleLabel;
+  const modeToggle = (
+    <IconButton
+      label={modeToggleLabel}
+      size="sm"
+      active={mode === 'docked'}
+      disabled={modeToggleDisabled}
+      onClick={() => setMode(mode === 'docked' ? 'overlay' : 'docked')}
+    >
+      <PanelRight className="size-4" />
+    </IconButton>
   );
-
-  const handleReset = useCallback(() => {
-    setSidePanelWidth(SIDE_PANEL_WIDTH_DEFAULT);
-    setLiveWidth(null);
-  }, [setSidePanelWidth]);
-
-  /* A drag interrupted by closing the panel never receives its release: drop
-     the stale preview so the persisted width takes over. */
-  useEffect(() => {
-    if (!open) setLiveWidth(null);
-  }, [open]);
 
   // Move focus into the panel when it opens so keyboard users can browse the list.
   useEffect(() => {
@@ -116,6 +105,20 @@ export function SourcesPanel() {
     return () => window.cancelAnimationFrame(handle);
   }, [open]);
 
+  /* Docked: an in-flow column next to the chat. Overlay: absolutely positioned
+     over the chat (containing block = AppShell's content row) and translated
+     out of view when closed. */
+  const asideClassName = layout.docked
+    ? cn(
+        'relative z-10 flex h-full shrink-0 flex-col border-l border-border bg-surface-raised outline-none',
+        !open && 'hidden',
+      )
+    : cn(
+        'absolute inset-y-0 right-0 z-40 flex max-w-[92vw] flex-col border-l border-border bg-surface-raised shadow-2xl outline-none',
+        'transition-transform duration-[240ms] ease-[var(--ease-out-soft)] motion-reduce:transition-none',
+        open ? 'translate-x-0' : 'pointer-events-none translate-x-full',
+      );
+
   return (
     <aside
       ref={panelRef}
@@ -123,12 +126,13 @@ export function SourcesPanel() {
       aria-label="Painel de fontes"
       aria-hidden={!open || undefined}
       inert={!open}
-      style={{ width: effectiveWidth }}
-      className={cn(
-        'fixed inset-y-0 right-0 z-40 flex max-w-[92vw] flex-col border-l border-border bg-surface-raised shadow-2xl outline-none',
-        'transition-transform duration-[240ms] ease-[var(--ease-out-soft)] motion-reduce:transition-none',
-        open ? 'translate-x-0' : 'pointer-events-none translate-x-full',
-      )}
+      style={{
+        width: layout.width,
+        // Closed docked panel: hide structurally (inline) so two surfaces can
+        // never end up side by side, regardless of utility-class merging.
+        ...(layout.docked && !open ? { display: 'none' } : null),
+      }}
+      className={asideClassName}
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
@@ -145,6 +149,11 @@ export function SourcesPanel() {
         >
           {sources.length}
         </Badge>
+        <Tooltip content={modeTooltip} side="bottom">
+          {/* Disabled buttons swallow pointer events: hover a wrapper so the
+              "aumente a janela" hint stays discoverable. */}
+          {modeToggleDisabled ? <span className="inline-flex">{modeToggle}</span> : modeToggle}
+        </Tooltip>
         <Tooltip content="Fechar" side="bottom">
           <IconButton label="Fechar painel de fontes" size="sm" onClick={closeSourcesPanel}>
             <X className="size-4" />
@@ -176,19 +185,19 @@ export function SourcesPanel() {
       </footer>
 
       {/* Fora do fluxo, sobre a borda esquerda: não cobre a lista nem a scrollbar.
-          O containing block vem do próprio painel (`position: fixed`), então não
-          é preciso um `relative` conflitante para ancorar o handle. */}
+          O próprio aside (absolute no overlay, relative no docked) é o containing
+          block do handle. */}
       <PanelResizer
         side="end"
-        value={effectiveWidth}
+        value={layout.width}
         min={SIDE_PANEL_WIDTH_MIN}
-        max={SIDE_PANEL_WIDTH_MAX}
+        max={layout.maxWidth}
         step={SIDE_PANEL_WIDTH_STEP}
         label="Redimensionar painel de fontes"
         className="absolute inset-y-0 -left-2 z-10"
-        onResize={handleResize}
-        onResizeEnd={handleResizeEnd}
-        onReset={handleReset}
+        onResize={onResize}
+        onResizeEnd={onResizeEnd}
+        onReset={onReset}
       />
     </aside>
   );

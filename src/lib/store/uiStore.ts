@@ -16,6 +16,14 @@ export type MainView = 'chat' | 'skills';
 export type ArtifactPanelView = 'list' | 'preview';
 
 /**
+ * How the right side panel shares space with the chat: `overlay` floats above
+ * the conversation (classic drawer); `docked` splits the row so the chat
+ * reflows. The docked layout only applies on wide windows — `lib/sidePanel.ts`
+ * owns the responsive fallback to overlay.
+ */
+export type SidePanelMode = 'overlay' | 'docked';
+
+/**
  * Sidebar width bounds (px). The user resizes the sidebar by dragging its right
  * edge (`components/layout/SidebarResizer`); the value is persisted with the
  * rest of the UI state and clamped on read/write. docs/DESIGN.md §5.
@@ -38,7 +46,7 @@ export function clampSidebarWidth(width: number): number {
  * persisted and clamped on read/write. docs/DESIGN.md §5.
  */
 export const SIDE_PANEL_WIDTH_MIN = 360;
-export const SIDE_PANEL_WIDTH_MAX = 560;
+export const SIDE_PANEL_WIDTH_MAX = 900;
 export const SIDE_PANEL_WIDTH_DEFAULT = 480;
 /** Width change per arrow key press on the resize handle. */
 export const SIDE_PANEL_WIDTH_STEP = 16;
@@ -65,6 +73,8 @@ interface UiState {
   sourcesPanelOpen: boolean;
   /** Persisted width of the right side panel (artifacts/sources), in px. */
   sidePanelWidth: number;
+  /** Persisted layout preference of the right side panel (see SidePanelMode). */
+  sidePanelMode: SidePanelMode;
   activeView: MainView;
   activeArtifactId: string | null;
   artifacts: Artifact[];
@@ -78,6 +88,8 @@ interface UiState {
   setSidebarWidth: (width: number) => void;
   /** Clamps to `SIDE_PANEL_WIDTH_MIN`…`SIDE_PANEL_WIDTH_MAX` and persists the width. */
   setSidePanelWidth: (width: number) => void;
+  /** Persists the overlay/docked preference (responsive fallback lives in lib/sidePanel). */
+  setSidePanelMode: (mode: SidePanelMode) => void;
   setSettingsOpen: (open: boolean) => void;
   setModelPickerOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -137,6 +149,7 @@ export const useUiStore = create<UiState>()(
       artifactPanelView: 'list',
       sourcesPanelOpen: false,
       sidePanelWidth: SIDE_PANEL_WIDTH_DEFAULT,
+      sidePanelMode: 'overlay',
       activeView: 'chat',
       activeArtifactId: null,
       artifacts: [],
@@ -151,6 +164,7 @@ export const useUiStore = create<UiState>()(
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
       setSidebarWidth: (sidebarWidth) => set({ sidebarWidth: clampSidebarWidth(sidebarWidth) }),
       setSidePanelWidth: (sidePanelWidth) => set({ sidePanelWidth: clampSidePanelWidth(sidePanelWidth) }),
+      setSidePanelMode: (sidePanelMode) => set({ sidePanelMode }),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
       setModelPickerOpen: (modelPickerOpen) => set({ modelPickerOpen }),
       setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
@@ -229,6 +243,7 @@ export const useUiStore = create<UiState>()(
         sidebarOpen: state.sidebarOpen,
         sidebarWidth: state.sidebarWidth,
         sidePanelWidth: state.sidePanelWidth,
+        sidePanelMode: state.sidePanelMode,
         fontScale: state.fontScale,
         reduceMotion: state.reduceMotion,
       }),
@@ -244,8 +259,26 @@ export const useUiStore = create<UiState>()(
           ...stored,
           sidebarWidth: clampSidebarWidth(stored.sidebarWidth ?? current.sidebarWidth),
           sidePanelWidth: clampSidePanelWidth(stored.sidePanelWidth ?? current.sidePanelWidth),
+          sidePanelMode: stored.sidePanelMode === 'docked' ? 'docked' : 'overlay',
         };
       },
     },
   ),
 );
+
+/**
+ * The artifact and sources panels share the same surface, so both can never be
+ * visible at once: in the docked layout that renders two columns side by side
+ * and squeezes the chat between them. Every store action already closes the
+ * sibling panel; this guard keeps the invariant even if the state is mutated
+ * from somewhere else (stale HMR module, devtools, a future action that forgets
+ * the rule). Keep whichever panel was opened last, or close the artifact panel
+ * when both were already open.
+ */
+useUiStore.subscribe((state, previous) => {
+  if (!state.artifactPanelOpen || !state.sourcesPanelOpen) return;
+  const sourcesJustOpened = !previous.sourcesPanelOpen;
+  useUiStore.setState(
+    sourcesJustOpened ? { artifactPanelOpen: false } : { sourcesPanelOpen: false },
+  );
+});

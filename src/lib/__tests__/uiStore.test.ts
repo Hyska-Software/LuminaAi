@@ -276,3 +276,80 @@ describe('useUiStore side panel width', () => {
     expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_MAX);
   });
 });
+
+describe('useUiStore side panel mode', () => {
+  beforeEach(() => {
+    useUiStore.setState({ sidePanelMode: 'overlay' });
+  });
+
+  it('starts in the overlay (drawer) layout — the classic behaviour', () => {
+    expect(useUiStore.getState().sidePanelMode).toBe('overlay');
+  });
+
+  it('toggles and persists the docked preference', () => {
+    useUiStore.getState().setSidePanelMode('docked');
+    expect(useUiStore.getState().sidePanelMode).toBe('docked');
+
+    const raw = window.localStorage.getItem('lumina.ui');
+    expect(raw).not.toBeNull();
+    const persisted = JSON.parse(raw as string) as { state?: { sidePanelMode?: string } };
+    expect(persisted.state?.sidePanelMode).toBe('docked');
+
+    useUiStore.getState().setSidePanelMode('overlay');
+    expect(useUiStore.getState().sidePanelMode).toBe('overlay');
+  });
+
+  it('keeps a valid docked preference and normalizes an invalid one while rehydrating', async () => {
+    window.localStorage.setItem(
+      'lumina.ui',
+      JSON.stringify({ version: 0, state: { sidePanelMode: 'docked' } }),
+    );
+    await useUiStore.persist.rehydrate();
+    expect(useUiStore.getState().sidePanelMode).toBe('docked');
+
+    window.localStorage.setItem(
+      'lumina.ui',
+      JSON.stringify({ version: 0, state: { sidePanelMode: 'floating' } }),
+    );
+    await useUiStore.persist.rehydrate();
+    expect(useUiStore.getState().sidePanelMode).toBe('overlay');
+  });
+});
+
+describe('useUiStore — painéis laterais mutuamente exclusivos', () => {
+  beforeEach(() => {
+    useUiStore.setState({ artifactPanelOpen: false, sourcesPanelOpen: false });
+  });
+
+  it('keeps only the panel opened last when the state is mutated directly (regression: duas barras abertas)', () => {
+    useUiStore.setState({ artifactPanelOpen: true, sourcesPanelOpen: false });
+
+    // A corruption path (stale HMR store, devtools, future action) that would
+    // render both surfaces side by side must be repaired by the invariant.
+    useUiStore.setState({ sourcesPanelOpen: true });
+
+    expect(useUiStore.getState().sourcesPanelOpen).toBe(true);
+    expect(useUiStore.getState().artifactPanelOpen).toBe(false);
+  });
+
+  it('closes the sources panel when only the artifact flags remain open', () => {
+    useUiStore.setState({ artifactPanelOpen: false, sourcesPanelOpen: true });
+
+    useUiStore.setState({ artifactPanelOpen: true });
+
+    expect(useUiStore.getState().artifactPanelOpen).toBe(true);
+    expect(useUiStore.getState().sourcesPanelOpen).toBe(false);
+  });
+
+  it('repairs a state where both panels are already open', () => {
+    useUiStore.setState({ artifactPanelOpen: false, sourcesPanelOpen: false });
+    // Bypass the exclusive actions on purpose, simulating a corrupted snapshot.
+    useUiStore.setState({ artifactPanelOpen: true });
+    useUiStore.setState({ sourcesPanelOpen: true });
+    useUiStore.setState({ artifactPanelOpen: true });
+
+    expect(
+      useUiStore.getState().artifactPanelOpen && useUiStore.getState().sourcesPanelOpen,
+    ).toBe(false);
+  });
+});

@@ -11,8 +11,15 @@ const EASE_OUT_SOFT: [number, number, number, number] = [0.22, 1, 0.36, 1];
 export interface AppShellProps {
   children: ReactNode;
   /**
-   * Optional slot for global overlays (dialogs, command palette, artifact
-   * panel) rendered by `App.tsx` above the shell content.
+   * Right side panel (sources/artifacts). It self-positions inside the content
+   * row: absolutely over the chat in overlay mode or as a flex column when
+   * docked. Keeping it as the row's last child lets docked mode share width
+   * with the chat instead of covering it.
+   */
+  rightPanel?: ReactNode;
+  /**
+   * Optional slot for global overlays (dialogs, command palette) rendered by
+   * `App.tsx` above the shell content.
    */
   overlays?: ReactNode;
 }
@@ -25,7 +32,7 @@ export interface AppShellProps {
  * (no persistence on every pointer move) while the committed value lives in
  * `useUiStore` with the rest of the persisted UI state.
  */
-export function AppShell({ children, overlays }: AppShellProps) {
+export function AppShell({ children, rightPanel, overlays }: AppShellProps) {
   const sidebarOpen = useUiStore((state) => state.sidebarOpen);
   const setSidebarOpen = useUiStore((state) => state.setSidebarOpen);
   const sidebarWidth = useUiStore((state) => state.sidebarWidth);
@@ -119,6 +126,8 @@ export function AppShell({ children, overlays }: AppShellProps) {
           ) : null}
 
           <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
+
+          {rightPanel}
         </div>
 
         <AnimatePresence>

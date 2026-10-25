@@ -145,3 +145,30 @@ describe('AppShell — sidebar redimensionável', () => {
     expect(sidebarContainer().style.width).toBe(`${SIDEBAR_WIDTH_DEFAULT}px`);
   });
 });
+
+describe('AppShell — painel lateral direito', () => {
+  it('renders the right panel as the last child of the content row, outside <main>', () => {
+    render(
+      <AppShell rightPanel={<div data-testid="right-panel" />}>
+        <div data-testid="content" />
+      </AppShell>,
+    );
+
+    const rightPanel = screen.getByTestId('right-panel');
+    const content = screen.getByTestId('content');
+    const main = content.closest('main');
+
+    expect(main).not.toBeNull();
+    // The panel is a sibling of the chat column, so docked mode can share the row.
+    expect(rightPanel.closest('main')).toBeNull();
+    expect(rightPanel.previousElementSibling).toBe(main);
+    expect(main?.parentElement?.lastElementChild).toBe(rightPanel);
+  });
+
+  it('keeps the shell unchanged when no right panel is passed', () => {
+    renderShell();
+
+    expect(screen.queryByTestId('right-panel')).toBeNull();
+    expect(screen.getByTestId('content').closest('main')).not.toBeNull();
+  });
+});

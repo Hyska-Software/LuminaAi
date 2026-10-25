@@ -66,7 +66,7 @@ export interface ModelPillProps {
 
 type Stage = 'model' | 'thinking';
 
-/** DOM ids must stay unique when the composer and the titlebar both mount a pill. */
+/** DOM ids must stay unique when more than one pill is mounted (tests/previews). */
 function domId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '');
 }

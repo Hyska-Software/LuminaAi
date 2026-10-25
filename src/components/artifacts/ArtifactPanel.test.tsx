@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Artifact } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
@@ -35,7 +35,9 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 
 // Imported after the mocks above.
 import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
+import { SIDE_PANEL_MIN_CHAT_WIDTH } from '@/lib/sidePanel';
 import {
+  SIDEBAR_WIDTH_DEFAULT,
   SIDE_PANEL_WIDTH_DEFAULT,
   SIDE_PANEL_WIDTH_MAX,
   SIDE_PANEL_WIDTH_MIN,
@@ -43,7 +45,24 @@ import {
   useUiStore,
 } from '@/lib/store';
 
-afterEach(() => cleanup());
+/** Viewport used by the overlay tests (jsdom default). */
+const DEFAULT_VIEWPORT = 1024;
+const originalInnerWidth = window.innerWidth;
+
+/** Resizes the jsdom window and notifies the `useSyncExternalStore` listener. */
+function setViewportWidth(width: number): void {
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    writable: true,
+    value: width,
+  });
+  window.dispatchEvent(new Event('resize'));
+}
+
+afterEach(() => {
+  cleanup();
+  setViewportWidth(originalInnerWidth);
+});
 
 function artifact(overrides: Partial<Artifact> = {}): Artifact {
   return {
@@ -77,14 +96,16 @@ function resetStore(): void {
     artifactPanelView: 'list',
     activeArtifactId: null,
     artifacts: [],
-    // A largura persistida vaza entre testes se não for resetada.
+    // A largura/modo persistidos vazam entre testes se não forem resetados.
     sidePanelWidth: SIDE_PANEL_WIDTH_DEFAULT,
+    sidePanelMode: 'overlay',
   });
 }
 
 beforeEach(() => {
   vi.resetAllMocks();
   resetStore();
+  setViewportWidth(DEFAULT_VIEWPORT);
   mocks.getArtifactContent.mockImplementation((id: string) => {
     const found = useUiStore.getState().artifacts.find((entry) => entry.id === id) ?? artifact();
     return Promise.resolve({ artifact: found, content: 'conteúdo do artefato', dataBase64: null });
@@ -149,6 +170,8 @@ describe('ArtifactPanel — modo preview', () => {
     expect(screen.getByRole('button', { name: 'Salvar como…' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Abrir no aplicativo padrão' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Excluir artefato' })).toBeTruthy();
+    // O botão de modo também aparece no header da prévia.
+    expect(screen.getByRole('button', { name: 'Fixar painel ao lado do chat' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Fechar painel de artefatos' })).toBeTruthy();
   });
 
@@ -254,6 +277,9 @@ describe('ArtifactPanel — painel redimensionável', () => {
 
     expect(panel().style.width).toBe('520px');
     expect(panel().className).toContain('max-w-[92vw]');
+    // No viewport padrão (1024) o modo é overlay: flutua sobre a linha do shell.
+    expect(panel().className).toContain('absolute');
+    expect(panel().className).not.toContain('relative');
 
     const handle = grip();
     expect(handle.getAttribute('aria-orientation')).toBe('vertical');
@@ -316,21 +342,137 @@ describe('ArtifactPanel — painel redimensionável', () => {
     expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT);
     expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT}px`);
   });
+});
 
-  it('descarta a pré-visualização quando o painel fecha durante o arrasto', () => {
+describe('ArtifactPanel — modo fixo (docked)', () => {
+  const panel = (): HTMLElement =>
+    screen.getByRole('complementary', { name: 'Painel de artefatos' });
+  const grip = (): HTMLElement =>
+    screen.getByRole('separator', { name: 'Redimensionar painel de artefatos' });
+  /** Width the docked panel may reach with the sidebar open at `viewport`. */
+  const dockedMax = (viewport: number): number =>
+    viewport - SIDEBAR_WIDTH_DEFAULT - SIDE_PANEL_MIN_CHAT_WIDTH;
+
+  it('fixa o painel na linha quando há espaço e a preferência é docked', () => {
+    setViewportWidth(1440);
+    useUiStore.setState({ sidePanelMode: 'docked' });
+
     render(<ArtifactPanel />);
 
-    // Com o painel fechado o `aside` fica `aria-hidden`; guardamos o nó antes.
     const aside = panel();
+    expect(aside.className).toContain('relative');
+    expect(aside.className).toContain('shrink-0');
+    expect(aside.className).not.toContain('absolute');
+    // Sem slide nem sombra: o chat reflui imediatamente.
+    expect(aside.className).not.toContain('translate-x');
+    expect(aside.className).not.toContain('shadow-2xl');
+    expect(aside.style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT}px`);
+
+    // 1440 − 272 (sidebar) − 480 (chat mínimo) = 688.
+    expect(grip().getAttribute('aria-valuemax')).toBe(String(dockedMax(1440)));
+    expect(grip().getAttribute('aria-valuenow')).toBe(String(SIDE_PANEL_WIDTH_DEFAULT));
+  });
+
+  it('esconde o painel dockado quando fechado, sem slide', () => {
+    setViewportWidth(1440);
+    useUiStore.setState({ sidePanelMode: 'docked', artifactPanelOpen: false });
+
+    const { container } = render(<ArtifactPanel />);
+
+    const aside = container.querySelector('aside');
+    expect(aside).not.toBeNull();
+    expect(aside?.className).toContain('hidden');
+    expect(aside?.className).toContain('relative');
+    expect(aside?.className).not.toContain('translate-x-full');
+    expect(aside?.getAttribute('aria-hidden')).toBe('true');
+    // Escondido estruturalmente (inline): nunca depende só do merge de classes,
+    // que já deixou dois painéis visíveis ao mesmo tempo (regressão).
+    expect(aside?.style.display).toBe('none');
+  });
+
+  it('cai para overlay em janela estreita, mantendo a preferência docked', () => {
+    setViewportWidth(DEFAULT_VIEWPORT);
+    useUiStore.setState({ sidePanelMode: 'docked' });
+
+    render(<ArtifactPanel />);
+
+    const aside = panel();
+    expect(aside.className).toContain('absolute');
+    expect(aside.className).not.toContain('relative');
+    expect(useUiStore.getState().sidePanelMode).toBe('docked');
+  });
+
+  it('limita a largura ao espaço livre e persiste o valor clampado', () => {
+    setViewportWidth(1200);
+    useUiStore.setState({ sidePanelMode: 'docked' });
+
+    render(<ArtifactPanel />);
+
+    // 1200 − 272 (sidebar) − 480 (chat mínimo) = 448.
+    const maxWidth = dockedMax(1200);
+    expect(grip().getAttribute('aria-valuemax')).toBe(String(maxWidth));
+    expect(panel().style.width).toBe(`${maxWidth}px`);
+    // A largura persistida (480) continua intacta: só a exibição é clampada.
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT);
+
+    // O arrasto também para no limite responsivo, sem gravar antes do release.
     const handle = grip();
     fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 900 });
-    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 820 });
-    expect(aside.style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT + 80}px`);
-
-    // Fechar o painel interrompe o gesto sem pointerup: o preview é descartado.
-    act(() => useUiStore.getState().closeArtifactPanel());
-
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 700 });
+    expect(panel().style.width).toBe(`${maxWidth}px`);
     expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT);
-    expect(aside.style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT}px`);
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+    expect(useUiStore.getState().sidePanelWidth).toBe(maxWidth);
+
+    // O teclado também respeita o limite responsivo ao persistir.
+    fireEvent.keyDown(grip(), { key: 'End' });
+    expect(useUiStore.getState().sidePanelWidth).toBe(maxWidth);
+    expect(panel().style.width).toBe(`${maxWidth}px`);
+  });
+
+  it('alterna entre fixo e sobreposto pelo botão do header', () => {
+    setViewportWidth(1440);
+
+    render(<ArtifactPanel />);
+
+    const pinButton = screen.getByRole('button', { name: 'Fixar painel ao lado do chat' });
+    expect(pinButton.getAttribute('aria-pressed')).toBeNull();
+    // Habilitado: o Tooltip usa o próprio botão como trigger (sem wrapper).
+    expect(pinButton.parentElement?.className).not.toContain('inline-flex');
+    // Em overlay o painel flutua...
+    expect(panel().className).toContain('absolute');
+
+    fireEvent.click(pinButton);
+
+    expect(useUiStore.getState().sidePanelMode).toBe('docked');
+    const unpinButton = screen.getByRole('button', { name: 'Soltar painel sobre o chat' });
+    expect(unpinButton.getAttribute('aria-pressed')).toBe('true');
+    expect(panel().className).toContain('relative');
+
+    fireEvent.click(unpinButton);
+
+    expect(useUiStore.getState().sidePanelMode).toBe('overlay');
+    expect(
+      screen.getByRole('button', { name: 'Fixar painel ao lado do chat' }).getAttribute('aria-pressed'),
+    ).toBeNull();
+    expect(panel().className).toContain('absolute');
+  });
+
+  it('desabilita o botão de fixar quando a janela não comporta o modo fixo', () => {
+    setViewportWidth(DEFAULT_VIEWPORT);
+
+    render(<ArtifactPanel />);
+
+    const pinButton = screen.getByRole('button', {
+      name: 'Fixar painel ao lado do chat',
+    }) as HTMLButtonElement;
+    expect(pinButton.disabled).toBe(true);
+
+    // O IconButton desabilitado engole o hover; o Tooltip usa um wrapper
+    // hoverável (Trigger asChild no span) para a dica continuar aparecendo.
+    const wrapper = pinButton.parentElement;
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.tagName).toBe('SPAN');
+    expect(wrapper?.className).toContain('inline-flex');
   });
 });

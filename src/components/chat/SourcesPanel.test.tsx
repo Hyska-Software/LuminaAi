@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('./external', () => ({ openExternalUrl: mocks.openExternalUrl }));
 
 // Imported after the mock above.
+import { SIDE_PANEL_MIN_CHAT_WIDTH } from '@/lib/sidePanel';
 import {
+  SIDEBAR_WIDTH_DEFAULT,
   SIDE_PANEL_WIDTH_DEFAULT,
   SIDE_PANEL_WIDTH_MAX,
   SIDE_PANEL_WIDTH_MIN,
@@ -20,9 +22,22 @@ import {
 } from '@/lib/store';
 import { SourcesPanel } from './SourcesPanel';
 
+const originalInnerWidth = window.innerWidth;
+
+/** jsdom defaults to 1024px; tests override it and notify subscribers. */
+function setViewportWidth(width: number): void {
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    writable: true,
+    value: width,
+  });
+  window.dispatchEvent(new Event('resize'));
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  setViewportWidth(originalInnerWidth);
 });
 
 function citation(overrides: Partial<Citation> = {}): Citation {
@@ -79,10 +94,15 @@ function setConversation(messages: ChatMessage[]): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Narrow by default so the panel stays in overlay mode unless a test says otherwise.
+  setViewportWidth(1024);
   useUiStore.setState({
     sourcesPanelOpen: true,
     artifactPanelOpen: false,
     sidePanelWidth: SIDE_PANEL_WIDTH_DEFAULT,
+    sidePanelMode: 'overlay',
+    sidebarOpen: true,
+    sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
   });
   setConversation(conversation());
 });
@@ -226,5 +246,124 @@ describe('SourcesPanel — painel redimensionável', () => {
 
     expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT);
     expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT}px`);
+  });
+});
+
+describe('SourcesPanel — modo docked', () => {
+  const panel = (): HTMLElement => screen.getByRole('complementary', { name: 'Painel de fontes' });
+  const grip = (): HTMLElement =>
+    screen.getByRole('separator', { name: 'Redimensionar painel de fontes' });
+
+  it('fixa o painel ao lado do chat quando a janela permite', () => {
+    setViewportWidth(1440);
+    useUiStore.setState({ sidePanelMode: 'docked' });
+
+    render(<SourcesPanel />);
+
+    const aside = panel();
+    expect(aside.className).toContain('relative');
+    expect(aside.className).toContain('shrink-0');
+    expect(aside.className).not.toContain('absolute');
+    expect(aside.className).not.toContain('translate-x-full');
+    expect(aside.style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT}px`);
+
+    // 1440 − 272 (sidebar) − 480 (chat mínimo) = 688.
+    const maxWidth = 1440 - SIDEBAR_WIDTH_DEFAULT - SIDE_PANEL_MIN_CHAT_WIDTH;
+    expect(grip().getAttribute('aria-valuenow')).toBe(String(SIDE_PANEL_WIDTH_DEFAULT));
+    expect(grip().getAttribute('aria-valuemax')).toBe(String(maxWidth));
+  });
+
+  it('esconde o painel dockado quando fechado', () => {
+    setViewportWidth(1440);
+    useUiStore.setState({ sidePanelMode: 'docked', sourcesPanelOpen: false });
+
+    const { container } = render(<SourcesPanel />);
+    const aside = container.querySelector('aside');
+
+    expect(aside?.className).toContain('hidden');
+    expect(aside?.getAttribute('aria-hidden')).toBe('true');
+    // Escondido estruturalmente (inline): nunca depende só do merge de classes,
+    // que já deixou dois painéis visíveis ao mesmo tempo (regressão).
+    expect(aside?.style.display).toBe('none');
+  });
+
+  it('volta para overlay quando a janela é estreita demais para fixar', () => {
+    setViewportWidth(1024);
+    useUiStore.setState({ sidePanelMode: 'docked' });
+
+    render(<SourcesPanel />);
+
+    const aside = panel();
+    expect(aside.className).toContain('absolute');
+    expect(aside.className).not.toContain('relative');
+    expect(aside.className).toContain('translate-x-0');
+    // A preferência é preservada para quando a janela crescer de novo.
+    expect(useUiStore.getState().sidePanelMode).toBe('docked');
+  });
+
+  it('limita a largura dockada ao espaço disponível e persiste o valor clampado', () => {
+    setViewportWidth(1200);
+    useUiStore.setState({ sidePanelMode: 'docked', sidePanelWidth: 900 });
+
+    render(<SourcesPanel />);
+
+    // 1200 − 272 (sidebar) − 480 (chat mínimo) = 448.
+    const available = 1200 - SIDEBAR_WIDTH_DEFAULT - SIDE_PANEL_MIN_CHAT_WIDTH;
+    expect(available).toBe(448);
+    expect(panel().style.width).toBe('448px');
+    expect(grip().getAttribute('aria-valuenow')).toBe('448');
+    expect(grip().getAttribute('aria-valuemax')).toBe('448');
+
+    fireEvent.keyDown(grip(), { key: 'End' });
+
+    expect(useUiStore.getState().sidePanelWidth).toBe(448);
+    expect(panel().style.width).toBe('448px');
+  });
+
+  it('alterna entre fixar e soltar pelo botão do header', () => {
+    setViewportWidth(1440);
+
+    render(<SourcesPanel />);
+
+    const dock = screen.getByRole('button', { name: 'Fixar painel ao lado do chat' });
+    expect(dock.getAttribute('aria-pressed')).toBeNull();
+    expect((dock as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(dock);
+
+    expect(useUiStore.getState().sidePanelMode).toBe('docked');
+    expect(panel().className).toContain('relative');
+
+    const undock = screen.getByRole('button', { name: 'Soltar painel sobre o chat' });
+    expect(undock.getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(undock);
+
+    expect(useUiStore.getState().sidePanelMode).toBe('overlay');
+    expect(panel().className).toContain('absolute');
+  });
+
+  it('desabilita o botão de fixar quando não há espaço para dockar', () => {
+    setViewportWidth(1024);
+
+    render(<SourcesPanel />);
+
+    const dock = screen.getByRole('button', { name: 'Fixar painel ao lado do chat' });
+    expect((dock as HTMLButtonElement).disabled).toBe(true);
+    // A dica "aumente a janela" precisa de um wrapper hoverável em volta do botão.
+    expect(dock.parentElement?.tagName).toBe('SPAN');
+  });
+
+  it('permite desafixar mesmo quando a janela encolheu (fallback overlay)', () => {
+    setViewportWidth(1024);
+    useUiStore.setState({ sidePanelMode: 'docked' });
+
+    render(<SourcesPanel />);
+
+    const undock = screen.getByRole('button', { name: 'Soltar painel sobre o chat' });
+    expect((undock as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(undock);
+    expect(useUiStore.getState().sidePanelMode).toBe('overlay');
   });
 });

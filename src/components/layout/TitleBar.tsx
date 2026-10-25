@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Copy, Minus, PanelLeft, Search, Square, X } from 'lucide-react';
-import { ModelPill } from '@/components/models/ModelPill';
 import { IconButton, Kbd, Tooltip } from '@/components/ui';
 import { useUiStore } from '@/lib/store';
 import { cn, modKey } from '@/lib/utils';
@@ -23,14 +22,14 @@ const CONTROL_BASE =
   'focus-visible:ring-offset-2 focus-visible:ring-offset-surface';
 
 /**
- * Frameless window chrome (DESIGN §5): drag region, brand, command search,
- * active model and native window controls.
+ * Frameless window chrome (DESIGN §5): drag region, brand, command search and
+ * native window controls. The model/thinking selector lives only in the chat
+ * composer (`components/composer/Composer.tsx`).
  */
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const setCommandPaletteOpen = useUiStore((state) => state.setCommandPaletteOpen);
-  const setModelPickerOpen = useUiStore((state) => state.setModelPickerOpen);
 
   useEffect(() => {
     const win = appWindow();
@@ -144,8 +143,6 @@ export function TitleBar() {
             <Kbd>K</Kbd>
           </span>
         </button>
-
-        <ModelPill onClick={() => setModelPickerOpen(true)} />
       </div>
 
       <div className="no-drag ml-1 flex items-center gap-0.5">

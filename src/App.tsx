@@ -197,7 +197,14 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={280}>
       <ErrorBoundary>
-        <AppShell>
+        <AppShell
+          rightPanel={
+            <>
+              <ArtifactPanel />
+              <SourcesPanel />
+            </>
+          }
+        >
           {/* Chat stays mounted (draft/scroll preserved) while Skills replaces it. */}
           <div
             className={cn(
@@ -211,8 +218,6 @@ export default function App() {
         </AppShell>
         <SettingsDialog />
         <ModelPickerDialog />
-        <ArtifactPanel />
-        <SourcesPanel />
         <CommandPalette />
       </ErrorBoundary>
       <Toaster

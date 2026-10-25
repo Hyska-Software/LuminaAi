@@ -6,7 +6,8 @@
 ## 1. Objetivo e escopo
 
 Refazer por completo o **seletor de modelos** do Lumina — o pill compacto do
-titlebar/composer e o dialog completo ("Ver todos os modelos…") — elevando
+composer (o titlebar não monta mais o pill) e o dialog completo ("Ver todos os
+modelos…") — elevando
 qualidade de UI/UX, consistência, acessibilidade e desempenho, **sem mudar o
 fluxo de uso atual**:
 
@@ -269,9 +270,10 @@ ThinkingOptions: { model, value, activeId, onActiveChange, onSelect, listId, onB
 
 ### 5.4 Consumidores inalterados
 
-`Composer`, `TitleBar`, `CommandPalette` e `App` continuam usando
-`<ModelPill onClick={() => setModelPickerOpen(true)} />` e `<ModelPickerDialog />`.
-Nenhuma mudança de store/IPC é necessária.
+`Composer` continua usando `<ModelPill onClick={() => setModelPickerOpen(true)} />`
+e `CommandPalette`/`App` seguem abrindo o dialog completo. O `TitleBar` deixou de
+montar o pill (o seletor de modelo e pensamento vive só no composer). Nenhuma
+mudança de store/IPC é necessária.
 
 ## 6. Acessibilidade
 

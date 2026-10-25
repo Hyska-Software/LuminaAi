@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ChevronLeft,
@@ -8,6 +8,7 @@ import {
   FileQuestion,
   Files,
   List,
+  PanelRight,
   Trash2,
   X,
 } from 'lucide-react';
@@ -16,13 +17,12 @@ import { api } from '@/lib/api';
 import type { ArtifactContent } from '@/lib/types';
 import { cn, formatBytes } from '@/lib/utils';
 import {
-  clampSidePanelWidth,
-  SIDE_PANEL_WIDTH_DEFAULT,
-  SIDE_PANEL_WIDTH_MAX,
   SIDE_PANEL_WIDTH_MIN,
   SIDE_PANEL_WIDTH_STEP,
   useUiStore,
+  type SidePanelMode,
 } from '@/lib/store';
+import { useSidePanelResize } from '@/lib/sidePanel';
 import { PanelResizer } from '@/components/layout/PanelResizer';
 import { Badge, Button, IconButton, Spinner, Tooltip } from '@/components/ui';
 import { artifactKindMeta } from './kinds';
@@ -39,6 +39,38 @@ function pluralize(count: number, singular: string, plural: string): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
+interface SidePanelModeButtonProps {
+  mode: SidePanelMode;
+  canDock: boolean;
+  onToggle: () => void;
+}
+
+/**
+ * Header action that flips the side panel between overlay (floating over the
+ * chat) and docked (splitting the row with it). DESIGN §5/§12: `aria-pressed`
+ * marks the docked state and the button is disabled while the window is too
+ * narrow to honor the docked layout.
+ */
+function SidePanelModeButton({ mode, canDock, onToggle }: SidePanelModeButtonProps) {
+  const docked = mode === 'docked';
+  const label = docked ? 'Soltar painel sobre o chat' : 'Fixar painel ao lado do chat';
+  const disabled = !canDock && !docked;
+  const tooltip = disabled ? 'Aumente a janela para fixar o painel' : label;
+  const button = (
+    <IconButton label={label} size="sm" active={docked} disabled={disabled} onClick={onToggle}>
+      <PanelRight className="size-4" />
+    </IconButton>
+  );
+
+  return (
+    <Tooltip content={tooltip} side="bottom">
+      {/* Disabled buttons swallow pointer events: hover a wrapper so the
+          "aumente a janela" hint stays discoverable. */}
+      {disabled ? <span className="inline-flex">{button}</span> : button}
+    </Tooltip>
+  );
+}
+
 /**
  * Canvas-like side panel for artifacts (DESIGN §5/§11): slide-in from the right,
  * with two store-driven views — the conversation artifact list and a single
@@ -53,8 +85,17 @@ export function ArtifactPanel() {
   const setActiveArtifact = useUiStore((state) => state.setActiveArtifact);
   const setArtifactPanelView = useUiStore((state) => state.setArtifactPanelView);
   const closeArtifactPanel = useUiStore((state) => state.closeArtifactPanel);
-  const sidePanelWidth = useUiStore((state) => state.sidePanelWidth);
-  const setSidePanelWidth = useUiStore((state) => state.setSidePanelWidth);
+
+  // Shared width/layout state (DESIGN §5): the hook previews the drag locally,
+  // commits on release and resolves the responsive overlay/docked layout.
+  const {
+    layout,
+    mode: sidePanelMode,
+    setMode,
+    onResize,
+    onResizeEnd,
+    onReset,
+  } = useSidePanelResize();
 
   const [content, setContent] = useState<ArtifactContent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -63,40 +104,13 @@ export function ArtifactPanel() {
   const [busy, setBusy] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
 
-  /** Width previewed while dragging; `null` means "use the persisted width". */
-  const [liveWidth, setLiveWidth] = useState<number | null>(null);
-  const effectiveWidth = clampSidePanelWidth(liveWidth ?? sidePanelWidth);
-
-  const handleResize = useCallback((next: number) => {
-    setLiveWidth(clampSidePanelWidth(next));
-  }, []);
-
-  const handleResizeEnd = useCallback(
-    (next: number) => {
-      // The store clamps as well; the local preview disappears in the same commit.
-      setSidePanelWidth(next);
-      setLiveWidth(null);
-    },
-    [setSidePanelWidth],
-  );
-
-  const handleReset = useCallback(() => {
-    setSidePanelWidth(SIDE_PANEL_WIDTH_DEFAULT);
-    setLiveWidth(null);
-  }, [setSidePanelWidth]);
-
-  /* A drag interrupted by closing the panel never receives its release: drop
-     the stale preview so the persisted width takes over. */
-  useEffect(() => {
-    if (!open) setLiveWidth(null);
-  }, [open]);
-
   const artifact = artifacts.find((entry) => entry.id === activeId) ?? null;
   const meta = artifact ? artifactKindMeta(artifact.kind) : null;
   const ArtifactIcon = meta?.icon ?? FileQuestion;
   // A preview without an active artifact falls back to the list, so the panel
   // never shows an empty/stale preview surface.
   const mode = panelView === 'preview' && artifact ? 'preview' : 'list';
+  const toggleSidePanelMode = () => setMode(sidePanelMode === 'docked' ? 'overlay' : 'docked');
 
   // Move focus into the panel when it opens (and when the list preview swaps),
   // so keyboard users can reach the actions of the new view.
@@ -200,11 +214,22 @@ export function ArtifactPanel() {
       aria-label="Painel de artefatos"
       aria-hidden={!open || undefined}
       inert={!open}
-      style={{ width: effectiveWidth }}
+      style={{
+        width: layout.width,
+        // Closed docked panel: hide structurally (inline) so two surfaces can
+        // never end up side by side, regardless of utility-class merging.
+        ...(layout.docked && !open ? { display: 'none' } : null),
+      }}
       className={cn(
-        'fixed inset-y-0 right-0 z-40 flex max-w-[92vw] flex-col border-l border-border bg-surface-raised shadow-2xl outline-none',
-        'transition-transform duration-[240ms] ease-[var(--ease-out-soft)] motion-reduce:transition-none',
-        open ? 'translate-x-0' : 'pointer-events-none translate-x-full',
+        layout.docked
+          ? 'relative z-10 flex h-full shrink-0 flex-col border-l border-border bg-surface-raised outline-none'
+          : 'absolute inset-y-0 right-0 z-40 flex max-w-[92vw] flex-col border-l border-border bg-surface-raised shadow-2xl outline-none',
+        layout.docked
+          ? !open && 'hidden'
+          : cn(
+              'transition-transform duration-[240ms] ease-[var(--ease-out-soft)] motion-reduce:transition-none',
+              open ? 'translate-x-0' : 'pointer-events-none translate-x-full',
+            ),
       )}
     >
       {mode === 'preview' && artifact && meta ? (
@@ -273,6 +298,11 @@ export function ArtifactPanel() {
                   <Trash2 className="size-4" />
                 </IconButton>
               </Tooltip>
+              <SidePanelModeButton
+                mode={sidePanelMode}
+                canDock={layout.canDock}
+                onToggle={toggleSidePanelMode}
+              />
               <Tooltip content="Fechar" side="bottom">
                 <IconButton label="Fechar painel de artefatos" size="sm" onClick={closeArtifactPanel}>
                   <X className="size-4" />
@@ -359,6 +389,11 @@ export function ArtifactPanel() {
             >
               {artifacts.length}
             </Badge>
+            <SidePanelModeButton
+              mode={sidePanelMode}
+              canDock={layout.canDock}
+              onToggle={toggleSidePanelMode}
+            />
             <Tooltip content="Fechar" side="bottom">
               <IconButton label="Fechar painel de artefatos" size="sm" onClick={closeArtifactPanel}>
                 <X className="size-4" />
@@ -380,19 +415,20 @@ export function ArtifactPanel() {
       )}
 
       {/* Fora do fluxo, sobre a borda esquerda: não cobre a lista nem a scrollbar.
-          O containing block vem do próprio painel (`position: fixed`), então não
-          é preciso um `relative` conflitante para ancorar o handle. */}
+          O containing block vem do próprio painel (`absolute` no overlay, cuja
+          linha do AppShell é `relative`; `relative` no docked), então não é
+          preciso um `relative` conflitante. */}
       <PanelResizer
         side="end"
-        value={effectiveWidth}
+        value={layout.width}
         min={SIDE_PANEL_WIDTH_MIN}
-        max={SIDE_PANEL_WIDTH_MAX}
+        max={layout.maxWidth}
         step={SIDE_PANEL_WIDTH_STEP}
         label="Redimensionar painel de artefatos"
         className="absolute inset-y-0 -left-2 z-10"
-        onResize={handleResize}
-        onResizeEnd={handleResizeEnd}
-        onReset={handleReset}
+        onResize={onResize}
+        onResizeEnd={onResizeEnd}
+        onReset={onReset}
       />
     </aside>
   );
