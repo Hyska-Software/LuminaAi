@@ -346,6 +346,12 @@ pub enum ArtifactKind {
     Docx,
     Xlsx,
     Pptx,
+    /// Áudio (mp3, wav, ogg, m4a, flac, …): player nativo no renderer.
+    Audio,
+    /// Vídeo (mp4, webm, ogv, mov, …): player nativo no renderer.
+    Video,
+    /// Arquivo compactado (zip; outros contêineres caem no cartão binário).
+    Archive,
     Binary,
 }
 
@@ -363,13 +369,32 @@ impl ArtifactKind {
             "docx" => return Self::Docx,
             "xlsx" | "xls" | "ods" => return Self::Xlsx,
             "pptx" | "ppt" | "odp" => return Self::Pptx,
-            "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "avif" | "tif" | "tiff" => {
-                return Self::Image
+            "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "avif" | "tif" | "tiff" | "ico"
+            | "jfif" | "apng" => return Self::Image,
+            "mp3" | "wav" | "ogg" | "oga" | "opus" | "m4a" | "aac" | "flac" | "weba" | "mid"
+            | "midi" | "amr" => return Self::Audio,
+            "mp4" | "m4v" | "webm" | "ogv" | "mov" | "mkv" | "avi" | "wmv" | "flv" => {
+                return Self::Video
             }
+            "zip" | "zipx" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "7z" | "rar" | "jar"
+            | "epub" | "cbz" => return Self::Archive,
             _ => {}
         }
         if mime.starts_with("image/") {
             return Self::Image;
+        }
+        if mime.starts_with("audio/") {
+            return Self::Audio;
+        }
+        if mime.starts_with("video/") {
+            return Self::Video;
+        }
+        if mime.contains("zip")
+            || mime.contains("tar")
+            || mime.contains("gzip")
+            || mime.contains("compress")
+        {
+            return Self::Archive;
         }
         if mime.starts_with("text/") {
             if mime.contains("html") {
@@ -471,17 +496,65 @@ pub struct CodeEnvironmentStatus {
     pub skills: Vec<SkillSummary>,
 }
 
-/// Prévia estruturada de um artefato binário (docx/xlsx/pptx).
+/// Prévia estruturada de um artefato binário (docx/xlsx/pptx/imagem/zip/binário).
 ///
 /// O PDF não aparece aqui: o renderer o desenha com pdf.js a partir do
-/// conteúdo base64 (`get_artifact_content`).
+/// conteúdo base64 (`get_artifact_content`). Áudio e vídeo também usam o
+/// payload base64 direto no player nativo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ArtifactPreview {
-    Docx { html: String },
-    Xlsx { sheets: Vec<SheetPreview> },
-    Pptx { slides: Vec<SlidePreview> },
-    Unsupported { reason: String },
+    Docx {
+        html: String,
+    },
+    Xlsx {
+        sheets: Vec<SheetPreview>,
+    },
+    Pptx {
+        slides: Vec<SlidePreview>,
+    },
+    /// Imagem com metadados; `data_base64` só vem preenchido quando o formato
+    /// original não abre no WebView e foi convertido para PNG (ex.: TIFF).
+    Image {
+        /// MIME do payload exibido (o original ou `image/png` após conversão).
+        mime: String,
+        #[serde(default)]
+        width: Option<u32>,
+        #[serde(default)]
+        height: Option<u32>,
+        #[serde(default)]
+        data_base64: Option<String>,
+    },
+    /// Listagem de arquivo compactado (ZIP). Outros contêineres → Unsupported.
+    Archive {
+        format: String,
+        entries: Vec<ArchiveEntryPreview>,
+        total_entries: u32,
+        truncated: bool,
+    },
+    /// Binário sem prévia: mime detectado + primeiros bytes em base64 (hexdump).
+    Binary {
+        format: String,
+        preview_base64: String,
+        preview_bytes: u32,
+    },
+    Unsupported {
+        reason: String,
+    },
+}
+
+/// Entrada de um arquivo compactado exibida na prévia de ZIP.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ArchiveEntryPreview {
+    pub name: String,
+    pub size: u64,
+    pub compressed_size: u64,
+    pub is_dir: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -652,5 +725,94 @@ mod tests {
         // Desserialização continua tolerante (não quebra payloads antigos).
         let parsed: ChatMessage = serde_json::from_value(json).expect("deserialize message");
         assert!(parsed.provider_state.is_none());
+    }
+
+    #[test]
+    fn detects_media_and_archive_kinds_by_extension_and_mime() {
+        for (mime, name, expected) in [
+            ("audio/mpeg", "trilha.mp3", ArtifactKind::Audio),
+            ("audio/wav", "voz.wav", ArtifactKind::Audio),
+            ("", "sem-extensao.ogg", ArtifactKind::Audio),
+            ("audio/ogg", "audio", ArtifactKind::Audio),
+            ("video/mp4", "demo.mp4", ArtifactKind::Video),
+            ("video/webm", "captura.webm", ArtifactKind::Video),
+            ("application/octet-stream", "clipe.mov", ArtifactKind::Video),
+            ("video/mp4", "video", ArtifactKind::Video),
+            ("application/zip", "pacote.zip", ArtifactKind::Archive),
+            ("application/octet-stream", "backup.7z", ArtifactKind::Archive),
+            ("application/x-tar", "fontes.tar", ArtifactKind::Archive),
+            ("application/gzip", "dados.gz", ArtifactKind::Archive),
+            ("image/tiff", "scan.tif", ArtifactKind::Image),
+            ("image/x-icon", "icone.ico", ArtifactKind::Image),
+        ] {
+            assert_eq!(
+                ArtifactKind::from_mime_and_name(mime, name),
+                expected,
+                "{name} ({mime})"
+            );
+        }
+        // Tipos textuais continuam com a classificação anterior.
+        assert_eq!(
+            ArtifactKind::from_mime_and_name("text/markdown", "notas.md"),
+            ArtifactKind::Markdown
+        );
+        assert_eq!(
+            ArtifactKind::from_mime_and_name("text/plain", "LEIAME"),
+            ArtifactKind::Text
+        );
+    }
+
+    #[test]
+    fn media_kinds_are_not_textual() {
+        for kind in [ArtifactKind::Audio, ArtifactKind::Video, ArtifactKind::Archive] {
+            assert!(!kind.is_textual(), "{kind:?} não é textual");
+        }
+        assert_eq!(
+            serde_json::to_string(&ArtifactKind::Audio).expect("serialize"),
+            "\"audio\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ArtifactKind::Archive).expect("serialize"),
+            "\"archive\""
+        );
+    }
+
+    #[test]
+    fn new_preview_variants_serialize_with_the_ipc_kind_tag() {
+        let image = serde_json::to_value(ArtifactPreview::Image {
+            mime: "image/tiff".into(),
+            width: Some(640),
+            height: Some(480),
+            data_base64: Some("iVBOR".into()),
+        })
+        .expect("serialize image preview");
+        assert_eq!(image["kind"], "image");
+        assert_eq!(image["width"], 640);
+        assert_eq!(image["dataBase64"], "iVBOR");
+
+        let archive = serde_json::to_value(ArtifactPreview::Archive {
+            format: "zip".into(),
+            entries: vec![ArchiveEntryPreview {
+                name: "src/main.rs".into(),
+                size: 120,
+                compressed_size: 80,
+                is_dir: false,
+            }],
+            total_entries: 1,
+            truncated: false,
+        })
+        .expect("serialize archive preview");
+        assert_eq!(archive["kind"], "archive");
+        assert_eq!(archive["entries"][0]["isDir"], false);
+        assert_eq!(archive["totalEntries"], 1);
+
+        let binary = serde_json::to_value(ArtifactPreview::Binary {
+            format: "application/octet-stream".into(),
+            preview_base64: "AAEC".into(),
+            preview_bytes: 3,
+        })
+        .expect("serialize binary preview");
+        assert_eq!(binary["kind"], "binary");
+        assert_eq!(binary["previewBytes"], 3);
     }
 }

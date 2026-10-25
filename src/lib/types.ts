@@ -268,6 +268,9 @@ export type ArtifactKind =
   | 'docx'
   | 'xlsx'
   | 'pptx'
+  | 'audio'
+  | 'video'
+  | 'archive'
   | 'binary';
 
 export interface Artifact {
@@ -304,11 +307,41 @@ export interface SlidePreview {
   notes?: string | null;
 }
 
-/** Prévia estruturada de artefatos binários (PDF usa pdf.js no renderer). */
+/** Entrada de um arquivo compactado (prévia de ZIP). */
+export interface ArchiveEntryPreview {
+  name: string;
+  size: number;
+  compressedSize: number;
+  isDir: boolean;
+}
+
+/**
+ * Prévia estruturada de artefatos binários. PDF, áudio e vídeo usam o payload
+ * base64 de `get_artifact_content` (pdf.js/player nativo); imagens ganham
+ * metadados e payload convertido quando o formato não abre no WebView (TIFF);
+ * ZIP vira listagem e binários sem prévia mostram os primeiros bytes (hexdump).
+ */
 export type ArtifactPreview =
   | { kind: 'docx'; html: string }
   | { kind: 'xlsx'; sheets: SheetPreview[] }
   | { kind: 'pptx'; slides: SlidePreview[] }
+  | {
+      kind: 'image';
+      /** MIME do payload exibido (o original ou `image/png` após conversão). */
+      mime: string;
+      width?: number | null;
+      height?: number | null;
+      /** Presente apenas quando o formato original foi convertido para PNG. */
+      dataBase64?: string | null;
+    }
+  | {
+      kind: 'archive';
+      format: string;
+      entries: ArchiveEntryPreview[];
+      totalEntries: number;
+      truncated: boolean;
+    }
+  | { kind: 'binary'; format: string; previewBase64: string; previewBytes: number }
   | { kind: 'unsupported'; reason: string };
 
 export interface InterpreterInfo {

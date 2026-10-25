@@ -48,6 +48,9 @@ function artifact(kind: ArtifactKind, overrides: Partial<Artifact> = {}): Artifa
     docx: 'docx',
     xlsx: 'xlsx',
     pptx: 'pptx',
+    audio: 'mp3',
+    video: 'mp4',
+    archive: 'zip',
     binary: 'bin',
   };
   return {
@@ -395,5 +398,206 @@ describe('ArtifactPreview — mídia e texto', () => {
 
     expect(screen.getByText(/prévia não disponível/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Abrir' })).toBeTruthy();
+  });
+});
+
+describe('ArtifactPreview — roteamento v1.5', () => {
+  it('roteia markdown para MarkdownPreview com abas Documento/Código', () => {
+    render(
+      <ArtifactPreview
+        content={contentFor('markdown', { content: '# Relatório\n\n- item' })}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Relatório' })).toBeTruthy();
+    expect(document.querySelector('.lumina-prose')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Código' }));
+
+    expect(screen.getByText('arquivo.md')).toBeTruthy();
+    expect(document.querySelector('pre')?.textContent).toContain('# Relatório');
+  });
+
+  it('roteia code para CodePreview com linguagem inferida e toggle de quebra', () => {
+    render(
+      <ArtifactPreview
+        content={contentFor('code', {
+          content: 'def soma(a, b):\n    return a + b',
+          artifact: artifact('code', { name: 'main.py' }),
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('toolbar', { name: 'Controles do código' })).toBeTruthy();
+    expect(screen.getByText('Python')).toBeTruthy();
+    expect(screen.getByText('2 linhas')).toBeTruthy();
+    expect(screen.getByText('main.py')).toBeTruthy();
+
+    const toggle = screen.getByRole('button', { name: 'Quebrar linhas' });
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('roteia text para CodePreview com quebra de linhas por padrão', () => {
+    render(
+      <ArtifactPreview
+        content={contentFor('text', { content: 'linha um\nlinha dois\n' })}
+      />,
+    );
+
+    expect(screen.getByText('Texto')).toBeTruthy();
+    expect(screen.getByText('2 linhas')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Quebrar linhas' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    // Texto simples não ganha coluna de números de linha.
+    expect(document.querySelectorAll('.table-cell.select-none')).toHaveLength(0);
+  });
+
+  it('roteia json para JsonPreview (árvore e código)', () => {
+    render(
+      <ArtifactPreview
+        content={contentFor('json', { content: '{"nome":"Lumina","tags":["a","b"]}' })}
+      />,
+    );
+
+    expect(
+      screen.getByRole('radiogroup', { name: 'Modo de visualização do JSON' }),
+    ).toBeTruthy();
+    expect(screen.getByText(/"nome"/)).toBeTruthy();
+    expect(screen.getByText('"Lumina"')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Código' }));
+
+    expect(document.querySelector('pre')?.textContent).toContain('"nome": "Lumina"');
+  });
+
+  it('roteia csv e tabula com ponto e vírgula, números à direita', () => {
+    render(
+      <ArtifactPreview
+        content={contentFor('csv', { content: 'nome;valor\nana;1.200,50\nbia;300' })}
+      />,
+    );
+
+    expect(screen.getByText('nome')).toBeTruthy();
+    expect(screen.getByText('valor')).toBeTruthy();
+    expect(screen.getByText('ana')).toBeTruthy();
+    const numeric = screen.getByText('1.200,50');
+    expect(numeric.className).toContain('text-right');
+    expect(screen.getByText('300').className).toContain('text-right');
+    expect(screen.getByText('bia').className).not.toContain('text-right');
+  });
+
+  it('roteia image para ImagePreview com toolbar, dimensões e data URL', async () => {
+    mocks.getArtifactPreview.mockResolvedValue({
+      kind: 'image',
+      mime: 'image/png',
+      width: 640,
+      height: 480,
+    });
+
+    render(
+      <ArtifactPreview
+        content={contentFor('image', {
+          artifact: artifact('image', { name: 'grafico.png', mimeType: 'image/png' }),
+          dataBase64: 'aGVsbG8=',
+        })}
+      />,
+    );
+
+    const image = screen.getByRole('img', { name: 'grafico.png' }) as HTMLImageElement;
+    expect(image.src).toBe('data:image/png;base64,aGVsbG8=');
+    expect(screen.getByRole('toolbar', { name: 'Controles da imagem' })).toBeTruthy();
+    expect(await screen.findByText('640 × 480')).toBeTruthy();
+    expect(mocks.getArtifactPreview).toHaveBeenCalledWith('artifact-image');
+  });
+
+  it('roteia svg para SvgPreview com o estágio de visualização', () => {
+    render(
+      <ArtifactPreview
+        content={contentFor('svg', {
+          content: '<svg viewBox="0 0 20 10"><rect width="20" height="10"/></svg>',
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('toolbar', { name: 'Controles do SVG' })).toBeTruthy();
+    const stage = screen.getByRole('region', { name: 'Visualização do SVG' });
+    expect(stage.querySelector('svg')).toBeTruthy();
+  });
+
+  it('roteia audio para AudioPreview com player nativo', () => {
+    render(
+      <ArtifactPreview
+        content={contentFor('audio', {
+          artifact: artifact('audio', { name: 'musica.mp3', mimeType: 'audio/mpeg' }),
+          dataBase64: 'SUQz',
+        })}
+      />,
+    );
+
+    expect(screen.getByText('MP3')).toBeTruthy();
+    const player = screen.getByLabelText('Reprodutor de áudio de musica.mp3') as HTMLAudioElement;
+    expect(player.getAttribute('src')).toBe('data:audio/mpeg;base64,SUQz');
+  });
+
+  it('cai no cartão binário quando o áudio passa do limite inline', () => {
+    render(<ArtifactPreview content={contentFor('audio')} />);
+
+    expect(screen.getByText(/grande demais para reprodução inline/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Abrir' })).toBeTruthy();
+  });
+
+  it('roteia video para VideoPreview com player nativo', () => {
+    render(
+      <ArtifactPreview
+        content={contentFor('video', {
+          artifact: artifact('video', { name: 'clipe.mp4', mimeType: 'video/mp4' }),
+          dataBase64: 'AAAAIGZ0eXA=',
+        })}
+      />,
+    );
+
+    expect(screen.getByText('MP4')).toBeTruthy();
+    const player = screen.getByLabelText('Reprodutor de vídeo de clipe.mp4') as HTMLVideoElement;
+    expect(player.getAttribute('src')).toBe('data:video/mp4;base64,AAAAIGZ0eXA=');
+  });
+
+  it('roteia archive para ArchivePreview com entradas e truncamento', async () => {
+    mocks.getArtifactPreview.mockResolvedValue({
+      kind: 'archive',
+      format: 'zip',
+      entries: [
+        { name: 'src/', size: 0, compressedSize: 0, isDir: true },
+        { name: 'README.md', size: 120, compressedSize: 80, isDir: false },
+      ],
+      totalEntries: 3,
+      truncated: true,
+    });
+
+    render(
+      <ArtifactPreview
+        content={contentFor('archive', {
+          artifact: artifact('archive', { name: 'projeto.zip', mimeType: 'application/zip' }),
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('list', { name: 'Entradas do arquivo compactado' }),
+    ).toBeTruthy();
+    expect(screen.getByText('src/')).toBeTruthy();
+    expect(screen.getByText('README.md')).toBeTruthy();
+    expect(screen.getByText('Mostrando 2 de 3 entradas')).toBeTruthy();
+    expect(mocks.getArtifactPreview).toHaveBeenCalledWith('artifact-archive');
+  });
+
+  it('mantém html no HtmlPreview isolado', () => {
+    render(
+      <ArtifactPreview content={contentFor('html', { content: '<h1>Oi</h1>' })} />,
+    );
+
+    expect(screen.getByTitle('arquivo.html')).toBeTruthy();
   });
 });

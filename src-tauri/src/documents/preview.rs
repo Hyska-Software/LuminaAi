@@ -5,7 +5,10 @@
 //!
 //! - DOCX → HTML restrito a uma allowlist de tags;
 //! - XLSX → grade de células por planilha;
-//! - PPTX → cartões de slide com textos e notas do apresentador.
+//! - PPTX → cartões de slide com textos e notas do apresentador;
+//! - imagens → metadados (pass-through) ou PNG convertido (TIFF);
+//! - ZIP → listagem das primeiras entradas;
+//! - outros binários → MIME detectado + primeiros bytes em base64 (hexdump).
 //!
 //! Os parsers nunca panicam em arquivo do usuário: entrada corrompida vira
 //! `Err` com uma mensagem em pt-BR. Nenhum deles confia no tamanho declarado no
@@ -15,6 +18,7 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
 use anyhow::{anyhow, bail, Context, Result};
+use base64::prelude::{Engine as _, BASE64_STANDARD};
 use calamine::{
     open_workbook_auto_from_rs, Data as CellData, ExcelDateTime, Reader as CalamineReader,
 };
@@ -22,7 +26,9 @@ use quick_xml::events::{BytesRef, BytesStart, Event};
 use quick_xml::reader::Reader;
 use zip::ZipArchive;
 
-use crate::domain::{SheetPreview, SlidePreview};
+use super::image::{header_dimensions, sniff_format, ImageFormat};
+use crate::domain::{ArchiveEntryPreview, ArtifactPreview, SheetPreview, SlidePreview};
+use image::ImageEncoder as _;
 
 /// Teto de tamanho do HTML gerado para o preview de DOCX (512 KB).
 pub const MAX_DOCX_HTML_BYTES: usize = 512 * 1024;
@@ -34,6 +40,14 @@ const MAX_XLSX_ROWS: usize = 200;
 const MAX_XLSX_COLUMNS: usize = 40;
 /// Slides exibidos por preview de PPTX.
 const MAX_PPTX_SLIDES: usize = 100;
+/// Entradas listadas por preview de ZIP.
+pub const MAX_ARCHIVE_ENTRIES: usize = 400;
+/// Caracteres mantidos no nome de cada entrada do ZIP.
+pub const MAX_ARCHIVE_ENTRY_NAME_CHARS: usize = 240;
+/// Bytes de hexdump (base64) exibidos na prévia de binários.
+pub const MAX_BINARY_PREVIEW_BYTES: usize = 4096;
+/// Lado maior máximo da prévia PNG gerada a partir de um TIFF.
+pub const MAX_TIFF_PREVIEW_SIDE: u32 = 2560;
 /// Profundidade máxima de aninhamento aceita ao percorrer o XML.
 const MAX_XML_DEPTH: usize = 64;
 /// Quantidade de itens de lista acumulados antes de fechar um `<ul>`/`<ol>`.
@@ -1257,6 +1271,187 @@ fn pptx_paragraphs(xml: &str) -> Result<Vec<String>> {
     Ok(paragraphs)
 }
 
+/* ------------------------------------------------------------------ */
+/* Imagens                                                             */
+/* ------------------------------------------------------------------ */
+
+/// Prévia de imagem.
+///
+/// Formatos que o WebView desenha (PNG/JPEG/GIF/WebP/AVIF/BMP/ICO) viram
+/// [`ArtifactPreview::Image`] só com metadados (`data_base64: None`): o
+/// renderer busca os bytes originais em `get_artifact_content`. TIFF é
+/// decodificado, redimensionado quando necessário e convertido para PNG (única
+/// forma de exibi-lo no WebView). HEIC/HEIF e formatos desconhecidos viram
+/// `Unsupported` com orientação de Salvar/Abrir; TIFF corrompido é `Err`.
+pub fn image_preview(bytes: &[u8]) -> Result<ArtifactPreview> {
+    let format = sniff_format(bytes);
+    if format.opens_in_webview() {
+        let (width, height) = header_dimensions(bytes, format);
+        return Ok(ArtifactPreview::Image {
+            mime: format.mime().to_string(),
+            width,
+            height,
+            data_base64: None,
+        });
+    }
+    match format {
+        ImageFormat::Tiff => tiff_png_preview(bytes),
+        ImageFormat::Heic => Ok(ArtifactPreview::Unsupported {
+            reason: "imagens HEIC/HEIF não abrem no visualizador interno. Use \"Salvar como…\" \
+                     para baixar o arquivo e \"Abrir\" para vê-lo no aplicativo do sistema."
+                .to_string(),
+        }),
+        _ if bytes.is_empty() => Ok(ArtifactPreview::Unsupported {
+            reason: "arquivo de imagem vazio. Use \"Salvar como…\" para baixar o arquivo e \
+                     \"Abrir\" para vê-lo no aplicativo do sistema."
+                .to_string(),
+        }),
+        _ => Ok(ArtifactPreview::Unsupported {
+            reason: "formato de imagem não reconhecido. Use \"Salvar como…\" para baixar o \
+                     arquivo e \"Abrir\" para vê-lo no aplicativo do sistema."
+                .to_string(),
+        }),
+    }
+}
+
+/// Decodifica um TIFF real e o converte em PNG; reduz se o lado maior passar
+/// de [`MAX_TIFF_PREVIEW_SIDE`]. Devolve as dimensões **originais** para a UI
+/// exibir os metadados do arquivo.
+fn tiff_png_preview(bytes: &[u8]) -> Result<ArtifactPreview> {
+    let decoded = image::load_from_memory_with_format(bytes, image::ImageFormat::Tiff).context(
+        "não foi possível decodificar a imagem TIFF (arquivo corrompido ou variante não suportada)",
+    )?;
+    let width = decoded.width();
+    let height = decoded.height();
+    if width == 0 || height == 0 {
+        bail!("imagem TIFF sem dimensões válidas");
+    }
+
+    let mut rgba = decoded.into_rgba8();
+    let long_side = width.max(height);
+    if long_side > MAX_TIFF_PREVIEW_SIDE {
+        let scale = f64::from(MAX_TIFF_PREVIEW_SIDE) / f64::from(long_side);
+        let target_width = ((f64::from(width) * scale).round() as u32).max(1);
+        let target_height = ((f64::from(height) * scale).round() as u32).max(1);
+        rgba = image::imageops::resize(
+            &rgba,
+            target_width,
+            target_height,
+            image::imageops::FilterType::Lanczos3,
+        );
+    }
+
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png)
+        .write_image(
+            rgba.as_raw(),
+            rgba.width(),
+            rgba.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .context("falha ao codificar a prévia PNG do TIFF")?;
+
+    Ok(ArtifactPreview::Image {
+        mime: "image/png".to_string(),
+        width: Some(width),
+        height: Some(height),
+        data_base64: Some(BASE64_STANDARD.encode(png)),
+    })
+}
+
+/* ------------------------------------------------------------------ */
+/* Arquivos compactados (ZIP)                                          */
+/* ------------------------------------------------------------------ */
+
+/// Prévia de arquivo compactado: lista as primeiras
+/// [`MAX_ARCHIVE_ENTRIES`] entradas de um ZIP (inclusive `.jar`, `.epub` e
+/// `.cbz`).
+///
+/// Outros contêineres (TAR/7z/RAR) não são lidos aqui: devolvem `Unsupported`
+/// com orientação para Salvar/Abrir. ZIP corrompido é `Err`.
+pub fn archive_preview(bytes: &[u8]) -> Result<ArtifactPreview> {
+    if !is_zip(bytes) {
+        return Ok(ArtifactPreview::Unsupported {
+            reason: if bytes.is_empty() {
+                "arquivo vazio: não há conteúdo ZIP para listar. Use \"Salvar como…\" para \
+                 baixar o arquivo e \"Abrir\" para vê-lo no aplicativo do sistema."
+                    .to_string()
+            } else {
+                "somente arquivos ZIP (.zip, .jar, .epub e .cbz) têm lista de conteúdo. Para \
+                 TAR, 7z ou RAR, use \"Salvar como…\" para baixar o arquivo e \"Abrir\" para \
+                 vê-lo no aplicativo do sistema."
+                    .to_string()
+            },
+        });
+    }
+
+    let mut archive =
+        ZipArchive::new(Cursor::new(bytes)).context("arquivo ZIP corrompido ou incompleto")?;
+    let total = archive.len();
+    let truncated = total > MAX_ARCHIVE_ENTRIES;
+    let mut entries = Vec::with_capacity(total.min(MAX_ARCHIVE_ENTRIES));
+    for index in 0..total.min(MAX_ARCHIVE_ENTRIES) {
+        let entry = archive
+            .by_index(index)
+            .map_err(|error| anyhow!("entrada {index} ilegível no ZIP: {error}"))?;
+        // Nome pode vir em UTF-8 (flag do ZIP) ou CP437; se a decodificação
+        // falhar, usa a representação lossy para não perder a listagem.
+        let name = entry
+            .name()
+            .map(|name| name.into_owned())
+            .unwrap_or_else(|_| String::from_utf8_lossy(entry.name_raw()).into_owned());
+        entries.push(ArchiveEntryPreview {
+            is_dir: name.ends_with('/'),
+            name: truncate_entry_name(&name),
+            size: entry.size(),
+            compressed_size: entry.compressed_size(),
+        });
+    }
+
+    Ok(ArtifactPreview::Archive {
+        format: "zip".to_string(),
+        entries,
+        total_entries: total.min(u32::MAX as usize) as u32,
+        truncated,
+    })
+}
+
+/// Mantém o nome da entrada legível na lista: corta em
+/// [`MAX_ARCHIVE_ENTRY_NAME_CHARS`] caracteres e sinaliza o corte com `…`.
+fn truncate_entry_name(name: &str) -> String {
+    if name.chars().count() <= MAX_ARCHIVE_ENTRY_NAME_CHARS {
+        return name.to_string();
+    }
+    let mut truncated: String = name
+        .chars()
+        .take(MAX_ARCHIVE_ENTRY_NAME_CHARS - 1)
+        .collect();
+    truncated.push('…');
+    truncated
+}
+
+/* ------------------------------------------------------------------ */
+/* Binário genérico (hexdump)                                          */
+/* ------------------------------------------------------------------ */
+
+/// Prévia de binário sem parser dedicado: MIME detectado por magic bytes e os
+/// primeiros [`MAX_BINARY_PREVIEW_BYTES`] bytes em base64.
+///
+/// Nunca falha: arquivo vazio ou desconhecido vira `application/octet-stream`
+/// com payload vazio (a UI mostra o cartão de binário com Salvar/Abrir).
+pub fn binary_preview(bytes: &[u8]) -> ArtifactPreview {
+    let format = infer::get(bytes)
+        .map(|kind| kind.mime_type().to_string())
+        .filter(|mime| !mime.is_empty())
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    let preview = &bytes[..bytes.len().min(MAX_BINARY_PREVIEW_BYTES)];
+    ArtifactPreview::Binary {
+        format,
+        preview_base64: BASE64_STANDARD.encode(preview),
+        preview_bytes: preview.len() as u32,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -1797,6 +1992,349 @@ mod tests {
             "<p:sld><p:cSld><p:spTree><p:sp><p:txBody><a:p>".to_string(),
         )]);
         assert!(pptx_slides(&truncated).is_err());
+    }
+
+    /* ------------------- imagens (v1.5) ------------------- */
+
+    const PNG: &[u8] = include_bytes!("testdata/grafico-receita.png");
+    const TIFF: &[u8] = include_bytes!("testdata/scan-tiff.tif");
+    const ZIPPED: &[u8] = include_bytes!("testdata/pacote-projeto.zip");
+
+    fn image_parts(
+        preview: ArtifactPreview,
+    ) -> (String, Option<u32>, Option<u32>, Option<String>) {
+        match preview {
+            ArtifactPreview::Image {
+                mime,
+                width,
+                height,
+                data_base64,
+            } => (mime, width, height, data_base64),
+            other => panic!("esperado ArtifactPreview::Image, veio {other:?}"),
+        }
+    }
+
+    #[test]
+    fn image_png_passes_through_with_header_dimensions() {
+        let (mime, width, height, data_base64) =
+            image_parts(image_preview(PNG).expect("prévia do PNG"));
+        assert_eq!(mime, "image/png");
+        assert_eq!(width, Some(960));
+        assert_eq!(height, Some(540));
+        assert!(
+            data_base64.is_none(),
+            "PNG abre no WebView: pass-through sem payload"
+        );
+    }
+
+    #[test]
+    fn image_tiff_is_converted_to_png_with_original_dimensions() {
+        let (mime, width, height, data_base64) =
+            image_parts(image_preview(TIFF).expect("prévia do TIFF"));
+        assert_eq!(mime, "image/png", "TIFF só abre convertido para PNG");
+        assert_eq!(width, Some(160));
+        assert_eq!(height, Some(100));
+        let encoded = data_base64.expect("TIFF convertido precisa do payload PNG");
+        assert!(
+            encoded.starts_with("iVBOR"),
+            "payload não é um PNG base64: {}",
+            &encoded[..encoded.len().min(16)]
+        );
+        let png = BASE64_STANDARD
+            .decode(encoded.as_bytes())
+            .expect("payload base64 válido");
+        assert_eq!(
+            &png[..8],
+            &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A],
+            "assinatura PNG ausente"
+        );
+        let decoded = image::load_from_memory(&png).expect("PNG gerado deve decodificar");
+        assert_eq!((decoded.width(), decoded.height()), (160, 100));
+    }
+
+    #[test]
+    fn image_tiff_larger_than_the_limit_is_resized() {
+        let source = image::RgbImage::from_fn(3200, 80, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, 96])
+        });
+        let source = image::DynamicImage::ImageRgb8(source);
+        let mut tiff = Cursor::new(Vec::new());
+        source
+            .write_to(&mut tiff, image::ImageFormat::Tiff)
+            .expect("codificar TIFF de teste");
+        let tiff = tiff.into_inner();
+
+        let (mime, width, height, data_base64) =
+            image_parts(image_preview(&tiff).expect("prévia do TIFF grande"));
+        assert_eq!(mime, "image/png");
+        assert_eq!(width, Some(3200), "dimensões originais no metadado");
+        assert_eq!(height, Some(80));
+        let png = BASE64_STANDARD
+            .decode(data_base64.expect("payload PNG").as_bytes())
+            .expect("payload base64 válido");
+        let decoded = image::load_from_memory(&png).expect("PNG gerado deve decodificar");
+        assert_eq!(decoded.width(), MAX_TIFF_PREVIEW_SIDE);
+        assert_eq!(decoded.height(), 64, "proporção 3200x80 → 2560x64");
+    }
+
+    #[test]
+    fn image_heic_and_unknown_formats_are_unsupported() {
+        // Cabeçalho ISO-BMFF (`ftyp` + brand `heic`), como um .heic real começa.
+        let mut heic = vec![0, 0, 0, 0x18];
+        heic.extend_from_slice(b"ftyp");
+        heic.extend_from_slice(b"heic");
+        heic.extend_from_slice(&[0, 0, 0, 0]);
+        heic.extend_from_slice(b"mif1heic");
+        match image_preview(&heic).expect("HEIC não é erro de parse") {
+            ArtifactPreview::Unsupported { reason } => {
+                assert!(reason.contains("Salvar como"), "sem orientação: {reason}");
+                assert!(reason.contains("Abrir"), "sem orientação: {reason}");
+            }
+            other => panic!("esperado Unsupported para HEIC, veio {other:?}"),
+        }
+
+        match image_preview(b"isto nao e uma imagem, so texto").expect("lixo não é erro") {
+            ArtifactPreview::Unsupported { reason } => {
+                assert!(reason.contains("Salvar como"), "sem orientação: {reason}");
+                assert!(reason.contains("Abrir"), "sem orientação: {reason}");
+            }
+            other => panic!("esperado Unsupported para formato desconhecido, veio {other:?}"),
+        }
+    }
+
+    #[test]
+    fn image_corrupt_tiff_is_an_error() {
+        let mut corrupt = b"II*\0".to_vec();
+        corrupt.extend_from_slice(&[0u8; 64]);
+        let result = image_preview(&corrupt);
+        assert!(
+            result.is_err(),
+            "TIFF corrompido deve ser Err, veio {result:?}"
+        );
+        let message = match result {
+            Err(error) => format!("{error:#}"),
+            Ok(preview) => panic!("esperava Err, veio {preview:?}"),
+        };
+        assert!(
+            message.contains("TIFF"),
+            "mensagem sem contexto do formato: {message}"
+        );
+    }
+
+    #[test]
+    fn empty_inputs_never_panic() {
+        match image_preview(b"").expect("imagem vazia é Unsupported, não Err") {
+            ArtifactPreview::Unsupported { reason } => {
+                assert!(reason.contains("vazio"), "motivo: {reason}");
+            }
+            other => panic!("esperado Unsupported para imagem vazia, veio {other:?}"),
+        }
+        match archive_preview(b"").expect("vazio não é ZIP: Unsupported") {
+            ArtifactPreview::Unsupported { reason } => {
+                assert!(reason.contains("Salvar como"), "motivo: {reason}");
+            }
+            other => panic!("esperado Unsupported para ZIP vazio, veio {other:?}"),
+        }
+        match binary_preview(b"") {
+            ArtifactPreview::Binary {
+                format,
+                preview_base64,
+                preview_bytes,
+            } => {
+                assert_eq!(format, "application/octet-stream");
+                assert_eq!(preview_bytes, 0);
+                assert!(preview_base64.is_empty());
+            }
+            other => panic!("esperado Binary para arquivo vazio, veio {other:?}"),
+        }
+    }
+
+    /* ------------------- ZIP (v1.5) ------------------- */
+
+    #[test]
+    fn archive_zip_fixture_lists_entries_in_order() {
+        match archive_preview(ZIPPED).expect("prévia do ZIP") {
+            ArtifactPreview::Archive {
+                format,
+                entries,
+                total_entries,
+                truncated,
+            } => {
+                assert_eq!(format, "zip");
+                assert_eq!(total_entries, 4, "entradas: {entries:?}");
+                assert!(!truncated);
+                assert_eq!(entries.len(), 4);
+
+                assert_eq!(entries[0].name, "pacote-projeto/");
+                assert!(entries[0].is_dir, "pasta deve ser marcada como diretório");
+
+                assert_eq!(entries[1].name, "pacote-projeto/LEIAME.md");
+                assert!(!entries[1].is_dir);
+                assert_eq!(entries[1].size, 67);
+                assert!(entries[1].compressed_size > 0);
+
+                assert_eq!(entries[2].name, "pacote-projeto/app.py");
+                assert_eq!(entries[2].size, 77);
+
+                assert_eq!(entries[3].name, "pacote-projeto/dados.csv");
+                assert_eq!(entries[3].size, 41);
+            }
+            other => panic!("esperado ArtifactPreview::Archive, veio {other:?}"),
+        }
+    }
+
+    #[test]
+    fn archive_lists_at_most_400_entries_and_flags_truncation() {
+        let mut parts: Vec<(String, String)> = Vec::new();
+        for index in 0..420u32 {
+            parts.push((
+                format!("entradas/arquivo-{index:03}.txt"),
+                format!("conteúdo {index}"),
+            ));
+        }
+        let bytes = zip_parts(&parts);
+        match archive_preview(&bytes).expect("prévia do ZIP grande") {
+            ArtifactPreview::Archive {
+                entries,
+                total_entries,
+                truncated,
+                ..
+            } => {
+                assert_eq!(total_entries, 420, "total de entradas do ZIP");
+                assert!(
+                    truncated,
+                    "mais de {MAX_ARCHIVE_ENTRIES} entradas deve sinalizar truncamento"
+                );
+                assert_eq!(entries.len(), MAX_ARCHIVE_ENTRIES);
+                assert_eq!(entries[0].name, "entradas/arquivo-000.txt");
+                assert_eq!(
+                    entries[MAX_ARCHIVE_ENTRIES - 1].name,
+                    format!("entradas/arquivo-{:03}.txt", MAX_ARCHIVE_ENTRIES - 1)
+                );
+            }
+            other => panic!("esperado ArtifactPreview::Archive, veio {other:?}"),
+        }
+    }
+
+    #[test]
+    fn archive_truncates_long_entry_names() {
+        let long_name = format!("docs/{}.txt", "a".repeat(400));
+        let bytes = zip_parts(&[(long_name, "x".to_string())]);
+        match archive_preview(&bytes).expect("prévia do ZIP") {
+            ArtifactPreview::Archive { entries, .. } => {
+                assert_eq!(entries.len(), 1);
+                let name = &entries[0].name;
+                assert!(
+                    name.chars().count() <= MAX_ARCHIVE_ENTRY_NAME_CHARS,
+                    "nome com {} chars",
+                    name.chars().count()
+                );
+                assert!(name.ends_with('…'), "corte não sinalizado: {name}");
+            }
+            other => panic!("esperado ArtifactPreview::Archive, veio {other:?}"),
+        }
+    }
+
+    #[test]
+    fn archive_non_zip_containers_are_unsupported() {
+        match archive_preview(b"conteudo de um TAR qualquer").expect("não-ZIP não é erro") {
+            ArtifactPreview::Unsupported { reason } => {
+                for formula in ["TAR", "7z", "RAR"] {
+                    assert!(
+                        reason.contains(formula),
+                        "motivo deveria citar {formula}: {reason}"
+                    );
+                }
+                assert!(reason.contains("Salvar como"), "sem orientação: {reason}");
+                assert!(reason.contains("Abrir"), "sem orientação: {reason}");
+            }
+            other => panic!("esperado Unsupported para não-ZIP, veio {other:?}"),
+        }
+    }
+
+    #[test]
+    fn archive_corrupt_zip_is_an_error() {
+        let corrupt = b"PK\x03\x04isto nao e um zip".as_slice();
+        assert!(
+            archive_preview(corrupt).is_err(),
+            "assinatura ZIP sem diretório central deve ser Err"
+        );
+        let truncated = &ZIPPED[..ZIPPED.len() / 2];
+        assert!(
+            archive_preview(truncated).is_err(),
+            "ZIP truncado deve ser Err"
+        );
+    }
+
+    /* ------------------- binário (v1.5) ------------------- */
+
+    #[test]
+    fn binary_preview_truncates_the_hexdump_at_4096_bytes() {
+        let data = vec![0xABu8; 10_000];
+        match binary_preview(&data) {
+            ArtifactPreview::Binary {
+                format,
+                preview_base64,
+                preview_bytes,
+            } => {
+                assert_eq!(format, "application/octet-stream");
+                assert_eq!(preview_bytes, MAX_BINARY_PREVIEW_BYTES as u32);
+                let decoded = BASE64_STANDARD
+                    .decode(preview_base64.as_bytes())
+                    .expect("base64 válido");
+                assert_eq!(decoded.len(), MAX_BINARY_PREVIEW_BYTES);
+                assert!(decoded.iter().all(|byte| *byte == 0xAB));
+            }
+            other => panic!("esperado ArtifactPreview::Binary, veio {other:?}"),
+        }
+    }
+
+    #[test]
+    fn binary_preview_detects_the_mime_by_magic_bytes() {
+        match binary_preview(b"%PDF-1.7\n") {
+            ArtifactPreview::Binary {
+                format,
+                preview_base64,
+                preview_bytes,
+            } => {
+                assert_eq!(format, "application/pdf");
+                assert_eq!(preview_bytes, 9);
+                assert_eq!(
+                    BASE64_STANDARD
+                        .decode(preview_base64.as_bytes())
+                        .expect("base64 válido"),
+                    b"%PDF-1.7\n"
+                );
+            }
+            other => panic!("esperado ArtifactPreview::Binary, veio {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_preview_variants_serialize_with_camel_case_fields() {
+        let image = serde_json::to_value(image_preview(TIFF).expect("prévia do TIFF"))
+            .expect("serializar imagem");
+        assert_eq!(image["kind"], "image");
+        assert_eq!(image["mime"], "image/png");
+        assert_eq!(image["width"], 160);
+        assert!(image["dataBase64"].is_string(), "campo camelCase: {image}");
+
+        let archive = serde_json::to_value(archive_preview(ZIPPED).expect("prévia do ZIP"))
+            .expect("serializar ZIP");
+        assert_eq!(archive["kind"], "archive");
+        assert_eq!(archive["totalEntries"], 4);
+        assert!(archive["truncated"].is_boolean());
+        assert_eq!(archive["entries"][1]["isDir"], false);
+        assert!(archive["entries"][1]["compressedSize"].is_number());
+
+        let binary =
+            serde_json::to_value(binary_preview(b"%PDF-1.7\n")).expect("serializar binário");
+        assert_eq!(binary["kind"], "binary");
+        assert_eq!(binary["previewBytes"], 9);
+        assert!(
+            binary["previewBase64"].is_string(),
+            "campo camelCase: {binary}"
+        );
     }
 
     /* ---------------- integração: scripts das skills ---------------- */

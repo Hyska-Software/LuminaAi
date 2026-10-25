@@ -17,6 +17,135 @@ pub(crate) fn is_raster_mime(mime: &str) -> bool {
     )
 }
 
+/* ------------------------------------------------------------------ */
+/* Detecção por magic bytes (compartilhada com documents::preview)     */
+/* ------------------------------------------------------------------ */
+
+/// Formatos de imagem reconhecidos pela assinatura do arquivo (magic bytes).
+///
+/// A detecção é o ponto único para os anexos ([`extract`]) e para a prévia do
+/// painel de artefatos (`documents::preview::image_preview`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImageFormat {
+    Png,
+    Jpeg,
+    Gif,
+    Webp,
+    Avif,
+    Bmp,
+    Ico,
+    Tiff,
+    /// HEIC/HEIF: o WebView não abre; a prévia devolve `Unsupported`.
+    Heic,
+    Unknown,
+}
+
+impl ImageFormat {
+    /// MIME do formato original.
+    pub(crate) fn mime(self) -> &'static str {
+        match self {
+            Self::Png => "image/png",
+            Self::Jpeg => "image/jpeg",
+            Self::Gif => "image/gif",
+            Self::Webp => "image/webp",
+            Self::Avif => "image/avif",
+            Self::Bmp => "image/bmp",
+            Self::Ico => "image/x-icon",
+            Self::Tiff => "image/tiff",
+            Self::Heic => "image/heic",
+            Self::Unknown => "application/octet-stream",
+        }
+    }
+
+    /// Formatos que o WebView desenha nativamente (pass-through).
+    pub(crate) fn opens_in_webview(self) -> bool {
+        matches!(
+            self,
+            Self::Png | Self::Jpeg | Self::Gif | Self::Webp | Self::Avif | Self::Bmp | Self::Ico
+        )
+    }
+}
+
+/// Detecta o formato de imagem pela assinatura do arquivo.
+///
+/// Nunca falha: bytes desconhecidos (ou vazios) viram [`ImageFormat::Unknown`].
+pub(crate) fn sniff_format(bytes: &[u8]) -> ImageFormat {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return ImageFormat::Png;
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return ImageFormat::Jpeg;
+    }
+    if bytes.starts_with(b"GIF8") {
+        return ImageFormat::Gif;
+    }
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return ImageFormat::Webp;
+    }
+    if bytes.starts_with(b"BM") {
+        return ImageFormat::Bmp;
+    }
+    if bytes.starts_with(&[0x00, 0x00, 0x01, 0x00]) {
+        return ImageFormat::Ico;
+    }
+    if bytes.starts_with(b"II*\0")
+        || bytes.starts_with(b"MM\0*")
+        || bytes.starts_with(b"II+\0")
+        || bytes.starts_with(b"MM\0+")
+    {
+        return ImageFormat::Tiff;
+    }
+    if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
+        let brand = &bytes[8..12];
+        if matches!(brand, [b'a', b'v', b'i', b'f'] | [b'a', b'v', b'i', b's']) {
+            return ImageFormat::Avif;
+        }
+        if is_heif_brand(brand) {
+            return ImageFormat::Heic;
+        }
+    }
+    ImageFormat::Unknown
+}
+
+/// Dimensões lidas do cabeçalho, sem decodificar a imagem (best-effort).
+///
+/// Devolve `(None, None)` quando o cabeçalho não permite ler as dimensões sem
+/// decodificar o arquivo (TIFF/HEIC e formatos desconhecidos).
+pub(crate) fn header_dimensions(bytes: &[u8], format: ImageFormat) -> (Option<u32>, Option<u32>) {
+    let dims = match format {
+        ImageFormat::Png => png_dimensions(bytes),
+        ImageFormat::Jpeg => jpeg_dimensions(bytes),
+        ImageFormat::Gif => gif_dimensions(bytes),
+        ImageFormat::Webp => webp_dimensions(bytes),
+        ImageFormat::Bmp => bmp_dimensions(bytes),
+        ImageFormat::Ico => ico_dimensions(bytes),
+        ImageFormat::Avif => ispe_dimensions(bytes),
+        ImageFormat::Tiff | ImageFormat::Heic | ImageFormat::Unknown => None,
+    };
+    match dims {
+        Some((width, height)) => (Some(width), Some(height)),
+        None => (None, None),
+    }
+}
+
+/// Brands HEIF/HEIC que o WebView não abre.
+fn is_heif_brand(brand: &[u8]) -> bool {
+    matches!(
+        brand,
+        [b'h', b'e', b'i', b'c']
+            | [b'h', b'e', b'i', b'x']
+            | [b'h', b'e', b'v', b'c']
+            | [b'h', b'e', b'v', b'x']
+            | [b'h', b'e', b'i', b'm']
+            | [b'h', b'e', b'i', b's']
+            | [b'h', b'e', b'v', b'm']
+            | [b'h', b'e', b'v', b's']
+            | [b'm', b'i', b'f', b'1']
+            | [b'm', b'i', b'f', b'2']
+            | [b'm', b's', b'f', b'1']
+    )
+}
+
 pub fn extract(bytes: &[u8], mime: &str) -> ExtractedDocument {
     let detected = infer::get(bytes)
         .map(|kind| kind.mime_type().to_string())
@@ -82,20 +211,12 @@ fn normalize_mime(detected: &str, bytes: &[u8]) -> String {
 }
 
 fn sniff_header(bytes: &[u8]) -> String {
-    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        "image/png".into()
-    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        "image/jpeg".into()
-    } else if bytes.starts_with(b"GIF8") {
-        "image/gif".into()
-    } else if bytes.len() > 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        "image/webp".into()
-    } else if bytes.starts_with(b"BM") {
-        "image/bmp".into()
-    } else if bytes.starts_with(b"<svg") || bytes.starts_with(b"<?xml") {
-        "image/svg+xml".into()
-    } else {
-        "image/unknown".into()
+    if bytes.starts_with(b"<svg") || bytes.starts_with(b"<?xml") {
+        return "image/svg+xml".into();
+    }
+    match sniff_format(bytes) {
+        ImageFormat::Unknown => "image/unknown".into(),
+        format => format.mime().to_string(),
     }
 }
 
@@ -205,6 +326,51 @@ fn bmp_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     let width = u32_le(&bytes[18..22])? as i32;
     let height = u32_le(&bytes[22..26])? as i32;
     Some((width.unsigned_abs(), height.unsigned_abs()))
+}
+
+/// ICO/CUR: o cabeçalho DIRENT tem largura/altura em 1 byte (0 = 256).
+fn ico_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.len() < 8 || !bytes.starts_with(&[0x00, 0x00, 0x01, 0x00]) {
+        return None;
+    }
+    let width = if bytes[6] == 0 { 256 } else { bytes[6] as u32 };
+    let height = if bytes[7] == 0 { 256 } else { bytes[7] as u32 };
+    Some((width, height))
+}
+
+/// AVIF (e outros formatos ISO-BMFF de imagem) guardam as dimensões no box
+/// `ispe`. Varredura best-effort no começo do arquivo: escolhe o maior `ispe`
+/// (o item primário, não a miniatura).
+fn ispe_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    const MAX_SCAN: usize = 64 * 1024;
+    let haystack = &bytes[..bytes.len().min(MAX_SCAN)];
+    let mut best: Option<(u32, u32)> = None;
+    let mut offset = 0usize;
+    while let Some(relative) = haystack[offset..]
+        .windows(4)
+        .position(|window| window == b"ispe")
+    {
+        let position = offset + relative;
+        // `ispe`: 4 bytes de versão/flags + largura (u32 BE) + altura (u32 BE).
+        if let Some(info) = haystack.get(position + 8..position + 16) {
+            let width = u32::from_be_bytes([info[0], info[1], info[2], info[3]]);
+            let height = u32::from_be_bytes([info[4], info[5], info[6], info[7]]);
+            if width > 0 && height > 0 {
+                let area = u64::from(width) * u64::from(height);
+                let bigger = match best {
+                    Some((best_width, best_height)) => {
+                        area > u64::from(best_width) * u64::from(best_height)
+                    }
+                    None => true,
+                };
+                if bigger {
+                    best = Some((width, height));
+                }
+            }
+        }
+        offset = position + 4;
+    }
+    best
 }
 
 #[cfg(test)]

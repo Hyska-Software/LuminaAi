@@ -1,6 +1,7 @@
 # Arquivos, código e skills — planejamento e contrato
 
-> Status: **implementado na v1** (plano + código + testes). Este documento é a
+> Status: **implementado na v1, com a v1.5 (visualização ampliada de artefatos —
+> §14/v1.5)**. Este documento é a
 > fonte única do desenho: contratos, fluxos, limites, segurança, catálogo de
 > skills, matriz de testes e divisão de trabalho. Evidências da entrega no §14.
 > Qualquer divergência entre código e este documento é bug — atualize o
@@ -53,6 +54,11 @@ O que falta para o objetivo: canal de escrita **binária**, ferramenta de
   existentes) + `ArtifactKind::from_mime_and_name` completo.
 - Preview real: PDF (pdf.js no renderer), DOCX (OOXML → HTML no backend),
   XLSX (calamine → grade), PPTX (OOXML → slides), imagens (base64 nativo).
+- **v1.5 — visualização ampliada** (§16): Markdown renderizado (GFM/math),
+  código com syntax highlight Prism em 30+ linguagens, JSON em árvore,
+  CSV/TSV com delimitador detectado, imagens com zoom/pan/transparência e
+  conversão TIFF→PNG, players de áudio/vídeo, listagem de ZIP e hexdump de
+  binários desconhecidos.
 - Settings: `codeExecutionEnabled`, `codeTimeoutSecs`, `codePythonPath`,
   `codeNodePath`; tela “Ambiente de código” com interpretadores, pacotes e
   skills detectados; ação “Abrir pasta de skills”.
@@ -69,21 +75,33 @@ O que falta para o objetivo: canal de escrita **binária**, ferramenta de
   O agente pode orientar o usuário; a UI mostra o comando sugerido.
 - Renderização visual fiel de PPTX (slides são lidos como texto/estrutura) e de
   XLSX (sem estilos/cores/células mescladas na grade).
-- Edição de artefatos existentes, áudio/vídeo/zip, OCR de PDF escaneado.
+- Edição de artefatos existentes, OCR de PDF escaneado, extração de ZIP,
+  criação de áudio/vídeo por skills dedicadas (arquivos gerados por `run_code`
+  já são visualizados) e reprodução de contêineres fora do que o WebView abre.
 - Execução de código no renderer/Web Worker.
 
 ## 4. Matriz de formatos
 
 | Formato | Criar | Preview no painel | Como cria |
 | --- | --- | --- | --- |
-| Markdown, TXT, HTML, CSV, JSON, código | ✅ | ✅ (já existe) | `create_file` |
-| SVG | ✅ | ✅ (sanitizado) | `create_file` |
+| Markdown | ✅ | ✅ renderizado (GFM/math/código) + alternância “Documento/Código” | `create_file` |
+| TXT/log | ✅ | ✅ linhas numeradas, quebra de linha configurável | `create_file` |
+| HTML | ✅ | ✅ iframe sandbox (já existe) | `create_file` |
+| CSV/TSV | ✅ | ✅ tabela com detecção de delimitador (`,`, `;`, tab, `\|`) | `create_file` |
+| JSON/JSONL | ✅ | ✅ árvore colapsável + código realçado (JSON inválido cai no código) | `create_file` |
+| Código (30+ linguagens) | ✅ | ✅ syntax highlight Prism (bash, rust, go, java, c#, php, ruby, toml, docker…) | `create_file` |
+| SVG | ✅ | ✅ (sanitizado) com zoom/ajuste | `create_file` |
 | PDF | ✅ | ✅ pdf.js (páginas, zoom, navegação) | `run_code` + skill `pdf` (helper stdlib) |
 | DOCX | ✅ | ✅ HTML renderizado em iframe sandbox | `run_code` + skill `office-docx` |
 | XLSX | ✅ | ✅ grade com abas por planilha | `run_code` + skill `office-xlsx` |
 | PPTX | ✅ | ✅ cartões de slide (título + texto) | `run_code` + skill `office-pptx` |
-| PNG/JPG/WebP/GIF | ✅ (com Pillow; senão SVG) | ✅ nativo | `run_code` (skill `imagens`) |
-| Outros binários | ✅ via código | cartão binário + Salvar/Abrir | `run_code` |
+| PNG/JPG/WebP/GIF/AVIF/BMP/ICO | ✅ (com Pillow; senão SVG) | ✅ nativo com zoom, pan e fundo xadrez | `run_code` (skill `imagens`) |
+| TIFF | ✅ | ✅ convertido para PNG no backend (≤2560 px) | `run_code` (Pillow) |
+| Áudio (mp3/wav/ogg/m4a/flac/opus/aac) | ✅ via `run_code` (ex.: stdlib `wave`) | ✅ player nativo + metadados (≤24 MiB inline) | `run_code` |
+| Vídeo (mp4/webm/ogv/mov…) | ✅ via `run_code` | ✅ player nativo + metadados (≤24 MiB inline) | `run_code` |
+| ZIP | ✅ via `run_code` (stdlib `zipfile`) | ✅ listagem de entradas (até 400) + resumo | `run_code` |
+| Outros contêineres (tar/gz/7z/rar) | ✅ via código | cartão binário + Salvar/Abrir | `run_code` |
+| Outros binários | ✅ via código | cartão com formato detectado + hexdump (4 KB) + Salvar/Abrir | `run_code` |
 
 ## 5. Arquitetura
 
@@ -122,8 +140,16 @@ Fluxo típico “relatório em PDF”:
 ### 6.1 `domain.rs` (Rust)
 
 ```rust
-pub enum ArtifactKind { Markdown, Code, Text, Html, Csv, Json, Svg, Image, Pdf, Docx, Xlsx, Pptx, Binary }
-// from_mime_and_name: "pptx"|"ppt" => Pptx; "png"|"jpg"|"jpeg"|"webp"|"gif"|"bmp"|"avif" => Image
+pub enum ArtifactKind {
+    Markdown, Code, Text, Html, Csv, Json, Svg, Image, Pdf, Docx, Xlsx, Pptx,
+    Audio, Video, Archive, Binary,
+}
+// from_mime_and_name (v1.5):
+//  - imagem: png|jpg|jpeg|webp|gif|bmp|avif|tif|tiff|ico|jfif|apng e mime image/*
+//  - áudio:  mp3|wav|ogg|oga|opus|m4a|aac|flac|weba|mid|midi|amr e mime audio/*
+//  - vídeo:  mp4|m4v|webm|ogv|mov|mkv|avi|wmv|flv e mime video/*
+//  - arquivo compactado: zip|zipx|tar|gz|tgz|bz2|xz|7z|rar|jar|epub|cbz e mimes zip/tar/gzip
+//  - pdf/docx/xlsx/pptx/markdown/html/csv/json/svg continuam iguais
 
 pub struct Settings {
     // … campos atuais …
@@ -170,8 +196,23 @@ pub enum ArtifactPreview {
     Docx { html: String },
     Xlsx { sheets: Vec<SheetPreview> },
     Pptx { slides: Vec<SlidePreview> },
+    /// Metadados da imagem; `data_base64` só quando o original foi convertido
+    /// para PNG (formatos que o WebView não abre, como TIFF).
+    Image {
+        mime: String,
+        width: Option<u32>,
+        height: Option<u32>,
+        data_base64: Option<String>,
+    },
+    /// Listagem de ZIP (outros contêineres → Unsupported).
+    Archive { format: String, entries: Vec<ArchiveEntryPreview>, total_entries: u32, truncated: bool },
+    /// Binário sem prévia: mime detectado + primeiros 4096 bytes em base64 (hexdump).
+    Binary { format: String, preview_base64: String, preview_bytes: u32 },
     Unsupported { reason: String },
 }
+
+#[serde(rename_all = "camelCase", default)]
+pub struct ArchiveEntryPreview { pub name: String, pub size: u64, pub compressed_size: u64, pub is_dir: bool }
 
 #[serde(rename_all = "camelCase")]
 pub struct SheetPreview { pub name: String, pub rows: Vec<Vec<String>>, pub truncated: bool }
@@ -179,6 +220,12 @@ pub struct SheetPreview { pub name: String, pub rows: Vec<Vec<String>>, pub trun
 #[serde(rename_all = "camelCase")]
 pub struct SlidePreview { pub index: u32, pub texts: Vec<String>, pub notes: Option<String> }
 ```
+
+`get_artifact_content` (v1.5) devolve `content` só para textuais, `dataBase64`
+para PDF e para imagens que o WebView abre (`png/jpeg/gif/webp/avif/bmp/ico`) e
+para áudio/vídeo até **24 MiB**; DOCX/XLSX/PPTX/Archive/Binary não trafegam
+payload (as prévias leem o arquivo no backend) e TIFF/HEIC não trafegam o
+original (a prévia de imagem entrega o PNG convertido).
 
 ### 6.2 Comandos Tauri novos
 
@@ -208,11 +255,15 @@ dos outros enquanto os comandos não existem).
 
 ### 6.4 Tipos do renderer (`types.ts`)
 
-Espelham §6.1: `ArtifactKind` ganha `'pptx'`; `Settings` ganha
-`codeExecutionEnabled`, `codeTimeoutSecs`, `codePythonPath`, `codeNodePath`;
-`TurnOptions` ganha `runCode`; novos `CodeEnvironmentStatus`,
-`InterpreterInfo`, `CodePackageStatus`, `SkillSummary`, `ArtifactPreview`,
-`SheetPreview`, `SlidePreview`.
+Espelham §6.1: `ArtifactKind` ganha `'pptx'` (v1) e, na v1.5,
+`'audio' | 'video' | 'archive'`; `Settings` ganha `codeExecutionEnabled`,
+`codeTimeoutSecs`, `codePythonPath`, `codeNodePath`; `TurnOptions` ganha
+`runCode`; novos `CodeEnvironmentStatus`, `InterpreterInfo`,
+`CodePackageStatus`, `SkillSummary`, `ArtifactPreview`, `SheetPreview`,
+`SlidePreview`, `ArchiveEntryPreview`. Na v1.5, `ArtifactPreview` ganha as
+variantes `image` (mime/width/height/dataBase64 opcional), `archive`
+(format/entries/totalEntries/truncated) e `binary`
+(format/previewBase64/previewBytes).
 
 ### 6.5 API do renderer (`api.ts`)
 
@@ -392,6 +443,10 @@ e acesso à rede. Mitigações v1:
 pub fn docx_html(bytes: &[u8]) -> anyhow::Result<String>          // OOXML → HTML allowlist
 pub fn xlsx_sheets(bytes: &[u8]) -> anyhow::Result<Vec<SheetPreview>>
 pub fn pptx_slides(bytes: &[u8]) -> anyhow::Result<Vec<SlidePreview>>
+// v1.5 — prévias de mídia/container/binário (formats-dev)
+pub fn image_preview(bytes: &[u8]) -> anyhow::Result<ArtifactPreview>    // Image | Unsupported
+pub fn archive_preview(bytes: &[u8]) -> anyhow::Result<ArtifactPreview>  // Archive | Unsupported
+pub fn binary_preview(bytes: &[u8]) -> ArtifactPreview                   // Binary (hexdump)
 ```
 
 - DOCX: `word/document.xml` via `quick-xml`; parágrafos, `HeadingN`/outline,
@@ -405,22 +460,59 @@ pub fn pptx_slides(bytes: &[u8]) -> anyhow::Result<Vec<SlidePreview>>
   `a:p` vira uma string em `texts`; `notes` de `ppt/notesSlides/notesSlideN.xml`
   quando existir.
 - Nunca panicam em arquivo corrompido: `Err` com mensagem.
+- Imagens (v1.5): formato por magic bytes; PNG/JPEG/GIF/WebP/AVIF/BMP/ICO
+  passam direto (`data_base64: None`) e TIFF é decodificado com o crate
+  `image`, reduzido para no máximo 2560 px no lado maior, reencodado em PNG
+  (base64) e devolvido com as dimensões originais. HEIC/HEIF e formatos não
+  reconhecidos → `Unsupported` com orientação de “Salvar como…/Abrir”.
+- ZIP (v1.5): listagem com `zip` (até 400 entradas, nomes truncados em 240
+  chars, `is_dir`, tamanho/comprimido, total e `truncated`); não-ZIP →
+  `Unsupported` citando TAR/7z/RAR; ZIP corrompido → `Err`.
+- Binário (v1.5): mime por `infer` + primeiros 4096 bytes em base64.
 
 ### 9.2 Renderer (ui-systems)
 
-- `ArtifactPreview.tsx`: novos ramos `pdf`, `docx`, `xlsx`, `pptx`; fallback
-  para `BinaryPreview` em erro/`unsupported`.
-- PDF: `pdfjs-dist` (dependência nova, carregada por `import()` dinâmico;
-  worker via `?url`), render das páginas em `<canvas>`, controles de página e
-  zoom, estados de carregamento/erro, `aria-label` e navegação por teclado.
+Roteamento em `ArtifactPreview.tsx` (v1.5): o componente escolhe a prévia pelo
+`ArtifactKind` e mantém `BinaryPreview` como fallback de erro/`unsupported`.
+
+- PDF: `pdfjs-dist` (carregada por `import()` dinâmico; worker via `?url`),
+  páginas em `<canvas>`, controles de página e zoom, estados de
+  carregamento/erro, `aria-label` e navegação por teclado.
 - DOCX: `api.getArtifactPreview` → `HtmlPreview` (iframe `sandbox`, já seguro).
 - XLSX: abas por planilha (botões com `aria-selected`), grade com cabeçalho
   fixo, números alinhados à direita, aviso de truncamento.
 - PPTX: cartões 16:9 numerados, título = primeira linha, demais linhas como
   bullets; aviso “prévia simplificada”.
-- `kinds.ts`: metadados/ícone de `pptx`; imagem ganha ícone próprio (já tem).
-- Testes: mock de `@/lib/api` e do módulo `@/lib/pdf`; casos de sucesso, erro,
-  vazio/truncado e fallback.
+- Imagens (`ImagePreview`/`SvgPreview`): toolbar com formato e dimensões, zoom
+  (−/+, “Ajustar à janela”, “Tamanho real”), fundo xadrez para transparência,
+  pan por arrasto quando ampliado e atalhos +/−/0/1; SVG continua sanitizado;
+  TIFF usa o PNG convertido pela prévia; erro/sem payload → `BinaryPreview`.
+- Áudio/vídeo (`AudioPreview`/`VideoPreview`): player nativo com metadados
+  (formato, tamanho, duração quando exposta pelo elemento) e fallback para
+  `BinaryPreview` quando o payload não vem (arquivo > 24 MiB) ou o formato não
+  abre no WebView.
+- ZIP (`ArchivePreview`): resumo (arquivos/tamanho), lista rolável de entradas
+  (ícone de pasta/arquivo, nome com `title`, tamanho) e aviso de truncamento.
+- Binário (`BinaryPreview` + `HexDump`): formato detectado, hexdump colapsável
+  dos primeiros `previewBytes` (offset + 16 bytes/linha + ASCII) e ações
+  “Salvar como…”/“Abrir”.
+- Markdown (`MarkdownPreview`): GFM/math/código renderizados pelo `Markdown` do
+  chat + alternância “Documento/Código”.
+- JSON (`JsonPreview`/`JsonTree`): árvore colapsável com contagem de
+  itens/limite de nós e alternância “Árvore/Código”; JSON inválido cai no
+  código com aviso discreto.
+- CSV/TSV (`CsvPreview`): tabela com detecção de delimitador (`,`/`;`/tab/`|`),
+  números à direita e truncamento em 501 linhas.
+- Código/texto (`CodePreview` + `CodeBlock` v1.5): syntax highlight Prism com
+  grammars extras (bash, docker, makefile, diff, java, ruby, php, c#, toml,
+  ini, git, powershell, batch, nginx, http, cmake…), números de linha,
+  alternância de quebra de linha e `meta` de linhas. O tema único vem de
+  `src/lib/highlight` (tokens CSS) e é compartilhado com o chat.
+- `kinds.ts`: metadados/ícone/label de `audio`, `video`, `archive` e inferência
+  de linguagem por extensão quando o artefato antigo não tem `language`.
+- Testes: mock de `@/lib/api` (conteúdo e prévia) e de `@/lib/pdf`, por
+  componente (imagem, áudio, vídeo, ZIP, hexdump, markdown, JSON, código, CSV)
+  e de roteamento, incluindo sucesso, erro, vazio/truncado e fallback.
 
 ## 10. UI/Settings
 
@@ -458,6 +550,10 @@ Chat (ui-core): ícones e rótulos no timeline para `run_code`,
 | `commands::skills` | `get_skills`/`set_skill_enabled`/`delete_skill` com helpers puros + temp dirs; ativar/desativar persiste em `disabled_skills` (inclusive externas); excluir só `source == user` e valida caminho/symlink; bundled e externas → erro; nome some de `disabled_skills` ao excluir |
 | `harness::prompt` | seção de skills, regra run_code×create_file, ausência quando desabilitado; skill desativada fora do prompt |
 | `documents::preview` | fixtures reais `testdata/`: docx (heading/tabela/lista), xlsx (2 abas/valores/truncamento), pptx (títulos/textos/notas); corrompidos → Err; limites |
+| `documents::preview` (v1.5) | imagem: PNG/JPEG pass-through com dimensões, TIFF→PNG (assinatura do payload, ≤2560 px), HEIC→Unsupported, corrompido→Err; ZIP: entradas/total/ordem/truncamento (400), não-ZIP→Unsupported, corrompido→Err; binário: formato detectado e preview de exatamente 4096 bytes; vazio não panica |
+| `commands::artifacts` (v1.5) | `preview_for` dos novos kinds; payload de `get_artifact_content` por kind/mime/tamanho (texto, PDF, imagem web-safe vs TIFF, Office/ZIP/binário sem payload, áudio/vídeo ≤24 MiB) |
+| `tools::artifacts` (v1.5) | kind de áudio/vídeo/zip/imagens variadas; `CODE_EXTENSIONS`/`language_for` por extensão e nome completo (Dockerfile/Makefile/CMakeLists/.gitignore); `extension_for_mime` de mídia/zip/tiff/ico |
+| `db` (v1.5) | round-trip `Audio`/`Video`/`Archive` (string ↔ enum) e fallback desconhecido→`Binary` |
 | `config` | normalização dos novos campos (clamp timeout, trim paths, defaults) |
 
 Teste de integração (em `tools::code_exec`): gera `relatorio.docx` com o script
@@ -477,6 +573,17 @@ prova o ciclo criação→preview sem UI.
 | `Sidebar.test.tsx` | item “Skills” visível/abre o painel; oculto com `skillsPanelEnabled=false`; regressão “Novo chat” |
 | `SkillsView.test.tsx` | lista agrupada por origem (incluindo Codex/OpenCode/Claude/Agentes); switch chama `setSkillEnabled`; exclusão confirmada chama `deleteSkill`; embutida/externa sem excluir e nota de somente leitura; vazio/erro/retry; “Voltar ao chat” muda `activeView` para `chat` |
 | `ToolsTab.test.tsx` | switch do painel salva setting; “Gerenciar skills” navega para a view e fecha as configurações; contagem/labels de skills externas; skills desativadas marcadas |
+| `ImagePreview.test.tsx` | web-safe usa base64 do conteúdo; TIFF usa payload convertido da prévia; zoom/ajuste/tamanho real; dimensões; `unsupported`/sem dados → cartão; SVG sanitizado |
+| `AudioPreview/VideoPreview.test.tsx` | player com data URI e metadados; sem payload (>24 MiB) → cartão; `onError` do media → cartão |
+| `ArchivePreview.test.tsx` | resumo, lista de entradas, diretórios, truncamento, `unsupported`, erro com retry |
+| `HexDump/BinaryPreview.test.tsx` | hexdump com offset/ASCII, respeita `previewBytes`, formato detectado, ações preservadas |
+| `JsonPreview.test.tsx` | árvore colapsável (expandir/recolher), alternância árvore/código, JSON inválido, limites de nós |
+| `MarkdownPreview.test.tsx` | GFM renderizado (headings/listas/tabelas), alternância documento/código, vazio |
+| `CodePreview.test.tsx` | linguagem por `language`/extensão, números de linha, toggle de quebra, `meta` de linhas |
+| `csv.test.ts` | delimitadores `,`/`;`/tab/`\|`, aspas escapadas, CRLF, BOM, truncamento |
+| `kinds.test.ts` (v1.5) | meta/ícone/label de audio/video/archive; `artifactLanguage` por extensão/nome sem `language` |
+| `ArtifactPreview.test.tsx` (v1.5) | roteamento de markdown/json/code/csv/image/svg/audio/video/archive/binary e fallbacks |
+| `lib/highlight` | grammars extras registradas (bash/java/ruby/toml/csharp…), `normalizeLanguage` e `languageLabel` |
 
 ### Comandos de verificação (critérios de pronto)
 
@@ -497,6 +604,9 @@ Rust (`cargo test` cobre; ver §11).
 | Python ausente na máquina | detecção + erro orientativo + status na UI; helpers são stdlib (não exigem pip) |
 | Scripts stdlib gerarem arquivo inválido | testes abrem cada saída com os parsers do app; validação de assinatura/magic |
 | PDF.js aumentar bundle/worker quebrar no build | import dinâmico + worker `?url`; build/typecheck no CI local; fallback binário |
+| Grammars extras do Prism (prismjs) aumentarem o bundle ou quebrarem no build | importados sob demanda em `src/lib/highlight` (só os usados), registrados na instância do `prism-react-renderer`; `pnpm build` valida; fallback = texto puro |
+| Imagem/TIFF enorme travar a prévia ou estourar IPC | TIFF reduzido para ≤2560 px e reencodado em PNG; payload de mídia inline capped em 24 MiB; `get_artifact_content` não manda payload de ZIP/binário/Office |
+| ZIP malicioso (zip bomb, nomes com caminho) | listagem sem extração; limite de 400 entradas/nome 240 chars; nunca escreve no disco |
 | Parsers OOXML divergirem de arquivos reais | fixtures reais do repo + testes de corrompido |
 | Novos campos de Settings quebrarem settings antigos | `#[serde(default)]` + normalização no load |
 | Excluir skill apagar caminho indevido | exclusão só de `source == user`; caminho precisa ser filho direto de `<data>/skills`, sem symlink; bundled nunca é removida (só desativada) |
@@ -514,6 +624,16 @@ Rust (`cargo test` cobre; ver §11).
 | **storage-dev** | `src-tauri/src/commands/**`, `src-tauri/src/config.rs`, `src-tauri/src/state.rs` (settings, comandos de preview/ambiente/skills) |
 | **ui-systems** | `src/components/artifacts/**`, `src/components/settings/**`, `src/lib/pdf/**` |
 | **ui-core** | `src/components/chat/AgentSteps.tsx`, `src/lib/agentTrace.ts` + testes desses |
+
+Na **v1.5 (visualização ampliada de artefatos)** os escopos foram:
+`domain.rs`/`types.ts`/`package.json`/`Cargo.toml` (Lead); `documents/**`
+(formats-dev: prévias de imagem/ZIP/binário); `commands/artifacts.rs`+`db.rs`
+(storage-dev: kinds e payloads); `tools/artifacts.rs` (harness-dev: kinds de
+mídia/zip e linguagem); `src/lib/highlight/**` +
+`src/components/{genui,chat}/CodeBlock.tsx` + `artifacts/JsonPreview.tsx`
+(ui-core); `artifacts/{Image,Audio,Video,Archive,Hex,Bin}*` (ui-media);
+`artifacts/{kinds,ArtifactPreview,Markdown,Code,Csv}*` (ui-text). A divisão
+evitou arquivos compartilhados entre os dois agentes de artifacts.
 
 Ordem de dependências: contratos (Lead) → harness/formats/storage em paralelo →
 ui-systems/ui-core em paralelo → integração do Lead (lib.rs, prompt final,
@@ -658,6 +778,69 @@ precedência Lumina > agents > codex > claude > opencode > embutidas.
 - **Evidências**: `pnpm typecheck` OK; `pnpm test` **37 arquivos / 903 testes**;
   `pnpm build` OK. Sem mudanças de backend (as citações já vinham nos eventos
   `tool_call_finished` e são persistidas em `messages.citations`).
+### v1.5 — visualização ampliada de artefatos
+
+Pedido: “mais visualização para diferentes tipos de arquivos no sistema de
+artefatos, incluindo imagens de diferentes tipos, arquivos variados e arquivos
+de código com syntax highlight”.
+
+- **Backend**:
+  - `ArtifactKind` ganha `Audio`, `Video`, `Archive` (serde `audio|video|archive`)
+    e `from_mime_and_name` cobre as extensões/mimes correspondentes + imagens
+    `ico/jfif/apng/tif/tiff`.
+  - `ArtifactPreview` ganha `Image` (mime/dimensões + PNG convertido quando o
+    formato não abre no WebView), `Archive` (listagem ZIP) e `Binary`
+    (formato + primeiros 4096 bytes para hexdump). `documents::preview` ganha
+    `image_preview` (TIFF→PNG ≤2560 px via crate `image`), `archive_preview`
+    (ZIP: ≤400 entradas) e `binary_preview`; `documents/image.rs` expõe os
+    parsers de header para reuso.
+  - `get_artifact_content` só trafega payload necessário (texto, PDF, imagem
+    web-safe, áudio/vídeo ≤24 MiB); Office/ZIP/binário não duplicam bytes e
+    TIFF não manda o original.
+  - `tools::artifacts` amplia `CODE_EXTENSIONS`/`language_for` (config/scripts/
+    Dockerfile/Makefile/etc.) e `extension_for_mime` para mídia/ZIP.
+- **Renderer**:
+  - `src/lib/highlight` (Prism compartilhado): grammars extras via `prismjs`
+    registradas na instância do `prism-react-renderer`, tema único de tokens e
+    `normalizeLanguage`/`languageLabel`; `CodeBlock` ganha `wrap`/`meta` e o
+    chat passa a usar o mesmo highlight.
+  - Novos componentes: `ImagePreview`/`SvgPreview` (zoom, pan, xadrez,
+    dimensões, formatos), `AudioPreview`, `VideoPreview`, `ArchivePreview`,
+    `HexDump` + `BinaryPreview` enriquecido, `MarkdownPreview` (Documento/
+    Código), `JsonPreview`/`JsonTree` (Árvore/Código), `CodePreview` e
+    `CsvPreview` (delimitador automático).
+  - `ArtifactPreview` roteia todos os kinds; `kinds.ts` cobre os novos tipos e
+    infere linguagem por extensão para artefatos antigos.
+- **Limites**: mídia inline ≤24 MiB; hexdump ≤4096 bytes; ZIP ≤400 entradas
+  (nomes ≤240 chars); TIFF ≤2560 px no lado maior; nós de JSON ≤2000;
+  CSV ≤501 linhas.
+- **Arquivos novas**: `src/lib/highlight/**` (7 arquivos + 70 testes),
+  `src/components/artifacts/{Image,Audio,Video,Archive,Binary,HexDump}`,
+  `src/components/artifacts/{Markdown,Code,Csv,Json}Preview`, `JsonTree`,
+  `src/components/artifacts/index.ts` (superfície pública), fixtures
+  `documents/testdata/{pacote-projeto.zip,scan-tiff.tif}`; previews de backend
+  em `documents/preview.rs`/`image.rs`; rotas/caps em `commands/artifacts.rs`;
+  kinds/idioma em `tools/artifacts.rs`; contrato em `domain.rs`/`types.ts`.
+- **Limites documentados**: mídia inline ≤24 MiB; hexdump ≤4096 bytes; ZIP
+  ≤400 entradas (nomes ≤240 chars); TIFF→PNG ≤2560 px no lado maior (dimensões
+  originais preservadas nos metadados); árvore JSON ≤2000 nós/profundidade 100;
+  CSV ≤501 linhas; Prism com 35 grammars extras carregadas sobre a instância
+  embutida do `prism-react-renderer` (o `lib/highlight` cobre 70 testes).
+- **Evidências da verificação final** (árvore integrada):
+  - `cd src-tauri && cargo check --lib --tests` → OK, 0 warnings;
+  - `cd src-tauri && cargo test --lib` → **316 passed; 0 failed; 9 ignored**
+    (baseline da v1.2: 278), incluindo `documents::preview` 32 (TIFF→PNG real,
+    ZIP fixtures/truncamento, 4096 bytes, corrompidos), `commands::artifacts` 18
+    (payloads e previews reais), `tools::artifacts` 16 (kinds/idioma/dotfiles) e
+    `db` 14 (16 kinds, migração legada);
+  - `pnpm typecheck` → OK;
+  - `pnpm test` → **48 arquivos / 1077 testes** (baseline da v1.4: 37/903;
+    +174 novos), incluindo ImagePreview (15), HexDump (8), Audio (7), Video (5),
+    Archive (6), Binary (7), JsonPreview (8), MarkdownPreview (3), CodePreview
+    (9), csv (20), kinds (8), `lib/highlight` (70) e ArtifactPreview (30);
+  - `pnpm build` → OK (chunk principal ~1,79 MB com as grammars extras; apenas o
+    aviso de tamanho do Vite; `pdf-*.js` e `pdf.worker.min-*.mjs` seguem lazy).
+
 ## 15. Critérios de aceite
 
 1. `run_code` habilitado gera DOCX, XLSX, PPTX e PDF via scripts das skills, e
@@ -678,3 +861,19 @@ precedência Lumina > agents > codex > claude > opencode > embutidas.
    padrão (`~/.agents/skills`, `~/.codex/skills`, `~/.claude/skills`,
    `~/.config/opencode/skills`/XDG) sem copiar nem escrever neles; a UI mostra a
    origem e permite desativar, mas não excluir essas skills.
+9. **v1.5 — imagens**: o painel abre PNG/JPEG/GIF/WebP/AVIF/BMP/ICO com zoom,
+   pan e fundo xadrez; TIFF é convertido para PNG no backend e exibido; HEIC ou
+   formato ilegível cai no cartão com “Abrir/Salvar como…” (sem tela quebrada).
+10. **v1.5 — arquivos variados**: áudio e vídeo tocam em player nativo (ou
+    cartão com motivo quando > 24 MiB/formato não suportado), ZIP mostra a
+    listagem de entradas com resumo, Markdown é renderizado (Documento/Código) e
+    JSON abre em árvore colapsável (com modo código); CSV/TSV tabulam com
+    delimitador detectado; binários desconhecidos mostram formato + hexdump.
+11. **v1.5 — código**: artefatos de código usam syntax highlight Prism para
+    30+ linguagens (incluindo as que o renderer não cobria: bash, java, ruby,
+    php, c#, toml, ini, dockerfile, makefile, diff, powershell…), com números de
+    linha, contagem de linhas e alternância de quebra de linha; linguagem
+    inferida pela extensão/nome quando o artefato antigo não tem `language`.
+12. `pnpm test`/`pnpm build`/`cargo test --lib` verdes com os novos testes de
+    prévia (imagem/áudio/vídeo/ZIP/hexdump/markdown/JSON/código/CSV) e sem
+    payloads gigantes no IPC (caps documentados em §9.2).

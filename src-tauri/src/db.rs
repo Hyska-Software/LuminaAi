@@ -267,6 +267,9 @@ fn artifact_kind_to_str(kind: &ArtifactKind) -> &'static str {
         ArtifactKind::Docx => "docx",
         ArtifactKind::Xlsx => "xlsx",
         ArtifactKind::Pptx => "pptx",
+        ArtifactKind::Audio => "audio",
+        ArtifactKind::Video => "video",
+        ArtifactKind::Archive => "archive",
         ArtifactKind::Binary => "binary",
     }
 }
@@ -285,6 +288,9 @@ fn artifact_kind_from_str(raw: &str) -> ArtifactKind {
         "docx" => ArtifactKind::Docx,
         "xlsx" => ArtifactKind::Xlsx,
         "pptx" => ArtifactKind::Pptx,
+        "audio" => ArtifactKind::Audio,
+        "video" => ArtifactKind::Video,
+        "archive" => ArtifactKind::Archive,
         _ => ArtifactKind::Binary,
     }
 }
@@ -1405,6 +1411,93 @@ mod tests {
 
         db.delete_artifact("art-7").expect("delete");
         assert!(db.get_artifact("art-7").expect("get").is_none());
+    }
+
+    /// Todos os variants do contrato. A lista é mantida à mão de propósito: um
+    /// kind novo em `domain.rs` quebra `artifact_kind_to_str` (match exaustivo)
+    /// e deve ser adicionado aqui para o round-trip continuar completo.
+    fn all_artifact_kinds() -> [ArtifactKind; 16] {
+        [
+            ArtifactKind::Markdown,
+            ArtifactKind::Code,
+            ArtifactKind::Text,
+            ArtifactKind::Html,
+            ArtifactKind::Csv,
+            ArtifactKind::Json,
+            ArtifactKind::Svg,
+            ArtifactKind::Image,
+            ArtifactKind::Pdf,
+            ArtifactKind::Docx,
+            ArtifactKind::Xlsx,
+            ArtifactKind::Pptx,
+            ArtifactKind::Audio,
+            ArtifactKind::Video,
+            ArtifactKind::Archive,
+            ArtifactKind::Binary,
+        ]
+    }
+
+    #[test]
+    fn artifact_kind_slugs_roundtrip_and_match_the_ipc_json() {
+        for kind in all_artifact_kinds() {
+            let stored = artifact_kind_to_str(&kind);
+            assert_eq!(
+                artifact_kind_from_str(stored),
+                kind,
+                "{kind:?} não sobrevive ao round-trip pelo banco"
+            );
+            // A coluna `kind` precisa usar o mesmo slug que o renderer recebe
+            // (`ArtifactKind` é `#[serde(rename_all = "lowercase")]`).
+            assert_eq!(
+                serde_json::to_value(&kind).expect("serializar kind"),
+                serde_json::Value::String(stored.to_string()),
+                "slug do banco divergente do IPC para {kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_artifact_kind_falls_back_to_binary() {
+        for raw in ["", "desconhecido", "imagem", "AUDIO", "video ", "binary-"] {
+            assert_eq!(
+                artifact_kind_from_str(raw),
+                ArtifactKind::Binary,
+                "valor legado/desconhecido {raw:?} deve cair em Binary"
+            );
+        }
+    }
+
+    #[test]
+    fn media_and_archive_kinds_persist_through_the_artifacts_table() {
+        let db = test_db();
+        let conversation = db
+            .create_conversation("Chat", "opencode-go", "glm-5.3-flash")
+            .expect("create");
+        for (index, kind) in all_artifact_kinds().into_iter().enumerate() {
+            let mut artifact = stored_artifact(&format!("art-{index:02}"), &conversation.id);
+            artifact.artifact.kind = kind;
+            db.insert_artifact(&artifact).expect("insert");
+        }
+
+        let listed = db.list_artifacts(&conversation.id).expect("list");
+        let stored_kinds: Vec<ArtifactKind> = listed.into_iter().map(|row| row.kind).collect();
+        assert_eq!(
+            stored_kinds,
+            all_artifact_kinds().to_vec(),
+            "todos os kinds, inclusive áudio/vídeo/compactado, devem voltar iguais"
+        );
+
+        // `get_artifact` (usado por preview/conteúdo) faz o mesmo mapeamento.
+        let audio = db
+            .get_artifact("art-12")
+            .expect("get")
+            .expect("artefato de áudio presente");
+        assert_eq!(audio.artifact.kind, ArtifactKind::Audio);
+        let archive = db
+            .get_artifact("art-14")
+            .expect("get")
+            .expect("artefato compactado presente");
+        assert_eq!(archive.artifact.kind, ArtifactKind::Archive);
     }
 
     #[test]

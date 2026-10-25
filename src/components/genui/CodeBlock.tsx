@@ -1,50 +1,9 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Check, Copy } from 'lucide-react';
-import { Highlight, type Language, type PrismTheme } from 'prism-react-renderer';
+import { Highlight } from 'prism-react-renderer';
+import { languageLabel, normalizeLanguage, prism, SYNTAX_THEME } from '@/lib/highlight';
 import { cn, copyText } from '@/lib/utils';
 import { IconButton, Tooltip } from '@/components/ui';
-
-/**
- * Token-based Prism theme: colors are CSS variables so the block follows the
- * design tokens in light/dark without duplicating palettes.
- */
-const LUMINA_THEME: PrismTheme = {
-  plain: { color: 'var(--foreground)', backgroundColor: 'transparent' },
-  styles: [
-    { types: ['comment', 'prolog', 'doctype', 'cdata'], style: { color: 'var(--foreground-subtle)', fontStyle: 'italic' } },
-    { types: ['punctuation'], style: { color: 'var(--foreground-muted)' } },
-    { types: ['property', 'tag', 'constant', 'symbol', 'deleted'], style: { color: 'var(--accent)' } },
-    { types: ['boolean', 'number'], style: { color: 'var(--warning)' } },
-    { types: ['selector', 'attr-name', 'string', 'char', 'builtin', 'inserted'], style: { color: 'var(--success)' } },
-    { types: ['operator', 'entity', 'url'], style: { color: 'var(--foreground-muted)' } },
-    { types: ['atrule', 'attr-value', 'keyword'], style: { color: 'var(--accent)' } },
-    { types: ['function', 'class-name'], style: { color: 'var(--foreground)' } },
-    { types: ['regex', 'important', 'variable'], style: { color: 'var(--warning)' } },
-  ],
-};
-
-const LANGUAGE_ALIASES: Record<string, string> = {
-  md: 'markdown',
-  ts: 'typescript',
-  js: 'javascript',
-  jsx: 'jsx',
-  tsx: 'tsx',
-  sh: 'bash',
-  shell: 'bash',
-  zsh: 'bash',
-  py: 'python',
-  rb: 'ruby',
-  yml: 'yaml',
-  yaml: 'yaml',
-  html: 'markup',
-  svg: 'markup',
-  xml: 'markup',
-  htm: 'markup',
-  json5: 'json',
-  jsonc: 'json',
-  plaintext: 'text',
-  txt: 'text',
-};
 
 export interface CodeBlockProps {
   code: string;
@@ -55,6 +14,15 @@ export interface CodeBlockProps {
   maxHeight?: number;
   showLineNumbers?: boolean;
   copyable?: boolean;
+  /**
+   * Quebra linhas longas (padrão). `false` mantém a rolagem horizontal, sem
+   * quebrar o código — útil para JSON, diffs e linhas largas.
+   */
+  wrap?: boolean;
+  /** Texto secundário discreto no header (ex.: "42 linhas"). */
+  meta?: string;
+  /** Controles extras no header, antes do botão copiar. */
+  actions?: ReactNode;
 }
 
 /** Code block with Prism highlighting, optional title bar and copy button. */
@@ -66,6 +34,9 @@ export function CodeBlock({
   maxHeight = 420,
   showLineNumbers = false,
   copyable = true,
+  wrap = true,
+  meta,
+  actions,
 }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
 
@@ -76,38 +47,44 @@ export function CodeBlock({
     window.setTimeout(() => setCopied(false), 1600);
   };
 
-  const normalized = LANGUAGE_ALIASES[language.toLowerCase()] ?? language.toLowerCase();
-  const label = language.toLowerCase() === 'text' ? '' : language.toLowerCase();
+  const normalized = normalizeLanguage(language);
+  const badge = title || (normalized === 'text' ? '' : languageLabel(normalized));
+  const showHeader = Boolean(badge || meta || actions || copyable);
   // Very large artifacts skip Prism to keep the UI responsive.
   const tooLarge = code.length > 200_000;
+  const lineClass = wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre';
 
   return (
     <div className={cn('group/code relative overflow-hidden rounded-xl border border-border bg-surface', className)}>
-      {(title || copyable) && (
+      {showHeader ? (
         <div className="flex items-center justify-between gap-3 border-b border-border bg-surface px-3 py-1.5">
-          <span className="min-w-0 truncate font-mono text-[11px] text-foreground-subtle">
-            {title ?? label ?? ''}
+          <span className="flex min-w-0 items-baseline gap-2 font-mono text-[11px] text-foreground-subtle">
+            <span className="min-w-0 truncate">{badge}</span>
+            {meta ? <span className="shrink-0 text-foreground-subtle/70">{meta}</span> : null}
           </span>
-          {copyable ? (
-            <Tooltip content={copied ? 'Copiado!' : 'Copiar código'} side="top">
-              <IconButton
-                label={copied ? 'Copiado' : 'Copiar código'}
-                size="sm"
-                onClick={handleCopy}
-                className="size-8 text-foreground-subtle hover:text-foreground"
-              >
-                {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
-              </IconButton>
-            </Tooltip>
-          ) : null}
+          <div className="flex shrink-0 items-center gap-1">
+            {actions}
+            {copyable ? (
+              <Tooltip content={copied ? 'Copiado!' : 'Copiar código'} side="top">
+                <IconButton
+                  label={copied ? 'Copiado' : 'Copiar código'}
+                  size="sm"
+                  onClick={handleCopy}
+                  className="size-8 text-foreground-subtle hover:text-foreground"
+                >
+                  {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
+                </IconButton>
+              </Tooltip>
+            ) : null}
+          </div>
         </div>
-      )}
+      ) : null}
       {tooLarge ? (
         <pre className="overflow-auto p-3 font-mono text-[12.5px] leading-[1.65]" style={{ maxHeight }}>
-          <code className="whitespace-pre-wrap break-words">{code}</code>
+          <code className={lineClass}>{code}</code>
         </pre>
       ) : (
-        <Highlight theme={LUMINA_THEME} code={code.replace(/\n$/, '')} language={normalized as Language}>
+        <Highlight prism={prism} theme={SYNTAX_THEME} code={code.replace(/\n$/, '')} language={normalized}>
           {({ tokens, getLineProps, getTokenProps }) => (
             <pre
               className="overflow-auto p-3 font-mono text-[12.5px] leading-[1.65]"
@@ -123,7 +100,7 @@ export function CodeBlock({
                           {lineIndex + 1}
                         </span>
                       ) : null}
-                      <span className="table-cell whitespace-pre-wrap break-words">
+                      <span className={cn('table-cell', lineClass)}>
                         {line.map((token, tokenIndex) => (
                           <span key={tokenIndex} {...getTokenProps({ token })} />
                         ))}

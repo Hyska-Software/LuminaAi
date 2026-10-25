@@ -84,6 +84,14 @@ pub fn build_system_prompt(
             "- PDF, DOCX, XLSX, PPTX e imagens são binários: gere-os com `run_code` (lendo a skill \
              correspondente) — o resultado aparece no painel de artefatos como os demais arquivos.\n",
         );
+        prompt.push_str(
+            "- Áudio (MP3, WAV, OGG, M4A, FLAC), vídeo (MP4, WEBM, MOV, MKV), arquivos compactados \
+             (ZIP, TAR, GZ, 7Z, RAR, EPUB) e imagens em vários formatos (PNG, JPG, WEBP, GIF, BMP, \
+             AVIF, ICO, TIFF) gerados por `run_code` também aparecem no painel com prévia própria: \
+             player nativo para áudio/vídeo, lista de entradas para ZIP, imagem com zoom e \
+             transparência, e prévia hexadecimal para os demais binários. Use sempre a extensão \
+             correta no nome do arquivo — é ela que define o tipo do artefato.\n",
+        );
     }
     prompt.push_str(
         "\n# Anexos do usuário\n\
@@ -777,6 +785,26 @@ mod tests {
         assert!(prompt.contains("`list_skills` → `read_skill"));
         // O timeout padrão vem das settings normalizadas.
         assert!(prompt.contains("Tempo limite padrão: 120 s"));
+    }
+
+    #[test]
+    fn prompt_documents_previews_for_generated_media_and_archives() {
+        // Áudio/vídeo/ZIP/imagens gerados por `run_code` têm prévia no painel;
+        // o modelo precisa saber que a extensão define o tipo do artefato.
+        let prompt = default_prompt();
+        assert!(prompt.contains("Áudio (MP3, WAV, OGG, M4A, FLAC)"));
+        assert!(prompt.contains("vídeo (MP4, WEBM, MOV, MKV)"));
+        assert!(prompt.contains("ZIP, TAR, GZ, 7Z, RAR, EPUB"));
+        assert!(prompt.contains("player nativo para áudio/vídeo"));
+        assert!(prompt.contains("lista de entradas para ZIP"));
+        assert!(prompt.contains("prévia hexadecimal"));
+        assert!(prompt.contains("extensão correta"));
+
+        // Sem `run_code` a seção (e o parágrafo) não existe.
+        let mut options = TurnOptions::default();
+        options.run_code = false;
+        let prompt = build_system_prompt(&model(), &options, &Settings::default(), &[]);
+        assert!(!prompt.contains("prévia hexadecimal"));
     }
 
     #[test]

@@ -358,20 +358,32 @@ respostas de uma conversa que o usuário já deixou. Assim, eventos perdidos nã
 deixam a lista do painel nem os cards do chat desatualizados, e o painel volta
 para a lista quando o artefato ativo deixa de existir.
 
-| Tipo | Criação | Preview |
+| Tipo | Criação | Preview (v1.5) |
 | --- | --- | --- |
-| md, txt, html, csv, json, código | `create_file` | texto/código, markdown, HTML sandbox, tabela CSV |
-| SVG | `create_file` | SVG sanitizado |
+| md | `create_file` | Markdown renderizado (GFM/math) + alternância Documento/Código |
+| txt/log | `create_file` | código/texto com números de linha e toggle de quebra |
+| html | `create_file` | HTML sandbox |
+| csv/tsv | `create_file` | tabela com delimitador detectado (`,`/`;`/tab/`\|`) |
+| json/jsonl | `create_file` | árvore colapsável + modo código realçado |
+| código (30+ linguagens) | `create_file` | syntax highlight Prism (grammars extras), linhas e wrap |
+| SVG | `create_file` | SVG sanitizado com zoom/pan/ajuste |
 | PDF | `run_code` + skill `pdf` | **pdf.js** (páginas em canvas, zoom e navegação) |
 | DOCX | `run_code` + skill `office-docx` | OOXML → HTML (`documents::preview`) em iframe sandbox |
 | XLSX | `run_code` + skill `office-xlsx` | grade com abas por planilha (`calamine`) |
 | PPTX | `run_code` + skill `office-pptx` | cartões de slide (título + texto, prévia simplificada) |
-| PNG/JPG/WebP/GIF | `run_code` (Pillow quando instalado) | imagem base64 nativa |
-| Outros | `run_code` | cartão binário + Salvar/Abrir |
+| PNG/JPG/WebP/GIF/AVIF/BMP/ICO | `run_code` (Pillow quando instalado) | imagem nativa com zoom/pan/xadrez e dimensões |
+| TIFF | `run_code` (Pillow) | convertido para PNG no backend (`image`, ≤2560 px) |
+| áudio/vídeo | `run_code` | player nativo (mp4/webm/ogg/mp3/wav/…) até 24 MiB inline |
+| ZIP | `run_code` | listagem de entradas (até 400) + resumo, sem extração |
+| outros contêineres | `run_code` | cartão binário + Salvar/Abrir |
+| binários | `run_code` | cartão com formato detectado + hexdump (4 KB) + ações |
 
 As prévias estruturadas vêm do comando `get_artifact_preview` e nunca injetam
 HTML do documento sem sanitização (DOCX vira HTML allowlist dentro de iframe
-`sandbox`; o PDF é desenhado pelo pdf.js). Formatos e limites: `docs/FILES.md`.
+`sandbox`; o PDF é desenhado pelo pdf.js; SVG é sanitizado antes de renderizar).
+`get_artifact_content` só transporta payload necessário (texto, PDF, imagem
+web-safe, áudio/vídeo ≤24 MiB); Office/ZIP/binário são lidos pelo backend na
+prévia. Formatos e limites: `docs/FILES.md` §9.
 
 ## 12. IPC
 
@@ -416,8 +428,8 @@ pnpm app:dev            # dev com HMR
 
 A verificação é feita por testes automatizados — unitários e de integração — e por build:
 
-1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo), a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`), o **renderer de Markdown** (matriz CommonMark/GFM, math, notas de rodapé, alertas, HTML sanitizado e vetores de segurança), as **prévias de artefatos** (PDF via pdf.js mockado, DOCX/XLSX/PPTX por JSON/HTML, imagem e fallback binário), a **UI de artefatos** (cards compactos, lista e modos lista↔prévia do painel, botão "+" do chat) e a **detecção/reconciliação de artefatos no store** (eventos filtrados pela conversa ativa, sync autoritativo ao fim do turno/ao reabrir, ordem canônica e proteção contra respostas fora de ordem) e as **fontes/citações** (chips até 8, painel lateral de fontes da conversa, dedupe por URL e abertura no navegador).
-2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui`, o system prompt gerado do contrato, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), **prévias DOCX→HTML/XLSX/PPTX**, SQLite (conversas/mensagens/anexos/artefatos/usage/`trace` + migração de bancos antigos), settings/segredos, exportação, **execução de código (interpretador, timeout, cancelamento, coleta de artefatos, sem interpretador)**, **skills embutidas/usuário (frontmatter, precedência, scripts→preview)** e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor, cancelamento e o trace por passo.
+1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo), a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`), o **renderer de Markdown** (matriz CommonMark/GFM, math, notas de rodapé, alertas, HTML sanitizado e vetores de segurança), as **prévias de artefatos** (PDF via pdf.js mockado, DOCX/XLSX/PPTX por JSON/HTML, imagem e fallback binário; e, na v1.5, imagem com zoom/transparência/TIFF-convertido, áudio/vídeo, ZIP, hexdump, Markdown renderizado, árvore JSON, CSV/TSV com delimitador detectado e código com syntax highlight via Prism estendido — `src/lib/highlight`), a **UI de artefatos** (cards compactos, lista e modos lista↔prévia do painel, botão "+" do chat) e a **detecção/reconciliação de artefatos no store** (eventos filtrados pela conversa ativa, sync autoritativo ao fim do turno/ao reabrir, ordem canônica e proteção contra respostas fora de ordem) e as **fontes/citações** (chips até 8, painel lateral de fontes da conversa, dedupe por URL e abertura no navegador).
+2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui`, o system prompt gerado do contrato, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), **prévias DOCX→HTML/XLSX/PPTX**, **prévias v1.5 de imagem (TIFF→PNG real), ZIP (fixtures e truncamento) e binário (hexdump de 4096 bytes)**, SQLite (conversas/mensagens/anexos/artefatos/usage/`trace` + migração de bancos antigos, incluindo os kinds `audio`/`video`/`archive`), settings/segredos, exportação, **execução de código (interpretador, timeout, cancelamento, coleta de artefatos, sem interpretador)**, **skills embutidas/usuário (frontmatter, precedência, scripts→preview)** e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor, cancelamento e o trace por passo.
 3. **Integração com o gateway real** (testes `#[ignore]`, executados sob demanda): streaming nos 4 protocolos, tool call + replay de `provider_state`, fallback de protocolo, mapeamento de 401, cancelamento e o caso canônico **DeepSeek V4.1 Flash com esforço máximo**.
 4. **Build**: `pnpm typecheck`, `pnpm build` e `pnpm tauri build --no-bundle` (artefato em `src-tauri/target/release/lumina.exe`).
 5. **Manual (release)**: abrir o app e validar visualmente os fluxos principais.
@@ -435,3 +447,5 @@ A verificação é feita por testes automatizados — unitários e de integraç�
 | 7 | Execução de código **opt-in** com workspace + timeout | execução livre por padrão / sandbox de SO | risco de prompt injection; sandbox completo não cabe no escopo local-first v1 |
 | 8 | Skills em arquivos Markdown + scripts | tool nativa por formato Office | extensível pelo usuário, sem pip obrigatório e com instruções versionáveis |
 | 9 | Preview de PDF com pdf.js | viewer nativo do WebView2 / conversão via LibreOffice | comportamento igual em Windows/macOS/Linux e testável; sem dependência externa |
+| 10 | Prévia de imagem no backend (TIFF→PNG com `image`) e ZIP listado sem extração | conversão no renderer (WASM) / abrir no app externo | WebView não abre TIFF; listar entradas é seguro, barato e cobre `.jar/.epub` |
+| 11 | Prism estendido com grammars extras carregadas sob demanda | trocar por Shiki/highlight.js | reaproveita o `prism-react-renderer` já usado no chat e mantém um tema único de tokens |

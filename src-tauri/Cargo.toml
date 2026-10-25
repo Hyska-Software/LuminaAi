@@ -44,6 +44,10 @@ zip = "9"
 quick-xml = "0.42"
 calamine = "0.37"
 pdf-extract = "0.12"
+# Prévia de imagens: converte formatos que o WebView não abre (TIFF) para PNG e
+# lê dimensões. `png`/`tiff` já estão na árvore transitiva (arboard), então a
+# dependência não adiciona crates novos relevantes.
+image = { version = "0.25", default-features = false, features = ["png", "tiff"] }
 encoding_rs = "0.8"
 chardetng = "1"
 infer = "0.22"
