@@ -66,11 +66,11 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 ```
 
 - **TitleBar**: 56px, `decorations: false`; arrastável (`data-tauri-drag-region`); controles nativos custom (minimizar/maximizar/fechar) com hover `surface-hover` e fechar em vermelho.
-- **Sidebar**: 272px, `bg-surface`, colapsável (⌘/Ctrl+B). Contém: botão "Novo chat" (pill com borda), item **"Skills"** (abre a view de gestão no lugar do chat; oculto quando o painel é desativado nas configurações), busca, lista agrupada (Fixadas, Hoje, Ontem, 7 dias, 30 dias, Mais antigas), rodapé com atalho de configurações e versão.
+- **Sidebar**: 272px (padrão), `bg-surface`, colapsável (⌘/Ctrl+B) e **redimensionável** arrastando a borda direita (220–480px, largura persistida; duplo clique restaura 272px; foco no divisor + ←/→ movem 16px, Home/End vão aos limites). Contém: botão "Novo chat" (pill com borda), item **"Skills"** (abre a view de gestão no lugar do chat; oculto quando o painel é desativado nas configurações), busca, lista agrupada (Fixadas, Hoje, Ontem, 7 dias, 30 dias, Mais antigas), rodapé com atalho de configurações e versão.
 - **Chat**: coluna central `max-w-3xl` (768px), padding 24px, espaçamento entre mensagens 28px.
 - **Composer**: sticky no rodapé com gradiente de fade; container `rounded-3xl`, borda 1px, fundo `surface-raised`, sombra sutil; cresce até 10 linhas.
-- **Artifact panel**: side panel à direita (até 560px, `92vw` em janelas pequenas), com dois modos controlados pelo `uiStore`: **lista** — header "Artefatos" com contador, cards compactos por artefato (tipo, nome e tamanho) e estado vazio discreto — e **prévia** — header com nome, tipo, ações (Ver lista, anterior/próximo, Salvar como…, Abrir, Excluir, Fechar) e conteúdo scrollável. O botão "+" do chat abre o painel na lista; clicar em um card ("Abrir") abre a prévia; "Ver lista" volta para a lista. A prévia é específica por tipo (v1.5): **imagem/SVG** com barra de formato + dimensões, zoom (−/+, ajustar à janela, tamanho real), fundo xadrez para transparência e pan por arrasto; **PDF** com navegação de páginas e zoom; **áudio/vídeo** com player nativo e metadados discretos; **ZIP** com resumo e lista de entradas (ícone, nome, tamanho); **binário** com formato detectado e hexdump colapsável (offset + ASCII); **Markdown** com alternância Documento/Código; **JSON** com alternância Árvore/Código (árvore colapsável); **CSV/TSV** em grade com cabeçalho fixo; **código/texto** com syntax highlight, números de linha, contagem de linhas e alternância de quebra de linha. Header do painel mostra tipo (badge), tamanho e linguagem. Estados de carregamento/erro têm spinner e "Tentar novamente"; formatos não suportados caem no cartão com "Salvar como…"/"Abrir" e o motivo.
-- **Sources panel**: mesmo painel lateral, aberto pelo botão **+ N fontes** dos chips de citação; header "Fontes" com contador, lista de todas as fontes usadas na conversa (letra/inicial do domínio, domínio e título truncado) que abrem no navegador padrão, estado vazio e rodapé com contagem. É mutuamente exclusivo com o painel de artefatos (abrir um fecha o outro).
+- **Artifact panel**: side panel à direita (360–560px, padrão 480px, `92vw` em janelas pequenas) e **redimensionável** arrastando a borda esquerda (largura persistida; duplo clique restaura 480px; divisor focável + ←/→/Home/End), com dois modos controlados pelo `uiStore`: **lista** — header "Artefatos" com contador, cards compactos por artefato (tipo, nome e tamanho) e estado vazio discreto — e **prévia** — header com nome, tipo, ações (Ver lista, anterior/próximo, Salvar como…, Abrir, Excluir, Fechar) e conteúdo scrollável. O botão "+" do chat abre o painel na lista; clicar em um card ("Abrir") abre a prévia; "Ver lista" volta para a lista. A prévia é específica por tipo (v1.5): **imagem/SVG** com barra de formato + dimensões, zoom (−/+, ajustar à janela, tamanho real), fundo xadrez para transparência e pan por arrasto; **PDF** com navegação de páginas e zoom; **áudio/vídeo** com player nativo e metadados discretos; **ZIP** com resumo e lista de entradas (ícone, nome, tamanho); **binário** com formato detectado e hexdump colapsável (offset + ASCII); **Markdown** com alternância Documento/Código; **JSON** com alternância Árvore/Código (árvore colapsável); **CSV/TSV** em grade com cabeçalho fixo; **código/texto** com syntax highlight, números de linha, contagem de linhas e alternância de quebra de linha. Header do painel mostra tipo (badge), tamanho e linguagem. Estados de carregamento/erro têm spinner e "Tentar novamente"; formatos não suportados caem no cartão com "Salvar como…"/"Abrir" e o motivo.
+- **Sources panel**: mesmo painel lateral (e a mesma largura redimensionável), aberto pelo botão **+ N fontes** dos chips de citação; header "Fontes" com contador, lista de todas as fontes usadas na conversa (letra/inicial do domínio, domínio e título truncado) que abrem no navegador padrão, estado vazio e rodapé com contagem. É mutuamente exclusivo com o painel de artefatos (abrir um fecha o outro).
 
 ## 6. Estados da conversa
 
@@ -162,8 +162,10 @@ Tabs à esquerda (180px), conteúdo à direita (520px):
 | Diálogos | fade + scale 0.97→1 (180ms) |
 | Popover do seletor de modelo | fade + scale 0.97→1 (180ms) |
 | Sidebar | width/translate 220ms ease-out-soft |
+| Redimensionamento da sidebar | sem transição enquanto arrasta (a largura acompanha o cursor); abertura/colapso mantêm 220ms |
 | Artifact panel | slide-in 240ms |
 | Sources panel | slide-in 240ms (mesmo movimento do painel de artefatos) |
+| Redimensionamento dos painéis laterais | sem transição de largura enquanto arrasta; slide-in/out mantém 240ms |
 | Pensando | shimmer no texto + pulso da marca |
 | Passos do agente | shimmer no header durante o streaming; timeline expande/recolhe |
 | Timeline de passos | linha de atividade entra com fade, spinner enquanto executa |
@@ -180,6 +182,8 @@ Com `reduceMotion` (config ou media query), remover transformações e shimmer; 
 - Contraste mínimo 4.5:1 para texto normal; placeholders ≥3:1.
 - Alvos de toque ≥32px; foco visível com anel `accent`.
 - Navegação completa por teclado: composer, lista, sidebar, dialogs.
+- Sidebar redimensionável: divisor focável (`role="separator"`, `aria-orientation="vertical"`, `aria-valuenow/min/max`), ←/→ movem 16px, Home/End vão aos limites, duplo clique restaura 272px, cursor `col-resize` e feedback visual de hover/foco/arrasto.
+- Painéis laterais direitos (artefatos/fontes) redimensionáveis: mesmo divisor acessível na borda esquerda (360–560px, ←/→ movem 16px, Home/End nos limites, duplo clique restaura 480px), compartilhando a largura persistida entre os dois painéis.
 - Seletor de modelos: combobox + listbox com `aria-activedescendant`; busca focada ao abrir; setas/Home/End/Enter/Esc; grupos com `aria-label`; favoritos com `aria-pressed`; modelos indisponíveis com `aria-disabled`; foco devolvido ao pill ao fechar.
 
 ## 13. Responsivo

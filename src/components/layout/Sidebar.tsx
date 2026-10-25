@@ -257,7 +257,7 @@ export function Sidebar({ className, onClose }: SidebarProps) {
   return (
     <aside
       aria-label="Conversas"
-      className={cn('flex h-full w-[272px] shrink-0 flex-col border-r border-border bg-surface', className)}
+      className={cn('flex h-full w-full min-w-0 flex-col border-r border-border bg-surface', className)}
     >
       <div className="flex items-center gap-1.5 px-3 pb-1.5 pt-3">
         <Button
@@ -305,9 +305,9 @@ export function Sidebar({ className, onClose }: SidebarProps) {
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
         )}
       >
-        <Search className="size-4" />
-        <span>Buscar conversas</span>
-        <span className="ml-auto flex items-center gap-0.5">
+        <Search className="size-4 shrink-0" />
+        <span className="min-w-0 truncate">Buscar conversas</span>
+        <span className="ml-auto flex shrink-0 items-center gap-0.5">
           <Kbd>{modKey}</Kbd>
           <Kbd>K</Kbd>
         </span>

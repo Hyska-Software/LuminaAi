@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ChevronLeft,
@@ -15,7 +15,15 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import type { ArtifactContent } from '@/lib/types';
 import { cn, formatBytes } from '@/lib/utils';
-import { useUiStore } from '@/lib/store';
+import {
+  clampSidePanelWidth,
+  SIDE_PANEL_WIDTH_DEFAULT,
+  SIDE_PANEL_WIDTH_MAX,
+  SIDE_PANEL_WIDTH_MIN,
+  SIDE_PANEL_WIDTH_STEP,
+  useUiStore,
+} from '@/lib/store';
+import { PanelResizer } from '@/components/layout/PanelResizer';
 import { Badge, Button, IconButton, Spinner, Tooltip } from '@/components/ui';
 import { artifactKindMeta } from './kinds';
 import { ArtifactPreview } from './ArtifactPreview';
@@ -45,6 +53,8 @@ export function ArtifactPanel() {
   const setActiveArtifact = useUiStore((state) => state.setActiveArtifact);
   const setArtifactPanelView = useUiStore((state) => state.setArtifactPanelView);
   const closeArtifactPanel = useUiStore((state) => state.closeArtifactPanel);
+  const sidePanelWidth = useUiStore((state) => state.sidePanelWidth);
+  const setSidePanelWidth = useUiStore((state) => state.setSidePanelWidth);
 
   const [content, setContent] = useState<ArtifactContent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -52,6 +62,34 @@ export function ArtifactPanel() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
+
+  /** Width previewed while dragging; `null` means "use the persisted width". */
+  const [liveWidth, setLiveWidth] = useState<number | null>(null);
+  const effectiveWidth = clampSidePanelWidth(liveWidth ?? sidePanelWidth);
+
+  const handleResize = useCallback((next: number) => {
+    setLiveWidth(clampSidePanelWidth(next));
+  }, []);
+
+  const handleResizeEnd = useCallback(
+    (next: number) => {
+      // The store clamps as well; the local preview disappears in the same commit.
+      setSidePanelWidth(next);
+      setLiveWidth(null);
+    },
+    [setSidePanelWidth],
+  );
+
+  const handleReset = useCallback(() => {
+    setSidePanelWidth(SIDE_PANEL_WIDTH_DEFAULT);
+    setLiveWidth(null);
+  }, [setSidePanelWidth]);
+
+  /* A drag interrupted by closing the panel never receives its release: drop
+     the stale preview so the persisted width takes over. */
+  useEffect(() => {
+    if (!open) setLiveWidth(null);
+  }, [open]);
 
   const artifact = artifacts.find((entry) => entry.id === activeId) ?? null;
   const meta = artifact ? artifactKindMeta(artifact.kind) : null;
@@ -162,8 +200,9 @@ export function ArtifactPanel() {
       aria-label="Painel de artefatos"
       aria-hidden={!open || undefined}
       inert={!open}
+      style={{ width: effectiveWidth }}
       className={cn(
-        'fixed inset-y-0 right-0 z-40 flex w-[min(560px,92vw)] flex-col border-l border-border bg-surface-raised shadow-2xl outline-none',
+        'fixed inset-y-0 right-0 z-40 flex max-w-[92vw] flex-col border-l border-border bg-surface-raised shadow-2xl outline-none',
         'transition-transform duration-[240ms] ease-[var(--ease-out-soft)] motion-reduce:transition-none',
         open ? 'translate-x-0' : 'pointer-events-none translate-x-full',
       )}
@@ -339,6 +378,22 @@ export function ArtifactPanel() {
           </footer>
         </>
       )}
+
+      {/* Fora do fluxo, sobre a borda esquerda: não cobre a lista nem a scrollbar.
+          O containing block vem do próprio painel (`position: fixed`), então não
+          é preciso um `relative` conflitante para ancorar o handle. */}
+      <PanelResizer
+        side="end"
+        value={effectiveWidth}
+        min={SIDE_PANEL_WIDTH_MIN}
+        max={SIDE_PANEL_WIDTH_MAX}
+        step={SIDE_PANEL_WIDTH_STEP}
+        label="Redimensionar painel de artefatos"
+        className="absolute inset-y-0 -left-2 z-10"
+        onResize={handleResize}
+        onResizeEnd={handleResizeEnd}
+        onReset={handleReset}
+      />
     </aside>
   );
 }

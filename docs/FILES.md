@@ -570,7 +570,12 @@ prova o ciclo criação→preview sem UI.
 | `ToolsTab.test.tsx` | toggle de código salva setting; timeout; ambiente (mock `api.getCodeEnvironment`); skills listadas; estado de erro |
 | `agentTrace.test.ts` | grupos `run_code`/`list_skills`/`read_skill` (labels, erro, agrupamento) |
 | `AgentSteps.test.tsx` | ícones/rótulos dos novos grupos |
-| `Sidebar.test.tsx` | item “Skills” visível/abre o painel; oculto com `skillsPanelEnabled=false`; regressão “Novo chat” |
+| `Sidebar.test.tsx` | item “Skills” visível/abre o painel; oculto com `skillsPanelEnabled=false`; regressão “Novo chat”; largura vem do AppShell (`w-full`) |
+| `SidebarResizer.test.tsx` | divisor acessível (`separator` + aria-valuenow/min/max/valuetext); ←/→ com passo de 16 px, Home/End nos limites, clamp; arrasto por Pointer Events com delta/clamp e commit único em pointerup/pointercancel/lostpointercapture; botão não primário, pointer alheio e 2º pointer ignorados; duplo clique restaura 272 px; linha accent durante o arrasto |
+| `AppShell.test.tsx` | largura persistida aplicada ao container e a `left` do divisor; divisor oculto com sidebar colapsada e no layout compacto; teclado persiste `sidebarWidth`; preview do arrasto não persiste até o pointerup; duplo clique restaura o padrão |
+| `PanelResizer.test.tsx` | divisor genérico (`side="start"`/`"end"`): aria/bounds/valuetext/hint, setas e arrasto invertidos no lado `end`, Home/End, clamp e passo custom, commit único em pointerup/pointercancel/lostpointercapture, duplo clique opcional; linha no início/fim e accent durante o arrasto |
+| `SourcesPanel.test.tsx` (painel direito) | largura persistida (`sidePanelWidth`) aplicada ao painel e ao aria do divisor; preview do arrasto não persiste até o pointerup; teclado (←/→/Home/End) persiste; duplo clique restaura 480 px |
+| `ArtifactPanel.test.tsx` (painel direito) | largura persistida aplicada ao `aside`/aria do divisor com o handle na borda esquerda; preview do arrasto não persiste até o pointerup; teclado persiste; duplo clique restaura 480 px; arrasto interrompido pelo fechamento descarta o preview |
 | `SkillsView.test.tsx` | lista agrupada por origem (incluindo Codex/OpenCode/Claude/Agentes); switch chama `setSkillEnabled`; exclusão confirmada chama `deleteSkill`; embutida/externa sem excluir e nota de somente leitura; vazio/erro/retry; “Voltar ao chat” muda `activeView` para `chat` |
 | `ToolsTab.test.tsx` | switch do painel salva setting; “Gerenciar skills” navega para a view e fecha as configurações; contagem/labels de skills externas; skills desativadas marcadas |
 | `ImagePreview.test.tsx` | web-safe usa base64 do conteúdo; TIFF usa payload convertido da prévia; zoom/ajuste/tamanho real; dimensões; `unsupported`/sem dados → cartão; SVG sanitizado |

@@ -8,5 +8,19 @@ export {
   MODEL_LOCKED_DESCRIPTION,
 } from './chatStore';
 export type { StreamingState, SendOptions } from './chatStore';
-export { useUiStore, resolveDark, sortArtifacts } from './uiStore';
+export {
+  useUiStore,
+  resolveDark,
+  sortArtifacts,
+  clampSidebarWidth,
+  SIDEBAR_WIDTH_MIN,
+  SIDEBAR_WIDTH_MAX,
+  SIDEBAR_WIDTH_DEFAULT,
+  SIDEBAR_WIDTH_STEP,
+  clampSidePanelWidth,
+  SIDE_PANEL_WIDTH_MIN,
+  SIDE_PANEL_WIDTH_MAX,
+  SIDE_PANEL_WIDTH_DEFAULT,
+  SIDE_PANEL_WIDTH_STEP,
+} from './uiStore';
 export type { ArtifactPanelView, MainView } from './uiStore';

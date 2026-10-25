@@ -1,6 +1,17 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
-import { sortArtifacts, useUiStore } from '@/lib/store/uiStore';
+import {
+  clampSidebarWidth,
+  clampSidePanelWidth,
+  SIDEBAR_WIDTH_DEFAULT,
+  SIDEBAR_WIDTH_MAX,
+  SIDEBAR_WIDTH_MIN,
+  SIDE_PANEL_WIDTH_DEFAULT,
+  SIDE_PANEL_WIDTH_MAX,
+  SIDE_PANEL_WIDTH_MIN,
+  sortArtifacts,
+  useUiStore,
+} from '@/lib/store/uiStore';
 import type { Artifact } from '@/lib/types';
 
 function artifact(overrides: Partial<Artifact> = {}): Artifact {
@@ -159,5 +170,109 @@ describe('useUiStore sources panel', () => {
     useUiStore.setState({ sourcesPanelOpen: true });
     useUiStore.getState().closeAllOverlays();
     expect(useUiStore.getState().sourcesPanelOpen).toBe(false);
+  });
+});
+
+describe('useUiStore sidebar width', () => {
+  beforeEach(() => {
+    useUiStore.setState({ sidebarWidth: SIDEBAR_WIDTH_DEFAULT });
+  });
+
+  it('starts at the design default (272px)', () => {
+    expect(SIDEBAR_WIDTH_DEFAULT).toBe(272);
+    expect(useUiStore.getState().sidebarWidth).toBe(SIDEBAR_WIDTH_DEFAULT);
+  });
+
+  it('clamps widths into the supported range and rounds them', () => {
+    useUiStore.getState().setSidebarWidth(10);
+    expect(useUiStore.getState().sidebarWidth).toBe(SIDEBAR_WIDTH_MIN);
+
+    useUiStore.getState().setSidebarWidth(9999);
+    expect(useUiStore.getState().sidebarWidth).toBe(SIDEBAR_WIDTH_MAX);
+
+    useUiStore.getState().setSidebarWidth(331.6);
+    expect(useUiStore.getState().sidebarWidth).toBe(332);
+  });
+
+  it('falls back to the default for invalid input', () => {
+    useUiStore.getState().setSidebarWidth(300);
+    useUiStore.getState().setSidebarWidth(Number.NaN);
+    expect(useUiStore.getState().sidebarWidth).toBe(SIDEBAR_WIDTH_DEFAULT);
+
+    expect(clampSidebarWidth(Number.POSITIVE_INFINITY)).toBe(SIDEBAR_WIDTH_DEFAULT);
+    expect(clampSidebarWidth(Number.NEGATIVE_INFINITY)).toBe(SIDEBAR_WIDTH_DEFAULT);
+    expect(clampSidebarWidth(250)).toBe(250);
+  });
+
+  it('persists the width in the UI storage', () => {
+    useUiStore.getState().setSidebarWidth(340);
+
+    const raw = window.localStorage.getItem('lumina.ui');
+    expect(raw).not.toBeNull();
+    const persisted = JSON.parse(raw as string) as { state?: { sidebarWidth?: number } };
+    expect(persisted.state?.sidebarWidth).toBe(340);
+  });
+
+  it('clamps a corrupted persisted width while rehydrating', async () => {
+    window.localStorage.setItem(
+      'lumina.ui',
+      JSON.stringify({ version: 0, state: { sidebarWidth: 9000 } }),
+    );
+
+    await useUiStore.persist.rehydrate();
+
+    expect(useUiStore.getState().sidebarWidth).toBe(SIDEBAR_WIDTH_MAX);
+  });
+});
+
+describe('useUiStore side panel width', () => {
+  beforeEach(() => {
+    useUiStore.setState({ sidePanelWidth: SIDE_PANEL_WIDTH_DEFAULT });
+  });
+
+  it('starts at the design default (480px)', () => {
+    expect(SIDE_PANEL_WIDTH_DEFAULT).toBe(480);
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT);
+  });
+
+  it('clamps widths into the supported range and rounds them', () => {
+    useUiStore.getState().setSidePanelWidth(10);
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_MIN);
+
+    useUiStore.getState().setSidePanelWidth(9999);
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_MAX);
+
+    useUiStore.getState().setSidePanelWidth(451.4);
+    expect(useUiStore.getState().sidePanelWidth).toBe(451);
+  });
+
+  it('falls back to the default for invalid input', () => {
+    useUiStore.getState().setSidePanelWidth(420);
+    useUiStore.getState().setSidePanelWidth(Number.NaN);
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT);
+
+    expect(clampSidePanelWidth(Number.POSITIVE_INFINITY)).toBe(SIDE_PANEL_WIDTH_DEFAULT);
+    expect(clampSidePanelWidth(Number.NEGATIVE_INFINITY)).toBe(SIDE_PANEL_WIDTH_DEFAULT);
+    expect(clampSidePanelWidth(500)).toBe(500);
+  });
+
+  it('persists the width in the UI storage', () => {
+    useUiStore.getState().setSidePanelWidth(520);
+
+    const raw = window.localStorage.getItem('lumina.ui');
+    expect(raw).not.toBeNull();
+    const persisted = JSON.parse(raw as string) as { state?: { sidePanelWidth?: number } };
+    expect(persisted.state?.sidePanelWidth).toBe(520);
+  });
+
+  it('clamps a corrupted persisted width while rehydrating', async () => {
+    window.localStorage.setItem(
+      'lumina.ui',
+      JSON.stringify({ version: 0, state: { sidePanelWidth: 9000 } }),
+    );
+
+    await useUiStore.persist.rehydrate();
+
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_MAX);
   });
 });

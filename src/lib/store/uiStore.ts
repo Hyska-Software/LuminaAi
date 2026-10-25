@@ -15,9 +15,45 @@ export type MainView = 'chat' | 'skills';
  */
 export type ArtifactPanelView = 'list' | 'preview';
 
+/**
+ * Sidebar width bounds (px). The user resizes the sidebar by dragging its right
+ * edge (`components/layout/SidebarResizer`); the value is persisted with the
+ * rest of the UI state and clamped on read/write. docs/DESIGN.md §5.
+ */
+export const SIDEBAR_WIDTH_MIN = 220;
+export const SIDEBAR_WIDTH_MAX = 480;
+export const SIDEBAR_WIDTH_DEFAULT = 272;
+/** Width change per arrow key press on the resize handle. */
+export const SIDEBAR_WIDTH_STEP = 16;
+
+/** Keeps a sidebar width inside the supported range; invalid input falls back to the default. */
+export function clampSidebarWidth(width: number): number {
+  if (typeof width !== 'number' || !Number.isFinite(width)) return SIDEBAR_WIDTH_DEFAULT;
+  return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.round(width)));
+}
+
+/**
+ * Right side panel (artifacts and sources share the same surface) width bounds.
+ * Resized by dragging its left edge (`components/layout/PanelResizer`), also
+ * persisted and clamped on read/write. docs/DESIGN.md §5.
+ */
+export const SIDE_PANEL_WIDTH_MIN = 360;
+export const SIDE_PANEL_WIDTH_MAX = 560;
+export const SIDE_PANEL_WIDTH_DEFAULT = 480;
+/** Width change per arrow key press on the resize handle. */
+export const SIDE_PANEL_WIDTH_STEP = 16;
+
+/** Keeps a side panel width inside the supported range; invalid input falls back to the default. */
+export function clampSidePanelWidth(width: number): number {
+  if (typeof width !== 'number' || !Number.isFinite(width)) return SIDE_PANEL_WIDTH_DEFAULT;
+  return Math.min(SIDE_PANEL_WIDTH_MAX, Math.max(SIDE_PANEL_WIDTH_MIN, Math.round(width)));
+}
+
 interface UiState {
   theme: ThemeMode;
   sidebarOpen: boolean;
+  /** Persisted width of the desktop sidebar, in px (docs/DESIGN.md §5). */
+  sidebarWidth: number;
   settingsOpen: boolean;
   modelPickerOpen: boolean;
   commandPaletteOpen: boolean;
@@ -27,6 +63,8 @@ interface UiState {
   artifactPanelView: ArtifactPanelView;
   /** Side panel listing every source (citation) used in the conversation. */
   sourcesPanelOpen: boolean;
+  /** Persisted width of the right side panel (artifacts/sources), in px. */
+  sidePanelWidth: number;
   activeView: MainView;
   activeArtifactId: string | null;
   artifacts: Artifact[];
@@ -36,6 +74,10 @@ interface UiState {
   setTheme: (theme: ThemeMode) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
+  /** Clamps to `SIDEBAR_WIDTH_MIN`…`SIDEBAR_WIDTH_MAX` and persists the width. */
+  setSidebarWidth: (width: number) => void;
+  /** Clamps to `SIDE_PANEL_WIDTH_MIN`…`SIDE_PANEL_WIDTH_MAX` and persists the width. */
+  setSidePanelWidth: (width: number) => void;
   setSettingsOpen: (open: boolean) => void;
   setModelPickerOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -85,6 +127,7 @@ export const useUiStore = create<UiState>()(
     (set, get) => ({
       theme: 'system',
       sidebarOpen: true,
+      sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
       settingsOpen: false,
       modelPickerOpen: false,
       commandPaletteOpen: false,
@@ -93,6 +136,7 @@ export const useUiStore = create<UiState>()(
       artifactPanelOpen: false,
       artifactPanelView: 'list',
       sourcesPanelOpen: false,
+      sidePanelWidth: SIDE_PANEL_WIDTH_DEFAULT,
       activeView: 'chat',
       activeArtifactId: null,
       artifacts: [],
@@ -105,6 +149,8 @@ export const useUiStore = create<UiState>()(
       },
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
+      setSidebarWidth: (sidebarWidth) => set({ sidebarWidth: clampSidebarWidth(sidebarWidth) }),
+      setSidePanelWidth: (sidePanelWidth) => set({ sidePanelWidth: clampSidePanelWidth(sidePanelWidth) }),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
       setModelPickerOpen: (modelPickerOpen) => set({ modelPickerOpen }),
       setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
@@ -181,9 +227,25 @@ export const useUiStore = create<UiState>()(
       partialize: (state) => ({
         theme: state.theme,
         sidebarOpen: state.sidebarOpen,
+        sidebarWidth: state.sidebarWidth,
+        sidePanelWidth: state.sidePanelWidth,
         fontScale: state.fontScale,
         reduceMotion: state.reduceMotion,
       }),
+      /**
+       * Rehydrated layouts may carry an out-of-range width (manually edited
+       * storage, older versions, future bounds). Clamp on merge so the first
+       * paint already uses a sane value instead of waiting for the next drag.
+       */
+      merge: (persisted, current) => {
+        const stored = (persisted ?? {}) as Partial<UiState>;
+        return {
+          ...current,
+          ...stored,
+          sidebarWidth: clampSidebarWidth(stored.sidebarWidth ?? current.sidebarWidth),
+          sidePanelWidth: clampSidePanelWidth(stored.sidePanelWidth ?? current.sidePanelWidth),
+        };
+      },
     },
   ),
 );

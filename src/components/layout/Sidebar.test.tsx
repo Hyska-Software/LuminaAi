@@ -91,6 +91,16 @@ afterEach(() => {
   window.matchMedia = originalMatchMedia;
 });
 
+describe('Sidebar — largura controlada pelo AppShell', () => {
+  it('fills its container instead of hard-coding the design width', () => {
+    render(<Sidebar />);
+
+    const aside = screen.getByRole('complementary', { name: 'Conversas' });
+    expect(aside.className).toContain('w-full');
+    expect(aside.className).not.toContain('w-[272px]');
+  });
+});
+
 describe('Sidebar — item Skills', () => {
   it('renders Skills between Novo chat and Buscar conversas and opens the skills view', () => {
     const onClose = vi.fn();

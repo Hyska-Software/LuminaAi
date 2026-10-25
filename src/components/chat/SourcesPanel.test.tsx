@@ -10,7 +10,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock('./external', () => ({ openExternalUrl: mocks.openExternalUrl }));
 
 // Imported after the mock above.
-import { useChatStore, useUiStore } from '@/lib/store';
+import {
+  SIDE_PANEL_WIDTH_DEFAULT,
+  SIDE_PANEL_WIDTH_MAX,
+  SIDE_PANEL_WIDTH_MIN,
+  SIDE_PANEL_WIDTH_STEP,
+  useChatStore,
+  useUiStore,
+} from '@/lib/store';
 import { SourcesPanel } from './SourcesPanel';
 
 afterEach(() => {
@@ -72,7 +79,11 @@ function setConversation(messages: ChatMessage[]): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useUiStore.setState({ sourcesPanelOpen: true, artifactPanelOpen: false });
+  useUiStore.setState({
+    sourcesPanelOpen: true,
+    artifactPanelOpen: false,
+    sidePanelWidth: SIDE_PANEL_WIDTH_DEFAULT,
+  });
   setConversation(conversation());
 });
 
@@ -141,5 +152,79 @@ describe('SourcesPanel', () => {
     ).toBeTruthy();
     expect(screen.queryByRole('list', { name: 'Fontes da conversa' })).toBeNull();
     expect(screen.getByText('0 fontes')).toBeTruthy();
+  });
+});
+
+describe('SourcesPanel — painel redimensionável', () => {
+  const panel = (): HTMLElement => screen.getByRole('complementary', { name: 'Painel de fontes' });
+  const grip = (): HTMLElement => screen.getByRole('separator', { name: 'Redimensionar painel de fontes' });
+
+  it('aplica a largura persistida e expõe o divisor na borda esquerda', () => {
+    useUiStore.setState({ sidePanelWidth: 520 });
+
+    render(<SourcesPanel />);
+
+    expect(panel().style.width).toBe('520px');
+    expect(panel().className).toContain('max-w-[92vw]');
+
+    const handle = grip();
+    expect(handle.getAttribute('aria-orientation')).toBe('vertical');
+    expect(handle.getAttribute('aria-valuenow')).toBe('520');
+    expect(handle.getAttribute('aria-valuetext')).toBe('520 px');
+    expect(handle.getAttribute('aria-valuemin')).toBe(String(SIDE_PANEL_WIDTH_MIN));
+    expect(handle.getAttribute('aria-valuemax')).toBe(String(SIDE_PANEL_WIDTH_MAX));
+    expect(handle.className).toContain('-left-2');
+    expect(handle.className).toContain('absolute');
+    // Fora do fluxo, depois do conteúdo: não soma largura nem cobre a lista.
+    expect(panel().lastElementChild).toBe(handle);
+  });
+
+  it('pré-visualiza durante o arrasto e só persiste no pointerup', () => {
+    render(<SourcesPanel />);
+
+    const handle = grip();
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT}px`);
+
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 900 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 860 });
+
+    // Arrastar para a esquerda aumenta a largura do painel à direita.
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT + 40}px`);
+    expect(grip().getAttribute('aria-valuenow')).toBe(String(SIDE_PANEL_WIDTH_DEFAULT + 40));
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT);
+
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT + 40);
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT + 40}px`);
+  });
+
+  it('persiste a largura pelas setas e pelos limites do teclado', () => {
+    render(<SourcesPanel />);
+
+    fireEvent.keyDown(grip(), { key: 'ArrowLeft' });
+    expect(useUiStore.getState().sidePanelWidth).toBe(
+      SIDE_PANEL_WIDTH_DEFAULT + SIDE_PANEL_WIDTH_STEP,
+    );
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT + SIDE_PANEL_WIDTH_STEP}px`);
+
+    fireEvent.keyDown(grip(), { key: 'Home' });
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_MIN);
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_MIN}px`);
+
+    fireEvent.keyDown(grip(), { key: 'End' });
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_MAX);
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_MAX}px`);
+  });
+
+  it('restaura a largura padrão com duplo clique', () => {
+    useUiStore.setState({ sidePanelWidth: 560 });
+
+    render(<SourcesPanel />);
+
+    fireEvent.doubleClick(grip());
+
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT);
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT}px`);
   });
 });

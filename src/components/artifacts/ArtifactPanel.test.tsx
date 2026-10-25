@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Artifact } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
@@ -35,7 +35,13 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 
 // Imported after the mocks above.
 import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
-import { useUiStore } from '@/lib/store';
+import {
+  SIDE_PANEL_WIDTH_DEFAULT,
+  SIDE_PANEL_WIDTH_MAX,
+  SIDE_PANEL_WIDTH_MIN,
+  SIDE_PANEL_WIDTH_STEP,
+  useUiStore,
+} from '@/lib/store';
 
 afterEach(() => cleanup());
 
@@ -71,6 +77,8 @@ function resetStore(): void {
     artifactPanelView: 'list',
     activeArtifactId: null,
     artifacts: [],
+    // A largura persistida vaza entre testes se não for resetada.
+    sidePanelWidth: SIDE_PANEL_WIDTH_DEFAULT,
   });
 }
 
@@ -230,5 +238,99 @@ describe('ArtifactPanel — exclusão', () => {
     await waitFor(() => expect(mocks.deleteArtifact).toHaveBeenCalledWith('a-1'));
     await waitFor(() => expect(useUiStore.getState().artifactPanelOpen).toBe(false));
     expect(useUiStore.getState().artifacts).toHaveLength(0);
+  });
+});
+
+describe('ArtifactPanel — painel redimensionável', () => {
+  const panel = (): HTMLElement =>
+    screen.getByRole('complementary', { name: 'Painel de artefatos' });
+  const grip = (): HTMLElement =>
+    screen.getByRole('separator', { name: 'Redimensionar painel de artefatos' });
+
+  it('aplica a largura persistida e expõe o divisor na borda esquerda', () => {
+    useUiStore.setState({ sidePanelWidth: 520 });
+
+    render(<ArtifactPanel />);
+
+    expect(panel().style.width).toBe('520px');
+    expect(panel().className).toContain('max-w-[92vw]');
+
+    const handle = grip();
+    expect(handle.getAttribute('aria-orientation')).toBe('vertical');
+    expect(handle.getAttribute('aria-label')).toBe('Redimensionar painel de artefatos');
+    expect(handle.getAttribute('aria-valuenow')).toBe('520');
+    expect(handle.getAttribute('aria-valuetext')).toBe('520 px');
+    expect(handle.getAttribute('aria-valuemin')).toBe(String(SIDE_PANEL_WIDTH_MIN));
+    expect(handle.getAttribute('aria-valuemax')).toBe(String(SIDE_PANEL_WIDTH_MAX));
+    expect(handle.className).toContain('-left-2');
+    expect(handle.className).toContain('absolute');
+    // Fora do fluxo, depois do conteúdo: não soma largura nem cobre a lista.
+    expect(panel().lastElementChild).toBe(handle);
+  });
+
+  it('pré-visualiza durante o arrasto e só persiste no pointerup', () => {
+    render(<ArtifactPanel />);
+
+    const handle = grip();
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT}px`);
+
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 900 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 860 });
+
+    // Arrastar para a esquerda aumenta a largura do painel à direita.
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT + 40}px`);
+    expect(grip().getAttribute('aria-valuenow')).toBe(String(SIDE_PANEL_WIDTH_DEFAULT + 40));
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT);
+
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT + 40);
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT + 40}px`);
+  });
+
+  it('persiste a largura pelas setas e pelos limites do teclado', () => {
+    render(<ArtifactPanel />);
+
+    fireEvent.keyDown(grip(), { key: 'ArrowLeft' });
+    expect(useUiStore.getState().sidePanelWidth).toBe(
+      SIDE_PANEL_WIDTH_DEFAULT + SIDE_PANEL_WIDTH_STEP,
+    );
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT + SIDE_PANEL_WIDTH_STEP}px`);
+
+    fireEvent.keyDown(grip(), { key: 'Home' });
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_MIN);
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_MIN}px`);
+
+    fireEvent.keyDown(grip(), { key: 'End' });
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_MAX);
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_MAX}px`);
+  });
+
+  it('restaura a largura padrão com duplo clique', () => {
+    useUiStore.setState({ sidePanelWidth: SIDE_PANEL_WIDTH_MAX });
+
+    render(<ArtifactPanel />);
+
+    fireEvent.doubleClick(grip());
+
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT);
+    expect(panel().style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT}px`);
+  });
+
+  it('descarta a pré-visualização quando o painel fecha durante o arrasto', () => {
+    render(<ArtifactPanel />);
+
+    // Com o painel fechado o `aside` fica `aria-hidden`; guardamos o nó antes.
+    const aside = panel();
+    const handle = grip();
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 900 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 820 });
+    expect(aside.style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT + 80}px`);
+
+    // Fechar o painel interrompe o gesto sem pointerup: o preview é descartado.
+    act(() => useUiStore.getState().closeArtifactPanel());
+
+    expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_DEFAULT);
+    expect(aside.style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT}px`);
   });
 });
