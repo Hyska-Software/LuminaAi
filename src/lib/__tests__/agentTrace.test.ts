@@ -202,6 +202,124 @@ describe('buildAgentTrace', () => {
     });
     expect(toolGroups(entries)[0].label).toBe('Executou minha ferramenta');
   });
+
+  it('describes code execution rows with a short summary detail', () => {
+    const running = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [tool({ name: 'run_code', status: 'running' })],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(running)[0].label).toBe('Executando código…');
+
+    const done = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [tool({ name: 'run_code', summary: 'python · 2 arquivos · 1.2s' })],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(done)[0].label).toBe('Executou código · python · 2 arquivos');
+
+    const withoutSummary = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [tool({ name: 'run_code' })],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(withoutSummary)[0].label).toBe('Executou código');
+
+    const failed = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({
+          name: 'run_code',
+          status: 'error',
+          result: 'ERROR: interpretador python não encontrado',
+        }),
+      ],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    const failedGroup = toolGroups(failed)[0];
+    expect(failedGroup.label).toBe('A execução de código falhou');
+    expect(failedGroup.errors).toEqual(['interpretador python não encontrado']);
+  });
+
+  it('keeps adjacent code runs in a single row next to a skills listing', () => {
+    const entries = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({ name: 'run_code', summary: 'python · 1 arquivo · 0.4s' }),
+        tool({ name: 'run_code', summary: 'javascript · 2 arquivos · 0.2s' }),
+        tool({ name: 'list_skills', result: '[]' }),
+      ],
+      trace: [{ reasoning: null, toolCalls: 3 }],
+    });
+    const groups = toolGroups(entries);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0].tools).toHaveLength(2);
+    expect(groups[0].label).toBe('Executou código · javascript · 2 arquivos');
+    expect(groups[1].label).toBe('Consultou as skills disponíveis');
+  });
+
+  it('describes skills listing and reading rows', () => {
+    const listing = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [tool({ name: 'list_skills', status: 'running' })],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(listing)[0].label).toBe('Consultando skills…');
+
+    const reading = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({ name: 'read_skill', status: 'running', arguments: '{"name":"office-docx"}' }),
+      ],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(reading)[0].label).toBe('Lendo skill office-docx…');
+
+    const read = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [tool({ name: 'read_skill', arguments: '{"name":"office-docx"}' })],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(read)[0].label).toBe('Leu a skill office-docx');
+  });
+
+  it('falls back to generic labels when a skill name is missing or invalid', () => {
+    const cases: Array<{ arguments: string; status: ToolCallRecord['status']; label: string }> = [
+      { arguments: '{}', status: 'done', label: 'Leu uma skill' },
+      { arguments: '{oops', status: 'done', label: 'Leu uma skill' },
+      { arguments: 'null', status: 'done', label: 'Leu uma skill' },
+      { arguments: '"office-docx"', status: 'done', label: 'Leu uma skill' },
+      { arguments: '{"name":42}', status: 'running', label: 'Lendo skill…' },
+      { arguments: '{"name":"   "}', status: 'done', label: 'Leu uma skill' },
+    ];
+
+    for (const testCase of cases) {
+      const entries = buildAgentTrace({
+        reasoning: null,
+        toolCalls: [
+          tool({ name: 'read_skill', arguments: testCase.arguments, status: testCase.status }),
+        ],
+        trace: [{ reasoning: null, toolCalls: 1 }],
+      });
+      expect(toolGroups(entries)[0].label).toBe(testCase.label);
+    }
+
+    const failed = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({
+          name: 'read_skill',
+          arguments: '{"name":"pdf"}',
+          status: 'error',
+          result: 'ERROR: skill não encontrada',
+        }),
+      ],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(failed)[0].label).toBe('Não foi possível ler a skill');
+    expect(toolGroups(failed)[0].errors).toEqual(['skill não encontrada']);
+  });
 });
 
 describe('splitReasoning', () => {

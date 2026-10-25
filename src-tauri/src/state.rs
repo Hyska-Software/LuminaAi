@@ -68,7 +68,9 @@ impl AppState {
 
 /// Ensure transient directories exist.
 pub fn ensure_dirs(app: &AppHandle) -> anyhow::Result<()> {
-    for sub in ["attachments", "artifacts", "logs"] {
+    // `skills-bundled` não entra aqui: o módulo de skills o materializa (e
+    // regrava) a cada inicialização; `skills` é a pasta do usuário.
+    for sub in ["attachments", "artifacts", "logs", "code-runs", "skills"] {
         let dir = crate::config::data_dir(app)?.join(sub);
         std::fs::create_dir_all(dir)?;
     }

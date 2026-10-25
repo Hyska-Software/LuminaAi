@@ -66,7 +66,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 ```
 
 - **TitleBar**: 56px, `decorations: false`; arrastável (`data-tauri-drag-region`); controles nativos custom (minimizar/maximizar/fechar) com hover `surface-hover` e fechar em vermelho.
-- **Sidebar**: 272px, `bg-surface`, colapsável (⌘/Ctrl+B). Contém: botão "Novo chat" (pill com borda), busca, lista agrupada (Fixadas, Hoje, Ontem, 7 dias, 30 dias, Mais antigas), rodapé com atalho de configurações e versão.
+- **Sidebar**: 272px, `bg-surface`, colapsável (⌘/Ctrl+B). Contém: botão "Novo chat" (pill com borda), item **"Skills"** (abre a view de gestão no lugar do chat; oculto quando o painel é desativado nas configurações), busca, lista agrupada (Fixadas, Hoje, Ontem, 7 dias, 30 dias, Mais antigas), rodapé com atalho de configurações e versão.
 - **Chat**: coluna central `max-w-3xl` (768px), padding 24px, espaçamento entre mensagens 28px.
 - **Composer**: sticky no rodapé com gradiente de fade; container `rounded-3xl`, borda 1px, fundo `surface-raised`, sombra sutil; cresce até 10 linhas.
 - **Artifact panel**: side panel à direita (largura 42%, mín 380px), com header próprio (nome, tipo, ações), preview scrollável e botão "Salvar como…".

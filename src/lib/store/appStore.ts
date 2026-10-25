@@ -36,6 +36,12 @@ const DEFAULT_SETTINGS: Settings = {
   temperature: null,
   includeAttachments: true,
   autoTitle: true,
+  codeExecutionEnabled: false,
+  codeTimeoutSecs: 120,
+  codePythonPath: '',
+  codeNodePath: '',
+  skillsPanelEnabled: true,
+  disabledSkills: [],
 };
 
 interface AppState {
@@ -52,6 +58,12 @@ interface AppState {
 
   init: () => Promise<void>;
   saveSettings: (patch: Partial<Settings>) => Promise<void>;
+  /**
+   * Reloads settings from the backend without touching the catalog/model
+   * selection. Used after commands that mutate settings server-side (e.g.
+   * skill enable/disable) so a later full save cannot clobber the change.
+   */
+  reloadSettings: () => Promise<void>;
   setProviderKey: (providerId: string, key: string | null) => Promise<void>;
   setSelection: (selection: ModelSelection) => void;
   /**
@@ -130,6 +142,15 @@ export const useAppStore = create<AppState>()(
         set({ settings: next });
         try {
           const view = await api.saveSettings(next);
+          set({ settings: view.settings, keys: view.keys });
+        } catch (error) {
+          set({ error: error instanceof Error ? error.message : String(error) });
+        }
+      },
+
+      reloadSettings: async () => {
+        try {
+          const view = await api.getSettings();
           set({ settings: view.settings, keys: view.keys });
         } catch (error) {
           set({ error: error instanceof Error ? error.message : String(error) });

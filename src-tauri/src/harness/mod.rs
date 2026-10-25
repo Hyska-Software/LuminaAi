@@ -1,6 +1,7 @@
 //! Agent harness: builds context, runs the tool loop and persists messages.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -81,6 +82,13 @@ pub struct HarnessDeps {
     pub streamer: Option<ProviderStreamer>,
     /// Test hook: resolves the API key without a Tauri AppHandle.
     pub api_key_override: Option<String>,
+    /// Test hook: explicit `<app-data>` directory. When `None`, the app handle
+    /// resolves it through `config::data_dir` (artifacts, code-runs, skills).
+    pub data_dir: Option<PathBuf>,
+    /// Test hook: external skills repositories (Codex/Claude/OpenCode/agents).
+    /// `None` uses [`crate::tools::skills::standard_external_roots`]; tests pass
+    /// `Some(Vec::new())` so they never read the developer's home directory.
+    pub skills_roots: Option<Vec<crate::tools::skills::ExternalSkillRoot>>,
 }
 
 /// Runs the real provider stream unless a test streamer is installed.
@@ -167,6 +175,9 @@ pub async fn run_turn(
     let mut options = payload.options.clone();
     options.web_search = options.web_search && settings.web_search_enabled;
     options.create_files = options.create_files && settings.file_creation_enabled;
+    // `run_code` is opt-in: the turn option is further gated by the global
+    // setting, so the tool/prompt section disappears when code execution is off.
+    options.run_code = options.run_code && settings.code_execution_enabled;
     options.max_steps = options.max_steps.clamp(1, MAX_STEPS_LIMIT);
 
     /* ---------------------------------------------------------------- */
@@ -204,19 +215,55 @@ pub async fn run_turn(
         &model,
         supports_images,
     );
-    let system_prompt = prompt::build_system_prompt(&model, &options, &settings);
+    // `<app-data>` backs artifacts, `run_code` workspaces and the skills
+    // catalog. Production resolves it from the app handle; tests inject a
+    // temporary directory through `HarnessDeps::data_dir`.
+    let data_dir = match deps.data_dir.clone() {
+        Some(dir) => dir,
+        None => {
+            let app = deps
+                .app
+                .as_ref()
+                .ok_or_else(|| anyhow!("AppHandle ausente para resolver o diretório de dados"))?;
+            crate::config::data_dir(app)?
+        }
+    };
+    // A broken skills directory must not abort the whole turn: the agent simply
+    // runs without the skills catalog. Disabled skills (Settings) are hidden
+    // from the prompt and from `list_skills`/`read_skill`. External repositories
+    // (Codex/Claude/OpenCode/Agent Skills) are read automatically in production;
+    // tests inject an explicit list through `HarnessDeps::skills_roots`.
+    let injected_roots = deps.skills_roots.clone();
+    let skills_roots = injected_roots
+        .clone()
+        .unwrap_or_else(tools::skills::standard_external_roots);
+    let skills = match &injected_roots {
+        Some(roots) => tools::skills::catalog_enabled_with_roots(
+            &data_dir,
+            &settings.disabled_skills,
+            roots,
+        ),
+        // Production path: the default-roots variant scans the standard
+        // repositories (agents/codex/claude/opencode + bundled).
+        None => tools::skills::catalog_enabled(&data_dir, &settings.disabled_skills),
+    }
+    .unwrap_or_default();
+    let system_prompt = prompt::build_system_prompt(&model, &options, &settings, &skills);
     let tool_definitions = tools::definitions(&options);
     let reasoning = reasoning_request(payload.reasoning.as_ref(), &model);
     let temperature = temperature_request(&options, &settings, &model);
     let max_output_tokens = Some(model.max_output.clamp(1_024, 32_768));
 
     let runtime = ToolRuntime {
-        app: deps.app.clone(),
         db: deps.db.clone(),
         http: deps.search_http.clone(),
         conversation_id: payload.conversation_id.clone(),
         message_id: assistant_message.id.clone(),
         options: options.clone(),
+        settings: settings.clone(),
+        cancel: cancel.clone(),
+        data_dir: data_dir.clone(),
+        skills_roots: skills_roots.clone(),
     };
 
     /* ---------------------------------------------------------------- */
@@ -1881,7 +1928,16 @@ mod agent_loop_tests {
             catalog: test_catalog(),
             streamer: Some(streamer),
             api_key_override: Some("test-key".to_string()),
+            data_dir: Some(test_data_dir()),
+            // Tests never read the developer's real skill repositories.
+            skills_roots: Some(Vec::new()),
         }
+    }
+
+    /// Unique `<app-data>` directory for tests that run a full turn (skills are
+    /// materialized by the catalog).
+    fn test_data_dir() -> PathBuf {
+        std::env::temp_dir().join(format!("lumina-harness-data-{}", uuid::Uuid::new_v4()))
     }
 
     fn payload(conversation: &Conversation, max_steps: u32) -> TurnPayload {
@@ -2135,6 +2191,248 @@ mod agent_loop_tests {
             .expect("get message")
             .expect("stored message");
         assert_eq!(stored.trace, result.assistant_message.trace);
+    }
+
+    #[tokio::test]
+    async fn run_code_is_gated_by_the_global_setting() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        // (has `run_code` tool, prompt documents code execution, has skills tools)
+        let captured: Arc<Mutex<Vec<(bool, bool, bool)>>> = Arc::new(Mutex::new(Vec::new()));
+        let streamer: ProviderStreamer = {
+            let captured = captured.clone();
+            Arc::new(move |request, sink| {
+                let has_run_code = request.tools.iter().any(|tool| tool.name == "run_code");
+                let has_code_section = request
+                    .system_prompt
+                    .contains("# Execução de código (`run_code`)");
+                let has_skills = request.tools.iter().any(|tool| tool.name == "read_skill")
+                    && request.system_prompt.contains("# Skills");
+                captured
+                    .lock()
+                    .expect("captured lock")
+                    .push((has_run_code, has_code_section, has_skills));
+                Box::pin(async move {
+                    text_stream(&sink, "Resposta final.");
+                    Ok(())
+                })
+            })
+        };
+
+        // Global setting off: the tool and its prompt section disappear even
+        // though `TurnOptions::run_code` defaults to true.
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(temp.db.clone(), streamer.clone()),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn with code execution disabled");
+
+        let mut settings = Settings::default();
+        settings.code_execution_enabled = true;
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(temp.db.clone(), streamer),
+            payload(&conversation, 2),
+            settings,
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn with code execution enabled");
+
+        let captured = captured.lock().expect("captured lock");
+        assert_eq!(captured.len(), 2, "one provider request per turn");
+        assert_eq!(captured[0], (false, false, true));
+        assert_eq!(captured[1], (true, true, true));
+    }
+
+    #[tokio::test]
+    async fn disabled_skills_are_hidden_from_the_prompt() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        // Pick a real bundled skill from the runtime catalog: the harness must
+        // load `catalog_enabled` so the disabled name never reaches the prompt.
+        let data_dir = test_data_dir();
+        let available =
+            tools::skills::catalog_with_roots(&data_dir, &[]).expect("catálogo de skills");
+        let Some(disabled) = available
+            .iter()
+            .find(|skill| skill.source == tools::skills::SkillSource::Bundled)
+            .map(|skill| skill.name.clone())
+        else {
+            eprintln!("nenhuma skill embutida no build: teste de prompt ignorado");
+            return;
+        };
+        let other = available
+            .iter()
+            .find(|skill| skill.name != disabled)
+            .map(|skill| skill.name.clone());
+
+        let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let streamer: ProviderStreamer = {
+            let captured = captured.clone();
+            Arc::new(move |request, sink| {
+                *captured.lock().expect("captured lock") = Some(request.system_prompt.clone());
+                Box::pin(async move {
+                    text_stream(&sink, "Resposta final.");
+                    Ok(())
+                })
+            })
+        };
+
+        let mut settings = Settings::default();
+        settings.disabled_skills = vec![disabled.clone()];
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.data_dir = Some(data_dir);
+        let (emitter, _events) = channel();
+        run_turn(
+            harness,
+            payload(&conversation, 2),
+            settings,
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn with a disabled skill");
+
+        let prompt = captured
+            .lock()
+            .expect("captured lock")
+            .clone()
+            .expect("system prompt captured");
+        assert!(prompt.contains("# Skills"));
+        assert!(
+            !prompt.contains(&format!("`{disabled}` (")),
+            "skill desativada `{disabled}` apareceu no catálogo do prompt"
+        );
+        if let Some(other) = other {
+            assert!(
+                prompt.contains(&format!("`{other}` (")),
+                "skill ativa `{other}` sumiu do prompt"
+            );
+        }
+    }
+
+    /// Temporary external skills repository (Codex-style) for the tests below.
+    struct TempSkillRepo {
+        path: PathBuf,
+    }
+
+    impl TempSkillRepo {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "lumina-external-skills-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&path).expect("criar repositório externo");
+            Self { path }
+        }
+
+        fn add_skill(&self, name: &str, description: &str) -> PathBuf {
+            let dir = self.path.join(name);
+            std::fs::create_dir_all(&dir).expect("criar skill externa");
+            std::fs::write(
+                dir.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: {description}\n---\n# Instruções\nUse.\n"),
+            )
+            .expect("escrever SKILL.md");
+            dir
+        }
+    }
+
+    impl Drop for TempSkillRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[tokio::test]
+    async fn external_skill_repositories_reach_the_prompt_and_tools() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        let repo = TempSkillRepo::new();
+        repo.add_skill("revisao-codigo", "Revisar PRs em busca de bugs.");
+        let roots = vec![tools::skills::ExternalSkillRoot {
+            source: tools::skills::SkillSource::Codex,
+            dir: repo.path.clone(),
+        }];
+
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let streamer: ProviderStreamer = {
+            let step = step.clone();
+            let prompts = prompts.clone();
+            Arc::new(move |request, sink| {
+                prompts
+                    .lock()
+                    .expect("prompts lock")
+                    .push(request.system_prompt.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    if current == 0 {
+                        tool_call_stream(&sink, "call-skills", "list_skills");
+                    } else {
+                        text_stream(&sink, "Resposta final.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.skills_roots = Some(roots);
+        let (emitter, _events) = channel();
+        let result = run_turn(
+            harness,
+            payload(&conversation, 3),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno com repositório externo");
+
+        // O prompt documenta a skill externa com a origem `codex`.
+        let prompts = prompts.lock().expect("prompts lock");
+        assert!(!prompts.is_empty(), "nenhum prompt capturado");
+        assert!(
+            prompts[0].contains("- `revisao-codigo` (codex · somente leitura):"),
+            "skill externa ausente no catálogo do prompt"
+        );
+        assert!(prompts[0].contains("repositórios externos"));
+        drop(prompts);
+
+        // A tool `list_skills` executou e devolveu a skill externa.
+        let call = result
+            .assistant_message
+            .tool_calls
+            .iter()
+            .find(|call| call.name == "list_skills")
+            .expect("list_skills executada");
+        assert_eq!(call.status, ToolCallStatus::Done);
+        let output = call.result.clone().unwrap_or_default();
+        assert!(
+            output.contains("revisao-codigo"),
+            "list_skills não devolveu a skill externa: {output}"
+        );
+        assert!(output.contains("\"source\":\"codex\""));
     }
 
     #[tokio::test]

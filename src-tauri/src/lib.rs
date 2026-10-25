@@ -4,8 +4,9 @@
 //! - `catalog`:   bundled model catalog (protocols + reasoning capabilities)
 //! - `providers`: wire protocols (OpenAI chat/responses, Anthropic, Google)
 //! - `harness`:   agent loop (system prompt, tools, streaming, persistence)
-//! - `tools`:     web search, page fetch, file creation
+//! - `tools`:     web search, page fetch, file creation, code execution and skills
 //! - `documents`: attachment text extraction (pdf, docx, xlsx, pptx, text, images)
+//!                and artifact previews (docx→html, xlsx, pptx)
 //! - `db`:        SQLite persistence
 //! - `commands`:  Tauri command surface used by the React app
 
@@ -58,11 +59,17 @@ pub fn run() {
             commands::settings::open_data_dir,
             commands::settings::reset_app_data,
             commands::settings::validate_provider,
+            commands::settings::get_code_environment,
+            commands::settings::open_skills_dir,
+            commands::skills::get_skills,
+            commands::skills::set_skill_enabled,
+            commands::skills::delete_skill,
             commands::attachments::import_attachments,
             commands::attachments::get_attachment,
             commands::attachments::delete_attachment,
             commands::artifacts::list_artifacts,
             commands::artifacts::get_artifact_content,
+            commands::artifacts::get_artifact_preview,
             commands::artifacts::save_artifact,
             commands::artifacts::open_artifact,
             commands::artifacts::delete_artifact,

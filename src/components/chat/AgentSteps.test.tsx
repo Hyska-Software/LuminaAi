@@ -181,4 +181,31 @@ describe('AgentSteps', () => {
     expect(screen.getByText('Não foi possível ler a página')).toBeTruthy();
     expect(screen.getByText('HTTP 404')).toBeTruthy();
   });
+
+  it('renders code and skill rows with their tool icons', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <AgentSteps
+        streaming={false}
+        phase={null}
+        message={message({
+          reasoning: null,
+          toolCalls: [
+            tool({ name: 'run_code', summary: 'python · 2 arquivos · 1.2s' }),
+            tool({ name: 'list_skills', result: '[]' }),
+            tool({ name: 'read_skill', arguments: '{"name":"office-docx"}' }),
+          ],
+          trace: [{ reasoning: null, toolCalls: 3 }],
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /3 passos/ }));
+    expect(screen.getByText('Executou código · python · 2 arquivos')).toBeTruthy();
+    expect(screen.getByText('Consultou as skills disponíveis')).toBeTruthy();
+    expect(screen.getByText('Leu a skill office-docx')).toBeTruthy();
+    // run_code → SquareTerminal; list_skills/read_skill → BookOpen.
+    expect(container.querySelectorAll('.lucide-square-terminal')).toHaveLength(1);
+    expect(container.querySelectorAll('.lucide-book-open')).toHaveLength(2);
+  });
 });

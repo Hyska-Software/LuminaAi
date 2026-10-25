@@ -1,6 +1,6 @@
 # AGENTS.md — como trabalhar neste repositório
 
-> Leia `docs/ARCHITECTURE.md` (visão técnica), `docs/DESIGN.md` (UI/UX), `docs/GENUI.md` (UI generativa/interativa do agente) e `docs/MODELS.md` (provedores/raciocínio) antes de implementar.
+> Leia `docs/ARCHITECTURE.md` (visão técnica), `docs/FILES.md` (arquivos, execução de código e skills), `docs/DESIGN.md` (UI/UX), `docs/GENUI.md` (UI generativa/interativa do agente) e `docs/MODELS.md` (provedores/raciocínio) antes de implementar.
 
 ## Comandos
 
@@ -26,9 +26,10 @@ Observação: `cargo` usa um target dir compartilhado. Se aparecer `Blocking wai
 | Contratos compartilhados | `src/lib/types.ts`, `src/lib/api.ts`, `src/lib/catalog.ts`, `src/lib/utils.ts`, `src/lib/store/**`, `src/lib/genui/**`, `data/catalog.json`, **`data/genui-contract.json`**, **`data/genui-fixtures.json`**, `src-tauri/src/{domain,catalog,events,state,http}.rs`, `src-tauri/src/lib.rs`, `src-tauri/src/commands/{mod,turn,models}.rs`, `src/App.tsx` | Lead |
 | Provedores | `src-tauri/src/providers/**` | provider-dev |
 | Harness/tools/docs | `src-tauri/src/harness/**`, `src-tauri/src/tools/**`, `src-tauri/src/documents/**` | harness-dev |
+| Skills embutidas | `src-tauri/skills/**` | formats-dev |
 | Persistência/config/commands | `src-tauri/src/db.rs`, `src-tauri/src/config.rs`, `src-tauri/src/commands/{conversations,settings,attachments,artifacts}.rs` | storage-dev |
 | UI núcleo | `src/components/layout/**`, `src/components/chat/**`, `src/components/composer/**` | ui-core |
-| UI sistemas | `src/components/ui/**`, `src/components/models/**`, `src/components/settings/**`, `src/components/artifacts/**`, `src/components/genui/**`, `src/components/palette/**` | ui-systems |
+| UI sistemas | `src/components/ui/**`, `src/components/models/**`, `src/components/settings/**`, `src/components/artifacts/**`, `src/components/skills/**`, `src/components/genui/**`, `src/components/palette/**` | ui-systems |
 
 **Never edite arquivos de outra área.** Se precisar de uma mudança de contrato, envie uma mensagem ao Lead com a assinatura exata desejada.
 
@@ -39,6 +40,7 @@ Observação: `cargo` usa um target dir compartilhado. Se aparecer `Blocking wai
 - Toda funcionalidade nova entra com teste automatizado **antes/durante** a implementação.
 - Renderer: Vitest (`src/**/*.test.ts`, jsdom quando precisar de DOM); mock de `@/lib/api` para stores.
 - Backend: `#[cfg(test)]` nos módulos; fixtures reais em `src-tauri/src/documents/testdata/`.
+- Testes que dependem de Python/Node no PATH (execução de código e scripts das skills) devem **pular condicionalmente** quando o interpretador não existir, sem quebrar a suíte; helpers das skills usam somente a stdlib (sem pip).
 - Integrações com o gateway usam `#[ignore]` + `deepseek-v4.1-flash` (Go) com esforço máximo.
 - **Não** use automação de UI/navegador (screenshots, SendKeys, CDP) como critério de verificação.
 

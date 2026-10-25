@@ -1,40 +1,17 @@
 import { useMemo } from 'react';
-import { Download, ExternalLink, FileQuestion } from 'lucide-react';
-import { toast } from 'sonner';
-import { api } from '@/lib/api';
-import type { ArtifactContent } from '@/lib/types';
 import { isSvgMarkup, sanitizeSvg } from '@/lib/genui/sanitize';
-import { cn, formatBytes } from '@/lib/utils';
-import { Button } from '@/components/ui';
+import { cn } from '@/lib/utils';
 import { CodeBlock, HtmlPreview } from '@/components/genui';
-import { artifactKindMeta, artifactLanguage } from './kinds';
+import { artifactLanguage } from './kinds';
 import { parseCsv } from './csv';
+import { BinaryPreview } from './BinaryPreview';
+import { DocxPreview } from './DocxPreview';
+import { PdfPreview } from './PdfPreview';
+import { PptxPreview } from './PptxPreview';
+import { XlsxPreview } from './XlsxPreview';
+import type { ArtifactViewProps } from './previewSupport';
 
-export interface ArtifactPreviewProps {
-  content: ArtifactContent;
-  className?: string;
-}
-
-async function saveArtifact(artifactId: string, name: string) {
-  try {
-    const path = await api.saveArtifact(artifactId, name);
-    if (path) toast.success('Arquivo salvo', { description: path });
-  } catch (error) {
-    toast.error('Não foi possível salvar', {
-      description: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-async function openArtifact(artifactId: string) {
-  try {
-    await api.openArtifact(artifactId);
-  } catch (error) {
-    toast.error('Não foi possível abrir o arquivo', {
-      description: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
+export type ArtifactPreviewProps = ArtifactViewProps;
 
 function TextPreview({ content, className }: ArtifactPreviewProps) {
   const { artifact, content: text } = content;
@@ -160,45 +137,6 @@ function CsvPreview({ content, className }: ArtifactPreviewProps) {
   );
 }
 
-function BinaryPreview({ content, className }: ArtifactPreviewProps) {
-  const { artifact } = content;
-  const meta = artifactKindMeta(artifact.kind);
-
-  return (
-    <div className={cn('flex h-full items-center justify-center p-6', className)}>
-      <div className="flex w-full max-w-xs flex-col items-center gap-3 rounded-2xl border border-border bg-surface-raised p-6 text-center">
-        <span className={cn('flex size-12 items-center justify-center rounded-xl', meta.tone)}>
-          <FileQuestion aria-hidden className="size-6" />
-        </span>
-        <div>
-          <p className="text-[13px] font-medium text-foreground">{artifact.name}</p>
-          <p className="mt-0.5 text-[11px] text-foreground-subtle">
-            {meta.label} · {formatBytes(artifact.size)} · prévia não disponível
-          </p>
-        </div>
-        <div className="flex flex-wrap justify-center gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            leftIcon={<Download className="size-3.5" />}
-            onClick={() => void saveArtifact(artifact.id, artifact.name)}
-          >
-            Salvar como…
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            leftIcon={<ExternalLink className="size-3.5" />}
-            onClick={() => void openArtifact(artifact.id)}
-          >
-            Abrir
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /** Type-aware artifact preview used by the side panel. */
 export function ArtifactPreview({ content, className }: ArtifactPreviewProps) {
   const { artifact } = content;
@@ -216,14 +154,19 @@ export function ArtifactPreview({ content, className }: ArtifactPreviewProps) {
       return <ImagePreview content={content} className={className} />;
     case 'csv':
       return <CsvPreview content={content} className={className} />;
+    case 'pdf':
+      return <PdfPreview content={content} className={className} />;
+    case 'docx':
+      return <DocxPreview content={content} className={className} />;
+    case 'xlsx':
+      return <XlsxPreview content={content} className={className} />;
+    case 'pptx':
+      return <PptxPreview content={content} className={className} />;
     case 'markdown':
     case 'code':
     case 'text':
     case 'json':
       return <TextPreview content={content} className={className} />;
-    case 'pdf':
-    case 'docx':
-    case 'xlsx':
     case 'binary':
     default:
       return <BinaryPreview content={content} className={className} />;

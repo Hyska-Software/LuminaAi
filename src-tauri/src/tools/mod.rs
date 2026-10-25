@@ -1,14 +1,21 @@
-//! Agent tools: web search, page fetching and file creation (artifacts).
+//! Agent tools: web search, page fetching, file creation, code execution and
+//! skills.
+
+use std::path::PathBuf;
 
 use serde_json::{json, Value};
+use tokio_util::sync::CancellationToken;
 
 use crate::db::Db;
-use crate::domain::{Artifact, Citation, ToolCallRecord, TurnOptions};
+use crate::domain::{Artifact, Citation, Settings, ToolCallRecord, TurnOptions};
 use crate::providers::ToolDefinition;
 
+pub mod artifacts;
+pub mod code_exec;
 pub mod create_file;
 pub mod fetch_url;
 pub mod genui;
+pub mod skills;
 pub mod web_search;
 
 /// Upper bound for the text fed back to the model from a single tool call.
@@ -16,8 +23,6 @@ pub const MAX_TOOL_RESULT_CHARS: usize = 120_000;
 
 #[derive(Clone)]
 pub struct ToolRuntime {
-    /// Missing in unit tests that exercise the harness without a Tauri app.
-    pub app: Option<tauri::AppHandle>,
     pub db: std::sync::Arc<Db>,
     /// Shared browser-like client (`AppState::search_http`) used by the web
     /// tools: search engines and scraped pages reject the plain API client.
@@ -25,6 +30,15 @@ pub struct ToolRuntime {
     pub conversation_id: String,
     pub message_id: String,
     pub options: TurnOptions,
+    /// Effective settings for this turn (code interpreter paths, timeout, …).
+    pub settings: Settings,
+    /// Turn cancellation token: `run_code` kills the process tree on cancel.
+    pub cancel: CancellationToken,
+    /// Resolved `<app-data>` directory (artifacts, code-runs, skills).
+    pub data_dir: PathBuf,
+    /// External skills repositories (Codex/Claude/OpenCode/Agent Skills) read
+    /// by the `list_skills`/`read_skill` tools; empty in most unit tests.
+    pub skills_roots: Vec<skills::ExternalSkillRoot>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -58,6 +72,13 @@ pub fn definitions(options: &TurnOptions) -> Vec<ToolDefinition> {
     if options.create_files {
         tools.push(create_file::definition());
     }
+    if options.run_code {
+        tools.push(code_exec::definition());
+    }
+    // Sempre disponíveis: skills não contam no orçamento de ferramentas de
+    // dados e o agente precisa poder lê-las antes de gerar arquivos.
+    tools.push(skills::list_definition());
+    tools.push(skills::read_definition());
     // Sempre disponível: o agente valida o JSON do bloco `ui` antes de emitir.
     tools.push(genui::definition());
     tools
@@ -80,6 +101,13 @@ pub async fn execute(rt: &ToolRuntime, call: &ToolCallRecord) -> ToolOutcome {
             ToolOutcome::error("a criação de arquivos está desativada nesta conversa")
         }
         "create_file" => create_file::run(rt, &arguments).await,
+        "run_code" if !rt.options.run_code => {
+            ToolOutcome::error("a execução de código está desativada nesta conversa")
+        }
+        "run_code" => code_exec::run(rt, &arguments).await,
+        // Skills: sempre disponíveis, independentes das flags do turno.
+        "list_skills" => skills::run_list(rt),
+        "read_skill" => skills::run_read(rt, &arguments),
         // Validação local do bloco `ui`; não depende de flags do turno.
         "validate_ui" => genui::run(&arguments),
         other => ToolOutcome::error(format!("ferramenta desconhecida: {other}")),
@@ -193,17 +221,31 @@ mod tests {
         let mut options = TurnOptions::default();
         options.web_search = true;
         options.create_files = true;
+        options.run_code = true;
         let names: Vec<String> = definitions(&options).into_iter().map(|tool| tool.name).collect();
         assert_eq!(
             names,
-            vec!["web_search", "fetch_url", "create_file", "validate_ui"]
+            vec![
+                "web_search",
+                "fetch_url",
+                "create_file",
+                "run_code",
+                "list_skills",
+                "read_skill",
+                "validate_ui"
+            ]
         );
 
         options.web_search = false;
         options.create_files = false;
+        options.run_code = false;
         let names: Vec<String> = definitions(&options).into_iter().map(|tool| tool.name).collect();
-        // `validate_ui` é sempre exposta, mesmo sem ferramentas de dados.
-        assert_eq!(names, vec!["fetch_url", "validate_ui"]);
+        // `list_skills`, `read_skill` e `validate_ui` são sempre expostas; elas
+        // não entram no orçamento de ferramentas de dados.
+        assert_eq!(
+            names,
+            vec!["fetch_url", "list_skills", "read_skill", "validate_ui"]
+        );
     }
 
     #[test]

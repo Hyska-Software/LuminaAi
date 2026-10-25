@@ -1,4 +1,5 @@
-//! Settings, API keys and app info commands (implemented by the storage module).
+//! Settings, API keys, app info and code environment/skills commands
+//! (implemented by the storage module).
 
 use std::path::Path;
 use std::time::Duration;
@@ -7,7 +8,9 @@ use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::config;
-use crate::domain::{AppInfo, ProviderValidation, Settings, SettingsView};
+use crate::domain::{
+    AppInfo, CodeEnvironmentStatus, ProviderValidation, Settings, SettingsView,
+};
 use crate::state::AppState;
 
 fn to_error(error: impl std::fmt::Display) -> String {
@@ -98,6 +101,41 @@ pub fn open_data_dir(app: AppHandle) -> Result<(), String> {
     app.opener()
         .open_path(dir.to_string_lossy().to_string(), None::<&str>)
         .map_err(|error| format!("falha ao abrir a pasta de dados: {error}"))
+}
+
+/* ------------------------------------------------------------------ */
+/* Code environment & skills                                           */
+/* ------------------------------------------------------------------ */
+
+/// Detects Python/Node, optional packages and available skills.
+///
+/// The detection spawns interpreter processes (`--version`, `find_spec`), so it
+/// runs on a blocking thread instead of the async IPC executor.
+#[tauri::command]
+pub async fn get_code_environment(app: AppHandle) -> Result<CodeEnvironmentStatus, String> {
+    let data_dir = config::data_dir(&app).map_err(to_error)?;
+    let settings = config::load_settings(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::tools::code_exec::environment_status(&data_dir, &settings)
+    })
+    .await
+    .map_err(|error| format!("falha ao verificar o ambiente de código: {error}"))
+}
+
+/// Opens `<app-data>/skills` (the user skills folder) in the OS file manager,
+/// creating it first so the folder always exists when the explorer opens.
+#[tauri::command]
+pub fn open_skills_dir(app: AppHandle) -> Result<(), String> {
+    let dir = config::data_dir(&app).map_err(to_error)?.join("skills");
+    std::fs::create_dir_all(&dir).map_err(|error| {
+        format!(
+            "falha ao criar a pasta de skills ({}): {error}",
+            dir.display()
+        )
+    })?;
+    app.opener()
+        .open_path(dir.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|error| format!("falha ao abrir a pasta de skills: {error}"))
 }
 
 /* ------------------------------------------------------------------ */

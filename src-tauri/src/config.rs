@@ -44,6 +44,26 @@ pub fn secrets_path(app: &AppHandle) -> PathBuf {
 /* Settings                                                            */
 /* ------------------------------------------------------------------ */
 
+/// Limites do tempo máximo de execução de código (`codeTimeoutSecs`), expostos
+/// no slider da tela de configuração e aplicados também pelo `run_code`.
+pub const CODE_TIMEOUT_MIN_SECS: u32 = 10;
+pub const CODE_TIMEOUT_MAX_SECS: u32 = 600;
+
+/// Normaliza a lista de skills desativadas vinda do disco ou do renderer:
+/// `trim`, descarta entradas vazias, remove duplicatas e ordena (a comparação
+/// com o catálogo é por nome canônico). `skills_panel_enabled` é booleano e não
+/// precisa de transformação.
+pub(crate) fn normalize_disabled_skills(names: Vec<String>) -> Vec<String> {
+    let mut names: Vec<String> = names
+        .into_iter()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
 /// Clamp/repair values coming from disk or from the renderer so the UI never
 /// has to deal with out-of-range settings.
 fn normalize_settings(mut settings: Settings) -> Settings {
@@ -82,6 +102,12 @@ fn normalize_settings(mut settings: Settings) -> Settings {
         Some(value) => settings.temperature = Some(value.clamp(0.0, 2.0)),
         None => {}
     }
+    settings.code_timeout_secs = settings
+        .code_timeout_secs
+        .clamp(CODE_TIMEOUT_MIN_SECS, CODE_TIMEOUT_MAX_SECS);
+    settings.code_python_path = settings.code_python_path.trim().to_string();
+    settings.code_node_path = settings.code_node_path.trim().to_string();
+    settings.disabled_skills = normalize_disabled_skills(std::mem::take(&mut settings.disabled_skills));
     settings
 }
 
@@ -332,6 +358,17 @@ mod tests {
             default_provider: "  ".into(),
             default_model: String::new(),
             temperature: Some(9.0),
+            code_execution_enabled: true,
+            code_timeout_secs: 5_000,
+            code_python_path: "  C:\\Python313\\python.exe  ".into(),
+            code_node_path: "   ".into(),
+            skills_panel_enabled: false,
+            disabled_skills: vec![
+                "  zeta ".into(),
+                "pdf".into(),
+                "pdf".into(),
+                String::new(),
+            ],
             ..Settings::default()
         };
         let normalized = normalize_settings(settings);
@@ -344,6 +381,12 @@ mod tests {
         assert_eq!(normalized.default_provider, "opencode-go");
         assert_eq!(normalized.default_model, "deepseek-v4.1-flash");
         assert_eq!(normalized.temperature, Some(2.0));
+        assert!(normalized.code_execution_enabled);
+        assert_eq!(normalized.code_timeout_secs, CODE_TIMEOUT_MAX_SECS);
+        assert_eq!(normalized.code_python_path, "C:\\Python313\\python.exe");
+        assert_eq!(normalized.code_node_path, "");
+        assert!(!normalized.skills_panel_enabled);
+        assert_eq!(normalized.disabled_skills, vec!["pdf", "zeta"]);
     }
 
     #[test]
@@ -351,10 +394,95 @@ mod tests {
         let settings = Settings {
             max_steps: 0,
             font_scale: 0.1,
+            code_timeout_secs: 1,
             ..Settings::default()
         };
         let normalized = normalize_settings(settings);
         assert_eq!(normalized.max_steps, 1);
         assert_eq!(normalized.font_scale, 0.85);
+        assert_eq!(normalized.code_timeout_secs, CODE_TIMEOUT_MIN_SECS);
+    }
+
+    #[test]
+    fn code_settings_default_to_safe_values() {
+        let defaults = Settings::default();
+        // Execução de código é opt-in: default desligado.
+        assert!(!defaults.code_execution_enabled);
+        assert_eq!(defaults.code_timeout_secs, 120);
+        // Vazio significa auto-detecção do interpretador no PATH.
+        assert!(defaults.code_python_path.is_empty());
+        assert!(defaults.code_node_path.is_empty());
+    }
+
+    #[test]
+    fn legacy_settings_file_without_code_fields_uses_defaults() {
+        // `settings.json` antigo, de antes dos campos de execução de código.
+        let raw = r#"{"theme":"dark","maxSteps":10,"webSearchEnabled":false}"#;
+        let parsed: Settings = serde_json::from_str(raw).expect("desserializar settings antigos");
+        let normalized = normalize_settings(parsed);
+        assert_eq!(normalized.theme, "dark");
+        assert_eq!(normalized.max_steps, 10);
+        assert!(!normalized.web_search_enabled);
+        assert!(!normalized.code_execution_enabled);
+        assert_eq!(normalized.code_timeout_secs, 120);
+        assert_eq!(normalized.code_python_path, "");
+        assert_eq!(normalized.code_node_path, "");
+    }
+
+    #[test]
+    fn skill_settings_default_to_safe_values() {
+        let defaults = Settings::default();
+        // O item "Skills" da sidebar aparece por padrão.
+        assert!(defaults.skills_panel_enabled);
+        assert!(defaults.disabled_skills.is_empty());
+    }
+
+    #[test]
+    fn normalizes_disabled_skills_list() {
+        let settings = Settings {
+            disabled_skills: vec![
+                " zeta".into(),
+                "alfa".into(),
+                "alfa ".into(),
+                String::new(),
+                "   ".into(),
+            ],
+            ..Settings::default()
+        };
+        let normalized = normalize_settings(settings);
+        assert_eq!(normalized.disabled_skills, vec!["alfa", "zeta"]);
+        // Sem transformação: o switch do painel é preservado.
+        assert!(normalized.skills_panel_enabled);
+    }
+
+    #[test]
+    fn legacy_settings_file_without_skill_fields_uses_defaults() {
+        // `settings.json` antigo, de antes da gestão de skills.
+        let raw = r#"{"theme":"light","codeExecutionEnabled":true}"#;
+        let parsed: Settings = serde_json::from_str(raw).expect("desserializar settings antigos");
+        let normalized = normalize_settings(parsed);
+        assert!(normalized.skills_panel_enabled);
+        assert!(normalized.disabled_skills.is_empty());
+        assert!(normalized.code_execution_enabled);
+    }
+
+    #[test]
+    fn code_timeout_accepts_boundaries() {
+        let settings = Settings {
+            code_timeout_secs: CODE_TIMEOUT_MIN_SECS,
+            ..Settings::default()
+        };
+        assert_eq!(
+            normalize_settings(settings).code_timeout_secs,
+            CODE_TIMEOUT_MIN_SECS
+        );
+        let settings = Settings {
+            code_timeout_secs: CODE_TIMEOUT_MAX_SECS,
+            ..Settings::default()
+        };
+        assert_eq!(
+            normalize_settings(settings).code_timeout_secs,
+            CODE_TIMEOUT_MAX_SECS
+        );
     }
 }

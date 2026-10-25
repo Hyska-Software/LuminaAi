@@ -27,6 +27,12 @@ pub async fn run_turn(
         http: state.http.clone(),
         search_http: state.search_http.clone(),
         catalog: state.catalog.clone(),
+        // Produção resolve o data dir pelo AppHandle; o campo existe para os
+        // testes do harness (sem Tauri) apontarem para um diretório temporário.
+        data_dir: None,
+        // `None` = repositórios padrão de skills (Agent Skills/Codex/Claude/
+        // OpenCode) resolvidos a partir do home do usuário.
+        skills_roots: None,
         streamer: None,
         api_key_override: None,
     };

@@ -6,9 +6,11 @@ import { ChatView } from '@/components/chat/ChatView';
 import { SettingsDialog } from '@/components/settings/SettingsDialog';
 import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
 import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
+import { SkillsView } from '@/components/skills';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { TooltipProvider } from '@/components/ui';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { SplashScreen } from '@/components/SplashScreen';
 
@@ -53,6 +55,7 @@ export default function App() {
   const initializing = useAppStore((state) => state.initializing);
   const error = useAppStore((state) => state.error);
   const theme = useUiStore((state) => state.theme);
+  const activeView = useUiStore((state) => state.activeView);
   const settingsTheme = useAppStore((state) => state.settings.theme);
   const fontScale = useAppStore((state) => state.settings.fontScale);
   const reduceMotion = useAppStore((state) => state.settings.reduceMotion);
@@ -133,6 +136,11 @@ export default function App() {
           ui.closeArtifactPanel();
           return;
         }
+        // Skills is a main view, not an overlay: Escape returns to the chat.
+        if (ui.activeView === 'skills') {
+          ui.setActiveView('chat');
+          return;
+        }
         if (useChatStore.getState().streaming) {
           void useChatStore.getState().stop();
         }
@@ -188,7 +196,16 @@ export default function App() {
     <TooltipProvider delayDuration={280}>
       <ErrorBoundary>
         <AppShell>
-          <ChatView />
+          {/* Chat stays mounted (draft/scroll preserved) while Skills replaces it. */}
+          <div
+            className={cn(
+              'min-h-0 flex-1 flex-col',
+              activeView === 'chat' ? 'flex h-full' : 'hidden',
+            )}
+          >
+            <ChatView />
+          </div>
+          {activeView === 'skills' ? <SkillsView /> : null}
         </AppShell>
         <SettingsDialog />
         <ModelPickerDialog />

@@ -167,10 +167,41 @@ Fatos descobertos por sondagem (ver `docs/MODELS.md`):
 | `web_search` | busca no DuckDuckGo (HTML/lite) + fallback Bing; retorna até 8 resultados com título, URL e snippet | JSON compacto + citações para a UI |
 | `fetch_url` | GET + extração de conteúdo legível (scraper), limite de ~120k chars, respeita `text/html` | texto com metadados e URL final |
 | `create_file` | cria artefato (md, html, csv, json, código, svg) no disco e registra no DB | confirmação + id do artefato |
+| `run_code` | executa um script Python/Node num workspace isolado (`code-runs/`), com timeout, limites e cancelamento; os arquivos gerados viram artefatos | resumo + exit code + cauda de stdout/stderr + ids dos artefatos |
+| `list_skills` / `read_skill` | lista as skills locais (embutidas + usuário) e carrega instruções/scripts de uma skill | JSON com descrição, `baseDir` e arquivos |
 | `validate_ui` | valida um bloco ` ```ui ` (JSON declarativo) contra o contrato: normaliza, valida e roda o lint de design | `{ ok, errors, warnings, normalized }` |
 
-`validate_ui` está sempre disponível e não conta no orçamento de ferramentas de
-dados — é o mecanismo de autovalidação do agente para a UI generativa (ver §9).
+`validate_ui`, `list_skills` e `read_skill` estão sempre disponíveis e não contam
+no orçamento de ferramentas de dados. `run_code` é **opt-in**:
+`Settings::code_execution_enabled` (default `false`) e o harness aplica o gate
+em `TurnOptions::run_code`; sem ele a ferramenta não entra na definição enviada
+ao modelo.
+
+### 8.2 Execução de código e skills
+
+`run_code` executa o script em `<app-data>/code-runs/<uuid>/`, com `stdin`
+fechado, `stdout/stderr` limitados a 64 KB cada, timeout (5 s–10 min) e morte da
+árvore de processos no cancelamento/timeout. Variáveis de ambiente sensíveis
+(`*API_KEY*`, `*TOKEN*`, `*SECRET*`) são removidas; as chaves do app nunca são
+injetadas. Arquivos novos do workspace (até 20, 25 MB cada / 64 MB no total) são
+gravados em `artifacts/<id>/` pelo mesmo writer do `create_file`
+(`tools::artifacts`) e viram artefatos mesmo quando o script termina com erro.
+
+Skills são diretórios com `SKILL.md` (frontmatter `name`/`description` +
+instruções) opcionalmente com `scripts/`. O backend materializa as skills
+embutidas (`src-tauri/skills/**`, via `include_dir!`) em
+`<app-data>/skills-bundled/` e varre `<app-data>/skills/` (usuário vence por
+nome). Além da pasta do Lumina, o catálogo lê **em modo somente leitura** os
+repositórios padrão usados por outros agentes: `~/.agents/skills` (Agent
+Skills), `~/.codex/skills`/`CODEX_HOME`, `~/.claude/skills`/`CLAUDE_CONFIG_DIR`
+e `~/.config/opencode/skills`/XDG (precedência: Lumina > agents > codex >
+claude > opencode > embutidas). O catálogo entra no system prompt e
+`read_skill` devolve `instructions` + `baseDir` + lista de arquivos,
+permitindo ao agente rodar o helper stdlib da skill por `run_code`. Skills
+desativadas (`Settings.disabled_skills`) são filtradas do prompt, de
+`list_skills` e de `read_skill`; a gestão (ativar/desativar; excluir apenas as
+do Lumina) fica na sidebar e em Configurações → Ferramentas. Desenho completo,
+limites e segurança: **`docs/FILES.md`**.
 
 ### 8.1 Markdown do chat
 
@@ -302,7 +333,26 @@ Limite de 400k caracteres por documento, truncamento sinalizado. Anexos são cop
 
 ## 11. Artefatos
 
-`create_file` grava o arquivo em `artifacts/<id>/<nome>`, persiste metadados e emite `artifact_created`. A UI mostra um card no chat e um painel lateral (Canvas-like) com preview por tipo (código com syntax highlight, markdown renderizado, HTML/SVG em iframe sandbox, CSV em tabela, imagem) e ações "Salvar como…" (dialog nativo) e "Abrir".
+`create_file` grava o arquivo em `artifacts/<id>/<nome>`, persiste metadados e
+emite `artifact_created`. A UI mostra um card no chat e um painel lateral
+(Canvas-like) com preview por tipo e ações "Salvar como…" (dialog nativo) e
+"Abrir". O writer é compartilhado com `run_code` (`tools::artifacts`), que
+aceita **bytes** — permitindo artefatos binários (PDF/DOCX/XLSX/PPTX/imagens).
+
+| Tipo | Criação | Preview |
+| --- | --- | --- |
+| md, txt, html, csv, json, código | `create_file` | texto/código, markdown, HTML sandbox, tabela CSV |
+| SVG | `create_file` | SVG sanitizado |
+| PDF | `run_code` + skill `pdf` | **pdf.js** (páginas em canvas, zoom e navegação) |
+| DOCX | `run_code` + skill `office-docx` | OOXML → HTML (`documents::preview`) em iframe sandbox |
+| XLSX | `run_code` + skill `office-xlsx` | grade com abas por planilha (`calamine`) |
+| PPTX | `run_code` + skill `office-pptx` | cartões de slide (título + texto, prévia simplificada) |
+| PNG/JPG/WebP/GIF | `run_code` (Pillow quando instalado) | imagem base64 nativa |
+| Outros | `run_code` | cartão binário + Salvar/Abrir |
+
+As prévias estruturadas vêm do comando `get_artifact_preview` e nunca injetam
+HTML do documento sem sanitização (DOCX vira HTML allowlist dentro de iframe
+`sandbox`; o PDF é desenhado pelo pdf.js). Formatos e limites: `docs/FILES.md`.
 
 ## 12. IPC
 
@@ -314,8 +364,9 @@ open_data_dir, reset_app_data, get_catalog, refresh_catalog, list_remote_models,
 list_conversations, create_conversation, get_conversation, rename_conversation,
 delete_conversation, set_conversation_pinned, search_conversations,
 truncate_conversation, export_conversation, import_attachments, get_attachment,
-delete_attachment, list_artifacts, get_artifact_content, save_artifact,
-open_artifact, delete_artifact, run_turn, cancel_turn
+delete_attachment, list_artifacts, get_artifact_content, get_artifact_preview,
+save_artifact, open_artifact, delete_artifact, get_code_environment,
+open_skills_dir, get_skills, set_skill_enabled, delete_skill, run_turn, cancel_turn
 ```
 
 ## 13. Segurança
@@ -326,6 +377,11 @@ open_artifact, delete_artifact, run_turn, cancel_turn
 - Links externos abrem no navegador padrão via plugin-opener, nunca no webview.
 - Markdown com HTML cru passa por sanitizador allowlist (`rehypeSafeHtml`): sem `script`/`style`/`iframe`/eventos/`style` inline, classes e `data-*` fora da allowlist, e URLs restritas a `http(s)`, `mailto:` e âncoras internas. React nunca injeta o markdown via `innerHTML`.
 - Toda saída de ferramentas é tratada como dados; o system prompt instrui o modelo a ignorar instruções vindas de páginas web.
+- **Execução de código** (`run_code`) é opt-in (default desligado), roda com o
+  interpretador e as permissões do usuário (não é sandbox de SO), em workspace
+  dedicado, com timeout, cancelamento, teto de saída/arquivos e ambiente sem
+  segredos. Riscos e mitigações: `docs/FILES.md` §8.
+- Scripts de skills e código do agente nunca recebem as API keys do app.
 
 ## 14. Build
 
@@ -341,8 +397,8 @@ pnpm app:dev            # dev com HMR
 
 A verificação é feita por testes automatizados — unitários e de integração — e por build:
 
-1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo), a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`) e o **renderer de Markdown** (matriz CommonMark/GFM, math, notas de rodapé, alertas, HTML sanitizado e vetores de segurança).
-2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui`, o system prompt gerado do contrato, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), SQLite (conversas/mensagens/anexos/artefatos/usage/`trace` + migração de bancos antigos), settings/segredos, exportação e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor, cancelamento e o trace por passo.
+1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo), a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`), o **renderer de Markdown** (matriz CommonMark/GFM, math, notas de rodapé, alertas, HTML sanitizado e vetores de segurança) e as **prévias de artefatos** (PDF via pdf.js mockado, DOCX/XLSX/PPTX por JSON/HTML, imagem e fallback binário) + tela de ambiente de código/skills.
+2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui`, o system prompt gerado do contrato, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), **prévias DOCX→HTML/XLSX/PPTX**, SQLite (conversas/mensagens/anexos/artefatos/usage/`trace` + migração de bancos antigos), settings/segredos, exportação, **execução de código (interpretador, timeout, cancelamento, coleta de artefatos, sem interpretador)**, **skills embutidas/usuário (frontmatter, precedência, scripts→preview)** e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor, cancelamento e o trace por passo.
 3. **Integração com o gateway real** (testes `#[ignore]`, executados sob demanda): streaming nos 4 protocolos, tool call + replay de `provider_state`, fallback de protocolo, mapeamento de 401, cancelamento e o caso canônico **DeepSeek V4.1 Flash com esforço máximo**.
 4. **Build**: `pnpm typecheck`, `pnpm build` e `pnpm tauri build --no-bundle` (artefato em `src-tauri/target/release/lumina.exe`).
 5. **Manual (release)**: abrir o app e validar visualmente os fluxos principais.
@@ -357,3 +413,6 @@ A verificação é feita por testes automatizados — unitários e de integraç�
 | 4 | UI generativa declarativa | React dinâmico via eval | segurança e determinismo |
 | 5 | Protocolo neutro + adaptadores | SDK único (ai-sdk) | controle de SSE, headers e reasoning por protocolo |
 | 6 | Zustand | Redux/Context | leveza e atualizações granulares em streaming |
+| 7 | Execução de código **opt-in** com workspace + timeout | execução livre por padrão / sandbox de SO | risco de prompt injection; sandbox completo não cabe no escopo local-first v1 |
+| 8 | Skills em arquivos Markdown + scripts | tool nativa por formato Office | extensível pelo usuário, sem pip obrigatório e com instruções versionáveis |
+| 9 | Preview de PDF com pdf.js | viewer nativo do WebView2 / conversão via LibreOffice | comportamento igual em Windows/macOS/Linux e testável; sem dependência externa |

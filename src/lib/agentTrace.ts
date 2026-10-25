@@ -151,6 +151,12 @@ function buildToolGroup(tools: ToolCallRecord[]): ToolGroup {
       return fileGroup(tools, status, errors);
     case 'validate_ui':
       return validationGroup(tools, status, errors);
+    case 'run_code':
+      return codeGroup(tools, status, errors);
+    case 'list_skills':
+      return skillsListGroup(tools, status, errors);
+    case 'read_skill':
+      return readSkillGroup(tools, status, errors);
     default:
       return {
         name,
@@ -239,6 +245,104 @@ function validationGroup(
     label:
       tools.length > 1 ? `Validou a interface ${tools.length} vezes` : 'Validou a interface',
   };
+}
+
+/**
+ * `run_code` rows: the harness summary looks like "python · 2 arquivos · 1.2s".
+ * The duration is dropped (the timeline header already shows the total time) and
+ * the remaining detail is appended to the done label so the user knows what ran.
+ */
+function codeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const base = {
+    name: 'run_code',
+    tools,
+    status,
+    total: tools.length,
+    domains: [],
+    pages: [],
+    files: [],
+    errors,
+  };
+  if (status === 'running') return { ...base, label: 'Executando código…' };
+  if (status === 'error') return { ...base, label: 'A execução de código falhou' };
+  const detail = codeSummaryDetail(tools[tools.length - 1]?.summary);
+  return { ...base, label: detail ? `Executou código · ${detail}` : 'Executou código' };
+}
+
+function skillsListGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const base = {
+    name: 'list_skills',
+    tools,
+    status,
+    total: tools.length,
+    domains: [],
+    pages: [],
+    files: [],
+    errors,
+  };
+  if (status === 'running') return { ...base, label: 'Consultando skills…' };
+  if (status === 'error') return { ...base, label: 'A consulta das skills falhou' };
+  return { ...base, label: 'Consultou as skills disponíveis' };
+}
+
+function readSkillGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const names = uniqueStrings(
+    tools.map(readSkillName).filter((name): name is string => name !== null),
+  );
+  const base = {
+    name: 'read_skill',
+    tools,
+    status,
+    total: tools.length,
+    domains: [],
+    pages: [],
+    files: [],
+    errors,
+  };
+  if (status === 'error') return { ...base, label: 'Não foi possível ler a skill' };
+  if (status === 'running') {
+    if (names.length === 1) return { ...base, label: `Lendo skill ${names[0]}…` };
+    if (names.length > 1) return { ...base, label: `Lendo ${names.length} skills…` };
+    return { ...base, label: 'Lendo skill…' };
+  }
+  if (names.length === 1) return { ...base, label: `Leu a skill ${names[0]}` };
+  if (names.length > 1) return { ...base, label: `Leu ${names.length} skills` };
+  return { ...base, label: 'Leu uma skill' };
+}
+
+/** Short detail of a `run_code` summary: drops the duration segment. */
+function codeSummaryDetail(summary?: string | null): string | null {
+  const raw = summary?.trim();
+  if (!raw) return null;
+  const parts = raw
+    .split('·')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0 && !isDurationPart(part));
+  if (parts.length === 0) return null;
+  return truncate(parts.slice(0, 2).join(' · '), 80);
+}
+
+function isDurationPart(part: string): boolean {
+  return /^\d+(?:[.,]\d+)?\s*(?:ms|s|seg|segs|segundos?|min|mins|minutos?)$/i.test(part);
+}
+
+function readSkillName(tool: ToolCallRecord): string | null {
+  const args = safeJsonParse<{ name?: unknown } | null>(tool.arguments, null);
+  if (!args || typeof args !== 'object' || typeof args.name !== 'string') return null;
+  const name = args.name.trim();
+  return name ? truncate(name, 64) : null;
 }
 
 function defaultLabel(name: string, count: number, status: ToolGroupStatus): string {

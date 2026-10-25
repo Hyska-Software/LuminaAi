@@ -6,13 +6,16 @@ import type {
   AppInfo,
   Artifact,
   ArtifactContent,
+  ArtifactPreview,
   AttachmentInfo,
   CatalogView,
+  CodeEnvironmentStatus,
   Conversation,
   ConversationDetail,
   ProviderValidation,
   Settings,
   SettingsView,
+  SkillSummary,
   TurnEvent,
   TurnPayload,
   TurnResult,
@@ -29,6 +32,14 @@ export const api = {
     invoke<ProviderValidation>('validate_provider', { providerId }),
   openDataDir: () => invoke<void>('open_data_dir'),
   resetAppData: () => invoke<void>('reset_app_data'),
+  getCodeEnvironment: () => invoke<CodeEnvironmentStatus>('get_code_environment'),
+  openSkillsDir: () => invoke<void>('open_skills_dir'),
+
+  /* -------- skills (gestão) -------- */
+  getSkills: () => invoke<SkillSummary[]>('get_skills'),
+  setSkillEnabled: (name: string, enabled: boolean) =>
+    invoke<SkillSummary[]>('set_skill_enabled', { name, enabled }),
+  deleteSkill: (name: string) => invoke<SkillSummary[]>('delete_skill', { name }),
 
   /* -------- catalog -------- */
   getCatalog: () => invoke<CatalogView>('get_catalog'),
@@ -68,6 +79,8 @@ export const api = {
     invoke<Artifact[]>('list_artifacts', { conversationId }),
   getArtifactContent: (id: string) =>
     invoke<ArtifactContent | null>('get_artifact_content', { id }),
+  getArtifactPreview: (id: string) =>
+    invoke<ArtifactPreview | null>('get_artifact_preview', { id }),
   saveArtifact: (id: string, suggestedName?: string) =>
     invoke<string | null>('save_artifact', { id, suggestedName: suggestedName ?? null }),
   openArtifact: (id: string) => invoke<void>('open_artifact', { id }),

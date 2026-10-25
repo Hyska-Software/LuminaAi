@@ -141,6 +141,7 @@ function turnOptionsFromSettings(overrides?: Partial<TurnOptions>): TurnOptions 
   return {
     webSearch: settings.webSearchEnabled,
     createFiles: settings.fileCreationEnabled,
+    runCode: settings.codeExecutionEnabled,
     maxSteps: settings.maxSteps,
     temperature: settings.temperature ?? null,
     systemPromptOverride: null,
@@ -514,6 +515,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
     refreshConversations: refreshList,
 
     openConversation: async (id) => {
+      // Navigating to a conversation always leaves the skills view.
+      useUiStore.getState().setActiveView('chat');
       if (get().activeId === id && get().messagesByConversation[id]) return;
       set({ activeId: id, loadingConversationId: id });
       try {
@@ -538,6 +541,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
     },
 
     startNewConversation: async () => {
+      // "Novo chat" always returns to the chat surface.
+      useUiStore.getState().setActiveView('chat');
       // Leaving a started conversation resets the composer to the configured
       // default model (the previous conversation's model is locked to it).
       if (selectModelLocked(get())) {

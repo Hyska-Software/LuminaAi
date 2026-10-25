@@ -10,9 +10,13 @@ Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usan
 - **Escolha de modelo e modo de pensamento** por modelo (esforço, orçamento de tokens ou desligado), com catálogo de 120+ modelos dos dois provedores.
 - **Análise de documentos**: PDF, DOCX, XLSX/CSV, PPTX, texto/código e imagens (visão).
 - **Busca na web** com citações de fontes e leitura de páginas.
-- **Criação de arquivos** (artefatos) com preview e "Salvar como…" nativo.
+- **Criação de arquivos** (artefatos) com preview e "Salvar como…" nativo — Markdown, HTML, SVG, CSV, JSON e código.
+- **Execução de código (opt-in)**: o agente escreve e roda scripts Python/Node num workspace isolado (timeout, limites e cancelamento) e entrega os arquivos gerados como artefatos — PDF, DOCX, XLSX, PPTX e imagens.
+- **Skills locais**: instruções em Markdown (`SKILL.md`) com scripts prontos (stdlib) que orientam o agente na geração de cada formato; dá para adicionar skills próprias na pasta de dados.
+- **Detecção de skills de outros agentes**: lê automaticamente os repositórios padrão — `~/.agents/skills`, `~/.codex/skills`/`CODEX_HOME`, `~/.claude/skills` e `~/.config/opencode/skills`/XDG — somente leitura, com a origem na UI e opção de desativar.
+- **Gerenciamento de skills**: item na barra lateral abre o painel para ver, ativar/desativar e excluir skills (o item pode ser escondido em Configurações → Ferramentas).
 - **UI generativa no chat**: o modelo escreve componentes (cards, tabelas, gráficos, timelines, tabs…) renderizados com segurança.
-- **Artefatos em painel lateral** estilo canvas, com preview por tipo.
+- **Artefatos em painel lateral** estilo canvas, com preview por tipo: PDF (pdf.js, páginas/zoom), DOCX (HTML sandbox), XLSX (abas + grade), PPTX (slides), imagens, markdown/código/CSV.
 - **Histórico local** (SQLite), busca, fixar, renomear, exportar.
 - **UI/UX** inspirada no ChatGPT: sidebar, composer flutuante, paleta de comandos, temas claro/escuro, atalhos.
 
@@ -32,6 +36,7 @@ Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usan
 - Rust (toolchain MSVC no Windows)
 - WebView2 (Windows 10/11)
 - Uma API key do [OpenCode Console](https://opencode.ai/console) (Go ou Zen). A chave existente do OpenCode CLI é detectada automaticamente.
+- **Opcional**: Python 3.9+ (e/ou Node) para execução de código. Os helpers das skills usam somente a stdlib; pacotes como `python-docx`, `openpyxl` e `Pillow` melhoram o resultado quando instalados (a tela Configurações → Ferramentas mostra o ambiente detectado).
 
 ## Desenvolvimento
 
@@ -57,7 +62,7 @@ pnpm tauri build --no-bundle   # src-tauri/target/release/lumina.exe
 O projeto é verificado por testes automatizados (TDD), sem automação de UI:
 
 ```bash
-pnpm test                                     # Vitest: utils, catálogo, UI generativa, store do chat e timeline de passos
+pnpm test                                     # Vitest: utils, catálogo, UI generativa, store do chat, timeline, previews de artefatos
 cd src-tauri && cargo test --lib              # Rust: providers, harness, tools, documents, db, comandos
 ```
 
@@ -80,10 +85,11 @@ assets/                  logos oficiais; `pnpm tauri icon app-icon.png` regenera
 public/brand/            vetores da marca usados na UI e no favicon
 src/                     renderer React (componentes, stores, genui)
 src-tauri/src/           core Rust (providers, harness, tools, documents, db)
-docs/                    arquitetura, design, modelos e screenshots
+src-tauri/skills/        skills embutidas (SKILL.md + scripts stdlib)
+docs/                    arquitetura, design, modelos, arquivos/código e screenshots
 ```
 
-Documentação: [Arquitetura](docs/ARCHITECTURE.md) · [Design](docs/DESIGN.md) · [Modelos & Provedores](docs/MODELS.md).
+Documentação: [Arquitetura](docs/ARCHITECTURE.md) · [Arquivos, código e skills](docs/FILES.md) · [Design](docs/DESIGN.md) · [Modelos & Provedores](docs/MODELS.md).
 
 ## Privacidade
 

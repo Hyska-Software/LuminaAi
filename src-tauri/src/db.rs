@@ -266,6 +266,7 @@ fn artifact_kind_to_str(kind: &ArtifactKind) -> &'static str {
         ArtifactKind::Pdf => "pdf",
         ArtifactKind::Docx => "docx",
         ArtifactKind::Xlsx => "xlsx",
+        ArtifactKind::Pptx => "pptx",
         ArtifactKind::Binary => "binary",
     }
 }
@@ -283,6 +284,7 @@ fn artifact_kind_from_str(raw: &str) -> ArtifactKind {
         "pdf" => ArtifactKind::Pdf,
         "docx" => ArtifactKind::Docx,
         "xlsx" => ArtifactKind::Xlsx,
+        "pptx" => ArtifactKind::Pptx,
         _ => ArtifactKind::Binary,
     }
 }

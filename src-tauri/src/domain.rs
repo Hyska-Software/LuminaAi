@@ -272,6 +272,9 @@ pub const MAX_STEPS_DEFAULT: u32 = 64;
 pub struct TurnOptions {
     pub web_search: bool,
     pub create_files: bool,
+    /// Execução de código (`run_code`); o harness ainda aplica o gate global
+    /// `Settings::code_execution_enabled`.
+    pub run_code: bool,
     pub max_steps: u32,
     pub temperature: Option<f32>,
     pub system_prompt_override: Option<String>,
@@ -284,6 +287,7 @@ impl Default for TurnOptions {
         Self {
             web_search: true,
             create_files: true,
+            run_code: true,
             max_steps: MAX_STEPS_DEFAULT,
             temperature: None,
             system_prompt_override: None,
@@ -341,6 +345,7 @@ pub enum ArtifactKind {
     Pdf,
     Docx,
     Xlsx,
+    Pptx,
     Binary,
 }
 
@@ -357,6 +362,10 @@ impl ArtifactKind {
             "pdf" => return Self::Pdf,
             "docx" => return Self::Docx,
             "xlsx" | "xls" | "ods" => return Self::Xlsx,
+            "pptx" | "ppt" | "odp" => return Self::Pptx,
+            "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "avif" | "tif" | "tiff" => {
+                return Self::Image
+            }
             _ => {}
         }
         if mime.starts_with("image/") {
@@ -415,6 +424,85 @@ pub struct ArtifactContent {
 }
 
 /* ------------------------------------------------------------------ */
+/* Code execution / skills / previews                                  */
+/* ------------------------------------------------------------------ */
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct InterpreterInfo {
+    pub path: String,
+    pub version: String,
+    /// settings | path
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CodePackageStatus {
+    pub name: String,
+    pub available: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SkillSummary {
+    pub name: String,
+    pub description: String,
+    /// bundled | user | agents | codex | claude | opencode
+    pub source: String,
+    /// Desativada em Configurações → Skills; o agente não a vê no prompt nem
+    /// nas ferramentas `list_skills`/`read_skill`.
+    pub enabled: bool,
+    /// Apenas skills do Lumina (`source == user`) podem ser excluídas pela
+    /// interface; skills de repositórios externos são somente leitura.
+    pub deletable: bool,
+}
+
+/// Status do ambiente de código exibido em Configurações → Ferramentas.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CodeEnvironmentStatus {
+    pub enabled: bool,
+    pub python: Option<InterpreterInfo>,
+    pub node: Option<InterpreterInfo>,
+    pub packages: Vec<CodePackageStatus>,
+    /// Comando sugerido para instalar os pacotes opcionais.
+    pub install_hint: String,
+    pub skills: Vec<SkillSummary>,
+}
+
+/// Prévia estruturada de um artefato binário (docx/xlsx/pptx).
+///
+/// O PDF não aparece aqui: o renderer o desenha com pdf.js a partir do
+/// conteúdo base64 (`get_artifact_content`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ArtifactPreview {
+    Docx { html: String },
+    Xlsx { sheets: Vec<SheetPreview> },
+    Pptx { slides: Vec<SlidePreview> },
+    Unsupported { reason: String },
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SheetPreview {
+    pub name: String,
+    pub rows: Vec<Vec<String>>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SlidePreview {
+    pub index: u32,
+    pub texts: Vec<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+
+/* ------------------------------------------------------------------ */
 /* Settings                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -437,6 +525,19 @@ pub struct Settings {
     pub temperature: Option<f32>,
     pub include_attachments: bool,
     pub auto_title: bool,
+    /// Opt-in: permite ao agente executar código (`run_code`) no computador.
+    pub code_execution_enabled: bool,
+    /// Tempo máximo de uma execução de código (segundos).
+    pub code_timeout_secs: u32,
+    /// Interpretador Python explícito; vazio = auto-detecção no PATH.
+    pub code_python_path: String,
+    /// Interpretador Node explícito; vazio = auto-detecção no PATH.
+    pub code_node_path: String,
+    /// Mostra o item "Skills" na barra lateral (o diálogo continua acessível
+    /// por Configurações → Ferramentas).
+    pub skills_panel_enabled: bool,
+    /// Nomes de skills desativadas; o agente as ignora no prompt e nas tools.
+    pub disabled_skills: Vec<String>,
 }
 
 impl Default for Settings {
@@ -458,6 +559,12 @@ impl Default for Settings {
             temperature: None,
             include_attachments: true,
             auto_title: true,
+            code_execution_enabled: false,
+            code_timeout_secs: 120,
+            code_python_path: String::new(),
+            code_node_path: String::new(),
+            skills_panel_enabled: true,
+            disabled_skills: Vec::new(),
         }
     }
 }

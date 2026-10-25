@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import * as Collapsible from '@radix-ui/react-collapsible';
 import {
   ArrowUpRight,
+  BookOpen,
   Brain,
   ChevronDown,
   FilePlus,
   FileText,
   Search,
   ShieldCheck,
+  SquareTerminal,
   TriangleAlert,
   Wrench,
   type LucideIcon,
@@ -43,6 +45,9 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   fetch_url: FileText,
   create_file: FilePlus,
   validate_ui: ShieldCheck,
+  run_code: SquareTerminal,
+  list_skills: BookOpen,
+  read_skill: BookOpen,
 };
 
 const MAX_DOMAINS = 5;

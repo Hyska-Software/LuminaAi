@@ -40,6 +40,12 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     temperature: null,
     includeAttachments: true,
     autoTitle: true,
+    codeExecutionEnabled: false,
+    codeTimeoutSecs: 120,
+    codePythonPath: '',
+    codeNodePath: '',
+    skillsPanelEnabled: true,
+    disabledSkills: [],
     ...overrides,
   };
 }

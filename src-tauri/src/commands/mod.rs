@@ -6,4 +6,5 @@ pub mod attachments;
 pub mod conversations;
 pub mod models;
 pub mod settings;
+pub mod skills;
 pub mod turn;

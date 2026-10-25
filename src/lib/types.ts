@@ -200,6 +200,8 @@ export interface ReasoningSelection {
 export interface TurnOptions {
   webSearch: boolean;
   createFiles: boolean;
+  /** Execução de código (`run_code`); o backend ainda aplica o gate global. */
+  runCode: boolean;
   maxSteps: number;
   temperature?: number | null;
   systemPromptOverride?: string | null;
@@ -265,6 +267,7 @@ export type ArtifactKind =
   | 'pdf'
   | 'docx'
   | 'xlsx'
+  | 'pptx'
   | 'binary';
 
 export interface Artifact {
@@ -283,6 +286,61 @@ export interface ArtifactContent {
   artifact: Artifact;
   content?: string | null;
   dataBase64?: string | null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Previews / code environment / skills                                */
+/* ------------------------------------------------------------------ */
+
+export interface SheetPreview {
+  name: string;
+  rows: string[][];
+  truncated: boolean;
+}
+
+export interface SlidePreview {
+  index: number;
+  texts: string[];
+  notes?: string | null;
+}
+
+/** Prévia estruturada de artefatos binários (PDF usa pdf.js no renderer). */
+export type ArtifactPreview =
+  | { kind: 'docx'; html: string }
+  | { kind: 'xlsx'; sheets: SheetPreview[] }
+  | { kind: 'pptx'; slides: SlidePreview[] }
+  | { kind: 'unsupported'; reason: string };
+
+export interface InterpreterInfo {
+  path: string;
+  version: string;
+  /** settings | path */
+  source: string;
+}
+
+export interface CodePackageStatus {
+  name: string;
+  available: boolean;
+}
+
+export interface SkillSummary {
+  name: string;
+  description: string;
+  /** bundled | user | agents | codex | claude | opencode */
+  source: string;
+  /** `false` quando a skill está desativada nas configurações. */
+  enabled: boolean;
+  /** Só skills do Lumina (`user`) podem ser excluídas; externas são somente leitura. */
+  deletable: boolean;
+}
+
+export interface CodeEnvironmentStatus {
+  enabled: boolean;
+  python?: InterpreterInfo | null;
+  node?: InterpreterInfo | null;
+  packages: CodePackageStatus[];
+  installHint: string;
+  skills: SkillSummary[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -308,6 +366,18 @@ export interface Settings {
   temperature?: number | null;
   includeAttachments: boolean;
   autoTitle: boolean;
+  /** Opt-in: permite ao agente executar código (`run_code`). */
+  codeExecutionEnabled: boolean;
+  /** Tempo máximo de uma execução de código (segundos). */
+  codeTimeoutSecs: number;
+  /** Interpretador Python explícito; vazio = auto-detecção. */
+  codePythonPath: string;
+  /** Interpretador Node explícito; vazio = auto-detecção. */
+  codeNodePath: string;
+  /** Mostra o item "Skills" na barra lateral. */
+  skillsPanelEnabled: boolean;
+  /** Nomes de skills desativadas; o agente as ignora. */
+  disabledSkills: string[];
 }
 
 export interface ProviderKeyStatus {

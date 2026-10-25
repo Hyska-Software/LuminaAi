@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { Download, Ellipsis, Pencil, Pin, PinOff, Search, Settings, SquarePen, Trash, X } from 'lucide-react';
+import { Download, Ellipsis, Pencil, Pin, PinOff, Search, Settings, Sparkles, SquarePen, Trash, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
@@ -181,7 +181,9 @@ export function Sidebar({ className, onClose }: SidebarProps) {
   const activeId = useChatStore((state) => state.activeId);
   const setCommandPaletteOpen = useUiStore((state) => state.setCommandPaletteOpen);
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
+  const activeView = useUiStore((state) => state.activeView);
   const appInfo = useAppStore((state) => state.appInfo);
+  const skillsPanelEnabled = useAppStore((state) => state.settings.skillsPanelEnabled);
   const isCompact = useIsCompact();
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -193,6 +195,11 @@ export function Sidebar({ className, onClose }: SidebarProps) {
 
   const handleNewChat = () => {
     void useChatStore.getState().startNewConversation();
+    if (isCompact) onClose?.();
+  };
+
+  const handleOpenSkills = () => {
+    useUiStore.getState().setActiveView('skills');
     if (isCompact) onClose?.();
   };
 
@@ -268,6 +275,26 @@ export function Sidebar({ className, onClose }: SidebarProps) {
           </IconButton>
         ) : null}
       </div>
+
+      {skillsPanelEnabled ? (
+        <button
+          type="button"
+          onClick={handleOpenSkills}
+          aria-label="Gerenciar skills"
+          aria-current={activeView === 'skills' ? 'page' : undefined}
+          className={cn(
+            'mx-3 mt-1 flex h-8 items-center gap-2 rounded-lg px-2 text-[13px]',
+            'transition-colors duration-150',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+            activeView === 'skills'
+              ? 'bg-surface-active text-foreground'
+              : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+          )}
+        >
+          <Sparkles className="size-4" />
+          <span>Skills</span>
+        </button>
+      ) : null}
 
       <button
         type="button"

@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 pub mod image;
 pub mod office;
 pub mod pdf;
+pub mod preview;
 pub mod text;
 
 /// Maximum number of characters kept per document (roughly 100k tokens).

@@ -7,6 +7,7 @@ import {
   FileText,
   FileType2,
   Globe,
+  Presentation,
   type LucideIcon,
 } from 'lucide-react';
 import type { Artifact, ArtifactKind } from '@/lib/types';
@@ -86,6 +87,12 @@ const META: Record<ArtifactKind, Omit<ArtifactKindMeta, 'kind'>> = {
     icon: FileSpreadsheet,
     tone: 'bg-success-soft text-success',
     description: 'Planilha Excel',
+  },
+  pptx: {
+    label: 'Apresentação',
+    icon: Presentation,
+    tone: 'bg-warning-soft text-warning',
+    description: 'Apresentação PowerPoint',
   },
   binary: {
     label: 'Arquivo',

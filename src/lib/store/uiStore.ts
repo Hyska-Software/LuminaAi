@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Artifact, ThemeMode } from '../types';
 
+/**
+ * Main content surface. `skills` replaces the chat column (the sidebar stays
+ * visible), so skill management never opens as a modal — docs/FILES.md §7.4.
+ */
+export type MainView = 'chat' | 'skills';
+
 interface UiState {
   theme: ThemeMode;
   sidebarOpen: boolean;
@@ -11,6 +17,7 @@ interface UiState {
   searchOpen: boolean;
   attachmentsOpen: boolean;
   artifactPanelOpen: boolean;
+  activeView: MainView;
   activeArtifactId: string | null;
   artifacts: Artifact[];
   fontScale: number;
@@ -24,6 +31,8 @@ interface UiState {
   setCommandPaletteOpen: (open: boolean) => void;
   setSearchOpen: (open: boolean) => void;
   setAttachmentsOpen: (open: boolean) => void;
+  /** Switches the main content between the chat and the skills manager. */
+  setActiveView: (view: MainView) => void;
   openArtifactPanel: (artifactId?: string | null) => void;
   closeArtifactPanel: () => void;
   setActiveArtifact: (artifactId: string | null) => void;
@@ -52,6 +61,7 @@ export const useUiStore = create<UiState>()(
       searchOpen: false,
       attachmentsOpen: false,
       artifactPanelOpen: false,
+      activeView: 'chat',
       activeArtifactId: null,
       artifacts: [],
       fontScale: 1,
@@ -68,6 +78,7 @@ export const useUiStore = create<UiState>()(
       setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
       setSearchOpen: (searchOpen) => set({ searchOpen }),
       setAttachmentsOpen: (attachmentsOpen) => set({ attachmentsOpen }),
+      setActiveView: (activeView) => set({ activeView }),
       openArtifactPanel: (artifactId) =>
         set((state) => ({
           artifactPanelOpen: true,
