@@ -1,7 +1,8 @@
-import { useState } from 'react';
 import { Plus } from 'lucide-react';
+import { citationDomain, MAX_INLINE_CITATIONS, uniqueCitations } from '@/lib/citations';
+import { useUiStore } from '@/lib/store';
 import type { Citation } from '@/lib/types';
-import { cn, hostnameOf, truncate } from '@/lib/utils';
+import { cn, truncate } from '@/lib/utils';
 import { openExternalUrl } from './external';
 
 export interface CitationChipsProps {
@@ -9,29 +10,22 @@ export interface CitationChipsProps {
   className?: string;
 }
 
-const MAX_VISIBLE = 6;
-
-/** Source chips for tool citations (DESIGN §6.3): domain + truncated title. */
+/**
+ * Source chips for tool citations (DESIGN §6.3): domain + truncated title, with
+ * at most `MAX_INLINE_CITATIONS` chips. The remaining sources are not expanded
+ * inline anymore — the "+ N fontes" button opens the sources side panel.
+ */
 export function CitationChips({ citations, className }: CitationChipsProps) {
-  const [expanded, setExpanded] = useState(false);
-  if (!citations.length) return null;
+  const unique = uniqueCitations(citations);
+  if (!unique.length) return null;
 
-  // Dedupe by domain+title so repeated searches do not flood the message.
-  const unique: Citation[] = [];
-  const seen = new Set<string>();
-  for (const citation of citations) {
-    const key = `${citation.url}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(citation);
-  }
-  const visible = expanded ? unique : unique.slice(0, MAX_VISIBLE);
+  const visible = unique.slice(0, MAX_INLINE_CITATIONS);
   const hidden = unique.length - visible.length;
 
   return (
     <div className={cn('flex flex-wrap items-center gap-1.5', className)}>
       {visible.map((citation) => {
-        const domain = (citation.siteName?.trim() || hostnameOf(citation.url)).replace(/^www\./, '');
+        const domain = citationDomain(citation);
         return (
           <button
             key={citation.id || citation.url}
@@ -60,10 +54,12 @@ export function CitationChips({ citations, className }: CitationChipsProps) {
           </button>
         );
       })}
+
       {hidden > 0 ? (
         <button
           type="button"
-          onClick={() => setExpanded(true)}
+          onClick={() => useUiStore.getState().openSourcesPanel()}
+          aria-label={`Abrir ${hidden} ${hidden === 1 ? 'fonte' : 'fontes'} no painel lateral`}
           className={cn(
             'flex h-6 items-center gap-1 rounded-full border border-dashed border-border bg-transparent px-2',
             'text-[11px] font-medium text-foreground-subtle transition-colors duration-150',
@@ -73,15 +69,6 @@ export function CitationChips({ citations, className }: CitationChipsProps) {
         >
           <Plus aria-hidden className="size-3" />
           {hidden} fonte{hidden > 1 ? 's' : ''}
-        </button>
-      ) : null}
-      {expanded && unique.length > MAX_VISIBLE ? (
-        <button
-          type="button"
-          onClick={() => setExpanded(false)}
-          className="flex h-6 items-center rounded-full px-2 text-[11px] font-medium text-foreground-subtle transition-colors hover:text-foreground"
-        >
-          Mostrar menos
         </button>
       ) : null}
     </div>

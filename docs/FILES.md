@@ -641,6 +641,23 @@ precedência Lumina > agents > codex > claude > opencode > embutidas.
   (38 novos); `pnpm build` OK. Sem mudanças de backend: o painel continua
   lendo `list_artifacts`/`get_artifact_content`/`get_artifact_preview`.
 
+### v1.4 — fontes na sidebar (chips até 8 + painel lateral)
+
+- **Chat**: `CitationChips` mostra no máximo **8 fontes** por mensagem (dedupe por
+  URL, ordem de descoberta). Acima disso o excedente vira o botão **+ N fontes**,
+  que abre o painel lateral de fontes; a expansão inline e o "Mostrar menos"
+  foram removidos.
+- **Painel de fontes** (`SourcesPanel`): mesmo padrão visual do painel de
+  artefatos (slide-in à direita, `aria-hidden`/`inert`, foco ao abrir), lista
+  todas as fontes da conversa (`conversationCitations`), com domínio + título e
+  abertura no navegador padrão; header "Fontes" com contador, estado vazio e
+  rodapé. Os dois painéis são mutuamente exclusivos (`uiStore`).
+- **Arquivos**: `src/lib/citations.ts`, `src/lib/__tests__/citations.test.ts`,
+  `src/components/chat/{CitationChips,SourcesPanel}.tsx` (+ testes),
+  `src/lib/store/uiStore.ts`, `src/App.tsx` (montagem e Escape).
+- **Evidências**: `pnpm typecheck` OK; `pnpm test` **37 arquivos / 903 testes**;
+  `pnpm build` OK. Sem mudanças de backend (as citações já vinham nos eventos
+  `tool_call_finished` e são persistidas em `messages.citations`).
 ## 15. Critérios de aceite
 
 1. `run_code` habilitado gera DOCX, XLSX, PPTX e PDF via scripts das skills, e

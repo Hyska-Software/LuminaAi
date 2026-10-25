@@ -9,7 +9,7 @@ Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usan
 - **Conversas com streaming** em tempo real, com espaço de pensamento que mostra os passos do agente (raciocínio, buscas, páginas lidas e arquivos criados) numa timeline colapsável.
 - **Escolha de modelo e modo de pensamento** por modelo (esforço, orçamento de tokens ou desligado), com catálogo de 120+ modelos dos dois provedores.
 - **Análise de documentos**: PDF, DOCX, XLSX/CSV, PPTX, texto/código e imagens (visão).
-- **Busca na web** com citações de fontes e leitura de páginas.
+- **Busca na web** com citações de fontes: chips na mensagem (até 8) e lista completa no painel lateral de fontes, com leitura de páginas.
 - **Criação de arquivos** (artefatos) com cards compactos no chat, lista completa no painel lateral e "Salvar como…" nativo — Markdown, HTML, SVG, CSV, JSON e código.
 - **Execução de código (opt-in)**: o agente escreve e roda scripts Python/Node num workspace isolado (timeout, limites e cancelamento) e entrega os arquivos gerados como artefatos — PDF, DOCX, XLSX, PPTX e imagens.
 - **Skills locais**: instruções em Markdown (`SKILL.md`) com scripts prontos (stdlib) que orientam o agente na geração de cada formato; dá para adicionar skills próprias na pasta de dados.

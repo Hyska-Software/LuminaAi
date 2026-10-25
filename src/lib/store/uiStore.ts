@@ -25,6 +25,8 @@ interface UiState {
   attachmentsOpen: boolean;
   artifactPanelOpen: boolean;
   artifactPanelView: ArtifactPanelView;
+  /** Side panel listing every source (citation) used in the conversation. */
+  sourcesPanelOpen: boolean;
   activeView: MainView;
   activeArtifactId: string | null;
   artifacts: Artifact[];
@@ -47,6 +49,9 @@ interface UiState {
   openArtifactList: () => void;
   closeArtifactPanel: () => void;
   setArtifactPanelView: (view: ArtifactPanelView) => void;
+  /** Opens the side panel listing every source used in the conversation. */
+  openSourcesPanel: () => void;
+  closeSourcesPanel: () => void;
   setActiveArtifact: (artifactId: string | null) => void;
   setArtifacts: (artifacts: Artifact[]) => void;
   addArtifact: (artifact: Artifact) => void;
@@ -87,6 +92,7 @@ export const useUiStore = create<UiState>()(
       attachmentsOpen: false,
       artifactPanelOpen: false,
       artifactPanelView: 'list',
+      sourcesPanelOpen: false,
       activeView: 'chat',
       activeArtifactId: null,
       artifacts: [],
@@ -109,12 +115,15 @@ export const useUiStore = create<UiState>()(
         set((state) => {
           const active = (typeof artifactId === 'string' ? artifactId : null) ?? state.activeArtifactId;
           if (active) {
-            return { artifactPanelOpen: true, artifactPanelView: 'preview', activeArtifactId: active };
+            return { artifactPanelOpen: true, artifactPanelView: 'preview', activeArtifactId: active, sourcesPanelOpen: false };
           }
-          return { artifactPanelOpen: true, artifactPanelView: 'list' };
+          return { artifactPanelOpen: true, artifactPanelView: 'list', sourcesPanelOpen: false };
         }),
-      openArtifactList: () => set({ artifactPanelOpen: true, artifactPanelView: 'list' }),
+      openArtifactList: () =>
+        set({ artifactPanelOpen: true, artifactPanelView: 'list', sourcesPanelOpen: false }),
       closeArtifactPanel: () => set({ artifactPanelOpen: false }),
+      openSourcesPanel: () => set({ sourcesPanelOpen: true, artifactPanelOpen: false }),
+      closeSourcesPanel: () => set({ sourcesPanelOpen: false }),
       setArtifactPanelView: (view) =>
         set((state) => {
           if (view === 'list') return { artifactPanelView: 'list' };
@@ -129,7 +138,7 @@ export const useUiStore = create<UiState>()(
           if (!activeArtifactId) {
             return { activeArtifactId: null, artifactPanelView: 'list', artifactPanelOpen: state.artifactPanelOpen };
           }
-          return { activeArtifactId, artifactPanelOpen: true, artifactPanelView: 'preview' };
+          return { activeArtifactId, artifactPanelOpen: true, artifactPanelView: 'preview', sourcesPanelOpen: false };
         }),
       setArtifacts: (artifacts) =>
         set((state) => {
@@ -157,6 +166,7 @@ export const useUiStore = create<UiState>()(
           commandPaletteOpen: false,
           searchOpen: false,
           attachmentsOpen: false,
+          sourcesPanelOpen: false,
         }),
       applyTheme: () => {
         const dark = resolveDark(get().theme);

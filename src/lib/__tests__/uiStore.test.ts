@@ -22,6 +22,7 @@ function resetUi(): void {
   useUiStore.setState({
     artifactPanelOpen: false,
     artifactPanelView: 'list',
+    sourcesPanelOpen: false,
     activeArtifactId: null,
     artifacts: [],
   });
@@ -116,5 +117,47 @@ describe('useUiStore artifacts', () => {
 
     useUiStore.getState().setArtifactPanelView('list');
     expect(useUiStore.getState().artifactPanelView).toBe('list');
+  });
+});
+
+describe('useUiStore sources panel', () => {
+  it('openSourcesPanel opens the fontes panel and closes the artifact panel', () => {
+    useUiStore.setState({
+      artifactPanelOpen: true,
+      artifacts: [artifact()],
+      activeArtifactId: 'artifact-1',
+      artifactPanelView: 'preview',
+    });
+
+    useUiStore.getState().openSourcesPanel();
+
+    expect(useUiStore.getState()).toMatchObject({
+      sourcesPanelOpen: true,
+      artifactPanelOpen: false,
+    });
+
+    useUiStore.getState().closeSourcesPanel();
+    expect(useUiStore.getState().sourcesPanelOpen).toBe(false);
+  });
+
+  it('opening the artifact panel/list closes the sources panel', () => {
+    useUiStore.setState({ sourcesPanelOpen: true, artifacts: [artifact()] });
+
+    useUiStore.getState().openArtifactList();
+    expect(useUiStore.getState().sourcesPanelOpen).toBe(false);
+
+    useUiStore.setState({ sourcesPanelOpen: true });
+    useUiStore.getState().openArtifactPanel();
+    expect(useUiStore.getState().sourcesPanelOpen).toBe(false);
+
+    useUiStore.setState({ sourcesPanelOpen: true });
+    useUiStore.getState().setActiveArtifact('artifact-1');
+    expect(useUiStore.getState().sourcesPanelOpen).toBe(false);
+  });
+
+  it('closeAllOverlays also closes the sources panel', () => {
+    useUiStore.setState({ sourcesPanelOpen: true });
+    useUiStore.getState().closeAllOverlays();
+    expect(useUiStore.getState().sourcesPanelOpen).toBe(false);
   });
 });

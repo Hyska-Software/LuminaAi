@@ -6,6 +6,7 @@ import { ChatView } from '@/components/chat/ChatView';
 import { SettingsDialog } from '@/components/settings/SettingsDialog';
 import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
 import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
+import { SourcesPanel } from '@/components/chat/SourcesPanel';
 import { SkillsView } from '@/components/skills';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { TooltipProvider } from '@/components/ui';
@@ -131,9 +132,10 @@ export default function App() {
           ui.setCommandPaletteOpen(false);
           return;
         }
-        if (ui.modelPickerOpen || ui.settingsOpen || ui.artifactPanelOpen) {
+        if (ui.modelPickerOpen || ui.settingsOpen || ui.artifactPanelOpen || ui.sourcesPanelOpen) {
           ui.closeAllOverlays();
           ui.closeArtifactPanel();
+          ui.closeSourcesPanel();
           return;
         }
         // Skills is a main view, not an overlay: Escape returns to the chat.
@@ -210,6 +212,7 @@ export default function App() {
         <SettingsDialog />
         <ModelPickerDialog />
         <ArtifactPanel />
+        <SourcesPanel />
         <CommandPalette />
       </ErrorBoundary>
       <Toaster
