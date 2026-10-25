@@ -69,7 +69,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 - **Sidebar**: 272px, `bg-surface`, colapsável (⌘/Ctrl+B). Contém: botão "Novo chat" (pill com borda), item **"Skills"** (abre a view de gestão no lugar do chat; oculto quando o painel é desativado nas configurações), busca, lista agrupada (Fixadas, Hoje, Ontem, 7 dias, 30 dias, Mais antigas), rodapé com atalho de configurações e versão.
 - **Chat**: coluna central `max-w-3xl` (768px), padding 24px, espaçamento entre mensagens 28px.
 - **Composer**: sticky no rodapé com gradiente de fade; container `rounded-3xl`, borda 1px, fundo `surface-raised`, sombra sutil; cresce até 10 linhas.
-- **Artifact panel**: side panel à direita (largura 42%, mín 380px), com header próprio (nome, tipo, ações), preview scrollável e botão "Salvar como…".
+- **Artifact panel**: side panel à direita (até 560px, `92vw` em janelas pequenas), com dois modos controlados pelo `uiStore`: **lista** — header "Artefatos" com contador, cards compactos por artefato (tipo, nome e tamanho) e estado vazio discreto — e **prévia** — header com nome, tipo, ações (Ver lista, anterior/próximo, Salvar como…, Abrir, Excluir, Fechar), preview scrollável e botão "Salvar como…". O botão "+" do chat abre o painel na lista; clicar em um card ("Abrir") abre a prévia; "Ver lista" volta para a lista.
 
 ## 6. Estados da conversa
 
@@ -89,7 +89,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 - **Segurança e resiliência do Markdown**: links externos e `mailto:` abrem no navegador/app padrão (nunca no webview); âncoras internas das notas de rodapé rolam na mensagem; imagens usam `alt` e têm fallback "Imagem indisponível" quando falham ou não têm fonte segura; URL insegura não vira link clicável.
 - **Passos do agente (espaço de pensamento)**: um único bloco colapsável acima do texto, no lugar dos antigos cards de ferramenta. Header com ícone `Brain`, shimmer enquanto o agente trabalha ("Pensando…", "Executando ferramentas…"), contador de tempo ao vivo e, ao concluir, o total ("Pensou por 10s"; sem raciocínio exposto, "N passos"). Expandido, uma timeline com trilho vertical sutil intercala os parágrafos de raciocínio (bullets) com uma linha por atividade, na ordem em que aconteceram: "Encontrou 8 páginas web" (+ avatares de domínio das fontes), "Leu 3 páginas" (+ chips de páginas com sublinhado tracejado que abrem no navegador), "Criou 2 arquivos" (+ chips dos nomes), "Validou a interface". Cada linha mostra spinner enquanto executa, ícone da ferramenta ao concluir e mensagem em `danger` em caso de erro. O painel abre sozinho durante o streaming e recolhe quando a resposta começa a chegar.
 - **Citações**: chips de fonte em linha (`favicon`/letra do domínio, título truncado), abrem no navegador.
-- **Artefatos**: card com ícone por tipo, nome, tamanho, botões "Visualizar" e "Salvar".
+- **Artefatos**: cards compactos (tile do tipo, nome truncado, "tipo · tamanho" e os botões existentes **Abrir** e **Salvar como…**), em grid de até duas colunas. Quando o turno gera mais de 4 arquivos, o chat mostra os 4 primeiros e um botão **+ Ver todos (N)** que abre o painel lateral na lista completa de artefatos gerados; clicar em um card abre a prévia no painel. A lista é atualizada ao vivo pelos eventos `artifact_created` e reconciliada com o backend ao fim do turno/ao reabrir a conversa (ordem canônica de criação), sem cards órfãos ou duplicados.
 - **UI generativa**: renderizada inline no fluxo do markdown usando o design system (tokens, tipografia e raios do chat). Blocos interativos (`actions`, `tabs`, `reveal`) seguem regras próprias de UI/UX — ver `docs/GENUI.md` e §16.
 - Rodapé da mensagem (hover): copiar, regenerar, feedback (like/dislike visual), modelo usado e tokens (se `showTokenUsage`).
 - Streaming: caret `accent` piscando após o último caractere.
@@ -188,7 +188,7 @@ Com `reduceMotion` (config ou media query), remover transformações e shimmer; 
 
 ## 14. Microcopy (pt-BR)
 
-- Novo chat, Buscar conversas, Configurações, Modelo padrão, Modo de pensamento, Buscar modelos…, Limpar busca, Usar este modelo, Configurar, Modelo bloqueado nesta conversa, Anexar arquivos, Busca web, Criar arquivos, Pensando…, Executando ferramentas…, Pensou por 10s, Encontrou 8 páginas web, Leu 3 páginas, Criou 2 arquivos, Validou a interface, Parar, Copiar, Regenerar, Salvar como…, Abrir, Excluir, Fixar, Renomear, Exportar, Limpar dados.
+- Novo chat, Buscar conversas, Configurações, Modelo padrão, Modo de pensamento, Buscar modelos…, Limpar busca, Usar este modelo, Configurar, Modelo bloqueado nesta conversa, Anexar arquivos, Busca web, Criar arquivos, Pensando…, Executando ferramentas…, Pensou por 10s, Encontrou 8 páginas web, Leu 3 páginas, Criou 2 arquivos, Validou a interface, Parar, Copiar, Regenerar, Artefatos, Ver lista de artefatos, Ver todos (N), Nenhum artefato nesta conversa, Salvar como…, Abrir, Excluir, Fixar, Renomear, Exportar, Limpar dados.
 - Erros: "Não foi possível concluir", "Chave de API ausente", "Limite de uso atingido", "Tente novamente em instantes".
 
 ## 15. Anti-padrões proibidos

@@ -617,6 +617,30 @@ precedência Lumina > agents > codex > claude > opencode > embutidas.
 - Evidências: `cargo check` sem warnings; `cargo test --lib` **278 passed**;
   `pnpm typecheck` OK; `pnpm test` **29 arquivos / 846 testes**; `pnpm build` OK.
 
+### v1.3 — artefatos: cards compactos, lista no painel e detecção de mudanças
+
+- **Chat**: cards compactos em grid de até duas colunas; acima de 4 artefatos
+  numa mensagem o chat mostra os 4 primeiros e um botão com ícone **+**
+  (“Ver todos (N)”), que abre o painel lateral na lista completa. Os botões
+  existentes (**Abrir** e **Salvar como…**) foram preservados.
+- **Painel lateral**: dois modos controlados por `uiStore.artifactPanelView` —
+  **lista** (cards compactos, contador no header, estado vazio) e **prévia**
+  (UI anterior + botão “Ver lista de artefatos”). Clicar em “Abrir” na lista
+  entra na prévia; a prévia cai para a lista quando o artefato ativo deixa de
+  existir. A ação “Abrir artefatos” da paleta abre a lista.
+- **Detecção/reconciliação**: `artifact_created` é aplicado só para a conversa
+  ativa e em ordem canônica (`createdAt, id`, a mesma de `list_artifacts`);
+  `chatStore.syncArtifacts` refaz a leitura autoritativa ao fim do turno
+  (`done`/`cancelled`/`error`), ao abrir uma conversa (mesmo com mensagens em
+  cache), após editar/regenerar e ao excluir a conversa. Um token monotônico
+  descarta respostas fora de ordem e de conversas que o usuário já deixou.
+- **Arquivos**: `src/components/chat/MessageArtifacts.tsx`,
+  `src/components/artifacts/{ArtifactCard,ArtifactList,ArtifactPanel}.tsx`,
+  `src/lib/store/{uiStore,chatStore}.ts`, `src/components/palette/CommandPalette.tsx`.
+- **Evidências**: `pnpm typecheck` OK; `pnpm test` **34 arquivos / 884 testes**
+  (38 novos); `pnpm build` OK. Sem mudanças de backend: o painel continua
+  lendo `list_artifacts`/`get_artifact_content`/`get_artifact_preview`.
+
 ## 15. Critérios de aceite
 
 1. `run_code` habilitado gera DOCX, XLSX, PPTX e PDF via scripts das skills, e

@@ -8,4 +8,5 @@ export {
   MODEL_LOCKED_DESCRIPTION,
 } from './chatStore';
 export type { StreamingState, SendOptions } from './chatStore';
-export { useUiStore, resolveDark } from './uiStore';
+export { useUiStore, resolveDark, sortArtifacts } from './uiStore';
+export type { ArtifactPanelView, MainView } from './uiStore';

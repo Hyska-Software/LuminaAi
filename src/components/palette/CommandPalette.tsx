@@ -87,7 +87,7 @@ function openArtifacts() {
     toast.info('Nenhum artefato nesta conversa');
     return;
   }
-  ui.openArtifactPanel();
+  ui.openArtifactList();
 }
 
 function clearAttachments() {

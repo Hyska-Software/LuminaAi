@@ -6,6 +6,8 @@ import {
   Download,
   ExternalLink,
   FileQuestion,
+  Files,
+  List,
   Trash2,
   X,
 } from 'lucide-react';
@@ -17,6 +19,7 @@ import { useUiStore } from '@/lib/store';
 import { Badge, Button, IconButton, Spinner, Tooltip } from '@/components/ui';
 import { artifactKindMeta } from './kinds';
 import { ArtifactPreview } from './ArtifactPreview';
+import { ArtifactList } from './ArtifactList';
 
 function formatCreatedAt(timestamp: number): string {
   const date = new Date(timestamp);
@@ -24,16 +27,23 @@ function formatCreatedAt(timestamp: number): string {
   return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+function pluralize(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 /**
  * Canvas-like side panel for artifacts (DESIGN §5/§11): slide-in from the right,
- * preview by kind, navigation between the conversation artifacts and
- * save/open/delete actions. Visibility is driven by `useUiStore`.
+ * with two store-driven views — the conversation artifact list and a single
+ * artifact preview (kind-aware, with navigation, save/open/delete actions).
+ * Visibility is driven by `useUiStore`.
  */
 export function ArtifactPanel() {
   const open = useUiStore((state) => state.artifactPanelOpen);
+  const panelView = useUiStore((state) => state.artifactPanelView);
   const artifacts = useUiStore((state) => state.artifacts);
   const activeId = useUiStore((state) => state.activeArtifactId);
   const setActiveArtifact = useUiStore((state) => state.setActiveArtifact);
+  const setArtifactPanelView = useUiStore((state) => state.setArtifactPanelView);
   const closeArtifactPanel = useUiStore((state) => state.closeArtifactPanel);
 
   const [content, setContent] = useState<ArtifactContent | null>(null);
@@ -43,17 +53,22 @@ export function ArtifactPanel() {
   const [busy, setBusy] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
 
-  // Move focus into the panel when it opens so keyboard users can reach the actions.
+  const artifact = artifacts.find((entry) => entry.id === activeId) ?? null;
+  const meta = artifact ? artifactKindMeta(artifact.kind) : null;
+  const ArtifactIcon = meta?.icon ?? FileQuestion;
+  // A preview without an active artifact falls back to the list, so the panel
+  // never shows an empty/stale preview surface.
+  const mode = panelView === 'preview' && artifact ? 'preview' : 'list';
+
+  // Move focus into the panel when it opens (and when the list preview swaps),
+  // so keyboard users can reach the actions of the new view.
   useEffect(() => {
     if (!open) return;
     const handle = window.requestAnimationFrame(() => panelRef.current?.focus());
     return () => window.cancelAnimationFrame(handle);
-  }, [open]);
+  }, [open, mode]);
 
-  const artifact = artifacts.find((entry) => entry.id === activeId) ?? null;
   const index = artifact ? artifacts.findIndex((entry) => entry.id === artifact.id) : -1;
-  const meta = artifact ? artifactKindMeta(artifact.kind) : null;
-  const ArtifactIcon = meta?.icon ?? FileQuestion;
 
   useEffect(() => {
     setConfirmDelete(false);
@@ -153,7 +168,7 @@ export function ArtifactPanel() {
         open ? 'translate-x-0' : 'pointer-events-none translate-x-full',
       )}
     >
-      {artifact && meta ? (
+      {mode === 'preview' && artifact && meta ? (
         <>
           <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
             <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-lg', meta.tone)}>
@@ -170,6 +185,15 @@ export function ArtifactPanel() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-0.5">
+              <Tooltip content="Ver lista" side="bottom">
+                <IconButton
+                  label="Ver lista de artefatos"
+                  size="sm"
+                  onClick={() => setArtifactPanelView('list')}
+                >
+                  <List className="size-4" />
+                </IconButton>
+              </Tooltip>
               <Tooltip content="Artefato anterior" side="bottom">
                 <IconButton
                   label="Artefato anterior"
@@ -280,29 +304,40 @@ export function ArtifactPanel() {
           </footer>
         </>
       ) : (
-        <div className="flex h-full flex-col">
+        <>
           <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-hover text-foreground-muted">
-              <FileQuestion aria-hidden className="size-4" strokeWidth={1.9} />
+              <Files aria-hidden className="size-4" strokeWidth={1.9} />
             </span>
             <h2 className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight text-foreground">
               Artefatos
             </h2>
-            <IconButton label="Fechar painel de artefatos" size="sm" onClick={closeArtifactPanel}>
-              <X className="size-4" />
-            </IconButton>
+            <Badge
+              tone="muted"
+              size="md"
+              title={pluralize(artifacts.length, 'artefato', 'artefatos')}
+              className="tabular-nums"
+            >
+              {artifacts.length}
+            </Badge>
+            <Tooltip content="Fechar" side="bottom">
+              <IconButton label="Fechar painel de artefatos" size="sm" onClick={closeArtifactPanel}>
+                <X className="size-4" />
+              </IconButton>
+            </Tooltip>
           </header>
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
-            <FileQuestion aria-hidden className="size-6 text-foreground-subtle" />
-            <p className="text-[13px] font-medium text-foreground">Nenhum artefato selecionado</p>
-            <p className="text-xs leading-relaxed text-foreground-muted">
-              Quando o modelo criar um arquivo, ele aparece aqui com prévia e ações.
-            </p>
-            <Button size="sm" variant="secondary" onClick={closeArtifactPanel}>
-              Fechar
-            </Button>
+
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-2">
+            <ArtifactList artifacts={artifacts} activeId={activeId} />
           </div>
-        </div>
+
+          <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-3 py-2 text-[11px] text-foreground-subtle">
+            <span className="tabular-nums">
+              {pluralize(artifacts.length, 'artefato', 'artefatos')}
+            </span>
+            {artifacts.length ? <span>Selecione “Abrir” para ver a prévia</span> : null}
+          </footer>
+        </>
       )}
     </aside>
   );

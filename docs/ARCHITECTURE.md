@@ -334,10 +334,24 @@ Limite de 400k caracteres por documento, truncamento sinalizado. Anexos são cop
 ## 11. Artefatos
 
 `create_file` grava o arquivo em `artifacts/<id>/<nome>`, persiste metadados e
-emite `artifact_created`. A UI mostra um card no chat e um painel lateral
-(Canvas-like) com preview por tipo e ações "Salvar como…" (dialog nativo) e
-"Abrir". O writer é compartilhado com `run_code` (`tools::artifacts`), que
-aceita **bytes** — permitindo artefatos binários (PDF/DOCX/XLSX/PPTX/imagens).
+emite `artifact_created`. A UI mostra cards compactos no chat (grid de até duas
+colunas; acima de 4 artefatos por mensagem aparece o botão **+ Ver todos (N)**,
+que abre o painel lateral na lista) e um painel lateral (Canvas-like) com dois
+modos: **lista** de artefatos gerados (cards compactos, contador) e **prévia**
+por tipo, com navegação e ações "Salvar como…" (dialog nativo) e "Abrir". O
+writer é compartilhado com `run_code` (`tools::artifacts`), que aceita **bytes**
+— permitindo artefatos binários (PDF/DOCX/XLSX/PPTX/imagens).
+
+**Detecção/reconciliação**: o renderer aplica `artifact_created` em ordem
+canônica (`created_at, id` — a mesma de `db::list_artifacts`) e só para a
+conversa ativa (eventos de um turno em segundo plano não vazam para outra
+conversa). Ao fim de cada turno (`done`/`cancelled`/`error`), ao abrir uma
+conversa (mesmo com mensagens em cache), após editar/regenerar e ao excluir a
+conversa, o `chatStore.syncArtifacts` refaz a leitura autoritativa
+(`list_artifacts`) — um token monotônico descarta respostas fora de ordem e
+respostas de uma conversa que o usuário já deixou. Assim, eventos perdidos não
+deixam a lista do painel nem os cards do chat desatualizados, e o painel volta
+para a lista quando o artefato ativo deixa de existir.
 
 | Tipo | Criação | Preview |
 | --- | --- | --- |
@@ -397,7 +411,7 @@ pnpm app:dev            # dev com HMR
 
 A verificação é feita por testes automatizados — unitários e de integração — e por build:
 
-1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo), a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`), o **renderer de Markdown** (matriz CommonMark/GFM, math, notas de rodapé, alertas, HTML sanitizado e vetores de segurança) e as **prévias de artefatos** (PDF via pdf.js mockado, DOCX/XLSX/PPTX por JSON/HTML, imagem e fallback binário) + tela de ambiente de código/skills.
+1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo), a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`), o **renderer de Markdown** (matriz CommonMark/GFM, math, notas de rodapé, alertas, HTML sanitizado e vetores de segurança), as **prévias de artefatos** (PDF via pdf.js mockado, DOCX/XLSX/PPTX por JSON/HTML, imagem e fallback binário), a **UI de artefatos** (cards compactos, lista e modos lista↔prévia do painel, botão "+" do chat) e a **detecção/reconciliação de artefatos no store** (eventos filtrados pela conversa ativa, sync autoritativo ao fim do turno/ao reabrir, ordem canônica e proteção contra respostas fora de ordem).
 2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui`, o system prompt gerado do contrato, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), **prévias DOCX→HTML/XLSX/PPTX**, SQLite (conversas/mensagens/anexos/artefatos/usage/`trace` + migração de bancos antigos), settings/segredos, exportação, **execução de código (interpretador, timeout, cancelamento, coleta de artefatos, sem interpretador)**, **skills embutidas/usuário (frontmatter, precedência, scripts→preview)** e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor, cancelamento e o trace por passo.
 3. **Integração com o gateway real** (testes `#[ignore]`, executados sob demanda): streaming nos 4 protocolos, tool call + replay de `provider_state`, fallback de protocolo, mapeamento de 401, cancelamento e o caso canônico **DeepSeek V4.1 Flash com esforço máximo**.
 4. **Build**: `pnpm typecheck`, `pnpm build` e `pnpm tauri build --no-bundle` (artefato em `src-tauri/target/release/lumina.exe`).

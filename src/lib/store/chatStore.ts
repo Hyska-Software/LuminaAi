@@ -54,6 +54,13 @@ interface ChatState {
   regenerate: () => Promise<void>;
   editAndResend: (messageId: string, content: string) => Promise<void>;
   stop: () => Promise<void>;
+  /**
+   * Reconciles the artifact list shown in the UI with the backend snapshot of
+   * a conversation. Used after a turn ends, when a conversation is reopened and
+   * after edits/deletions, so missed `artifact_created` events can never leave
+   * the chat/panel stale.
+   */
+  syncArtifacts: (conversationId?: string | null) => Promise<void>;
   messagesFor: (conversationId: string | null) => ChatMessage[];
 }
 
@@ -249,6 +256,26 @@ export const useChatStore = create<ChatState>()((set, get) => {
     }
   };
 
+  // Monotonic token: a slow `list_artifacts` response must never overwrite the
+  // result of a newer synchronization (turn end, conversation switch, delete).
+  let artifactSyncToken = 0;
+
+  const syncArtifacts = async (conversationId?: string | null) => {
+    const target = conversationId ?? get().activeId;
+    if (!target) return;
+    const token = ++artifactSyncToken;
+    try {
+      const artifacts = await api.listArtifacts(target);
+      if (token !== artifactSyncToken) return;
+      // The user may have switched conversations while the request was in
+      // flight; the panel must never show artifacts from another conversation.
+      if (get().activeId !== target) return;
+      useUiStore.getState().setArtifacts(artifacts);
+    } catch (error) {
+      console.error('failed to sync conversation artifacts', error);
+    }
+  };
+
   const runTurn = async (
     payload: TurnPayload,
     context: {
@@ -377,6 +404,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
           }));
           break;
         case 'artifact_created':
+          // The uiStore holds the artifacts of the conversation currently on
+          // screen. Events from a turn the user navigated away from are
+          // reconciled when that conversation is opened again, so they must not
+          // leak into an unrelated chat/panel.
+          if (event.artifact.conversationId !== context.conversationId) break;
+          if (get().activeId !== context.conversationId) break;
           useUiStore.getState().addArtifact(event.artifact);
           break;
         case 'usage':
@@ -411,6 +444,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
             status: 'cancelled',
           }));
           set({ streaming: null });
+          void syncArtifacts(context.conversationId);
           break;
         case 'error':
           flush();
@@ -420,6 +454,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
             status: message.content ? 'complete' : 'error',
           }));
           set({ streaming: null, error: event.message });
+          void syncArtifacts(context.conversationId);
           toast.error('Falha na resposta', { description: event.message });
           break;
         default:
@@ -448,6 +483,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
         toast.error('A resposta terminou com erro', { description: result.error });
       }
       void refreshList();
+      // Authoritative reconciliation: even if an `artifact_created` event was
+      // lost, the conversation's artifacts are complete once the turn is done.
+      void syncArtifacts(context.conversationId);
     };
 
     try {
@@ -467,6 +505,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       );
       set({ streaming: null, error: message });
       toast.error('Não foi possível concluir a mensagem', { description: message });
+      void syncArtifacts(context.conversationId);
     } finally {
       if (flushHandle) clearTimeout(flushHandle);
     }
@@ -517,8 +556,16 @@ export const useChatStore = create<ChatState>()((set, get) => {
     openConversation: async (id) => {
       // Navigating to a conversation always leaves the skills view.
       useUiStore.getState().setActiveView('chat');
-      if (get().activeId === id && get().messagesByConversation[id]) return;
+      if (get().activeId === id && get().messagesByConversation[id]) {
+        // Messages are cached, but the artifacts may have changed (turn ended
+        // in the background, deletion, app reload): always reconcile them.
+        await syncArtifacts(id);
+        return;
+      }
       set({ activeId: id, loadingConversationId: id });
+      // Never show the previous conversation's artifacts while the new one
+      // loads (the panel may be open on the list).
+      useUiStore.getState().setArtifacts([]);
       try {
         const detail = await api.getConversation(id);
         if (detail) {
@@ -533,8 +580,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         } else {
           set({ loadingConversationId: null });
         }
-        const artifacts = await api.listArtifacts(id);
-        useUiStore.getState().setArtifacts(artifacts);
+        await syncArtifacts(id);
       } catch (error) {
         set({ loadingConversationId: null, error: String(error) });
       }
@@ -564,6 +610,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           pendingAttachments: [],
         }));
         useUiStore.getState().setArtifacts([]);
+        useUiStore.getState().closeArtifactPanel();
         return conversation.id;
       } catch (error) {
         toast.error('Não foi possível criar a conversa', { description: String(error) });
@@ -585,7 +632,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
           };
         });
         const next = get().activeId;
-        if (next) await get().openConversation(next);
+        if (next) {
+          await get().openConversation(next);
+        } else {
+          useUiStore.getState().setArtifacts([]);
+          useUiStore.getState().closeArtifactPanel();
+        }
       } catch (error) {
         toast.error('Não foi possível excluir', { description: String(error) });
       }
@@ -757,6 +809,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
         return;
       }
       removeMessage(conversationId, lastAssistant.id);
+      // The truncated answer may own artifacts; refresh the list so the panel
+      // reflects only what still exists.
+      void syncArtifacts(conversationId);
 
       const assistantMessage: ChatMessage = {
         id: `optimistic-assistant-${turnId}`,
@@ -828,6 +883,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           [conversationId]: messages.slice(0, index),
         },
       }));
+      void syncArtifacts(conversationId);
       await get().send(trimmed);
     },
 
@@ -845,6 +901,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
         console.error('cancel failed', error);
       }
     },
+
+    syncArtifacts,
 
     messagesFor: (conversationId) =>
       conversationId ? (get().messagesByConversation[conversationId] ?? EMPTY) : EMPTY,

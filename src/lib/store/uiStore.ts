@@ -8,6 +8,13 @@ import type { Artifact, ThemeMode } from '../types';
  */
 export type MainView = 'chat' | 'skills';
 
+/**
+ * Surface shown by the artifact side panel: the generated-artifact list (the
+ * "+" affordance in the chat and the command palette) or a single preview
+ * (clicking an artifact card).
+ */
+export type ArtifactPanelView = 'list' | 'preview';
+
 interface UiState {
   theme: ThemeMode;
   sidebarOpen: boolean;
@@ -17,6 +24,7 @@ interface UiState {
   searchOpen: boolean;
   attachmentsOpen: boolean;
   artifactPanelOpen: boolean;
+  artifactPanelView: ArtifactPanelView;
   activeView: MainView;
   activeArtifactId: string | null;
   artifacts: Artifact[];
@@ -33,13 +41,30 @@ interface UiState {
   setAttachmentsOpen: (open: boolean) => void;
   /** Switches the main content between the chat and the skills manager. */
   setActiveView: (view: MainView) => void;
+  /** Opens the panel on the artifact preview (or the list when there is none). */
   openArtifactPanel: (artifactId?: string | null) => void;
+  /** Opens the panel on the generated-artifact list. */
+  openArtifactList: () => void;
   closeArtifactPanel: () => void;
+  setArtifactPanelView: (view: ArtifactPanelView) => void;
   setActiveArtifact: (artifactId: string | null) => void;
   setArtifacts: (artifacts: Artifact[]) => void;
   addArtifact: (artifact: Artifact) => void;
   closeAllOverlays: () => void;
   applyTheme: () => void;
+}
+
+/**
+ * Canonical artifact order, identical to `db::list_artifacts`
+ * (`ORDER BY created_at, id`). Keeping it here means the live events, the
+ * backend reconciliation and the chat cards never disagree about the order.
+ */
+export function sortArtifacts(artifacts: Artifact[]): Artifact[] {
+  const byId = new Map<string, Artifact>();
+  for (const artifact of artifacts) byId.set(artifact.id, artifact);
+  return [...byId.values()].sort(
+    (left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id),
+  );
 }
 
 function systemPrefersDark(): boolean {
@@ -61,6 +86,7 @@ export const useUiStore = create<UiState>()(
       searchOpen: false,
       attachmentsOpen: false,
       artifactPanelOpen: false,
+      artifactPanelView: 'list',
       activeView: 'chat',
       activeArtifactId: null,
       artifacts: [],
@@ -80,23 +106,49 @@ export const useUiStore = create<UiState>()(
       setAttachmentsOpen: (attachmentsOpen) => set({ attachmentsOpen }),
       setActiveView: (activeView) => set({ activeView }),
       openArtifactPanel: (artifactId) =>
-        set((state) => ({
-          artifactPanelOpen: true,
-          activeArtifactId: artifactId === undefined ? (state.activeArtifactId ?? state.artifacts[0]?.id ?? null) : artifactId,
-        })),
+        set((state) => {
+          const active = (typeof artifactId === 'string' ? artifactId : null) ?? state.activeArtifactId;
+          if (active) {
+            return { artifactPanelOpen: true, artifactPanelView: 'preview', activeArtifactId: active };
+          }
+          return { artifactPanelOpen: true, artifactPanelView: 'list' };
+        }),
+      openArtifactList: () => set({ artifactPanelOpen: true, artifactPanelView: 'list' }),
       closeArtifactPanel: () => set({ artifactPanelOpen: false }),
-      setActiveArtifact: (activeArtifactId) => set({ activeArtifactId, artifactPanelOpen: activeArtifactId !== null }),
+      setArtifactPanelView: (view) =>
+        set((state) => {
+          if (view === 'list') return { artifactPanelView: 'list' };
+          const active =
+            state.artifacts.find((artifact) => artifact.id === state.activeArtifactId) ??
+            state.artifacts[state.artifacts.length - 1];
+          if (!active) return { artifactPanelView: 'list' };
+          return { artifactPanelView: 'preview', activeArtifactId: active.id };
+        }),
+      setActiveArtifact: (activeArtifactId) =>
+        set((state) => {
+          if (!activeArtifactId) {
+            return { activeArtifactId: null, artifactPanelView: 'list', artifactPanelOpen: state.artifactPanelOpen };
+          }
+          return { activeArtifactId, artifactPanelOpen: true, artifactPanelView: 'preview' };
+        }),
       setArtifacts: (artifacts) =>
-        set((state) => ({
-          artifacts,
-          activeArtifactId:
-            state.activeArtifactId && artifacts.some((a) => a.id === state.activeArtifactId)
+        set((state) => {
+          const next = sortArtifacts(artifacts);
+          const activeArtifactId =
+            state.activeArtifactId && next.some((artifact) => artifact.id === state.activeArtifactId)
               ? state.activeArtifactId
-              : (artifacts[0]?.id ?? null),
-        })),
+              : null;
+          // A preview whose artifact disappeared falls back to the list, so the
+          // panel never stays on a stale/removed artifact.
+          const artifactPanelView =
+            state.artifactPanelView === 'preview' && !activeArtifactId
+              ? 'list'
+              : state.artifactPanelView;
+          return { artifacts: next, activeArtifactId, artifactPanelView };
+        }),
       addArtifact: (artifact) =>
         set((state) => ({
-          artifacts: [artifact, ...state.artifacts.filter((a) => a.id !== artifact.id)],
+          artifacts: sortArtifacts([...state.artifacts, artifact]),
         })),
       closeAllOverlays: () =>
         set({

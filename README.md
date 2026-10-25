@@ -10,13 +10,13 @@ Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usan
 - **Escolha de modelo e modo de pensamento** por modelo (esforço, orçamento de tokens ou desligado), com catálogo de 120+ modelos dos dois provedores.
 - **Análise de documentos**: PDF, DOCX, XLSX/CSV, PPTX, texto/código e imagens (visão).
 - **Busca na web** com citações de fontes e leitura de páginas.
-- **Criação de arquivos** (artefatos) com preview e "Salvar como…" nativo — Markdown, HTML, SVG, CSV, JSON e código.
+- **Criação de arquivos** (artefatos) com cards compactos no chat, lista completa no painel lateral e "Salvar como…" nativo — Markdown, HTML, SVG, CSV, JSON e código.
 - **Execução de código (opt-in)**: o agente escreve e roda scripts Python/Node num workspace isolado (timeout, limites e cancelamento) e entrega os arquivos gerados como artefatos — PDF, DOCX, XLSX, PPTX e imagens.
 - **Skills locais**: instruções em Markdown (`SKILL.md`) com scripts prontos (stdlib) que orientam o agente na geração de cada formato; dá para adicionar skills próprias na pasta de dados.
 - **Detecção de skills de outros agentes**: lê automaticamente os repositórios padrão — `~/.agents/skills`, `~/.codex/skills`/`CODEX_HOME`, `~/.claude/skills` e `~/.config/opencode/skills`/XDG — somente leitura, com a origem na UI e opção de desativar.
 - **Gerenciamento de skills**: item na barra lateral abre o painel para ver, ativar/desativar e excluir skills (o item pode ser escondido em Configurações → Ferramentas).
 - **UI generativa no chat**: o modelo escreve componentes (cards, tabelas, gráficos, timelines, tabs…) renderizados com segurança.
-- **Artefatos em painel lateral** estilo canvas, com preview por tipo: PDF (pdf.js, páginas/zoom), DOCX (HTML sandbox), XLSX (abas + grade), PPTX (slides), imagens, markdown/código/CSV.
+- **Artefatos em painel lateral** com modos **lista** (todos os artefatos gerados, em cards compactos) e **prévia** por tipo: PDF (pdf.js, páginas/zoom), DOCX (HTML sandbox), XLSX (abas + grade), PPTX (slides), imagens, markdown/código/CSV. Acima de 4 artefatos numa resposta, o chat mostra os primeiros e um botão **+ Ver todos** que abre a lista.
 - **Histórico local** (SQLite), busca, fixar, renomear, exportar.
 - **UI/UX** inspirada no ChatGPT: sidebar, composer flutuante, paleta de comandos, temas claro/escuro, atalhos.
 

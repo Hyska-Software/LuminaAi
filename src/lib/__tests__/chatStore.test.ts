@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatMessage, Conversation, ConversationDetail, TurnPayload, TurnEvent } from '@/lib/types';
+import type {
+  Artifact,
+  ChatMessage,
+  Conversation,
+  ConversationDetail,
+  TurnPayload,
+  TurnEvent,
+} from '@/lib/types';
 
 const mocks = vi.hoisted(() => {
   const api = {
@@ -77,6 +84,20 @@ function assistantMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
     citations: [],
     attachments: [],
     createdAt: 2,
+    ...overrides,
+  };
+}
+
+function artifact(overrides: Partial<Artifact> = {}): Artifact {
+  return {
+    id: 'artifact-1',
+    conversationId: 'conv-1',
+    messageId: 'assistant-1',
+    name: 'relatorio.md',
+    mimeType: 'text/markdown',
+    kind: 'markdown',
+    size: 120,
+    createdAt: 1,
     ...overrides,
   };
 }
@@ -412,6 +433,166 @@ describe('chatStore other actions', () => {
   it('ships the DeepSeek V4.1 Flash model in the bundled catalog', () => {
     const go = catalog.providers.find((provider) => provider.id === 'opencode-go');
     expect(go?.models.some((model) => model.id === 'deepseek-v4.1-flash')).toBe(true);
+  });
+});
+
+describe('chatStore artifact change detection', () => {
+  it('adds artifact events only for the active conversation, in canonical order', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent({ type: 'artifact_created', artifact: artifact({ id: 'late', createdAt: 20 }) });
+        onEvent({ type: 'artifact_created', artifact: artifact({ id: 'early', createdAt: 10 }) });
+        // A background turn of another conversation must not leak into this chat.
+        onEvent({
+          type: 'artifact_created',
+          artifact: artifact({ id: 'foreign', conversationId: 'conv-2', createdAt: 5 }),
+        });
+        await gate;
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage(),
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 2 }),
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+    mocks.api.listArtifacts.mockResolvedValue([
+      artifact({ id: 'early', createdAt: 10 }),
+      artifact({ id: 'late', createdAt: 20 }),
+    ]);
+
+    void useChatStore.getState().send('Crie dois arquivos');
+    await vi.waitFor(() => expect(useUiStore.getState().artifacts).toHaveLength(2));
+    expect(useUiStore.getState().artifacts.map((entry) => entry.id)).toEqual(['early', 'late']);
+
+    release();
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+    expect(useUiStore.getState().artifacts.map((entry) => entry.id)).toEqual(['early', 'late']);
+  });
+
+  it('reconciles with the backend when the turn finishes, recovering missed events', async () => {
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage(),
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 2 }),
+        };
+        // No `artifact_created` event at all: only the authoritative resync
+        // can reveal the artifact.
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+    mocks.api.listArtifacts.mockResolvedValue([artifact({ id: 'only-on-disk' })]);
+
+    await useChatStore.getState().send('Crie um arquivo');
+
+    await vi.waitFor(() => {
+      expect(useUiStore.getState().artifacts.map((entry) => entry.id)).toEqual(['only-on-disk']);
+    });
+    expect(mocks.api.listArtifacts).toHaveBeenCalledWith('conv-1');
+  });
+
+  it('refreshes the artifacts when reopening the cached active conversation', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ messageCount: 2 })],
+      activeId: 'conv-1',
+      messagesByConversation: { 'conv-1': [userMessage(), assistantMessage()] },
+    });
+    mocks.api.listArtifacts.mockResolvedValue([
+      artifact({ id: 'a1', createdAt: 1 }),
+      artifact({ id: 'a2', createdAt: 2 }),
+    ]);
+
+    await useChatStore.getState().openConversation('conv-1');
+
+    expect(mocks.api.getConversation).not.toHaveBeenCalled();
+    expect(mocks.api.listArtifacts).toHaveBeenCalledWith('conv-1');
+    expect(useUiStore.getState().artifacts.map((entry) => entry.id)).toEqual(['a1', 'a2']);
+  });
+
+  it('drops a sync result when the user switched conversations meanwhile', async () => {
+    useChatStore.setState({ activeId: 'conv-1' });
+    let resolveList: (value: Artifact[]) => void = () => {};
+    mocks.api.listArtifacts.mockReturnValue(
+      new Promise<Artifact[]>((resolve) => {
+        resolveList = resolve;
+      }),
+    );
+
+    const pending = useChatStore.getState().syncArtifacts();
+    useChatStore.setState({ activeId: 'conv-2' });
+    resolveList([artifact({ id: 'stale' })]);
+    await pending;
+
+    expect(useUiStore.getState().artifacts).toEqual([]);
+  });
+
+  it('keeps the newest result when two synchronizations overlap', async () => {
+    useChatStore.setState({ activeId: 'conv-1' });
+    let resolveFirst: (value: Artifact[]) => void = () => {};
+    let resolveSecond: (value: Artifact[]) => void = () => {};
+    mocks.api.listArtifacts
+      .mockReturnValueOnce(
+        new Promise<Artifact[]>((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise<Artifact[]>((resolve) => {
+          resolveSecond = resolve;
+        }),
+      );
+
+    const first = useChatStore.getState().syncArtifacts();
+    const second = useChatStore.getState().syncArtifacts();
+    resolveSecond([artifact({ id: 'newer', createdAt: 2 })]);
+    resolveFirst([artifact({ id: 'older', createdAt: 1 })]);
+    await Promise.all([first, second]);
+
+    expect(useUiStore.getState().artifacts.map((entry) => entry.id)).toEqual(['newer']);
+  });
+
+  it('clears the panel artifacts when the last conversation is deleted', async () => {
+    useChatStore.setState({
+      conversations: [conversation()],
+      activeId: 'conv-1',
+      messagesByConversation: { 'conv-1': [userMessage()] },
+    });
+    useUiStore.setState({
+      artifacts: [artifact()],
+      activeArtifactId: 'artifact-1',
+      artifactPanelOpen: true,
+      artifactPanelView: 'preview',
+    });
+
+    await useChatStore.getState().deleteConversation('conv-1');
+
+    expect(useUiStore.getState().artifacts).toEqual([]);
+    expect(useUiStore.getState().artifactPanelOpen).toBe(false);
   });
 });
 

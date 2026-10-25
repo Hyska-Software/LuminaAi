@@ -2,7 +2,6 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Copy, Pencil, RefreshCw, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
-import { ArtifactCard } from '@/components/artifacts/ArtifactCard';
 import { AttachmentChips } from '@/components/composer/AttachmentChips';
 import { useReduceMotion } from '@/components/layout/hooks';
 import { Badge, Button, IconButton, Spinner } from '@/components/ui';
@@ -14,6 +13,7 @@ import { CitationChips } from './CitationChips';
 import { BrandMark } from './BrandMark';
 import { Markdown } from './Markdown';
 import { AgentSteps } from './AgentSteps';
+import { MessageArtifacts } from './MessageArtifacts';
 
 /** Errors that indicate a missing/invalid provider key get a settings CTA. */
 const KEY_ERROR_PATTERN = /(chave de api|api[ _-]?key|401|unauthorized|não configurad)/i;
@@ -254,13 +254,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({ message, isStr
         {attachments.length > 0 ? <AttachmentChips attachments={attachments} className="mt-3" /> : null}
         {citations.length > 0 ? <CitationChips citations={citations} className="mt-3" /> : null}
 
-        {messageArtifacts.length > 0 ? (
-          <div className="mt-3 grid gap-2">
-            {messageArtifacts.map((artifact) => (
-              <ArtifactCard key={artifact.id} artifact={artifact} />
-            ))}
-          </div>
-        ) : null}
+        {messageArtifacts.length > 0 ? <MessageArtifacts artifacts={messageArtifacts} /> : null}
 
         {message.status === 'cancelled' ? (
           <div className="mt-2">

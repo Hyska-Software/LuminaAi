@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
 import type { Artifact } from '@/lib/types';
 import { cn, formatBytes } from '@/lib/utils';
 import { useUiStore } from '@/lib/store';
-import { Badge, Button, IconButton, Tooltip } from '@/components/ui';
+import { Button, IconButton, Tooltip } from '@/components/ui';
 import { artifactKindMeta } from './kinds';
 
 export interface ArtifactCardProps {
@@ -13,6 +13,8 @@ export interface ArtifactCardProps {
   /** Overrides the default action (open the artifact panel). */
   onOpen?: (artifact: Artifact) => void;
   compact?: boolean;
+  /** Highlights the artifact currently open in the side panel list. */
+  active?: boolean;
   className?: string;
 }
 
@@ -28,10 +30,17 @@ async function saveArtifact(artifact: Artifact) {
 }
 
 /**
- * Inline artifact card shown in the chat flow (DESIGN §6.3/§11): kind icon,
- * name, size and the "Abrir" / "Salvar como…" actions.
+ * Compact artifact card (DESIGN §6.3/§11): kind icon on a colored tile, name
+ * (13px), "kind · size" subtitle (11px) and the "Abrir" / "Salvar como…"
+ * actions. Used inline in the chat flow and in the panel list (`compact`).
  */
-export function ArtifactCard({ artifact, onOpen, compact = false, className }: ArtifactCardProps) {
+export function ArtifactCard({
+  artifact,
+  onOpen,
+  compact = false,
+  active = false,
+  className,
+}: ArtifactCardProps) {
   const meta = artifactKindMeta(artifact.kind);
   const Icon = meta.icon;
 
@@ -50,19 +59,21 @@ export function ArtifactCard({ artifact, onOpen, compact = false, className }: A
 
   return (
     <div
+      data-active={active || undefined}
       className={cn(
-        'group/artifact flex min-w-0 items-center gap-3 rounded-xl border border-border bg-surface-raised p-2.5',
-        'transition-colors duration-150 hover:border-border-strong motion-reduce:transition-none',
-        compact && 'gap-2 p-2',
+        'group/artifact flex min-w-0 items-center gap-2.5 rounded-xl border border-border bg-surface-raised p-2',
+        'transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover',
+        active && 'border-accent/40 bg-accent-soft/60 hover:border-accent/50 hover:bg-accent-soft/70',
+        compact && 'gap-2 p-1.5',
         className,
       )}
     >
       <span
         aria-hidden
         className={cn(
-          'flex size-9 shrink-0 items-center justify-center rounded-lg',
+          'flex size-8 shrink-0 items-center justify-center rounded-lg',
           meta.tone,
-          compact && 'size-8',
+          compact && 'size-7 rounded-md',
         )}
       >
         <Icon className={cn('size-4', compact && 'size-3.5')} strokeWidth={1.9} />
@@ -71,14 +82,17 @@ export function ArtifactCard({ artifact, onOpen, compact = false, className }: A
       <button
         type="button"
         onClick={open}
-        className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        aria-current={active ? 'true' : undefined}
+        className={cn(
+          'min-w-0 flex-1 rounded-lg text-left',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+        )}
       >
-        <span className="block truncate text-[13px] font-medium text-foreground decoration-border-strong underline-offset-2 group-hover/artifact:underline">
+        <span className="block truncate text-[13px] font-medium leading-snug text-foreground decoration-border-strong underline-offset-2 group-hover/artifact:underline">
           {artifact.name}
         </span>
-        <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-foreground-subtle">
-          <Badge tone="muted">{meta.label}</Badge>
-          <span className="tabular-nums">{formatBytes(artifact.size)}</span>
+        <span className="mt-0.5 block truncate text-[11px] leading-snug text-foreground-muted tabular-nums">
+          {`${meta.label} · ${formatBytes(artifact.size)}`}
         </span>
       </button>
 
