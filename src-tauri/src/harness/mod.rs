@@ -1,6 +1,6 @@
 //! Agent harness: builds context, runs the tool loop and persists messages.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -199,6 +199,7 @@ pub async fn run_turn(
         &deps,
         &messages,
         &assistant_message.id,
+        &provider.id,
         &settings,
         &model,
         supports_images,
@@ -229,7 +230,9 @@ pub async fn run_turn(
     let mut all_tool_calls: Vec<ToolCallRecord> = Vec::new();
     let mut citations: Vec<Citation> = Vec::new();
     let mut total_usage = UsageInfo::default();
-    let mut provider_state: Option<Value> = None;
+    // Replay por passo: um bloco por resposta do provedor (com as tool calls do
+    // passo), para que o próximo turno reconstrua o turno multi-step inteiro.
+    let mut replay_steps: Vec<ReplayStep> = Vec::new();
     let mut cancelled = false;
     let mut turn_error: Option<String> = None;
 
@@ -363,25 +366,29 @@ pub async fn run_turn(
             }
             full_reasoning.push_str(&step_reasoning);
         }
-        if step_state.is_some() {
-            provider_state = step_state.clone();
-        }
         if let Some(usage) = step_usage.take() {
             merge_usage(&mut total_usage, &usage);
         }
 
         if let Some(error) = provider_error {
             turn_error = Some(error);
-            let mut failed = 0usize;
+            let mut failed: Vec<ToolCallRecord> = Vec::new();
             for call in streaming_calls.drain(..).filter(|call| !call.id.is_empty()) {
                 let mut record = tool_call_record(call);
                 record.status = ToolCallStatus::Error;
                 record.result = Some("Interrompida por um erro do provedor.".to_string());
                 record.finished_at = Some(now_ms());
-                all_tool_calls.push(record);
-                failed += 1;
+                failed.push(record);
             }
-            push_trace_step(&mut trace, &step_reasoning, failed);
+            push_trace_step(&mut trace, &step_reasoning, failed.len());
+            // As chamadas que falharam continuam em `tool_calls`; o replay
+            // precisa do assistant que as declara para não deixar o output órfão.
+            replay_steps.push(ReplayStep {
+                text: step_text.clone(),
+                state: step_state.clone(),
+                call_ids: failed.iter().map(|call| call.id.clone()).collect(),
+            });
+            all_tool_calls.extend(failed);
             break;
         }
 
@@ -396,6 +403,11 @@ pub async fn run_turn(
             // tool-calling steps is intentionally not part of the final message.
             push_trace_step(&mut trace, &step_reasoning, 0);
             full_text = step_text.trim().to_string();
+            replay_steps.push(ReplayStep {
+                text: full_text.clone(),
+                state: step_state.clone(),
+                call_ids: Vec::new(),
+            });
             break;
         }
 
@@ -463,9 +475,20 @@ pub async fn run_turn(
                 truncate_chars(&outcome.content, MAX_MODEL_TOOL_RESULT_CHARS),
             ));
         }
+        let step_call_ids: Vec<String> = paired
+            .iter()
+            .map(|(call, _)| call.id.clone())
+            .collect();
         for (call, _) in paired {
             all_tool_calls.push(call);
         }
+        // O passo com ferramentas também entra no replay, com as suas calls na
+        // ordem cronológica de `ChatMessage.tool_calls`.
+        replay_steps.push(ReplayStep {
+            text: step_text.clone(),
+            state: step_state.clone(),
+            call_ids: step_call_ids,
+        });
 
         if step_number >= options.max_steps {
             // Force the final-answer pass below instead of ending the turn with
@@ -518,6 +541,7 @@ pub async fn run_turn(
         };
         let mut forced_text = String::new();
         let mut forced_reasoning = String::new();
+        let mut forced_state: Option<Value> = None;
         let mut forced_usage: Option<UsageInfo> = None;
         loop {
             tokio::select! {
@@ -538,7 +562,7 @@ pub async fn run_turn(
                             emit(&on_event, TurnEvent::ReasoningDelta { delta });
                         }
                         ProviderEvent::Usage(usage) => forced_usage = Some(usage),
-                        ProviderEvent::ProviderState(state) => provider_state = Some(state),
+                        ProviderEvent::ProviderState(state) => forced_state = Some(state),
                         ProviderEvent::ToolCallStart { .. }
                         | ProviderEvent::ToolCallArgsDelta { .. }
                         | ProviderEvent::ToolCallDone { .. }
@@ -579,6 +603,15 @@ pub async fn run_turn(
             full_text = forced_text.trim().to_string();
         } else if turn_error.is_none() {
             turn_error = Some("O modelo não produziu uma resposta final.".to_string());
+        }
+        // A resposta final forçada é o último passo do replay. Um turno
+        // cancelado no meio dela não tem estado replayável.
+        if !cancelled {
+            replay_steps.push(ReplayStep {
+                text: forced_text.trim().to_string(),
+                state: forced_state,
+                call_ids: Vec::new(),
+            });
         }
     }
 
@@ -647,7 +680,7 @@ pub async fn run_turn(
     assistant_message.tool_calls = all_tool_calls.clone();
     assistant_message.citations = citations.clone();
     assistant_message.usage = Some(usage.clone());
-    assistant_message.provider_state = provider_state.clone();
+    assistant_message.provider_state = wrap_provider_state(&replay_steps);
     assistant_message.trace = trace.clone();
     assistant_message.model_id = Some(model.id.clone());
     assistant_message.provider_id = Some(provider.id.clone());
@@ -786,6 +819,130 @@ fn resolve_attachment_infos(db: &Db, ids: &[String]) -> Vec<AttachmentInfo> {
 }
 
 /* ------------------------------------------------------------------ */
+/* Provider state replay (v2)                                          */
+/* ------------------------------------------------------------------ */
+
+/// Versão do envelope persistido em `ChatMessage.provider_state`.
+const PROVIDER_STATE_VERSION: u64 = 2;
+/// Placeholder enviado ao provedor quando uma tool call persistida não tem
+/// resultado (turno interrompido antes da execução).
+const MISSING_TOOL_RESULT: &str = "(sem resultado: a ferramenta não concluiu)";
+
+/// Um passo do loop de agentes preservado para replay no próximo turno do mesmo
+/// modelo/provedor: é exatamente o que o loop em memória empilha no histórico
+/// ao pedir o passo seguinte.
+#[derive(Default)]
+struct ReplayStep {
+    /// Texto visível emitido no passo (narração intermediária ou resposta final).
+    text: String,
+    /// Payload bruto do provedor naquele passo (opaco para o harness).
+    state: Option<Value>,
+    /// Ids das tool calls do passo, na ordem cronológica de `ChatMessage.tool_calls`.
+    call_ids: Vec<String>,
+}
+
+impl ReplayStep {
+    fn is_empty(&self) -> bool {
+        self.state.is_none() && self.text.trim().is_empty() && self.call_ids.is_empty()
+    }
+
+    fn to_value(&self) -> Value {
+        serde_json::json!({
+            "state": self.state.clone().unwrap_or(Value::Null),
+            "text": self.text,
+            "toolCallIds": self.call_ids,
+        })
+    }
+}
+
+/// Serializa os passos no envelope v2. `None` quando nenhum passo é replayável
+/// (ex.: turno cancelado antes de qualquer resposta do provedor).
+fn wrap_provider_state(steps: &[ReplayStep]) -> Option<Value> {
+    let serialized: Vec<Value> = steps
+        .iter()
+        .filter(|step| !step.is_empty())
+        .map(ReplayStep::to_value)
+        .collect();
+    if serialized.is_empty() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "version": PROVIDER_STATE_VERSION,
+        "steps": serialized,
+    }))
+}
+
+fn is_provider_state_v2(state: &Value) -> bool {
+    state
+        .as_object()
+        .and_then(|object| object.get("version"))
+        .and_then(Value::as_u64)
+        == Some(PROVIDER_STATE_VERSION)
+}
+
+/// Lê o envelope v2 (`{"version":2,"steps":[…]}`); `None` quando não é v2 ou
+/// quando não há nenhum passo válido.
+fn parse_provider_state_v2(state: &Value) -> Option<Vec<ReplayStep>> {
+    if !is_provider_state_v2(state) {
+        return None;
+    }
+    let steps = state.get("steps")?.as_array()?;
+    let mut parsed: Vec<ReplayStep> = Vec::with_capacity(steps.len());
+    for step in steps {
+        let Some(object) = step.as_object() else {
+            continue;
+        };
+        let text = object
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        // `state` nulo não é payload replayável (passo só com texto).
+        let state = object
+            .get("state")
+            .filter(|value| !value.is_null())
+            .cloned();
+        let call_ids = object
+            .get("toolCallIds")
+            .and_then(Value::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let replay_step = ReplayStep {
+            text,
+            state,
+            call_ids,
+        };
+        if !replay_step.is_empty() {
+            parsed.push(replay_step);
+        }
+    }
+    (!parsed.is_empty()).then_some(parsed)
+}
+
+fn history_tool_call(call: &ToolCallRecord) -> HistoryToolCall {
+    HistoryToolCall {
+        id: call.id.clone(),
+        name: call.name.clone(),
+        arguments: call.arguments.clone(),
+    }
+}
+
+/// Tool result para o replay. Resultado ausente/vazio vira um output sintético:
+/// o provedor recusa uma tool call sem output, então nenhuma call fica órfã.
+fn tool_result_message(call: &ToolCallRecord) -> HistoryMessage {
+    let content = match call.result.as_deref().filter(|result| !result.trim().is_empty()) {
+        Some(result) => truncate_chars(result, MAX_MODEL_TOOL_RESULT_CHARS),
+        None => MISSING_TOOL_RESULT.to_string(),
+    };
+    HistoryMessage::tool_result(call.id.clone(), call.name.clone(), content)
+}
+
+/* ------------------------------------------------------------------ */
 /* History                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -793,6 +950,7 @@ fn build_history(
     deps: &HarnessDeps,
     messages: &[ChatMessage],
     current_assistant_id: &str,
+    provider_id: &str,
     settings: &Settings,
     model: &ModelInfo,
     supports_images: bool,
@@ -827,32 +985,7 @@ fn build_history(
                 if message.status == MessageStatus::Streaming && message.content.is_empty() {
                     continue;
                 }
-                let mut history_message = HistoryMessage::assistant(message.content.clone());
-                history_message.reasoning = message
-                    .reasoning
-                    .clone()
-                    .filter(|reasoning| !reasoning.trim().is_empty());
-                history_message.provider_state = message.provider_state.clone();
-                history_message.tool_calls = message
-                    .tool_calls
-                    .iter()
-                    .map(|call| HistoryToolCall {
-                        id: call.id.clone(),
-                        name: call.name.clone(),
-                        arguments: call.arguments.clone(),
-                    })
-                    .collect();
-                let mut group = vec![history_message];
-                for call in &message.tool_calls {
-                    if let Some(result) = &call.result {
-                        group.push(HistoryMessage::tool_result(
-                            call.id.clone(),
-                            call.name.clone(),
-                            result.clone(),
-                        ));
-                    }
-                }
-                groups.push(group);
+                groups.push(assistant_history_group(message, provider_id, &model.id));
             }
             MessageRole::System => {
                 groups.push(vec![HistoryMessage::system(message.content.clone())]);
@@ -884,7 +1017,140 @@ fn build_history(
         keep_from += 1;
     }
 
-    groups.into_iter().skip(keep_from).flatten().collect()
+    let history: Vec<HistoryMessage> = groups.into_iter().skip(keep_from).flatten().collect();
+    // O corte por orçamento sempre começa em user/system, então o pareamento do
+    // replay tem que sobreviver ao flatten.
+    debug_assert_tool_results_are_paired(&history);
+    history
+}
+
+/// Reconstrói uma mensagem assistant persistida no histórico neutro.
+///
+/// O `provider_state` v2 guarda um bloco de replay por passo do loop; quando o
+/// modelo/provedor da mensagem são os mesmos do turno atual, cada passo vira um
+/// `HistoryMessage::assistant` seguido dos tool results daquele passo — idêntico
+/// ao que o loop em memória envia no passo seguinte. Fora disso cai no fallback
+/// neutro (texto + tool calls + tool results) sem o payload bruto: o replay de
+/// outro modelo/protocolo é inválido e o estado legado não descreve as tool
+/// calls, o que produziria tool results órfãos no provedor.
+fn assistant_history_group(
+    message: &ChatMessage,
+    provider_id: &str,
+    model_id: &str,
+) -> Vec<HistoryMessage> {
+    let same_model = message.provider_id.as_deref() == Some(provider_id)
+        && message.model_id.as_deref() == Some(model_id);
+
+    if same_model {
+        if let Some(steps) = message
+            .provider_state
+            .as_ref()
+            .and_then(parse_provider_state_v2)
+        {
+            return replay_steps_history(message, &steps);
+        }
+    }
+
+    let mut history_message = HistoryMessage::assistant(message.content.clone());
+    history_message.reasoning = message
+        .reasoning
+        .clone()
+        .filter(|reasoning| !reasoning.trim().is_empty());
+    // Estado legado (payload bruto de um único passo): só é seguro replayar
+    // quando não há tool calls persistidas, porque o payload não contém as
+    // chamadas. Envelope v2 inválido também é descartado aqui.
+    history_message.provider_state = message.provider_state.clone().filter(|state| {
+        same_model && message.tool_calls.is_empty() && !is_provider_state_v2(state)
+    });
+    history_message.tool_calls = message.tool_calls.iter().map(history_tool_call).collect();
+
+    let mut group = vec![history_message];
+    for call in &message.tool_calls {
+        group.push(tool_result_message(call));
+    }
+    group
+}
+
+/// Reconstrói o turno multi-step a partir dos passos persistidos: um assistant
+/// por passo (texto + estado bruto + tool calls daquele passo) e, logo depois,
+/// os tool results correspondentes — a mesma ordem do loop em memória.
+fn replay_steps_history(message: &ChatMessage, steps: &[ReplayStep]) -> Vec<HistoryMessage> {
+    let calls_by_id: HashMap<&str, &ToolCallRecord> = message
+        .tool_calls
+        .iter()
+        .map(|call| (call.id.as_str(), call))
+        .collect();
+    let mut referenced: HashSet<&str> = HashSet::new();
+    let mut group: Vec<HistoryMessage> = Vec::new();
+
+    for step in steps {
+        let mut assistant = HistoryMessage::assistant(step.text.clone());
+        assistant.provider_state = step.state.clone();
+        let mut step_calls: Vec<&ToolCallRecord> = Vec::new();
+        for id in &step.call_ids {
+            // Ids desconhecidos (envelope truncado/corrompido) são ignorados.
+            let Some(call) = calls_by_id.get(id.as_str()) else {
+                continue;
+            };
+            if !referenced.insert(call.id.as_str()) {
+                continue;
+            }
+            assistant.tool_calls.push(history_tool_call(call));
+            step_calls.push(call);
+        }
+        group.push(assistant);
+        for call in step_calls {
+            group.push(tool_result_message(call));
+        }
+    }
+
+    // Chamadas persistidas que não aparecem em nenhum passo (envelope
+    // incompleto) entram num passo extra final: nunca deixar o tool result
+    // órfão de uma call que o provedor não vê.
+    let unreferenced: Vec<&ToolCallRecord> = message
+        .tool_calls
+        .iter()
+        .filter(|call| !referenced.contains(call.id.as_str()))
+        .collect();
+    if !unreferenced.is_empty() {
+        let mut assistant = HistoryMessage::assistant(String::new());
+        assistant.tool_calls = unreferenced.iter().map(|call| history_tool_call(call)).collect();
+        group.push(assistant);
+        for call in unreferenced {
+            group.push(tool_result_message(call));
+        }
+    }
+    group
+}
+
+/// Garantia (debug) do replay: todo tool result no histórico tem que vir de um
+/// assistant anterior que declara aquela call — é exatamente o que o provedor
+/// valida (tool result órfão = HTTP 400).
+fn debug_assert_tool_results_are_paired(history: &[HistoryMessage]) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+    let mut calls: HashSet<&str> = HashSet::new();
+    for message in history {
+        match &message.role {
+            HistoryRole::Assistant => {
+                calls = message
+                    .tool_calls
+                    .iter()
+                    .map(|call| call.id.as_str())
+                    .collect();
+            }
+            HistoryRole::Tool => {
+                if let Some(id) = message.tool_call_id.as_deref() {
+                    debug_assert!(
+                        calls.contains(id),
+                        "tool result sem function call no histórico: {id}"
+                    );
+                }
+            }
+            HistoryRole::User | HistoryRole::System => calls.clear(),
+        }
+    }
 }
 
 fn history_budget(model: &ModelInfo) -> usize {
@@ -900,6 +1166,11 @@ fn history_message_size(message: &HistoryMessage) -> usize {
     }
     for image in &message.images {
         size += image.data_base64.len();
+    }
+    // O payload opaco do provedor também ocupa a janela de contexto: sem contar
+    // aqui, conversas com replay gravado estourariam o orçamento estimado.
+    if let Some(state) = &message.provider_state {
+        size += serde_json::to_string(state).map(|json| json.len()).unwrap_or(0);
     }
     size
 }
@@ -1508,6 +1779,21 @@ mod tests {
         assert!(enabled.contains(&messages[2].id));
         assert!(!enabled.contains(&messages[0].id));
     }
+
+    #[test]
+    fn history_size_counts_the_provider_state() {
+        let mut message = HistoryMessage::assistant("ok");
+        let baseline = history_message_size(&message);
+        message.provider_state = Some(serde_json::json!({
+            "version": 2,
+            "steps": [{"state": {"output": []}, "text": "x", "toolCallIds": []}]
+        }));
+        let with_state = history_message_size(&message);
+        assert!(
+            with_state > baseline + 16,
+            "provider_state entra no orçamento de contexto: {baseline} → {with_state}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1921,5 +2207,523 @@ mod agent_loop_tests {
         assert_eq!(result.assistant_message.status, MessageStatus::Cancelled);
         assert!(has_event(&events, "cancelled"));
         assert!(!has_event(&events, "done"));
+    }
+
+    /// Garante o invariante que os provedores exigem no replay: nenhum tool
+    /// result pode aparecer sem o assistant que declarou aquela call antes.
+    fn assert_tool_results_are_paired(history: &[HistoryMessage]) {
+        let mut calls: Vec<&str> = Vec::new();
+        for message in history {
+            match &message.role {
+                HistoryRole::Assistant => {
+                    calls = message
+                        .tool_calls
+                        .iter()
+                        .map(|call| call.id.as_str())
+                        .collect();
+                }
+                HistoryRole::Tool => {
+                    let id = message.tool_call_id.as_deref().unwrap_or_default();
+                    assert!(
+                        calls.contains(&id),
+                        "tool result órfão para a call `{id}`: {history:?}"
+                    );
+                }
+                HistoryRole::User | HistoryRole::System => calls.clear(),
+            }
+        }
+    }
+
+    /// Bug do turno 2: antes da correção o `provider_state` persistido era só o
+    /// do último passo, então o histórico mandava os tool results sem o
+    /// `function_call` correspondente (HTTP 400 "No function call found for
+    /// function call output with call_id ..."). O replay tem que reproduzir o
+    /// loop em memória: um assistant por passo + os tool results do passo.
+    #[tokio::test]
+    async fn second_turn_replays_each_step_of_a_tool_turn() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        let first_state = serde_json::json!({
+            "output": [
+                {"type": "reasoning", "encrypted_content": "assinatura-1"},
+                {"type": "function_call", "call_id": "call-1", "name": "ferramenta_inexistente", "arguments": "{}"}
+            ]
+        });
+        let final_state = serde_json::json!({
+            "output": [
+                {"type": "message", "role": "assistant", "content": [
+                    {"type": "output_text", "text": "Resposta final em duas frases."}
+                ]}
+            ]
+        });
+
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let captured: Arc<Mutex<Vec<Vec<HistoryMessage>>>> = Arc::new(Mutex::new(Vec::new()));
+        let streamer: ProviderStreamer = {
+            let step = step.clone();
+            let captured = captured.clone();
+            let first_state = first_state.clone();
+            let final_state = final_state.clone();
+            Arc::new(move |request, sink| {
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                captured
+                    .lock()
+                    .expect("captured lock")
+                    .push(request.history.clone());
+                let first_state = first_state.clone();
+                let final_state = final_state.clone();
+                Box::pin(async move {
+                    match current {
+                        0 => {
+                            emit(&sink, ProviderEvent::ProviderState(first_state.clone()));
+                            text_stream(&sink, "Vou consultar a ferramenta.");
+                            tool_call_stream(&sink, "call-1", "ferramenta_inexistente");
+                        }
+                        1 => {
+                            emit(&sink, ProviderEvent::ProviderState(final_state.clone()));
+                            text_stream(&sink, "Resposta final em duas frases.");
+                        }
+                        _ => text_stream(&sink, "Resposta ao novo pedido."),
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let harness = deps(temp.db.clone(), streamer);
+        let (first_channel, _events) = channel();
+        let first = run_turn(
+            harness.clone(),
+            payload(&conversation, 4),
+            Settings::default(),
+            first_channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn 1 should complete");
+
+        assert_eq!(first.assistant_message.status, MessageStatus::Complete);
+        assert_eq!(first.assistant_message.tool_calls.len(), 1);
+
+        // O turno persistido guarda o replay de todos os passos (envelope v2).
+        let stored = temp
+            .db
+            .get_message(&first.assistant_message.id)
+            .expect("get message")
+            .expect("stored message");
+        let state = stored.provider_state.expect("provider_state persistido");
+        assert_eq!(
+            state.get("version"),
+            Some(&serde_json::json!(2)),
+            "envelope v2: {state}"
+        );
+        let steps = state
+            .get("steps")
+            .and_then(Value::as_array)
+            .expect("steps array");
+        assert_eq!(steps.len(), 2, "um passo por resposta do provedor: {state}");
+        assert_eq!(
+            steps[0].get("text"),
+            Some(&serde_json::json!("Vou consultar a ferramenta."))
+        );
+        assert_eq!(steps[0].get("state"), Some(&first_state));
+        assert_eq!(
+            steps[0].get("toolCallIds"),
+            Some(&serde_json::json!(["call-1"]))
+        );
+        assert_eq!(
+            steps[1].get("text"),
+            Some(&serde_json::json!("Resposta final em duas frases."))
+        );
+        assert_eq!(steps[1].get("state"), Some(&final_state));
+        assert_eq!(steps[1].get("toolCallIds"), Some(&serde_json::json!([])));
+
+        // Turno 2: novo pedido do usuário — o histórico precisa reconstruir o
+        // turno 1 passo a passo, exatamente como o loop em memória faz.
+        let mut second_payload = payload(&conversation, 4);
+        second_payload.content = "E agora, resuma em uma frase.".to_string();
+        let (second_channel, _second_events) = channel();
+        let second = run_turn(
+            harness,
+            second_payload,
+            Settings::default(),
+            second_channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn 2 should complete");
+        assert_eq!(second.assistant_message.content, "Resposta ao novo pedido.");
+        assert_eq!(step.load(std::sync::atomic::Ordering::SeqCst), 3);
+
+        let requests = captured.lock().expect("captured lock").clone();
+        assert_eq!(requests.len(), 3, "2 passos no turno 1 + 1 passo no turno 2");
+        let history = &requests[2];
+        assert_eq!(
+            history
+                .iter()
+                .map(|message| message.role.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                HistoryRole::User,
+                HistoryRole::Assistant,
+                HistoryRole::Tool,
+                HistoryRole::Assistant,
+                HistoryRole::User,
+            ],
+            "histórico por passo: {history:?}"
+        );
+        assert_eq!(history[1].text, "Vou consultar a ferramenta.");
+        assert_eq!(history[1].provider_state.as_ref(), Some(&first_state));
+        assert_eq!(history[1].tool_calls.len(), 1);
+        assert_eq!(history[1].tool_calls[0].id, "call-1");
+        assert_eq!(history[2].tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(history[3].text, "Resposta final em duas frases.");
+        assert_eq!(history[3].provider_state.as_ref(), Some(&final_state));
+        assert!(history[3].tool_calls.is_empty());
+        assert_eq!(history[4].text, "E agora, resuma em uma frase.");
+        assert_tool_results_are_paired(history);
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* build_history / replay por passo                                  */
+    /* ---------------------------------------------------------------- */
+
+    fn history_deps(db: Arc<Db>) -> HarnessDeps {
+        let streamer: ProviderStreamer = Arc::new(|_request, _sink| Box::pin(async { Ok(()) }));
+        deps(db, streamer)
+    }
+
+    fn catalog_model(deps: &HarnessDeps, model_id: &str) -> ModelInfo {
+        deps.catalog
+            .model("opencode-go", model_id)
+            .expect("model in test catalog")
+            .clone()
+    }
+
+    fn tool_call(id: &str, name: &str, arguments: &str, result: Option<&str>) -> ToolCallRecord {
+        ToolCallRecord {
+            id: id.to_string(),
+            name: name.to_string(),
+            arguments: arguments.to_string(),
+            result: result.map(str::to_string),
+            status: ToolCallStatus::Done,
+            summary: None,
+            started_at: Some(0),
+            finished_at: Some(1),
+        }
+    }
+
+    /// Semeia no banco um turno concluído com uma tool call e o `provider_state`
+    /// informado, seguido do placeholder do turno atual (ignorado no histórico).
+    fn seed_assistant_turn(
+        temp: &TempDb,
+        conversation: &Conversation,
+        model: &ModelInfo,
+        provider_state: Option<Value>,
+    ) -> ChatMessage {
+        let mut user = ChatMessage::user(&conversation.id, "Pesquise o preço do dólar");
+        user.model_id = Some(model.id.clone());
+        user.provider_id = Some("opencode-go".to_string());
+        temp.db.insert_message(&user).expect("user message");
+
+        let mut assistant = ChatMessage::assistant(&conversation.id);
+        assistant.status = MessageStatus::Complete;
+        assistant.content = "O dólar está em R$ 5,40.".to_string();
+        assistant.model_id = Some(model.id.clone());
+        assistant.provider_id = Some("opencode-go".to_string());
+        assistant.tool_calls = vec![tool_call(
+            "call-1",
+            "web_search",
+            "{\"q\":\"dolar\"}",
+            Some("R$ 5,40"),
+        )];
+        assistant.provider_state = provider_state;
+        temp.db.insert_message(&assistant).expect("assistant message");
+
+        let mut placeholder = ChatMessage::assistant(&conversation.id);
+        placeholder.model_id = Some(model.id.clone());
+        placeholder.provider_id = Some("opencode-go".to_string());
+        temp.db.insert_message(&placeholder).expect("placeholder");
+        placeholder
+    }
+
+    /// Envelope v2 de 2 passos usado nos testes de `build_history`.
+    fn two_step_provider_state() -> (Value, Value, Value) {
+        let first_state = serde_json::json!({
+            "output": [
+                {"type": "reasoning", "encrypted_content": "assinatura-1"},
+                {"type": "function_call", "call_id": "call-1", "name": "web_search", "arguments": "{\"q\":\"dolar\"}"}
+            ]
+        });
+        let final_state = serde_json::json!({
+            "output": [
+                {"type": "message", "role": "assistant", "content": [
+                    {"type": "output_text", "text": "O dólar está em R$ 5,40."}
+                ]}
+            ]
+        });
+        let wrapper = serde_json::json!({
+            "version": 2,
+            "steps": [
+                {"state": first_state, "text": "Vou pesquisar o câmbio.", "toolCallIds": ["call-1"]},
+                {"state": final_state, "text": "O dólar está em R$ 5,40.", "toolCallIds": []}
+            ]
+        });
+        (wrapper, first_state, final_state)
+    }
+
+    #[test]
+    fn build_history_rebuilds_one_assistant_per_replay_step() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let deps = history_deps(temp.db.clone());
+        let model = catalog_model(&deps, "deepseek-v4.1-flash");
+        let (wrapper, first_state, final_state) = two_step_provider_state();
+        let placeholder = seed_assistant_turn(&temp, &conversation, &model, Some(wrapper));
+
+        let messages = temp
+            .db
+            .list_messages(&conversation.id)
+            .expect("list messages");
+        let history = build_history(
+            &deps,
+            &messages,
+            &placeholder.id,
+            "opencode-go",
+            &Settings::default(),
+            &model,
+            false,
+        );
+
+        assert_eq!(
+            history.len(),
+            4,
+            "user + passo 1 + tool result + passo final: {history:?}"
+        );
+        assert_tool_results_are_paired(&history);
+        assert_eq!(history[0].role, HistoryRole::User);
+        assert_eq!(history[1].role, HistoryRole::Assistant);
+        assert_eq!(history[1].text, "Vou pesquisar o câmbio.");
+        assert_eq!(
+            history[1].provider_state.as_ref(),
+            Some(&first_state),
+            "estado do passo 1 replayado verbatim"
+        );
+        assert_eq!(history[1].tool_calls.len(), 1);
+        assert_eq!(history[1].tool_calls[0].id, "call-1");
+        assert_eq!(history[1].tool_calls[0].name, "web_search");
+        assert_eq!(history[2].role, HistoryRole::Tool);
+        assert_eq!(history[2].tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(history[2].tool_name.as_deref(), Some("web_search"));
+        assert_eq!(history[2].text, "R$ 5,40");
+        assert_eq!(history[3].role, HistoryRole::Assistant);
+        assert_eq!(history[3].text, "O dólar está em R$ 5,40.");
+        assert_eq!(
+            history[3].provider_state.as_ref(),
+            Some(&final_state),
+            "estado do passo final replayado verbatim"
+        );
+        assert!(history[3].tool_calls.is_empty());
+    }
+
+    #[test]
+    fn legacy_provider_state_with_tool_calls_falls_back_to_neutral_history() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let deps = history_deps(temp.db.clone());
+        let model = catalog_model(&deps, "deepseek-v4.1-flash");
+        // Estado legado: payload bruto do ÚLTIMO passo (só a resposta final),
+        // enquanto `tool_calls` agrega as chamadas de todos os passos. Replayar
+        // esse estado junto das chamadas gera tool result órfão (o HTTP 400).
+        let legacy_state = serde_json::json!({
+            "output": [{"type": "message", "role": "assistant"}]
+        });
+        let placeholder = seed_assistant_turn(&temp, &conversation, &model, Some(legacy_state));
+
+        let messages = temp
+            .db
+            .list_messages(&conversation.id)
+            .expect("list messages");
+        let history = build_history(
+            &deps,
+            &messages,
+            &placeholder.id,
+            "opencode-go",
+            &Settings::default(),
+            &model,
+            false,
+        );
+
+        assert_eq!(
+            history.len(),
+            3,
+            "user + assistant neutro + tool result: {history:?}"
+        );
+        assert_tool_results_are_paired(&history);
+        assert_eq!(history[1].role, HistoryRole::Assistant);
+        assert!(
+            history[1].provider_state.is_none(),
+            "estado legado com tool calls tem que ser descartado"
+        );
+        assert_eq!(history[1].text, "O dólar está em R$ 5,40.");
+        assert_eq!(history[1].tool_calls.len(), 1);
+        assert_eq!(history[1].tool_calls[0].id, "call-1");
+        assert_eq!(history[2].role, HistoryRole::Tool);
+        assert_eq!(history[2].tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(history[2].text, "R$ 5,40");
+    }
+
+    #[test]
+    fn legacy_provider_state_is_kept_for_plain_messages_of_the_same_model() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let deps = history_deps(temp.db.clone());
+        let model = catalog_model(&deps, "deepseek-v4.1-flash");
+        let legacy_state = serde_json::json!({
+            "output": [{"type": "message", "role": "assistant"}]
+        });
+
+        let mut user = ChatMessage::user(&conversation.id, "Responda apenas: ok");
+        user.model_id = Some(model.id.clone());
+        user.provider_id = Some("opencode-go".to_string());
+        temp.db.insert_message(&user).expect("user");
+        let mut assistant = ChatMessage::assistant(&conversation.id);
+        assistant.status = MessageStatus::Complete;
+        assistant.content = "ok".to_string();
+        assistant.model_id = Some(model.id.clone());
+        assistant.provider_id = Some("opencode-go".to_string());
+        assistant.provider_state = Some(legacy_state.clone());
+        temp.db.insert_message(&assistant).expect("assistant");
+        let mut placeholder = ChatMessage::assistant(&conversation.id);
+        placeholder.model_id = Some(model.id.clone());
+        placeholder.provider_id = Some("opencode-go".to_string());
+        temp.db.insert_message(&placeholder).expect("placeholder");
+
+        let messages = temp
+            .db
+            .list_messages(&conversation.id)
+            .expect("list messages");
+        let history = build_history(
+            &deps,
+            &messages,
+            &placeholder.id,
+            "opencode-go",
+            &Settings::default(),
+            &model,
+            false,
+        );
+
+        assert_eq!(history.len(), 2, "user + assistant: {history:?}");
+        assert_eq!(
+            history[1].provider_state.as_ref(),
+            Some(&legacy_state),
+            "mensagem sem tool calls mantém o replay legado"
+        );
+    }
+
+    #[test]
+    fn replay_state_is_dropped_when_the_model_changes() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let deps = history_deps(temp.db.clone());
+        let model = catalog_model(&deps, "deepseek-v4.1-flash");
+        let (wrapper, _, _) = two_step_provider_state();
+        let placeholder = seed_assistant_turn(&temp, &conversation, &model, Some(wrapper));
+
+        let mut other_model = model.clone();
+        other_model.id = "outro-modelo".to_string();
+        let messages = temp
+            .db
+            .list_messages(&conversation.id)
+            .expect("list messages");
+        let history = build_history(
+            &deps,
+            &messages,
+            &placeholder.id,
+            "opencode-go",
+            &Settings::default(),
+            &other_model,
+            false,
+        );
+
+        assert_eq!(history.len(), 3, "fallback neutro: {history:?}");
+        assert_tool_results_are_paired(&history);
+        assert!(
+            history[1].provider_state.is_none(),
+            "replay de outro modelo não pode ir para o provedor"
+        );
+        assert_eq!(history[1].tool_calls.len(), 1);
+        assert_eq!(history[2].tool_call_id.as_deref(), Some("call-1"));
+    }
+
+    #[test]
+    fn replay_synthesizes_output_for_a_tool_call_without_result() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let deps = history_deps(temp.db.clone());
+        let model = catalog_model(&deps, "deepseek-v4.1-flash");
+
+        let mut user = ChatMessage::user(&conversation.id, "Pesquise o preço do dólar");
+        user.model_id = Some(model.id.clone());
+        user.provider_id = Some("opencode-go".to_string());
+        temp.db.insert_message(&user).expect("user");
+        let mut assistant = ChatMessage::assistant(&conversation.id);
+        assistant.status = MessageStatus::Complete;
+        assistant.content = "Resposta final.".to_string();
+        assistant.model_id = Some(model.id.clone());
+        assistant.provider_id = Some("opencode-go".to_string());
+        assistant.tool_calls = vec![tool_call("call-1", "web_search", "{}", None)];
+        assistant.provider_state = Some(serde_json::json!({
+            "version": 2,
+            "steps": [
+                {"state": {"output": []}, "text": "", "toolCallIds": ["call-1"]},
+                {"state": null, "text": "Resposta final.", "toolCallIds": []}
+            ]
+        }));
+        temp.db.insert_message(&assistant).expect("assistant");
+        let mut placeholder = ChatMessage::assistant(&conversation.id);
+        placeholder.model_id = Some(model.id.clone());
+        placeholder.provider_id = Some("opencode-go".to_string());
+        temp.db.insert_message(&placeholder).expect("placeholder");
+
+        let messages = temp
+            .db
+            .list_messages(&conversation.id)
+            .expect("list messages");
+        let history = build_history(
+            &deps,
+            &messages,
+            &placeholder.id,
+            "opencode-go",
+            &Settings::default(),
+            &model,
+            false,
+        );
+
+        assert_eq!(history.len(), 4, "user + 2 passos + tool result: {history:?}");
+        assert_tool_results_are_paired(&history);
+        assert_eq!(history[2].role, HistoryRole::Tool);
+        assert_eq!(history[2].text, MISSING_TOOL_RESULT);
+        assert_eq!(history[3].text, "Resposta final.");
+        assert!(history[3].provider_state.is_none(), "state nulo é omitido");
     }
 }

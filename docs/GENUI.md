@@ -137,7 +137,7 @@ descartadas com aviso — use exatamente estes nomes.
 | `stat` | `label` (≤ 32), `value` (≤ 20), `trend?` (`up\|down\|flat`), `hint?` (≤ 100) | Números tabulares; `hint` para a variação. |
 | `progress` | `value` (0–`max`), `max?` (padrão 100), `label?`, `suffix?` | Fração concluída. |
 | `timeline` | `items` (2–20 `{title, time?, description?, status?}`) | Status `done\|active\|pending\|error`; máx. 12 itens. |
-| `steps` | `items` (2–16 `{title, description?}`), `current?` | `current` é 1-based (0 = nenhum). Máx. 10 passos. |
+| `steps` | `items` (2–16 `{title, description?}`), `current?` | `current` é 1-based (0 = nenhum). Máx. 10 passos; `description` curto — traços/fórmulas longas vão em `table`/`code`. |
 | `checklist` | `items` (1–20 `{label, description?, status?, icon?}`) | Status `done\|active\|pending\|disabled\|error` com ícone + texto acessível. Ideal para simulações e capacidades. |
 | `keyvalue` | `items` (1–20 `{label, value}`) | Pares curtos; > 12 use `table`. |
 | `list` | `items` (1–40 strings ou `{text, description?, href?, icon?, status?}`), `ordered?` | Com `href` vira link externo; máx. 20 itens. |
@@ -148,7 +148,7 @@ descartadas com aviso — use exatamente estes nomes.
 | --- | --- | --- |
 | `callout` | `variant?` (`info\|warning\|success\|danger`), `title?`, `text?` | **Descontinuado — não emitir.** Caixa colorida de nota; só renderiza mensagens antigas (regra `ui.callout-style`). |
 | `code` | `code`, `language?`, `title?` | Trecho curto; arquivos longos viram artefato. |
-| `quote` | `text` (≤ 600), `cite?` | Citação curta com atribuição. |
+| `quote` | `text` (≤ 600), `cite?` | Citação curta com atribuição — **sem moldura/borda** (regra de bordas uniformes). |
 | `text` | `text` (obrigatório, ≤ 1200), `variant?` (`body\|muted\|lead\|strong\|small`) | Parágrafo de texto puro (Markdown não é renderizado dentro de props). |
 | `badge` | `label` (≤ 24), `tone?`, `icon?` | Status/etiqueta curta. |
 | `image` | `src`, `alt` (obrigatório), `caption?`, `size?` (`full\|thumb\|avatar`), `aspect?` (`auto\|video\|square\|wide`) | `http(s)` ou `data:image/...`; em `stack` row use `size: thumb`. |
@@ -356,6 +356,11 @@ legadas são **normalizadas** (`ui.legacy-shape`). O bloco só degrada quando h�
    renderer descrita no item 5.
 9. **Acessibilidade estrutural**: `alt`, `label` e `title` obrigatórios são
    erros do validador, não recomendações.
+10. **Isolamento visual**: `GenUIBlock` usa o escopo `.lumina-genui` e os estilos
+    de elemento do Markdown ficam em `@layer components` (utilitários Tailwind
+    vencem). Assim, margens de `p`, *padding*/marcadores de listas e bordas de
+    `details` do Markdown **não vazam** para a UI generativa — o alinhamento e
+    o espaçamento são sempre os do design system.
 
 ## 11. Checklist do agente antes de emitir
 

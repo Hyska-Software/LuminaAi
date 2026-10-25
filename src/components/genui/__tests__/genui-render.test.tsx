@@ -306,6 +306,19 @@ describe('GenUIBlock — diagnósticos', () => {
 /* ------------------------------------------------------------------ */
 
 describe('a11y/UX das primitivas', () => {
+  it('o bloco renderizado usa o escopo .lumina-genui (isolamento do prose)', () => {
+    renderBlock([
+      {
+        type: 'reveal',
+        props: { title: 'Gabarito' },
+        children: [{ type: 'steps', props: { items: [{ title: 'Passo 1' }, { title: 'Passo 2' }] } }],
+      },
+    ]);
+    const scoped = document.querySelector('.lumina-genui');
+    expect(scoped).toBeTruthy();
+    expect(scoped?.querySelector('details')).toBeTruthy();
+  });
+
   it('steps: current é 1-based e marca o item atual com aria-current="step"', () => {
     renderBlock([
       {
@@ -1000,6 +1013,10 @@ const TYPE_FIXTURES: Record<string, TypeFixture> = {
     assert: () => {
       expect(screen.getByText('Citação de teste')).toBeTruthy();
       expect(screen.getByText('— Autora')).toBeTruthy();
+      // Regra de produto: blocos de conteúdo não usam borda (nem unilateral).
+      const blockquote = screen.getByText('Citação de teste').closest('blockquote');
+      expect(blockquote).toBeTruthy();
+      expect(blockquote?.className ?? '').not.toMatch(/border/);
     },
   },
   callout: {

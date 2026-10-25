@@ -273,7 +273,10 @@
 }
 
 /* Markdown / prose tuning used by the chat renderer */
-/* Contract: docs/MARKDOWN.md §4 — only design tokens are used here. */
+/* Contract: docs/MARKDOWN.md §4 — only design tokens are used here.
+   Fica em `components` para que utilitários Tailwind (usados pela UI generativa)
+   vençam estes defaults sem herdar o estilo de elementos do Markdown. */
+@layer components {
 .lumina-prose {
   font-size: 0.9375rem;
   line-height: 1.7;
@@ -451,54 +454,32 @@
   text-decoration: none;
 }
 
-/* Blockquotes (nested quotes keep a lighter track). */
+/* Blockquotes: texto citado sem moldura. Regra do produto: blocos de conteúdo
+   nunca usam borda assimétrica (um lado maior que os outros). */
 .lumina-prose blockquote {
   margin-block: 0.9em;
-  padding-inline-start: 1em;
-  border-inline-start: 2px solid var(--border-strong);
+  padding-inline-start: 0;
+  border: 0;
   color: var(--foreground-muted);
+  font-style: italic;
 }
 .lumina-prose blockquote blockquote {
   margin-block: 0.6em;
-  border-inline-start-color: var(--border);
   color: var(--foreground-subtle);
 }
 
-/* GitHub alerts (docs §3.3): colors come from the shared semantic tokens. */
+/* GitHub alerts (`> [!NOTE]`, `> [!TIP]`…): bloco neutro com rótulo + ícone,
+   SEM caixa, fundo colorido ou borda — o produto não usa caixas de destaque. */
 .lumina-prose .lumina-alert {
-  --lumina-alert-accent: var(--accent);
-  --lumina-alert-surface: var(--accent-soft);
   margin-block: 0.9em;
-  padding: 0.65em 0.9em;
-  border: 1px solid color-mix(in oklab, var(--lumina-alert-accent) 32%, transparent);
-  border-inline-start: 3px solid var(--lumina-alert-accent);
-  border-radius: 0.75rem;
-  background: var(--lumina-alert-surface);
-  color: var(--foreground);
-}
-.lumina-prose .lumina-alert-note {
-  --lumina-alert-accent: var(--accent);
-  --lumina-alert-surface: var(--accent-soft);
-}
-.lumina-prose .lumina-alert-tip {
-  --lumina-alert-accent: var(--success);
-  --lumina-alert-surface: var(--success-soft);
-}
-.lumina-prose .lumina-alert-important {
-  --lumina-alert-accent: var(--accent-hover);
-  --lumina-alert-surface: var(--accent-soft);
-}
-.lumina-prose .lumina-alert-warning {
-  --lumina-alert-accent: var(--warning);
-  --lumina-alert-surface: var(--warning-soft);
-}
-.lumina-prose .lumina-alert-caution {
-  --lumina-alert-accent: var(--danger);
-  --lumina-alert-surface: var(--danger-soft);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground-muted);
 }
 .lumina-prose .lumina-alert-header {
   margin-bottom: 0.15em;
-  color: var(--lumina-alert-accent);
+  color: var(--foreground);
   font-size: 0.875em;
 }
 .lumina-prose .lumina-alert-body > :first-child {
@@ -626,6 +607,85 @@
   color: var(--danger) !important;
   font-family: var(--font-mono);
   font-size: 0.85em;
+}
+
+/* ------------------------------------------------------------------ */
+/* UI generativa: isolamento do "prose" do Markdown                    */
+/* ------------------------------------------------------------------ */
+/* GenUIBlock vive dentro de `.lumina-prose`, cujos seletores de elemento
+   (p, listas, headings, details, blockquote, tabela) também atingem a UI
+   declarativa e desalinham o conteúdo (listas indentadas, margens extras,
+   bordas duplicadas). Os resets abaixo vencem o prose (mesma layer, mais
+   específicos) e continuam deixando os utilitários Tailwind vencerem, pois
+   `utilities` é a última layer. */
+.lumina-prose .lumina-genui p {
+  margin-block: 0;
+}
+.lumina-prose .lumina-genui ol,
+.lumina-prose .lumina-genui ul {
+  margin-block: 0;
+  padding-inline-start: 0;
+  list-style: none;
+}
+.lumina-prose .lumina-genui li {
+  margin-block: 0;
+  padding-inline-start: 0;
+}
+.lumina-prose .lumina-genui h1,
+.lumina-prose .lumina-genui h2,
+.lumina-prose .lumina-genui h3,
+.lumina-prose .lumina-genui h4,
+.lumina-prose .lumina-genui h5,
+.lumina-prose .lumina-genui h6 {
+  margin-block: 0;
+}
+.lumina-prose .lumina-genui details {
+  margin-block: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+.lumina-prose .lumina-genui summary {
+  padding: 0;
+  font-weight: inherit;
+  list-style: none;
+}
+.lumina-prose .lumina-genui summary:hover {
+  background: transparent;
+}
+.lumina-prose .lumina-genui details[open] > summary {
+  border-bottom: 0;
+}
+.lumina-prose .lumina-genui details > :not(summary) {
+  margin-inline: 0;
+}
+.lumina-prose .lumina-genui blockquote {
+  margin-block: 0;
+  padding: 0;
+  border: 0;
+  font-style: normal;
+}
+.lumina-prose .lumina-genui table {
+  width: auto;
+  border-collapse: collapse;
+  margin-block: 0;
+  font-size: inherit;
+}
+.lumina-prose .lumina-genui caption {
+  margin-top: 0;
+}
+.lumina-prose .lumina-genui img {
+  border-radius: 0;
+}
+.lumina-prose .lumina-genui hr {
+  margin-block: 0;
+}
+.lumina-prose .lumina-genui :not(pre) > code {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
 }
 
 /* Streaming caret: only when the message ends in inline text (p/heading/quote/

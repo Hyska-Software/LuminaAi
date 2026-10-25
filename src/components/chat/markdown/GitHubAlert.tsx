@@ -1,6 +1,5 @@
 import { cloneElement, Children, isValidElement, type ReactNode } from 'react';
 import { CircleAlert, Info, Lightbulb, OctagonAlert, TriangleAlert, type LucideIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { childrenToText, isIgnorableNode, stripLeadingText } from './reactText';
 
 /** GitHub alert kinds supported by the chat renderer (`docs/MARKDOWN.md` §3.3). */
@@ -66,18 +65,17 @@ export interface GitHubAlertProps {
   children?: ReactNode;
 }
 
-/** Styled GitHub alert block with a pt-BR label and an accessible note role. */
+/**
+ * Bloco de alerta do Markdown (GitHub alerts): rótulo + ícone neutros, **sem
+ * caixa, fundo colorido ou borda** — o produto não usa blocos com moldura
+ * assimétrica (ver docs/DESIGN.md §15).
+ */
 export function GitHubAlert({ kind, children }: GitHubAlertProps) {
   const { label, Icon } = ALERT_META[kind];
   return (
-    <div
-      role="note"
-      aria-label={label}
-      data-alert={kind}
-      className={cn('lumina-alert', `lumina-alert-${kind}`)}
-    >
+    <div role="note" aria-label={label} data-alert={kind} className="lumina-alert">
       <div className="lumina-alert-header flex items-center gap-1.5">
-        <Icon aria-hidden className="size-4 shrink-0" />
+        <Icon aria-hidden className="size-4 shrink-0 text-foreground-subtle" />
         <span className="font-semibold">{label}</span>
       </div>
       <div className="lumina-alert-body">{children}</div>

@@ -67,11 +67,18 @@ Pipeline hoje (`src/components/chat/Markdown.tsx`):
 2. **Notas de rodapé** usam o suporte nativo do `remark-gfm`; CSS próprio,
    refs/backrefs navegam por âncora e o rótulo oculto vira "Notas" (pt-BR).
 3. **Alertas GitHub** (`NOTE`, `TIP`, `IMPORTANT`, `WARNING`, `CAUTION`) viram
-   um bloco com ícone Lucide + rótulo pt-BR (`Nota`, `Dica`, `Importante`,
-   `Atenção`, `Cuidado`), usando tokens (`--accent`, `--success`, `--warning`,
-   `--danger`).
+   um bloco neutro com ícone Lucide + rótulo pt-BR (`Nota`, `Dica`,
+   `Importante`, `Atenção`, `Cuidado`), **sem caixa, fundo colorido ou borda**.
+   Regra de produto: blocos de conteúdo não usam moldura nem borda assimétrica
+   (ver `docs/DESIGN.md` §15); o destaque é só tipográfico.
 4. **Quebra de linha simples continua softbreak** (CommonMark). Nada de
    transformar toda quebra em `<br>` — listas/parágrafos do modelo quebrariam.
+5. **Isolamento do prose × GenUI**: os estilos de elemento do Markdown ficam em
+   `@layer components` e os blocos `ui` são renderizados dentro de
+   `.lumina-genui` com resets escopados (`p`, `ol`/`ul`/`li`, headings,
+   `details`, `blockquote`, tabela). Assim utilitários Tailwind da UI
+   generativa sempre vencem e margens/padding/bordas do Markdown não vazam para
+   os componentes (`docs/GENUI.md` §10).
 5. **Mensagem do usuário** continua texto puro (bolha com edição/cópia) —
    fora de escopo.
 6. **Preview de artefato Markdown** (`ArtifactPreview`) continua modo

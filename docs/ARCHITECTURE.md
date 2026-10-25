@@ -78,7 +78,7 @@ usage_log(id, conversation_id, message_id, provider_id, model_id, tokens..., cos
 meta(key PK, value)
 ```
 
-`provider_state` guarda o payload bruto da resposta do provedor (blocos `thinking` da Anthropic, itens do Responses, `parts` do Google) para replay fiel no próximo passo do loop — necessário para tool calls com raciocínio estendido.
+`provider_state` guarda o replay do turno do agente no formato **v2** (JSON opaco, só no backend — não trafega no IPC): `{"version":2,"steps":[{"state":<payload bruto do passo ou null>,"text":"<texto do passo>","toolCallIds":["id1", …]}]}`. Há um passo por resposta do provedor — um por passo com ferramentas e um para a resposta final (a resposta final forçada é o último) — e `toolCallIds` referencia `tool_calls` em ordem cronológica. No turno seguinte o harness reconstrói o turno multi-step no histórico (um assistant por passo + os tool results daquele passo), exatamente como o loop em memória faz, para que o provedor aceite os outputs das ferramentas. Bancos antigos (payload bruto de um único passo) continuam funcionando: o estado só é replayado quando a mensagem não tem tool calls e o modelo/provedor conferem; caso contrário é descartado e o histórico cai no fallback neutro (texto + tool calls + tool results).
 
 `trace` guarda o traço do loop de agentes usado pelo espaço de pensamento do chat: uma entrada por passo com o `reasoning` visível daquele passo e a quantidade de tool calls que ele pediu (as chamadas em si continuam em `tool_calls`, na ordem cronológica). Bancos antigos recebem a coluna automaticamente na abertura (migração aditiva).
 
@@ -157,7 +157,7 @@ Fatos descobertos por sondagem (ver `docs/MODELS.md`):
    - se houver tool calls: executa `tools::execute` em paralelo (máx. 4), emite `tool_call_finished`, adiciona resultados ao histórico e repete;
    - se não houver: finaliza.
    Cada passo alimenta `ChatMessage.trace` (`reasoning` do passo + número de tool calls), o que permite reconstruir a timeline de pensamento do chat depois de reabrir a conversa (DESIGN §6.3).
-4. Persiste mensagem final + `provider_state` + usage; gera título automático (primeiro turno) com o próprio modelo (requisição curta, não-streaming) ou heurística local.
+4. Persiste mensagem final + `provider_state` (envelope **v2** com o replay de cada passo do loop — ver §5) + usage; gera título automático (primeiro turno) com o próprio modelo (requisição curta, não-streaming) ou heurística local.
 5. Cancelamento: `CancellationToken` interrompe o stream; mensagem parcial é salva com status `cancelled`.
 
 ### Ferramentas

@@ -94,7 +94,7 @@ export function GenUIBlock({ source, className }: GenUIBlockProps) {
   }
 
   return (
-    <div className={cn('my-3', className)}>
+    <div className={cn('lumina-genui my-3', className)}>
       <GenUIRenderer spec={spec} />
     </div>
   );

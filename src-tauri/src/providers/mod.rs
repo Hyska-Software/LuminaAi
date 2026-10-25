@@ -1124,4 +1124,185 @@ mod smoke {
         assert!(deltas >= 3, "esperava pelo menos 3 deltas antes de cancelar");
         assert!(!saw_done, "cancelamento não deve emitir Done");
     }
+
+    /// JSON object returned by the fake `echo` tool during the multi-step replay.
+    fn fake_echo_result() -> String {
+        json!({"ok": true, "echo": "ping"}).to_string()
+    }
+
+    /// Appends one agent-loop step exactly like the corrected `build_history`
+    /// does on the next turn: the assistant message carries that step's
+    /// `provider_state` (and its own tool calls), immediately followed by the
+    /// tool results for the calls it requested.
+    fn push_step_replay(history: &mut Vec<HistoryMessage>, step: &StreamResult) {
+        history.push(assistant_replay(step));
+        for call in &step.calls {
+            history.push(HistoryMessage::tool_result(
+                call.id.clone(),
+                call.name.clone(),
+                fake_echo_result(),
+            ));
+        }
+    }
+
+    fn call_names(result: &StreamResult) -> Vec<&str> {
+        result.calls.iter().map(|call| call.name.as_str()).collect()
+    }
+
+    /// Modelo vivo do protocolo Google. O catálogo ainda lista
+    /// `gemini-4-argon-contributor`, mas o gateway respondeu `ModelDeprecated`
+    /// para ele; o id vivo do mesmo modelo é `gemini-4-argon` (confirmado em
+    /// `/v1/models` no gateway Go). Preferimos o id quando o catálogo já o
+    /// tiver e, enquanto não tiver, herdamos o metadata do entry antigo
+    /// (protocolo `google`, limites e opções de raciocínio).
+    fn google_smoke_model(catalog: &CatalogFile) -> crate::catalog::ModelInfo {
+        if let Some(model) = catalog.model("opencode-go", "gemini-4-argon") {
+            return model.clone();
+        }
+        let mut model = catalog
+            .model("opencode-go", "gemini-4-argon-contributor")
+            .expect("nenhum modelo do protocolo Google no catálogo opencode-go")
+            .clone();
+        model.id = "gemini-4-argon".to_string();
+        model
+    }
+
+    /// Regression smoke for the replay-shape bug found live: a tool-using turn
+    /// used to persist only the LAST step's `provider_state` while keeping every
+    /// step's `tool_calls`. On the next user turn, `openai-responses`,
+    /// `anthropic` and `google` replayed that final state (no
+    /// function_call/tool_use/functionCall item) and ignored
+    /// `message.tool_calls`, so the tool outputs were orphaned and the gateway
+    /// answered HTTP 400 (`No function call found for function call output with
+    /// call_id …`). The fix persists one state per step; `build_history`
+    /// reconstructs one assistant per step with interleaved tool results — the
+    /// exact shape exercised here on the four wire protocols.
+    #[tokio::test]
+    #[ignore = "real gateway smoke test (needs ~/.local/share/opencode/auth.json)"]
+    async fn smoke_multi_step_turn_replay_all_protocols() {
+        let Some(key) = auth_key() else {
+            eprintln!(
+                "SKIP smoke_multi_step_turn_replay_all_protocols: auth.json sem chave opencode-go"
+            );
+            return;
+        };
+        let catalog = CatalogFile::load().expect("catalog");
+        let provider = catalog
+            .provider("opencode-go")
+            .expect("provider opencode-go");
+        let cases = [
+            ("deepseek-v4.1-flash", WireProtocol::OpenaiChat),
+            ("muse-spark-1.3-contributor", WireProtocol::OpenaiResponses),
+            ("gpt-6-luna", WireProtocol::OpenaiResponses),
+            ("claude-haiku-5-5", WireProtocol::Anthropic),
+            // `gemini-4-argon-contributor` foi descontinuado no gateway; o
+            // helper resolve para o id vivo (`gemini-4-argon`).
+            ("gemini-4-argon", WireProtocol::Google),
+        ];
+
+        for (model_id, protocol) in cases {
+            let model = if matches!(protocol, WireProtocol::Google) {
+                google_smoke_model(&catalog)
+            } else {
+                catalog
+                    .model("opencode-go", model_id)
+                    .unwrap_or_else(|| panic!("{model_id} ausente do catálogo opencode-go"))
+                    .clone()
+            };
+            let tool = echo_tool();
+            let label = format!("{model_id} [{}]", protocol.as_str());
+
+            // Passo 1 (dentro do turno): o modelo pede a ferramenta e devolve o
+            // estado bruto daquele passo.
+            let first = run_once(
+                provider_config(provider, &model, &key),
+                protocol,
+                vec![HistoryMessage::user(tool_call_instructions())],
+                vec![tool.clone()],
+                ReasoningRequest::Auto,
+            )
+            .await;
+            eprintln!(
+                "[{label}] passo 1: calls={:?} state_chars={}",
+                call_names(&first),
+                first
+                    .state
+                    .as_ref()
+                    .map(|state| state.to_string().chars().count())
+                    .unwrap_or(0)
+            );
+            assert!(
+                !first.calls.is_empty(),
+                "{label}: o modelo não chamou a ferramenta no passo 1"
+            );
+            assert!(first.state.is_some(), "{label}: passo 1 sem provider_state");
+
+            // Passo 2 (ainda no turno): replay do passo 1 — assistant daquele
+            // passo + os tool results — e nova chamada do provedor.
+            let mut history = vec![HistoryMessage::user(tool_call_instructions())];
+            push_step_replay(&mut history, &first);
+            let second = run_once(
+                provider_config(provider, &model, &key),
+                protocol,
+                history,
+                vec![tool.clone()],
+                ReasoningRequest::Auto,
+            )
+            .await;
+            eprintln!(
+                "[{label}] passo 2: texto={:?} calls={:?} state={}",
+                second.text.trim(),
+                call_names(&second),
+                second.state.is_some()
+            );
+            assert!(
+                !second.text.trim().is_empty() || !second.calls.is_empty(),
+                "{label}: replay do passo 1 não produziu resposta"
+            );
+
+            // Passo 3 (PRÓXIMO turno do usuário): histórico persistido com um
+            // assistant por passo + tool results intercalados. O shape antigo
+            // (só o estado do último passo + todos os tool results) devolvia 400
+            // justamente aqui, nos protocolos que fazem replay do estado.
+            let mut history = vec![HistoryMessage::user(tool_call_instructions())];
+            push_step_replay(&mut history, &first);
+            push_step_replay(&mut history, &second);
+            history.push(HistoryMessage::user("Responda apenas: ok"));
+            let mut third = run_once(
+                provider_config(provider, &model, &key),
+                protocol,
+                history.clone(),
+                vec![tool.clone()],
+                ReasoningRequest::Auto,
+            )
+            .await;
+            eprintln!(
+                "[{label}] passo 3: texto={:?} calls={:?}",
+                third.text.trim(),
+                call_names(&third)
+            );
+            // Se o modelo insistir em chamar a ferramenta, responde as calls e
+            // repete a pergunta final sem ferramentas — o histórico multi-step
+            // rejeitado pelo gateway seria o mesmo, então o teste continua
+            // cobrindo o replay.
+            if third.text.trim().is_empty() && !third.calls.is_empty() {
+                push_step_replay(&mut history, &third);
+                history.push(HistoryMessage::user("Sem ferramentas: responda apenas: ok"));
+                third = run_once(
+                    provider_config(provider, &model, &key),
+                    protocol,
+                    history,
+                    Vec::new(),
+                    ReasoningRequest::Auto,
+                )
+                .await;
+                eprintln!("[{label}] passo 3b: texto={:?}", third.text.trim());
+            }
+            assert!(
+                !third.text.trim().is_empty(),
+                "{label}: o próximo turno não devolveu texto — replay multi-step rejeitado"
+            );
+            eprintln!("[{label}] OK");
+        }
+    }
 }

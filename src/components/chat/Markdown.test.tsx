@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -551,5 +552,54 @@ describe('Markdown — HTML seguro e detalhes', () => {
 
     const idle = renderMarkdown('Resposta completa');
     expect(idle.container.querySelector('.lumina-prose')?.className).not.toContain('lumina-prose--streaming');
+  });
+});
+
+describe('Markdown — bordas uniformes (regra de produto)', () => {
+  const css = readFileSync('src/styles/globals.css', 'utf8');
+
+  function ruleBlock(selector: string): string {
+    const start = css.indexOf(selector);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const end = css.indexOf('}', start);
+    return css.slice(start, end + 1);
+  }
+
+  it('citações não usam borda unilateral', () => {
+    const block = ruleBlock('.lumina-prose blockquote {');
+    expect(block).not.toMatch(/border-inline-start|border-left|border-right/);
+  });
+
+  it('alertas GitHub não são caixas com borda/fundo', () => {
+    const block = ruleBlock('.lumina-prose .lumina-alert {');
+    // Pode declarar `border: 0` (reset), nunca uma borda desenhada.
+    expect(block).not.toMatch(/border-(inline|left|right|top|bottom)/);
+    const borderValue = /border:\s*([^;]+);/.exec(block)?.[1]?.trim();
+    expect(borderValue === undefined || borderValue === '0').toBe(true);
+    // Fundo é permitido apenas transparente (sem caixa colorida).
+    const backgroundValue = /background:\s*([^;]+);/.exec(block)?.[1]?.trim();
+    expect(backgroundValue === undefined || backgroundValue === 'transparent').toBe(true);
+  });
+
+  it('alertas continuam acessíveis (role note + rótulo pt-BR)', () => {
+    renderMarkdown('> [!TIP]\n> Conteúdo');
+    const alert = screen.getByRole('note', { name: 'Dica' });
+    expect(alert.getAttribute('data-alert')).toBe('tip');
+    expect(alert.className).not.toMatch(/border|bg-/);
+  });
+
+  it('o prose do Markdown fica em @layer components e o GenUI tem resets próprios', () => {
+    // Regressão: sem o layer, os seletores de elemento do Markdown (p, ol, li,
+    // details) vazam para dentro da UI generativa e desalinham os blocos.
+    expect(css).toMatch(/@layer components\s*\{[\s\S]*?\.lumina-prose\s*\{/);
+    for (const selector of [
+      '.lumina-prose .lumina-genui p',
+      '.lumina-prose .lumina-genui ol',
+      '.lumina-prose .lumina-genui li',
+      '.lumina-prose .lumina-genui details',
+      '.lumina-prose .lumina-genui details > :not(summary)',
+    ]) {
+      expect(css).toContain(selector);
+    }
   });
 });

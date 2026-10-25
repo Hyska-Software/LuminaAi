@@ -198,6 +198,12 @@ Com `reduceMotion` (config ou media query), remover transformações e shimmer; 
 - Cards dentro de cards sem hierarquia.
 - Animações > 300ms em interações.
 - Texto cinza claro sobre fundo claro, ou `opacity` como substituto de cor.
+- **Bordas assimétricas**: nunca um lado/peso diferente dos demais no mesmo
+  elemento (ex.: `border-inline-start: 3px` com `1px` nos outros lados). Ou a
+  borda é uniforme em todos os lados, ou não existe.
+- **Caixas de alerta/tip no Markdown** (`> [!TIP]` etc.): alertas renderizam
+  como bloco neutro (ícone + rótulo + texto, sem caixa/fundo/borda). Citações
+  também são texto sem moldura.
 - **UI generativa**: props de estilo (cores, fontes, raios, sombras) — o agente
   usa apenas os componentes e tokens do design system; card dentro de card;
   containers vazios; `grid` com linha incompleta; tabela/gráfico sem título;

@@ -476,7 +476,7 @@
       "kind": "leaf",
       "category": "data",
       "summary": "Passos numerados com passo atual destacado.",
-      "doc": "`items` (2–16 `{title, description?}`), `current?` (índice 1-based do passo atual; 0 = nenhum).",
+      "doc": "`items` (2–16 `{title, description?}`), `current?` (índice 1-based do passo atual; 0 = nenhum). Mantenha `description` curto; traços, fórmulas e configurações longas vão em `table`/`code`.",
       "acceptsChildren": false,
       "props": {
         "items": {

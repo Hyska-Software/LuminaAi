@@ -228,10 +228,11 @@ export function GenUICallout({ props, children }: GenUINodeProps) {
 export function GenUIQuote({ props, children }: GenUINodeProps) {
   const text = propString(props, 'text');
   const cite = propString(props, 'cite');
+  // Sem moldura/borda: o produto não usa bloco com borda de um lado só.
   return (
-    <blockquote className="border-l-2 border-border-strong pl-3.5">
+    <blockquote className="flex flex-col gap-1">
       <p className="text-[13px] italic leading-relaxed text-foreground-muted">{text || children}</p>
-      {cite ? <cite className="mt-1 block text-[11px] not-italic text-foreground-subtle">— {cite}</cite> : null}
+      {cite ? <cite className="text-[11px] not-italic text-foreground-subtle">— {cite}</cite> : null}
     </blockquote>
   );
 }

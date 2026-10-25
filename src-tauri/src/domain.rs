@@ -183,9 +183,13 @@ pub struct ChatMessage {
     #[serde(default)]
     pub usage: Option<UsageInfo>,
     pub created_at: i64,
-    /// Opaque protocol payload (Anthropic thinking blocks, Responses items,
-    /// Google parts) replayed verbatim on the next turn of the same conversation.
-    #[serde(default)]
+    /// Opaque, backend-only protocol payload (Anthropic thinking blocks,
+    /// Responses items, Google parts) replayed verbatim on the next turn of the
+    /// same conversation. It is persisted in SQLite but never serialized to the
+    /// renderer: the UI does not use it and, from v2 on, it stores one replay
+    /// block per agent-loop step (see harness::build_history), which would only
+    /// inflate the IPC payload.
+    #[serde(default, skip_serializing)]
     pub provider_state: Option<Value>,
     /// Agent loop trace for the thinking timeline (reasoning + tool counts per step).
     #[serde(default)]
@@ -515,4 +519,31 @@ pub struct CatalogView {
 
 pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// O replay opaco do provedor fica só no backend (SQLite): o renderer nunca
+    /// usou o campo e, a partir do formato v2, ele carrega o estado de todos os
+    /// passos do loop — mandá-lo no IPC só inflaria as mensagens.
+    #[test]
+    fn provider_state_is_not_serialized_to_the_renderer() {
+        let mut message = ChatMessage::assistant("conv-1");
+        message.provider_state = Some(serde_json::json!({
+            "version": 2,
+            "steps": [{"state": {"output": []}, "text": "ok", "toolCallIds": []}],
+        }));
+
+        let json = serde_json::to_value(&message).expect("serialize assistant message");
+        assert!(
+            json.get("providerState").is_none(),
+            "provider_state não deve cruzar o IPC: {json}"
+        );
+
+        // Desserialização continua tolerante (não quebra payloads antigos).
+        let parsed: ChatMessage = serde_json::from_value(json).expect("deserialize message");
+        assert!(parsed.provider_state.is_none());
+    }
 }
