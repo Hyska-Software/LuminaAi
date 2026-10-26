@@ -133,18 +133,30 @@ function settingsView(overrides: Partial<SettingsView> = {}): SettingsView {
   };
 }
 
-function catalogView(providerOverrides: Partial<ProviderInfo> = {}): CatalogView {
+function catalogViewWith(
+  providers: ProviderInfo[],
+  keys: CatalogView['keys'] = [],
+  auth: ProviderAuthStatus[] = [],
+): CatalogView {
   return {
     catalog: {
       version: 1,
       generatedAt: '2026-10-26T00:00:00.000Z',
       sources: {},
-      providers: [{ ...openaiProvider, ...providerOverrides }],
+      providers,
     },
-    keys: [{ providerId: 'openai', hasKey: true, masked: null, source: 'chatgpt', mode: 'oauth' }],
-    auth: [authStatus()],
+    keys,
+    auth,
     remoteRefreshedAt: 1_700_000_000_000,
   };
+}
+
+function catalogView(providerOverrides: Partial<ProviderInfo> = {}): CatalogView {
+  return catalogViewWith(
+    [{ ...openaiProvider, ...providerOverrides }],
+    [{ providerId: 'openai', hasKey: true, masked: null, source: 'chatgpt', mode: 'oauth' }],
+    [authStatus()],
+  );
 }
 
 beforeEach(() => {
@@ -267,5 +279,143 @@ describe('appStore — OpenAI plan usage', () => {
     useAppStore.getState().toggleFavorite('openai', 'gpt-6.1-sol');
     expect(useAppStore.getState().favorites).not.toContain('gpt-6.1-sol');
     expect(useAppStore.getState().isFavorite('openai', 'gpt-6.1-sol')).toBe(false);
+  });
+});
+
+describe('appStore — API key save', () => {
+  const anthropicProvider: ProviderInfo = {
+    id: 'anthropic',
+    name: 'Anthropic',
+    shortName: 'Anthropic',
+    description: 'Anthropic',
+    baseUrl: 'https://api.anthropic.com/v1',
+    consoleUrl: 'https://platform.claude.com/settings/keys',
+    endpoints: { anthropic: '/messages', models: '/models' },
+    headers: { 'anthropic-version': '2026-10-21' },
+    authEnv: 'ANTHROPIC_API_KEY',
+    defaultModelId: 'claude-sonnet-5-5',
+    models: [
+      model('claude-sonnet-5-5', 'Claude Sonnet 5.5', {
+        family: 'claude',
+        protocols: ['anthropic'],
+      }),
+    ],
+    notes: [],
+  };
+
+  /** Gateway providers (Go/Zen) do not declare a `models` endpoint. */
+  const gatewayProvider: ProviderInfo = {
+    ...anthropicProvider,
+    id: 'opencode-go',
+    name: 'OpenCode Go',
+    shortName: 'Go',
+    endpoints: { 'openai-chat': '/openai/v1/chat/completions' },
+    authEnv: 'OPENCODE_API_KEY',
+    defaultModelId: 'deepseek-v4.1-flash',
+    models: [
+      model('deepseek-v4.1-flash', 'DeepSeek V4.1 Flash', {
+        family: 'deepseek',
+        protocols: ['openai-chat'],
+      }),
+    ],
+  };
+
+  const anthropicKey = {
+    providerId: 'anthropic',
+    hasKey: true,
+    masked: 'sk-ant…1234',
+    source: 'settings' as const,
+    mode: 'api-key' as const,
+  };
+
+  it('puxa e mescla a lista da conta assim que a API key é salva', async () => {
+    useAppStore.setState({ providers: [anthropicProvider], keys: [] });
+    const providerId = anthropicProvider.id;
+    mocks.api.setProviderKey.mockResolvedValue({
+      settings,
+      keys: [anthropicKey],
+      auth: [],
+      secretsError: null,
+    } satisfies SettingsView);
+    mocks.api.refreshProviderModels.mockResolvedValue(
+      catalogViewWith(
+        [
+          {
+            ...anthropicProvider,
+            models: [
+              ...anthropicProvider.models,
+              model('claude-sonnet-6', 'Claude Sonnet 6', {
+                family: 'claude',
+                protocols: ['anthropic'],
+                estimated: true,
+              }),
+            ],
+          },
+        ],
+        [anthropicKey],
+      ),
+    );
+
+    await useAppStore.getState().setProviderKey(providerId, 'sk-ant-api03-chave');
+
+    expect(mocks.api.setProviderKey).toHaveBeenCalledWith(providerId, 'sk-ant-api03-chave');
+    expect(mocks.api.refreshProviderModels).toHaveBeenCalledWith(providerId);
+    const provider = useAppStore.getState().providers.find((entry) => entry.id === providerId)!;
+    expect(provider.models.map((entry) => entry.id)).toContain('claude-sonnet-6');
+    expect(useAppStore.getState().keys[0].hasKey).toBe(true);
+  });
+
+  it('não tenta puxar modelos de provedores sem endpoint de modelos (Go/Zen)', async () => {
+    useAppStore.setState({ providers: [gatewayProvider], keys: [] });
+    mocks.api.setProviderKey.mockResolvedValue({
+      settings,
+      keys: [
+        {
+          providerId: 'opencode-go',
+          hasKey: true,
+          masked: 'sk-…1234',
+          source: 'settings',
+          mode: 'api-key',
+        },
+      ],
+      auth: [],
+      secretsError: null,
+    } satisfies SettingsView);
+
+    await useAppStore.getState().setProviderKey('opencode-go', 'sk-go-chave');
+
+    expect(mocks.api.refreshProviderModels).not.toHaveBeenCalled();
+  });
+
+  it('falha ao atualizar a lista não desfaz a chave salva nem vira erro do app', async () => {
+    useAppStore.setState({ providers: [anthropicProvider], keys: [] });
+    mocks.api.setProviderKey.mockResolvedValue({
+      settings,
+      keys: [anthropicKey],
+      auth: [],
+      secretsError: null,
+    } satisfies SettingsView);
+    mocks.api.refreshProviderModels.mockRejectedValue(new Error('rede indisponível'));
+
+    await expect(
+      useAppStore.getState().setProviderKey('anthropic', 'sk-ant-api03-chave'),
+    ).resolves.toBeUndefined();
+
+    expect(useAppStore.getState().keys[0].hasKey).toBe(true);
+    expect(useAppStore.getState().error).toBeNull();
+  });
+
+  it('remover a chave não tenta puxar modelos', async () => {
+    useAppStore.setState({ providers: [anthropicProvider], keys: [anthropicKey] });
+    mocks.api.setProviderKey.mockResolvedValue({
+      settings,
+      keys: [{ ...anthropicKey, hasKey: false, masked: null, source: 'none' }],
+      auth: [],
+      secretsError: null,
+    } satisfies SettingsView);
+
+    await useAppStore.getState().setProviderKey('anthropic', null);
+
+    expect(mocks.api.refreshProviderModels).not.toHaveBeenCalled();
   });
 });

@@ -215,6 +215,20 @@ export const useAppStore = create<AppState>()(
         try {
           const view = await api.setProviderKey(providerId, key);
           set({ keys: view.keys, auth: view.auth ?? get().auth });
+          // A saved API key unlocks the provider account model list: pull it
+          // right away so the picker already shows every model the account can
+          // use (new ids/snapshots included) without a manual "Atualizar".
+          // Providers without a `models` endpoint (Go/Zen gateways) keep only
+          // the bundled catalog.
+          if (!key) return;
+          const provider = get().providers.find((entry) => entry.id === providerId);
+          if (!provider?.endpoints?.models) return;
+          try {
+            await get().refreshProviderModels(providerId);
+          } catch {
+            // Non-fatal: the bundled catalog stays usable and "Testar conexão"
+            // surfaces the real credential/network error.
+          }
         } catch (error) {
           set({ error: error instanceof Error ? error.message : String(error) });
         }

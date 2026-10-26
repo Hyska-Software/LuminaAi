@@ -18,13 +18,14 @@
 | Validação | `src-tauri/src/commands/settings.rs`, `src-tauri/src/config.rs` | `probe_models` envia headers do catálogo (guard contra `authorization`/`user-agent`/`host`/`content-length` vindos do JSON); copy `sk-ant-…`/console Anthropic; 402 provider-aware; `default_auth_env("anthropic")` |
 | UI | `src/components/settings/{ProvidersTab,AboutTab}.tsx` + testes; `src/components/models/*` testes | card Anthropic só API key (placeholder `sk-ant-…`, console `platform.claude.com/settings/keys`, sem CTA ChatGPT); fixtures passam a 4 abas / 161 opções na busca global / rótulo `Go + Zen + ChatGPT + Anthropic` |
 | Docs | `docs/MODELS.md`, `docs/ARCHITECTURE.md`, `docs/DESIGN.md`, `README.md` | provedor, autenticação, headers, catálogo, decisão #14 |
+| Auto-refresh | `src/lib/store/appStore.ts` | salvar uma API key de provedor com endpoint `models` dispara `refresh_provider_models` (lista/metadados da conta) sem ação manual; falha é não-fatal (catálogo embutido continua); remover chave não dispara |
 
 ## 2. Verificação automatizada
 
 | Comando | Resultado |
 | --- | --- |
 | `pnpm typecheck` | exit 0 (sem erros) |
-| `pnpm test` | **67 arquivos / 1341 testes** passando (0 falhas) |
+| `pnpm test` | **67 arquivos / 1345 testes** passando (0 falhas; inclui os 4 testes do auto-refresh no `appStore`) |
 | `pnpm build` | build Vite concluído (só avisos pré-existentes de chunk size) |
 | `cd src-tauri && cargo check --lib` | `Finished` (13 warnings pré-existentes, nenhum novo da entrega) |
 | `cd src-tauri && cargo test --lib` | **428 passed; 0 failed; 10 ignored** |

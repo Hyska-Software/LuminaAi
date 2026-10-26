@@ -89,7 +89,12 @@ Configuração no catálogo (`data/catalog.json`, provider `anthropic`):
 `endpoints: { "anthropic": "/messages", "models": "/models" }`, `auth` implícito
 `api-key` (perfil `standard`) e `headers: { "anthropic-version": "2026-10-21" }`.
 O mesmo header vale para inferência, listagem e "Testar conexão"; trocar de
-versão é só editar o JSON (sem recompilar).
+versão é só editar o JSON (sem recompilar). **Ao salvar a API key, o app busca a
+lista da conta automaticamente** (`refresh_provider_models` → `GET /v1/models`),
+então os modelos e metadados da conta aparecem no seletor sem ação manual; o
+catálogo embutido continua disponível como fallback offline. "Testar conexão"
+apenas valida a credencial; a ação "Atualizar catálogo" (paleta de comandos)
+repete a busca para todos os provedores configurados.
 
 Seed de modelos (IDs dateless da geração 4.6+, linha Claude): Fable 5/5.1,
 Opus 4.5–5.5, Sonnet 4.5–5.5, Haiku 4.5/5.5. Preços e limites vêm do models.dev
