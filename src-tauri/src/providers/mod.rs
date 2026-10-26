@@ -1640,6 +1640,129 @@ mod smoke {
             eprintln!("[{label}] OK");
         }
     }
+
+    /// Provedor oficial da Anthropic (API key, Bearer + header estático
+    /// `anthropic-version` do catálogo): lista os modelos da conta em
+    /// `GET {base_url}/models` e faz um stream real em `POST {base_url}/messages`.
+    ///
+    /// Rodar manualmente (fora do CI; precisa de `ANTHROPIC_API_KEY`):
+    ///
+    /// ```text
+    /// cd src-tauri
+    /// cargo test --lib providers::smoke::anthropic_direct -- --ignored --nocapture
+    /// ```
+    #[tokio::test]
+    #[ignore = "real Anthropic API smoke test (needs ANTHROPIC_API_KEY)"]
+    async fn anthropic_direct_lists_models_and_streams() {
+        let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
+        if api_key.trim().is_empty() {
+            eprintln!("SKIP anthropic_direct_lists_models_and_streams: ANTHROPIC_API_KEY ausente");
+            return;
+        }
+        let catalog = CatalogFile::load().expect("catalog");
+        let provider = catalog
+            .provider("anthropic")
+            .expect("provider anthropic no catálogo");
+        let model = catalog
+            .model("anthropic", &provider.default_model_id)
+            .expect("modelo default do provider anthropic")
+            .clone();
+        let static_headers = provider.static_headers();
+        assert!(
+            static_headers
+                .iter()
+                .any(|(name, _)| name == "anthropic-version"),
+            "catalog deve declarar anthropic-version"
+        );
+        let http = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(20))
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .expect("smoke HTTP client");
+
+        // 1) Lista da conta: GET {base}/models com Bearer + headers estáticos.
+        let models_path = provider
+            .endpoints
+            .get("models")
+            .expect("endpoints.models do provider anthropic");
+        let models_url = endpoint(&provider.base_url, models_path);
+        let mut list_request = http
+            .get(&models_url)
+            .header("authorization", format!("Bearer {api_key}"));
+        for (name, value) in &static_headers {
+            list_request = list_request.header(name.as_str(), value.as_str());
+        }
+        let response = list_request.send().await.expect("GET /models");
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        assert!(
+            status.is_success(),
+            "GET {models_url} respondeu {status}: {body}"
+        );
+        let parsed: Value = serde_json::from_str(&body).expect("GET /models devolve JSON");
+        let ids: Vec<String> = parsed
+            .get("data")
+            .and_then(Value::as_array)
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|row| row.get("id").and_then(Value::as_str))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(!ids.is_empty(), "GET /models não devolveu nenhum modelo");
+        assert!(
+            ids.iter().any(|id| id.starts_with("claude-")),
+            "GET /models sem ids claude-*: {ids:?}"
+        );
+        eprintln!(
+            "[anthropic] GET /models → {} modelos, primeiros: {:?}",
+            ids.len(),
+            &ids[..ids.len().min(8)]
+        );
+
+        // 2) Stream real: o adaptador monta `stream:true`, `max_tokens:64`,
+        //    messages=[{role:"user",content:"diga olá"}] no modelo default.
+        let mut config = provider_config(provider, &model, &api_key);
+        config.extra_headers = static_headers;
+        let request = CompletionRequest {
+            config,
+            protocols: vec![WireProtocol::Anthropic],
+            history: vec![HistoryMessage::user("diga olá")],
+            system_prompt: String::new(),
+            tools: Vec::new(),
+            reasoning: ReasoningRequest::Auto,
+            max_output_tokens: Some(64),
+            temperature: None,
+            cancel: CancellationToken::new(),
+        };
+        let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let task = tokio::spawn(async move { stream_completion(&http, request, sink).await });
+        let mut text = String::new();
+        let mut reasoning = String::new();
+        let mut usage = None;
+        while let Some(event) = events.recv().await {
+            match event {
+                ProviderEvent::TextDelta(delta) => text.push_str(&delta),
+                ProviderEvent::ReasoningDelta(delta) => reasoning.push_str(&delta),
+                ProviderEvent::Usage(value) => usage = Some(value),
+                _ => {}
+            }
+        }
+        let outcome = task.await.expect("stream task panicked");
+        outcome.expect("POST /messages falhou");
+        eprintln!(
+            "[anthropic] POST /messages stream: modelo={} texto={:?} reasoning_chars={} usage={:?}",
+            model.id,
+            text.trim(),
+            reasoning.chars().count(),
+            usage
+        );
+        assert!(
+            !text.trim().is_empty(),
+            "stream do provedor direto não produziu texto"
+        );
+    }
 }
 
 /* ------------------------------------------------------------------ */

@@ -764,6 +764,7 @@ fn cli_entry_ids(provider_id: &str) -> &'static [&'static str] {
 fn default_auth_env(provider_id: &str) -> &'static str {
     match provider_id {
         "openai" => "OPENAI_API_KEY",
+        "anthropic" => "ANTHROPIC_API_KEY",
         _ => "OPENCODE_API_KEY",
     }
 }
@@ -979,11 +980,15 @@ mod tests {
         }
     }
 
-    /// Serializes the tests that assert on the process-wide `secrets_error` slot
-    /// (only corrupt/reset paths touch it).
+    /// Serializes the tests that mutate/observe the process-wide `secrets_error`
+    /// slot and starts each one from a clean slot. Without this, a parallel test
+    /// that calls `reset_credentials_at` (which clears the slot) can clear it
+    /// between a corrupt-read `remember_secrets_error` and its assertion.
     fn error_slot_guard() -> parking_lot::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock()
+        let guard = LOCK.get_or_init(|| Mutex::new(())).lock();
+        clear_secrets_error();
+        guard
     }
 
     fn registration(client_id: &str) -> StoredOAuthRegistration {
@@ -1112,7 +1117,6 @@ mod tests {
         let path = temp.secrets();
         let original = "{ isto não é json";
         std::fs::write(&path, original).expect("gravar corrompido");
-        clear_secrets_error();
 
         assert!(read_secrets_at(&path).is_err());
         let error = update_oauth_at(&path, |_| Ok(())).expect_err("gravação deve ser recusada");
@@ -1169,6 +1173,9 @@ mod tests {
 
     #[test]
     fn reset_removes_stale_temp_files() {
+        // Reset clears the global error slot: serialize with the tests that
+        // observe it (see `error_slot_guard`).
+        let _guard = error_slot_guard();
         let temp = TempDir::new();
         let path = temp.secrets();
         let stale = path.with_file_name(format!("secrets.json.{}.tmp", uuid::Uuid::new_v4()));
@@ -1275,7 +1282,6 @@ mod tests {
         let temp = TempDir::new();
         let path = temp.secrets();
         std::fs::write(&path, "corrompido").expect("gravar corrompido");
-        clear_secrets_error();
 
         let (store, error) = oauth_snapshot_at(&path);
         assert!(error.is_some());
@@ -1382,6 +1388,7 @@ mod tests {
     #[test]
     fn provider_env_keys_are_provider_aware() {
         assert_eq!(default_auth_env("openai"), "OPENAI_API_KEY");
+        assert_eq!(default_auth_env("anthropic"), "ANTHROPIC_API_KEY");
         assert_eq!(default_auth_env("opencode-go"), "OPENCODE_API_KEY");
         assert_eq!(default_auth_env("opencode-zen"), "OPENCODE_API_KEY");
 
@@ -1397,6 +1404,17 @@ mod tests {
         // not the bogus test variable); it must not panic and must not read the
         // OpenCode variable for OpenAI.
         assert_eq!(api_key_from_env("openai", ""), None);
+
+        // The direct Anthropic provider has its own env var; it must never fall
+        // back to the shared OpenCode key.
+        let name = "LUMINA_TEST_ANTHROPIC_ENV_4A1B";
+        std::env::set_var(name, "  sk-ant-test-anthropic  ");
+        assert_eq!(
+            api_key_from_env("anthropic", name).as_deref(),
+            Some("sk-ant-test-anthropic")
+        );
+        std::env::remove_var(name);
+        assert_eq!(api_key_from_env("anthropic", name), None);
     }
 
     #[test]
@@ -1409,10 +1427,15 @@ mod tests {
 
     #[test]
     fn reset_credentials_does_not_recreate_the_file() {
+        // Reset clears the global error slot (asserted below): serialize with
+        // the tests that observe it.
+        let _guard = error_slot_guard();
         let temp = TempDir::new();
         let path = temp.secrets();
         save_oauth_registration_at(&path, "openai", registration("oaiapp_1"))
             .expect("salvar login");
+        remember_secrets_error("erro antigo de credenciais");
+        assert!(secrets_error().is_some());
 
         let mut called = false;
         reset_credentials_at(&path, || {
@@ -1421,6 +1444,10 @@ mod tests {
         .expect("reset");
         assert!(called, "hook de cancelamento precisa rodar sob o lock");
         assert!(!path.exists());
+        assert!(
+            secrets_error().is_none(),
+            "reset explícito deve limpar o erro lembrado"
+        );
     }
 
     #[cfg(unix)]

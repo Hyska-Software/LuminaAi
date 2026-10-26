@@ -51,10 +51,21 @@ afterEach(() => cleanup());
 const GO = 'opencode-go';
 const ZEN = 'opencode-zen';
 const OPENAI = 'openai';
+const ANTHROPIC = 'anthropic';
 
 const GO_KEY: ProviderKeyStatus = { providerId: GO, hasKey: true, source: 'settings', masked: 'sk-…go01' };
 const ZEN_KEY: ProviderKeyStatus = { providerId: ZEN, hasKey: true, source: 'settings', masked: 'sk-…zen1' };
 const OPENAI_NO_KEY: ProviderKeyStatus = { providerId: OPENAI, hasKey: false, source: 'none' };
+const ANTHROPIC_NO_KEY: ProviderKeyStatus = {
+  providerId: ANTHROPIC,
+  hasKey: false,
+  source: 'none',
+};
+
+/** Fresh copy of the key-status fixtures used by the mocked settings views. */
+function defaultKeys(): ProviderKeyStatus[] {
+  return [GO_KEY, ZEN_KEY, OPENAI_NO_KEY, ANTHROPIC_NO_KEY];
+}
 
 const CHALLENGE: LoginChallenge = {
   attemptId: 'attempt-1',
@@ -109,11 +120,11 @@ beforeEach(() => {
   mocks.openaiAuthStatus.mockResolvedValue([]);
   mocks.refreshProviderModels.mockResolvedValue({
     catalog,
-    keys: [GO_KEY, ZEN_KEY, OPENAI_NO_KEY],
+    keys: defaultKeys(),
     auth: [],
   });
   mocks.setProviderKey.mockImplementation(async (providerId: string, key: string | null) => {
-    const nextKeys: ProviderKeyStatus[] = [GO_KEY, ZEN_KEY, OPENAI_NO_KEY].map((entry) =>
+    const nextKeys: ProviderKeyStatus[] = defaultKeys().map((entry) =>
       entry.providerId === providerId
         ? {
             ...entry,
@@ -125,12 +136,10 @@ beforeEach(() => {
     );
     return settingsView(nextKeys);
   });
-  mocks.getSettings.mockImplementation(async () =>
-    settingsView([GO_KEY, ZEN_KEY, OPENAI_NO_KEY]),
-  );
+  mocks.getSettings.mockImplementation(async () => settingsView(defaultKeys()));
   useAppStore.setState({
     providers: catalog.providers,
-    keys: [GO_KEY, ZEN_KEY, OPENAI_NO_KEY],
+    keys: defaultKeys(),
     auth: [],
     secretsError: null,
     error: null,
@@ -140,6 +149,15 @@ beforeEach(() => {
 
 describe('ProvidersTab — cards de provedor', () => {
   it('mantém o comportamento de API key do Go e do Zen', async () => {
+    // O Zen fica sem chave para exercitar o placeholder do OpenCode Console.
+    useAppStore.setState({
+      keys: [
+        GO_KEY,
+        { providerId: ZEN, hasKey: false, source: 'none' },
+        OPENAI_NO_KEY,
+        ANTHROPIC_NO_KEY,
+      ],
+    });
     await renderTab();
     const user = userEvent.setup();
 
@@ -152,6 +170,13 @@ describe('ProvidersTab — cards de provedor', () => {
     expect(within(go).queryByRole('button', { name: /Continuar com ChatGPT/ })).toBeNull();
     expect(within(zen).queryByRole('button', { name: /Continuar com ChatGPT/ })).toBeNull();
     expect(within(go).getByText('Configurada')).toBeTruthy();
+    // Com chave salva o campo pede substituição; sem chave cita o console do OpenCode.
+    expect(
+      (within(go).getByLabelText('API key de OpenCode Go') as HTMLInputElement).placeholder,
+    ).toBe('Colar nova chave para substituir…');
+    expect(
+      (within(zen).getByLabelText('API key de OpenCode Zen') as HTMLInputElement).placeholder,
+    ).toBe('Colar API key do OpenCode Console…');
 
     const input = within(go).getByLabelText('API key de OpenCode Go');
     await user.type(input, 'sk-go-nova');
@@ -173,7 +198,8 @@ describe('ProvidersTab — cards de provedor', () => {
 
     await user.click(within(section).getByRole('button', { name: 'Usar API key' }));
 
-    const input = within(section).getByLabelText('API key de OpenAI (ChatGPT)');
+    const input = within(section).getByLabelText('API key de OpenAI (ChatGPT)') as HTMLInputElement;
+    expect(input.placeholder).toBe('Colar API key da OpenAI…');
     await user.type(input, 'sk-openai-123');
     await user.click(within(section).getByRole('button', { name: 'Salvar' }));
 
@@ -283,7 +309,7 @@ describe('ProvidersTab — cards de provedor', () => {
     useAppStore.setState({
       auth: [],
       loginChallenge: null,
-      keys: [GO_KEY, ZEN_KEY, OPENAI_NO_KEY],
+      keys: defaultKeys(),
     });
     render(<ProvidersTab />);
     await second.click(screen.getByRole('button', { name: /Continuar com ChatGPT/ }));
@@ -311,6 +337,46 @@ describe('ProvidersTab — cards de provedor', () => {
     expect(text).not.toContain('id-secret');
     expect(text).not.toContain('snake-secret');
     expect(text).toContain('oaiapp_…1234');
+  });
+
+  it('card Anthropic permanece só API key (sem ChatGPT) e usa o console da Anthropic', async () => {
+    mocks.validateProvider.mockResolvedValue({
+      providerId: ANTHROPIC,
+      ok: true,
+      latencyMs: 8,
+      models: 14,
+    });
+    await renderTab();
+    const user = userEvent.setup();
+    const section = providerSection('Anthropic');
+
+    // Generic API-key card: provider metadata only, no ChatGPT account UI.
+    expect(within(section).getByText(/API oficial da Anthropic/)).toBeTruthy();
+    expect(within(section).queryByRole('button', { name: /Continuar com ChatGPT/ })).toBeNull();
+    expect(within(section).queryByText(/ChatGPT/)).toBeNull();
+    expect(within(section).queryByText('Plano ChatGPT')).toBeNull();
+    expect(within(section).getByText('Chave ausente')).toBeTruthy();
+
+    const input = within(section).getByLabelText('API key de Anthropic') as HTMLInputElement;
+    expect(input.placeholder).toBe('Colar API key da Anthropic (sk-ant-…)…');
+
+    // Console button opens the provider's own console (not the OpenCode one).
+    await user.click(within(section).getByRole('button', { name: 'Console' }));
+    expect(mocks.openExternal).toHaveBeenCalledWith('https://platform.claude.com/settings/keys');
+
+    // Saving stores the key under the anthropic provider id.
+    await user.type(input, 'sk-ant-api03-teste-1234567890');
+    await user.click(within(section).getByRole('button', { name: 'Salvar' }));
+    await waitFor(() =>
+      expect(mocks.setProviderKey).toHaveBeenCalledWith(
+        ANTHROPIC,
+        'sk-ant-api03-teste-1234567890',
+      ),
+    );
+
+    // "Testar conexão" validates the anthropic provider.
+    await user.click(within(section).getByRole('button', { name: 'Testar conexão' }));
+    await waitFor(() => expect(mocks.validateProvider).toHaveBeenCalledWith(ANTHROPIC));
   });
 
   it('mostra o aviso de secrets.json inválido sem ação destrutiva', async () => {

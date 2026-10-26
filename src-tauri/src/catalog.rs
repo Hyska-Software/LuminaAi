@@ -34,6 +34,11 @@ pub struct ProviderInfo {
     /// protocol key -> path suffix (google uses `{model}` placeholder)
     #[serde(default)]
     pub endpoints: HashMap<String, String>,
+    /// Static headers sent with every request of this provider (e.g.
+    /// `anthropic-version`). They carry no credentials, so they are safe to
+    /// keep in the bundled catalog.
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
     #[serde(default)]
     pub auth_env: String,
     pub default_model_id: String,
@@ -64,6 +69,19 @@ impl ProviderInfo {
     /// True when this provider supports the ChatGPT-plan OAuth flow.
     pub fn supports_oauth(&self) -> bool {
         matches!(self.auth, ProviderAuth::Oauth) && self.oauth.is_some()
+    }
+
+    /// Static headers declared by the catalog, lowercased and sorted by name so
+    /// every caller (inference, model listing, validation) builds the exact
+    /// same request regardless of `HashMap` iteration order.
+    pub fn static_headers(&self) -> Vec<(String, String)> {
+        let mut headers: Vec<(String, String)> = self
+            .headers
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
+            .collect();
+        headers.sort_by(|left, right| left.0.cmp(&right.0));
+        headers
     }
 }
 
@@ -175,7 +193,7 @@ pub struct Modalities {
     pub output: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ReasoningOption {
     Toggle,
@@ -296,7 +314,7 @@ mod tests {
 
     #[test]
     fn legacy_provider_json_without_auth_fields_still_parses() {
-        // Catálogo v1 (Go/Zen) não tem auth/requestProfiles/oauth/estimated.
+        // Catálogo v1 (Go/Zen) não tem auth/requestProfiles/oauth/estimated/headers.
         let raw = r#"{
             "id": "opencode-go",
             "name": "OpenCode Go",
@@ -317,11 +335,124 @@ mod tests {
         assert!(provider.request_profiles.api_key.is_none());
         assert!(provider.oauth.is_none());
         assert!(!provider.models[0].estimated);
+        assert!(provider.headers.is_empty());
+        assert!(provider.static_headers().is_empty());
 
         let catalog_raw = format!(r#"{{"version":1,"generatedAt":"x","providers":[{raw}]}}"#);
         let catalog: CatalogFile = serde_json::from_str(&catalog_raw).expect("catálogo legado");
         assert_eq!(catalog.providers.len(), 1);
     }
+
+    #[test]
+    fn embedded_catalog_has_the_anthropic_provider() {
+        let catalog = embedded();
+        let anthropic = catalog.provider("anthropic").expect("provedor anthropic presente");
+        assert_eq!(anthropic.name, "Anthropic");
+        assert_eq!(anthropic.short_name, "Anthropic");
+        assert_eq!(anthropic.base_url, "https://api.anthropic.com/v1");
+        assert_eq!(
+            anthropic.console_url,
+            "https://platform.claude.com/settings/keys"
+        );
+        assert_eq!(
+            anthropic.endpoints.get("anthropic").map(String::as_str),
+            Some("/messages")
+        );
+        assert_eq!(
+            anthropic.endpoints.get("models").map(String::as_str),
+            Some("/models")
+        );
+        assert_eq!(anthropic.auth_env, "ANTHROPIC_API_KEY");
+        // API key apenas: o OAuth de assinatura do Claude não é suportado.
+        assert_eq!(anthropic.auth, ProviderAuth::ApiKey);
+        assert!(!anthropic.supports_oauth());
+        assert_eq!(
+            anthropic.request_profile(ProviderAuth::ApiKey),
+            RequestProfile::Standard
+        );
+        assert_eq!(
+            anthropic.static_headers(),
+            vec![(
+                "anthropic-version".to_string(),
+                "2026-10-21".to_string()
+            )]
+        );
+        assert!(
+            anthropic.models.iter().any(|model| model.id == anthropic.default_model_id),
+            "defaultModelId precisa existir no provider"
+        );
+        // `claude-sonnet-5-5` é o default atual.
+        assert_eq!(anthropic.default_model_id, "claude-sonnet-5-5");
+        assert!(anthropic.notes.iter().any(|note| note.contains("Anthropic")));
+    }
+
+    #[test]
+    fn anthropic_models_are_anthropic_only_and_family_claude() {
+        let catalog = embedded();
+        let anthropic = catalog.provider("anthropic").expect("provedor anthropic");
+        assert!(anthropic.models.len() >= 10, "seed pequeno demais");
+        for model in &anthropic.models {
+            assert_eq!(
+                model.protocols,
+                vec!["anthropic".to_string()],
+                "{} não é exclusivo do protocolo anthropic",
+                model.id
+            );
+            assert_eq!(model.family, "claude", "{} fora da família claude", model.id);
+            assert!(!model.estimated);
+            assert!(model.reasoning_options.len() > 0, "{} sem raciocínio", model.id);
+            assert!(model.cost.is_some(), "{} sem preço", model.id);
+        }
+    }
+
+    #[test]
+    fn anthropic_seed_skips_dated_snapshots_and_duplicate_ids() {
+        let catalog = embedded();
+        let anthropic = catalog.provider("anthropic").expect("provedor anthropic");
+        let mut ids: Vec<&str> = anthropic.models.iter().map(|m| m.id.as_str()).collect();
+        ids.sort_unstable();
+        let before = ids.len();
+        ids.dedup();
+        assert_eq!(before, ids.len(), "ids duplicados dentro do provedor");
+        for id in ids {
+            // Geração 4.6+ usa IDs dateless; snapshots com data ficam a cargo da
+            // lista viva da conta (`/v1/models`).
+            let last_segment = id.rsplit('-').next().unwrap_or_default();
+            assert!(
+                !(last_segment.len() == 8 && last_segment.chars().all(|c| c.is_ascii_digit())),
+                "snapshot datado no seed: {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn static_headers_are_lowercased_and_sorted() {
+        let provider: ProviderInfo = serde_json::from_str(
+            r#"{
+                "id": "anthropic",
+                "name": "Anthropic",
+                "shortName": "Anthropic",
+                "baseUrl": "https://api.anthropic.com/v1",
+                "defaultModelId": "m1",
+                "headers": {
+                    "anthropic-version": "2026-10-21",
+                    "Z-Last": "b",
+                    "a-first": "a"
+                },
+                "models": []
+            }"#,
+        )
+        .expect("fixture");
+        assert_eq!(
+            provider.static_headers(),
+            vec![
+                ("a-first".to_string(), "a".to_string()),
+                ("anthropic-version".to_string(), "2026-10-21".to_string()),
+                ("z-last".to_string(), "b".to_string()),
+            ]
+        );
+    }
+
 
     #[test]
     fn model_lookup_is_provider_scoped() {

@@ -24,7 +24,10 @@ export function AboutTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <SettingsSection title="Sobre o Lumina" description="Chat desktop local-first com OpenCode Go, Zen e OpenAI (ChatGPT).">
+      <SettingsSection
+        title="Sobre o Lumina"
+        description="Chat desktop local-first com OpenCode Go, Zen, OpenAI (ChatGPT) e Anthropic."
+      >
         <div className="flex items-center gap-3 py-3">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft">
             <BrandMark size={24} />

@@ -1,6 +1,6 @@
 # Lumina — Arquitetura
 
-Lumina é um aplicativo desktop de conversação com LLMs, construído em **Tauri 2 + React 19 + Tailwind CSS 4**. O objetivo é reproduzir a experiência dos chats de IA modernos (ChatGPT/Claude) — streaming com raciocínio visível, ferramentas, anexos, artefatos e UI generativa — usando **OpenCode Go**, **OpenCode Zen** e **OpenAI** (plano ChatGPT via "Sign in with ChatGPT" ou API key) como provedores.
+Lumina é um aplicativo desktop de conversação com LLMs, construído em **Tauri 2 + React 19 + Tailwind CSS 4**. O objetivo é reproduzir a experiência dos chats de IA modernos (ChatGPT/Claude) — streaming com raciocínio visível, ferramentas, anexos, artefatos e UI generativa — usando **OpenCode Go**, **OpenCode Zen**, **OpenAI** (plano ChatGPT via "Sign in with ChatGPT" ou API key) e **Anthropic** (API oficial, API key) como provedores.
 
 ## 1. Princípios
 
@@ -98,9 +98,10 @@ meta(key PK, value)
 `scripts/build-catalog.mjs` gera `data/catalog.json` combinando:
 
 1. **Tabelas oficiais** de [OpenCode Go](https://opencode.ai/v2/docs/console/go) e [Zen](https://opencode.ai/v2/docs/console/models/) — ids, nomes e protocolo de wire por modelo;
-2. **models.dev** — `reasoning_options`, visão/anexos, limites de contexto, preço, família;
-3. **Sondagens reais** (`scripts/probe-models.mjs`) — quais protocolos o gateway aceita para cada modelo (há modelos multi-protocolo);
-4. **Heurísticas por família** para modelos novos que ainda não estão no models.dev.
+2. **models.dev** — `reasoning_options`, visão/anexos, limites de contexto, preço, família (Go/Zen/OpenAI/**Anthropic**);
+3. **Docs oficiais da Anthropic** ([platform.claude.com](https://platform.claude.com/docs/en/api/overview)) — modelo Claude do provedor direto (IDs dateless, limites, preços) e o header obrigatório `anthropic-version`, que entra no catálogo como header estático;
+4. **Sondagens reais** (`scripts/probe-models.mjs`) — quais protocolos o gateway aceita para cada modelo (há modelos multi-protocolo);
+5. **Heurísticas por família** para modelos novos que ainda não estão no models.dev.
 
 Formato (resumo):
 
@@ -120,21 +121,25 @@ O frontend importa o catálogo estaticamente (render instantâneo) e o backend o
 | OpenCode Go | `https://opencode.ai/inference/go` | openai-chat, openai-responses, anthropic, google | API key |
 | OpenCode Zen | `https://opencode.ai/inference` | idem | API key |
 | OpenAI | `https://api.openai.com/v1` | openai-responses | OAuth ChatGPT (plano) ou API key |
+| Anthropic | `https://api.anthropic.com/v1` | anthropic | API key `sk-ant-…` (pay-as-you-go) |
 
 Os endpoints de cada protocolo vêm do mapa `endpoints` do catálogo (não há
 caminhos fixos no código dos adaptadores; o Google usa o placeholder `{model}` e
 o sufixo `:streamGenerateContent?alt=sse`). `x-opencode-session` só é enviado a
-provedores OpenCode.
+provedores OpenCode. Headers estáticos do provedor (ex.: `anthropic-version`)
+vêm de `ProviderInfo.headers` e são enviados em toda requisição (inferência,
+listagem de modelos e validação).
 
 | Protocolo | Endpoint (base OpenCode) | Modelos típicos |
 | --- | --- | --- |
 | `openai-chat` | `/openai/v1/chat/completions` | GLM, DeepSeek, Kimi (chat), Qwen, MiMo, LongCat, Step |
 | `openai-responses` | `/openai/v1/responses` (OpenAI: `/responses`) | GPT, Grok, Muse, OpenAI `gpt-*` |
-| `anthropic` | `/anthropic/v1/messages` | Claude, MiniMax, Kimi K3/K3.1, Qwen (alguns) |
+| `anthropic` | `/anthropic/v1/messages` (Anthropic direto: `/messages`) | Claude, MiniMax, Kimi K3/K3.1, Qwen (alguns) |
 | `google` | `/google/v1beta/models/{model}` | Gemini |
 
 Cabeçalhos: `Authorization: Bearer <key>`, `x-opencode-session: <session>` (só
-OpenCode), `User-Agent: Lumina/<versão>`.
+OpenCode), `User-Agent: Lumina/<versão>` e os headers estáticos do catálogo
+(`ProviderInfo.headers`).
 
 ### Autenticação OpenAI (plano ChatGPT)
 
@@ -151,6 +156,26 @@ mesclada ao catálogo no `CatalogView`; o harness resolve modelos pela visão
 mesclada. Perfis de request: `chatgpt-plan` (store:false/stream:true, sem
 `max_output_tokens`/`temperature`, `instructions` + function tools) e `standard`
 (API key). Detalhes/limites: `docs/MODELS.md`.
+
+### Autenticação Anthropic (API key)
+
+O provedor `anthropic` usa a API oficial (`https://api.anthropic.com/v1`), o
+mesmo adaptador `anthropic` e o perfil `standard`. A credencial é a API key do
+Claude Console (`ANTHROPIC_API_KEY` ou chave salva em Configurações →
+Provedores), enviada como `Authorization: Bearer <key>` (formato documentado
+atual; `x-api-key` é o fallback legado da Anthropic e não é usado). O header
+obrigatório `anthropic-version` vem de `ProviderInfo.headers` no catálogo
+(`{"anthropic-version": "2026-10-21"}`), então inferência, listagem de modelos
+(`GET /v1/models`, com paginação `after_id`/`has_more`/`last_id`) e "Testar
+conexão" enviam exatamente o mesmo contrato sem código específico de provedor.
+
+Não há OAuth/assinatura: a Anthropic não oferece um programa público de login
+para apps de terceiros (o OAuth do Claude Code é interno e proibido para
+terceiros sem aprovação). Cobrança é por token na conta do usuário; a lista de
+modelos da conta é mesclada ao seed do catálogo e modelos novos aparecem como
+`estimated` com as capacidades lidas de `/v1/models` (`max_input_tokens`,
+`max_tokens`, `capabilities.effort`/`thinking`/`image_input`). Detalhes:
+`docs/MODELS.md` e `docs/goals/anthropic-api-provider/PLAN.md`.
 
 ### Mapeamento de "modo de pensamento"
 
@@ -496,3 +521,4 @@ A verificação é feita por testes automatizados — unitários e de integraç�
 | 11 | Prism estendido com grammars extras carregadas sob demanda | trocar por Shiki/highlight.js | reaproveita o `prism-react-renderer` já usado no chat e mantém um tema único de tokens |
 | 12 | OpenAI via "Sign in with ChatGPT" (plano) + API key, endpoints/perfis no catálogo | OAuth interno do Codex CLI/`backend-api` | caminho documentado para apps OSS, sem headers/tokens internos; o backend `backend-api` não é autorizado a terceiros (ver `docs/research/openai-oauth.md`) |
 | 13 | Instância única do app + refresh OAuth single-flight | múltiplas instâncias com refresh rotativo concorrente | refresh token é rotativo; duas instâncias poderiam invalidar a sessão uma da outra |
+| 14 | Anthropic via API oficial só com API key (Bearer) + `anthropic-version` como header estático do catálogo | OAuth/assinatura do Claude Code; `x-api-key` embutido no transporte | a Anthropic não tem programa público de login/plano para apps de terceiros (proibido sem aprovação); Bearer é o formato documentado atual e o header versionado é configurável sem código (ver `docs/goals/anthropic-api-provider/PLAN.md`) |

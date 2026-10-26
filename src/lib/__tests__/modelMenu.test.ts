@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getModel, getProvider, providers } from '@/lib/catalog';
+import { getModel, getProvider, providerAuth, providerSupportsPlan, providers } from '@/lib/catalog';
 import type { ModelInfo, ProviderInfo } from '@/lib/types';
 import {
   budgetPresets,
@@ -234,8 +234,13 @@ describe('buildModelGroups (global search)', () => {
     const groups = buildModelGroups(allProviders, { query: 'opus' });
     const labels = groupLabels(groups);
     expect(labels.length).toBeGreaterThan(0);
-    expect(labels.every((label) => label.startsWith('Zen · '))).toBe(true);
-    expect(flattenGroups(groups).every((entry) => entry.providerId === zen.id)).toBe(true);
+    // Claude Opus existe no gateway (Zen) e no provedor Anthropic direto.
+    expect(
+      labels.every((label) => label === 'Zen · Claude' || label === 'Anthropic · Claude'),
+    ).toBe(true);
+    const providerIds = flattenGroups(groups).map((entry) => entry.providerId);
+    expect(providerIds).toContain(zen.id);
+    expect(providerIds).toContain('anthropic');
   });
 
   it('ignores the provider scope while searching', () => {
@@ -255,6 +260,65 @@ describe('buildModelGroups (global search)', () => {
     const entries = flattenGroups(groups);
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.every((entry) => modelSupportsVision(entry.model))).toBe(true);
+  });
+});
+
+describe('provedor Anthropic direto (API key)', () => {
+  const anthropic = getProvider('anthropic')!;
+
+  it('expõe catálogo Claude exclusivo do protocolo anthropic', () => {
+    expect(anthropic.name).toBe('Anthropic');
+    expect(anthropic.shortName).toBe('Anthropic');
+    // Sem `auth: "oauth"` no catálogo → provedor de API key (sem plano).
+    expect(providerAuth(anthropic)).toBe('api-key');
+    expect(providerSupportsPlan(anthropic)).toBe(false);
+    expect(anthropic.headers).toEqual({ 'anthropic-version': '2026-10-21' });
+    expect(anthropic.endpoints.anthropic).toBe('/messages');
+    expect(anthropic.models.length).toBeGreaterThanOrEqual(10);
+    for (const model of anthropic.models) {
+      expect(model.family).toBe('claude');
+      expect(model.protocols).toEqual(['anthropic']);
+      expect(model.reasoningOptions.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('lista os modelos no seletor com contexto, preço e raciocínio', () => {
+    const entries = flattenGroups(buildModelGroups(allProviders, { providerId: 'anthropic' }));
+    expect(entries).toHaveLength(anthropic.models.length);
+    const sonnet = entries.find((entry) => entry.model.id === 'claude-sonnet-5-5')!;
+    expect(sonnet.providerShortName).toBe('Anthropic');
+    const details = modelDetails(sonnet.model, sonnet.providerName)!;
+    expect(details.lines).toEqual(
+      expect.arrayContaining([
+        { label: 'Contexto', value: '1M' },
+        { label: 'Custo (1M tok.)', value: '$2.00 / $10.00' },
+        { label: 'Protocolo', value: 'Anthropic Messages' },
+      ]),
+    );
+    // Esforço: os cinco níveis documentados (low..max).
+    expect(thinkingOptions(sonnet.model, { mode: 'effort', effort: 'high' }).map((o) => o.id))
+      .toEqual(['effort:low', 'effort:medium', 'effort:high', 'effort:xhigh', 'effort:max']);
+  });
+
+  it('modelo com orçamento (4.5) usa modo thinking enabled', () => {
+    const haiku = getModel('anthropic', 'claude-haiku-4-5')!;
+    const details = modelDetails(haiku, 'Anthropic')!;
+    expect(details.lines).toEqual(
+      expect.arrayContaining([{ label: 'Contexto', value: '200K' }]),
+    );
+    expect(thinkingOptions(haiku, { mode: 'budget', budget: 8_192 }).map((o) => o.id)).toEqual([
+      'budget:4096',
+      'budget:8192',
+      'budget:16384',
+      'budget:32768',
+    ]);
+  });
+
+  it('busca global "claude sonnet 5.5" encontra o modelo dos dois provedores', () => {
+    const groups = buildModelGroups(allProviders, { query: 'claude sonnet 5.5' });
+    const providerIds = new Set(flattenGroups(groups).map((entry) => entry.providerId));
+    expect(providerIds.has('anthropic')).toBe(true);
+    expect(providerIds.has(zen.id)).toBe(true);
   });
 });
 

@@ -146,9 +146,12 @@ describe('ModelPickerDialog', () => {
     await user.type(searchField(), 'opus');
 
     expect(screen.getByText('Todos os provedores')).toBeTruthy();
-    expect(screen.getByText('Zen · Claude')).toBeTruthy();
-    expect(screen.getByRole('option', { name: /Claude Opus 5\.5/ })).toBeTruthy();
-    expect(modelCount()).toBe(6);
+    // Zen e Anthropic expõem o mesmo slug: os dois grupos aparecem na busca.
+    expect(screen.getAllByText('Zen · Claude').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Anthropic · Claude').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('option', { name: /Claude Opus 5\.5/ })).toHaveLength(2);
+    // 6 variantes no Zen + 6 na Anthropic.
+    expect(modelCount()).toBe(12);
     // As abas dão lugar ao rótulo da busca global.
     expect(screen.queryByRole('tab', { name: 'Go' })).toBeNull();
     expect(screen.getByRole('listbox', { name: 'Resultados da busca de modelos' })).toBeTruthy();

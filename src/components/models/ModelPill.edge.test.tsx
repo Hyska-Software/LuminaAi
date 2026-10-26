@@ -225,7 +225,7 @@ describe('ModelPill (edge) — busca hostil', () => {
     await user.type(search, '    ');
     // Só espaços não é uma busca: o seletor de provedor continua visível.
     expect(within(dialog).getByRole('radio', { name: 'Go' })).toBeTruthy();
-    expect(within(dialog).queryByText('Go + Zen + ChatGPT')).toBeNull();
+    expect(within(dialog).queryByText('Go + Zen + ChatGPT + Anthropic')).toBeNull();
     expect(within(dialog).getByText('37 modelos')).toBeTruthy();
   });
 
@@ -279,7 +279,7 @@ describe('ModelPill (edge) — busca hostil', () => {
     const options = within(dialog).getAllByRole('option');
     expect(options).toHaveLength(119);
     expect(new Set(options.map((option) => option.id)).size).toBe(119);
-    expect(within(dialog).getByText('Go + Zen + ChatGPT')).toBeTruthy();
+    expect(within(dialog).getByText('Go + Zen + ChatGPT + Anthropic')).toBeTruthy();
 
     const activeId = search.getAttribute('aria-activedescendant');
     expect(activeId).toBeTruthy();

@@ -1,14 +1,16 @@
 # Modelos & Provedores
 
 Provedores suportados: **OpenCode Go** (assinatura), **OpenCode Zen** (pay-as-you-go
-do OpenCode Console) e **OpenAI** (plano ChatGPT via "Sign in with ChatGPT" ou API
-key da plataforma). Go/Zen expõem o mesmo gateway com bases diferentes:
+do OpenCode Console), **OpenAI** (plano ChatGPT via "Sign in with ChatGPT" ou API
+key da plataforma) e **Anthropic** (API oficial, API key). Go/Zen expõem o mesmo
+gateway com bases diferentes:
 
 | Provedor | Base URL | Autenticação |
 | --- | --- | --- |
 | OpenCode Go | `https://opencode.ai/inference/go` | API key do Console com assinatura Go/Go Plus |
 | OpenCode Zen | `https://opencode.ai/inference` | API key do Console com créditos |
 | OpenAI | `https://api.openai.com/v1` | OAuth "Sign in with ChatGPT" (plano) **ou** API key `sk-…` |
+| Anthropic | `https://api.anthropic.com/v1` | API key `sk-ant-…` do Claude Console (pay-as-you-go) |
 
 Headers obrigatórios/recomendados (Go/Zen):
 
@@ -20,7 +22,9 @@ x-opencode-session: <id estável da conversa>
 ```
 
 `x-opencode-session` é enviado **somente** para provedores OpenCode; o provedor
-OpenAI não recebe headers internos do ChatGPT/Codex.
+OpenAI não recebe headers internos do ChatGPT/Codex. Headers estáticos de um
+provedor (sem credencial) ficam em `ProviderInfo.headers` no catálogo e são
+enviados em toda requisição (inferência, listagem de modelos e validação).
 
 ## OpenAI — "ChatGPT plan usage" (Sign in with ChatGPT)
 
@@ -63,6 +67,44 @@ por isso a UI nunca inventa percentual/reset.
 > Não usar o OAuth/backend interno do Codex CLI (`chatgpt.com/backend-api`): não é
 > documentado para terceiros e contraria a doc oficial/ToS. Ver
 > `docs/research/openai-oauth.md`.
+
+## Anthropic — API oficial direta (API key)
+
+Caminho suportado para apps de terceiros. **Não** há OAuth de assinatura: o
+login do Claude Code é interno da Anthropic e a doc do Agent SDK proíbe oferecer
+login claude.ai/limites do plano em apps de terceiros sem aprovação prévia. O
+Lumina usa a API oficial cobrada por token na conta do usuário:
+
+| Item | Valor |
+| --- | --- |
+| Base URL | `https://api.anthropic.com/v1` |
+| Messages | `POST /v1/messages` (SSE com `stream: true`) |
+| Modelos | `GET /v1/models` (lista da conta; paginação `after_id`/`has_more`/`last_id`) |
+| Auth | `Authorization: Bearer <ANTHROPIC_API_KEY>` (`x-api-key` é fallback legado da Anthropic, não usado) |
+| Versão | `anthropic-version: 2026-10-21` (obrigatório; header estático do catálogo) |
+| Chave | `ANTHROPIC_API_KEY` (env) ou colada em Configurações → Provedores (`sk-ant-…`) |
+| Console | `https://platform.claude.com/settings/keys` |
+
+Configuração no catálogo (`data/catalog.json`, provider `anthropic`):
+`endpoints: { "anthropic": "/messages", "models": "/models" }`, `auth` implícito
+`api-key` (perfil `standard`) e `headers: { "anthropic-version": "2026-10-21" }`.
+O mesmo header vale para inferência, listagem e "Testar conexão"; trocar de
+versão é só editar o JSON (sem recompilar).
+
+Seed de modelos (IDs dateless da geração 4.6+, linha Claude): Fable 5/5.1,
+Opus 4.5–5.5, Sonnet 4.5–5.5, Haiku 4.5/5.5. Preços e limites vêm do models.dev
+(ex.: Sonnet 5.5 a $2/$10 por MTok, contexto 1M). Snapshots com data
+(`claude-…-20251001`) não entram no seed: quando a conta os lista, aparecem como
+`estimated` com capacidades lidas de `/v1/models` (`max_input_tokens`,
+`max_tokens`, `capabilities.effort/thinking/image_input/pdf_input`). Modelos
+`retired` são filtrados; `deprecated` continuam listados.
+
+Comportamento de request: o perfil é `standard`, sem headers beta. `temperature`
+não é enviado para a família Claude (o harness já a omite; a API 2026-10-21
+removeu o parâmetro). Raciocínio segue a tabela do protocolo `anthropic` abaixo
+(`adaptive` + `output_config.effort` para modelos com esforço; `enabled` +
+`budget_tokens` ≥1024 para os que só têm orçamento). Prompt caching
+(`cache_control`) fica como melhoria futura.
 
 ## Protocolos por modelo (Go — verificado em 2026-10-23)
 
@@ -146,6 +188,10 @@ O gateway não expõe thought parts separados para o Gemini 4 Argon; o raciocín
 node scripts/collect-research.mjs   # baixa docs + models.dev (opcional)
 node scripts/probe-models.mjs       # sonda protocolos com a chave local (opcional)
 node scripts/build-catalog.mjs      # gera data/catalog.json
+node scripts/build-catalog.mjs --provider anthropic   # atualiza só o provedor Anthropic
 ```
 
-Sempre que o gateway adicionar modelos, o app continua funcionando: a UI mostra os modelos do catálogo embutido e `refresh_catalog` consulta a lista viva (`/v1/models`) para sinalizar novidades.
+Sempre que o gateway/provedor adicionar modelos, o app continua funcionando: a UI
+mostra os modelos do catálogo embutido e `refresh_catalog`/`refresh_provider_models`
+consultam a lista viva (`/v1/models`) para sinalizar novidades e mesclar a lista
+da conta.

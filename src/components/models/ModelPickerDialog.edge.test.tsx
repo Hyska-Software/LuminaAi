@@ -152,10 +152,12 @@ describe('ModelPickerDialog (edge) — catálogo grande e busca hostil', () => {
 
     await user.type(searchField(), 'o');
 
-    // 1 letra casa nos três provedores: 38 no Go + 82 no Zen + 27 no OpenAI.
-    expect(screen.getAllByRole('option')).toHaveLength(147);
-    expect(modelCount()).toBe('147 modelos');
-    expect(new Set(screen.getAllByRole('option').map((option) => option.id)).size).toBe(147);
+    // 1 letra casa nos quatro provedores: 38 Go + 82 Zen + 27 OpenAI + 14 Anthropic.
+    expect(screen.getAllByRole('option')).toHaveLength(161);
+    expect(modelCount()).toBe('161 modelos');
+    // A busca global repete slugs (Zen × Anthropic), mas o id qualificado do
+    // option (providerId:modelId) continua único.
+    expect(new Set(screen.getAllByRole('option').map((option) => option.id)).size).toBe(161);
     expect(screen.getByText('Todos os provedores')).toBeTruthy();
     expect(screen.queryAllByRole('tab')).toHaveLength(0);
     // O destaque é reancorado no primeiro resultado e aponta para um id real.
@@ -178,7 +180,7 @@ describe('ModelPickerDialog (edge) — catálogo grande e busca hostil', () => {
     expect(screen.getAllByRole('option')).toHaveLength(38);
 
     await user.type(searchField(), '    ');
-    expect(screen.queryAllByRole('tab')).toHaveLength(3);
+    expect(screen.queryAllByRole('tab')).toHaveLength(4);
     expect(modelCount()).toBe('38 modelos');
     expect(screen.queryByText('Todos os provedores')).toBeNull();
 
@@ -282,7 +284,12 @@ describe('ModelPickerDialog (edge) — estados de modelo e provedor', () => {
     const user = userEvent.setup();
 
     await user.type(searchField(), 'claude-haiku-4-5');
-    await user.keyboard('{ArrowDown}');
+    // O mesmo slug existe no Zen e na API Anthropic: escolhe a variante do Zen.
+    const haikuOptions = screen.getAllByRole('option');
+    expect(haikuOptions).toHaveLength(2);
+    const haikuZen = haikuOptions.find((option) => (option.textContent ?? '').includes('Zen'));
+    expect(haikuZen).toBeTruthy();
+    await user.click(haikuZen as HTMLElement);
 
     const slider = screen.getByRole('slider', {
       name: 'Orçamento de raciocínio em tokens',
@@ -310,7 +317,12 @@ describe('ModelPickerDialog (edge) — estados de modelo e provedor', () => {
     const user = userEvent.setup();
 
     await user.type(searchField(), 'claude-opus-4-6');
-    await user.keyboard('{ArrowDown}');
+    // Mesmo slug no Zen e na Anthropic: a variante do Zen é a que tem budget.
+    const opusOptions = screen.getAllByRole('option');
+    expect(opusOptions).toHaveLength(2);
+    const opusZen = opusOptions.find((option) => (option.textContent ?? '').includes('Zen'));
+    expect(opusZen).toBeTruthy();
+    await user.click(opusZen as HTMLElement);
 
     expect(screen.getByRole('heading', { name: 'Claude Opus 4.6' })).toBeTruthy();
     expect(screen.queryAllByRole('slider')).toHaveLength(0);

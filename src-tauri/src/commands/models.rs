@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, State};
 
-use crate::catalog::{ModelInfo, ProviderInfo};
+use crate::catalog::{ModelInfo, Modalities, ProviderInfo, ReasoningOption};
 use crate::config;
 use crate::domain::CatalogView;
 use crate::state::AppState;
@@ -23,53 +23,185 @@ const CACHE_VERSION: u32 = 1;
 /* Remote list                                                         */
 /* ------------------------------------------------------------------ */
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RemoteModel {
     pub id: String,
     pub display_name: Option<String>,
     pub visibility: Option<String>,
+    /// Context window reported by the account list (Anthropic `max_input_tokens`).
+    pub context_window: Option<u32>,
+    /// Max output tokens reported by the account list (Anthropic `max_tokens`).
+    pub max_output: Option<u32>,
+    /// Input modalities reported by the account list (`capabilities.*.supported`
+    /// or the `modalities.input` array on older list shapes).
+    pub input_modalities: Vec<String>,
+    /// Reasoning efforts reported by the account list (`capabilities.effort`).
+    pub reasoning_efforts: Vec<String>,
+    /// The model exposes some thinking control (`capabilities.thinking`).
+    pub reasoning: bool,
+    /// The payload carried a `capabilities` object, so "no reasoning/image" is
+    /// authoritative instead of "metadata absent" (see [`estimated_model`]).
+    pub capabilities_reported: bool,
 }
 
-/// Parses both documented shapes: OpenAI plan usage returns
-/// `{"models":[{"slug","display_name","visibility"}]}`, the platform API returns
-/// `{"data":[{"id"}]}`.
-pub fn parse_remote_models(document: &Value) -> Vec<RemoteModel> {
+/// One page of a provider model list plus the cursor for the next page.
+#[derive(Debug, Clone, Default)]
+pub struct RemotePage {
+    pub models: Vec<RemoteModel>,
+    /// `after_id` value for the next request when the provider paginates.
+    pub next_after: Option<String>,
+}
+
+impl RemoteModel {
+    /// True when the account list reports image/pdf input support.
+    fn can_receive_images(&self) -> bool {
+        self.input_modalities
+            .iter()
+            .any(|modality| modality == "image" || modality == "pdf")
+    }
+}
+
+/// Effort levels the UI understands, in the order the picker shows them.
+const REASONING_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+fn flag_supported(item: &Value, pointer: &str) -> bool {
+    item.pointer(pointer).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn u32_field(item: &Value, keys: &[&str]) -> Option<u32> {
+    keys.iter()
+        .find_map(|key| item.get(*key).and_then(Value::as_u64))
+        .and_then(|value| u32::try_from(value).ok())
+}
+
+/// Parses one model entry, tolerating every shape we know:
+/// `{"models":[{"slug","display_name","visibility"}]}` (OpenAI plan usage),
+/// `{"data":[{"id","display_name","max_input_tokens","max_tokens","capabilities"}]}`
+/// (Anthropic Models API) and `{"data":[{"id"}]}` (OpenAI platform).
+fn parse_remote_model(item: &Value) -> Option<RemoteModel> {
+    let id = item
+        .get("id")
+        .or_else(|| item.get("slug"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?
+        .to_string();
+    let display_name = item
+        .get("display_name")
+        .or_else(|| item.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
+    let visibility = item
+        .get("visibility")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    // The plan route hides internal models from the picker; other providers do
+    // not send `visibility` at all.
+    if visibility.as_deref().is_some_and(|value| value != "list") {
+        return None;
+    }
+    // Retired models still appear in the Anthropic catalogue as history but can
+    // never be called: keep them out of the account list.
+    if item.get("lifecycle").and_then(Value::as_str) == Some("retired") {
+        return None;
+    }
+
+    let capabilities = item.get("capabilities");
+    let capabilities_reported = capabilities.is_some_and(Value::is_object);
+    let mut input_modalities: Vec<String> = Vec::new();
+    if capabilities_reported {
+        input_modalities.push("text".to_string());
+        if flag_supported(item, "/capabilities/image_input/supported") {
+            input_modalities.push("image".to_string());
+        }
+        if flag_supported(item, "/capabilities/pdf_input/supported") {
+            input_modalities.push("pdf".to_string());
+        }
+    } else {
+        // Older/other list shapes may still expose modalities directly.
+        input_modalities = string_array(item.pointer("/modalities/input"));
+    }
+
+    let reasoning_efforts = capabilities
+        .and_then(|value| value.get("effort"))
+        .map(|effort| {
+            REASONING_EFFORTS
+                .iter()
+                .filter(|level| flag_supported(effort, &format!("/{level}/supported")))
+                .map(|level| (*level).to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    let reasoning = flag_supported(item, "/capabilities/thinking/supported")
+        || item.get("reasoning").and_then(Value::as_bool).unwrap_or(false);
+
+    Some(RemoteModel {
+        id,
+        display_name,
+        visibility,
+        context_window: u32_field(item, &["max_input_tokens", "context_window"]),
+        max_output: u32_field(item, &["max_tokens", "max_output_tokens"]),
+        input_modalities,
+        reasoning_efforts,
+        reasoning,
+        capabilities_reported,
+    })
+}
+
+/// Parses a model-list page and the pagination cursor, when the provider sends
+/// one (`has_more` + `last_id` on the Anthropic Models API).
+pub fn parse_remote_page(document: &Value) -> RemotePage {
     let array = document
         .get("models")
         .and_then(Value::as_array)
         .or_else(|| document.get("data").and_then(Value::as_array));
     let Some(array) = array else {
-        return Vec::new();
+        return RemotePage::default();
     };
-    array
-        .iter()
-        .filter_map(|item| {
-            let id = item
-                .get("id")
-                .or_else(|| item.get("slug"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|id| !id.is_empty())?
-                .to_string();
-            let display_name = item
-                .get("display_name")
-                .or_else(|| item.get("name"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .map(str::to_string);
-            let visibility = item
-                .get("visibility")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            Some(RemoteModel {
-                id,
-                display_name,
-                visibility,
-            })
-        })
-        .filter(|model| model.visibility.as_deref().map_or(true, |visibility| visibility == "list"))
-        .collect()
+    let models = array.iter().filter_map(parse_remote_model).collect();
+    let has_more = document.get("has_more").and_then(Value::as_bool).unwrap_or(false);
+    let next_after = if has_more {
+        document
+            .get("last_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|cursor| !cursor.is_empty())
+            .map(str::to_string)
+    } else {
+        None
+    };
+    RemotePage {
+        models,
+        next_after,
+    }
+}
+
+/// Flattens the first page (kept for callers/tests that only need the list).
+pub fn parse_remote_models(document: &Value) -> Vec<RemoteModel> {
+    parse_remote_page(document).models
+}
+
+/// Appends the `after_id` cursor of a paginated list endpoint.
+pub fn next_page_url(base: &str, after: &str) -> String {
+    let separator = if base.contains('?') { '&' } else { '?' };
+    format!("{base}{separator}after_id={after}")
 }
 
 fn models_endpoint(provider: &ProviderInfo) -> String {
@@ -85,6 +217,23 @@ fn api_key_for(app: &AppHandle, provider: &ProviderInfo) -> Option<String> {
     config::api_key_from_secrets(app, &provider.id)
         .or_else(|| config::api_key_from_env(&provider.id, &provider.auth_env))
         .or_else(|| config::api_key_from_opencode_cli(&provider.id))
+}
+
+/// Actionable "no credential" copy. It keeps the lowercase `nenhuma credencial`
+/// prefix because `refresh_catalog` uses it to skip the expected "provider not
+/// configured yet" failures without logging noise.
+fn missing_credential_message(provider: &ProviderInfo) -> String {
+    if provider.supports_oauth() {
+        format!(
+            "nenhuma credencial configurada para {} (conecte o ChatGPT ou adicione uma API key)",
+            provider.name
+        )
+    } else {
+        format!(
+            "nenhuma credencial configurada para {} (adicione uma API key em Configurações → Provedores)",
+            provider.name
+        )
+    }
 }
 
 /// Bearer credential for a provider: OAuth access token when the provider uses
@@ -104,13 +253,12 @@ async fn bearer_for(
     if let Some(key) = api_key_for(app, provider) {
         return Ok(key);
     }
-    Err(oauth_error.unwrap_or_else(|| {
-        format!(
-            "nenhuma credencial configurada para {} (conecte o ChatGPT ou adicione uma API key)",
-            provider.name
-        )
-    }))
+    Err(oauth_error.unwrap_or_else(|| missing_credential_message(provider)))
 }
+
+/// Upper bound of remote pages per refresh (the Models API caps `limit` at 1000
+/// but defaults to 20; the loop makes any page size safe).
+const MAX_MODEL_PAGES: usize = 50;
 
 async fn fetch_remote_models(
     app: &AppHandle,
@@ -118,54 +266,117 @@ async fn fetch_remote_models(
     provider: &ProviderInfo,
 ) -> Result<Vec<RemoteModel>, String> {
     let bearer = bearer_for(app, state, provider).await?;
-    let response = state
-        .http
-        .get(models_endpoint(provider))
-        .header("Authorization", format!("Bearer {bearer}"))
-        .header("User-Agent", concat!("Lumina/", env!("CARGO_PKG_VERSION")))
-        .timeout(std::time::Duration::from_secs(25))
-        .send()
-        .await
-        .map_err(|error| format!("falha ao listar modelos de {}: {error}", provider.name))?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!(
-            "{} respondeu {status} ao listar modelos: {}",
-            provider.name,
-            body.chars().take(300).collect::<String>()
-        ));
+    let endpoint = models_endpoint(provider);
+    let mut url = endpoint.clone();
+    let mut remote: Vec<RemoteModel> = Vec::new();
+    for _ in 0..MAX_MODEL_PAGES {
+        let mut request = state
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {bearer}"))
+            .header("User-Agent", concat!("Lumina/", env!("CARGO_PKG_VERSION")))
+            .timeout(std::time::Duration::from_secs(25));
+        // Provider-declared headers (e.g. `anthropic-version`) are required by
+        // direct APIs even on the model-list endpoint.
+        for (name, value) in provider.static_headers() {
+            request = request.header(name, value);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| format!("falha ao listar modelos de {}: {error}", provider.name))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!(
+                "{} respondeu {status} ao listar modelos: {}",
+                provider.name,
+                body.chars().take(300).collect::<String>()
+            ));
+        }
+        let document: Value = response
+            .json()
+            .await
+            .map_err(|error| format!("resposta inválida de {}: {error}", provider.name))?;
+        let page = parse_remote_page(&document);
+        remote.extend(page.models);
+        match page.next_after {
+            Some(cursor) => url = next_page_url(&endpoint, &cursor),
+            None => break,
+        }
     }
-    let document: Value = response
-        .json()
-        .await
-        .map_err(|error| format!("resposta inválida de {}: {error}", provider.name))?;
-    let models = parse_remote_models(&document);
-    if models.is_empty() {
+    if remote.is_empty() {
         return Err(format!(
             "{} não devolveu modelos disponíveis para esta conta",
             provider.name
         ));
     }
-    Ok(models)
+    Ok(remote)
 }
 
 /// Conservative metadata for a model that only the account exposes.
+///
+/// Providers that report capabilities in the list payload (Anthropic Models API)
+/// use them verbatim; the others (OpenAI `/v1/models`) fall back to the
+/// representative metadata of the provider seed so the model stays usable with
+/// the right wire protocol/family instead of guessing.
 fn estimated_model(provider: &ProviderInfo, remote: &RemoteModel) -> ModelInfo {
-    let protocols = provider
-        .models
-        .first()
+    let representative = provider.models.first();
+    let protocols = representative
         .map(|model| model.protocols.clone())
+        .filter(|protocols| !protocols.is_empty())
         .unwrap_or_else(|| vec!["openai-responses".to_string()]);
-    let family = if provider.id == "openai" {
-        "gpt".to_string()
+    let family = representative
+        .map(|model| model.family.clone())
+        .unwrap_or_default();
+
+    let reasoning_options = if remote.capabilities_reported {
+        if !remote.reasoning_efforts.is_empty() {
+            vec![ReasoningOption::Effort {
+                values: remote.reasoning_efforts.clone(),
+            }]
+        } else if remote.reasoning {
+            vec![ReasoningOption::Toggle]
+        } else {
+            Vec::new()
+        }
     } else {
-        provider
-            .models
-            .first()
-            .map(|model| model.family.clone())
+        representative
+            .map(|model| model.reasoning_options.clone())
             .unwrap_or_default()
     };
+
+    let modalities = if remote.can_receive_images() || remote.capabilities_reported {
+        Modalities {
+            input: if remote.input_modalities.is_empty() {
+                vec!["text".to_string()]
+            } else {
+                remote.input_modalities.clone()
+            },
+            output: vec!["text".to_string()],
+        }
+    } else {
+        representative
+            .map(|model| model.modalities.clone())
+            .unwrap_or_else(|| Modalities {
+                input: vec!["text".to_string()],
+                output: vec!["text".to_string()],
+            })
+    };
+    let attachment = if remote.capabilities_reported {
+        remote.can_receive_images()
+    } else {
+        representative.map(|model| model.attachment).unwrap_or(false)
+    };
+
+    let mut tags: Vec<String> = Vec::new();
+    if !reasoning_options.is_empty() {
+        tags.push("reasoning".to_string());
+    }
+    if attachment {
+        tags.push("vision".to_string());
+    }
+
     ModelInfo {
         id: remote.id.clone(),
         name: remote
@@ -174,28 +385,26 @@ fn estimated_model(provider: &ProviderInfo, remote: &RemoteModel) -> ModelInfo {
             .unwrap_or_else(|| remote.id.clone()),
         family,
         protocols,
-        reasoning: true,
-        reasoning_options: vec![crate::catalog::ReasoningOption::Effort {
-            values: vec![
-                "low".into(),
-                "medium".into(),
-                "high".into(),
-                "xhigh".into(),
-            ],
-        }],
-        attachment: true,
-        modalities: crate::catalog::Modalities {
-            input: vec!["text".into(), "image".into()],
-            output: vec!["text".into()],
-        },
-        context_window: 400_000,
-        max_output: 32_768,
+        reasoning: !reasoning_options.is_empty(),
+        reasoning_options,
+        attachment,
+        modalities,
+        // Account-reported limits win; otherwise the seed's representative
+        // model keeps the estimate in the right ballpark for the provider.
+        context_window: remote
+            .context_window
+            .or_else(|| representative.map(|model| model.context_window))
+            .unwrap_or(128_000),
+        max_output: remote
+            .max_output
+            .or_else(|| representative.map(|model| model.max_output))
+            .unwrap_or(16_384),
         cost: None,
         release_date: None,
         knowledge: None,
         open_weights: false,
         description: None,
-        tags: Vec::new(),
+        tags,
         status: "stable".into(),
         estimated: true,
     }
@@ -408,6 +617,109 @@ mod tests {
     }
 
     #[test]
+    fn parses_the_anthropic_models_page_with_capabilities_and_cursor() {
+        let document = json!({
+            "data": [
+                {
+                    "id": "claude-opus-5-5",
+                    "type": "model",
+                    "display_name": "Claude Opus 5.5",
+                    "created_at": "2026-09-21T00:00:00Z",
+                    "lifecycle": "active",
+                    "line": "opus",
+                    "max_input_tokens": 1000000,
+                    "max_tokens": 128000,
+                    "capabilities": {
+                        "effort": {
+                            "supported": true,
+                            "low": {"supported": true},
+                            "medium": {"supported": true},
+                            "high": {"supported": true},
+                            "xhigh": {"supported": true},
+                            "max": {"supported": true}
+                        },
+                        "thinking": {
+                            "supported": true,
+                            "types": {
+                                "adaptive": {"supported": true},
+                                "enabled": {"supported": true},
+                                "disabled": {"supported": true}
+                            }
+                        },
+                        "image_input": {"supported": true},
+                        "pdf_input": {"supported": true}
+                    }
+                },
+                {
+                    "id": "claude-haiku-4-5",
+                    "display_name": "Claude Haiku 4.5",
+                    "max_input_tokens": 200000,
+                    "max_tokens": 64000,
+                    "capabilities": {
+                        "effort": {"supported": false},
+                        "thinking": {"supported": true},
+                        "image_input": {"supported": true},
+                        "pdf_input": {"supported": false}
+                    }
+                },
+                {"id": "claude-retired", "lifecycle": "retired"}
+            ],
+            "first_id": "claude-opus-5-5",
+            "has_more": true,
+            "last_id": "claude-haiku-4-5"
+        });
+        let page = parse_remote_page(&document);
+        // Retired models are history only: never selectable.
+        assert_eq!(page.models.len(), 2);
+        assert_eq!(page.next_after.as_deref(), Some("claude-haiku-4-5"));
+
+        let opus = &page.models[0];
+        assert_eq!(opus.context_window, Some(1_000_000));
+        assert_eq!(opus.max_output, Some(128_000));
+        assert_eq!(
+            opus.reasoning_efforts,
+            vec!["low", "medium", "high", "xhigh", "max"]
+        );
+        assert!(opus.reasoning);
+        assert!(opus.capabilities_reported);
+        assert_eq!(
+            opus.input_modalities,
+            vec!["text", "image", "pdf"],
+            "modalidades da conta"
+        );
+        assert!(opus.can_receive_images());
+
+        let haiku = &page.models[1];
+        assert_eq!(haiku.context_window, Some(200_000));
+        assert!(haiku.reasoning_efforts.is_empty());
+        assert!(haiku.reasoning);
+        assert_eq!(haiku.input_modalities, vec!["text", "image"]);
+    }
+
+    #[test]
+    fn openai_platform_page_has_no_cursor_and_no_capabilities() {
+        let document = json!({"data": [{"id": "gpt-6-luna", "object": "model"}, {"id": "gpt-6-sol"}]});
+        let page = parse_remote_page(&document);
+        assert_eq!(page.models.len(), 2);
+        assert!(page.next_after.is_none());
+        assert!(!page.models[0].capabilities_reported);
+        assert!(page.models[0].input_modalities.is_empty());
+        assert!(page.models[0].context_window.is_none());
+    }
+
+    #[test]
+    fn next_page_url_appends_the_cursor() {
+        assert_eq!(
+            next_page_url("https://api.anthropic.com/v1/models", "claude-x"),
+            "https://api.anthropic.com/v1/models?after_id=claude-x"
+        );
+        assert_eq!(
+            next_page_url("https://exemplo.test/models?limit=1000", "a"),
+            "https://exemplo.test/models?limit=1000&after_id=a"
+        );
+    }
+
+    #[test]
     fn merge_keeps_catalog_metadata_and_marks_unknown_models_estimated() {
         let catalog = crate::catalog::CatalogFile::load().expect("catalog");
         let provider = catalog.provider("openai").expect("openai");
@@ -417,12 +729,12 @@ mod tests {
                 RemoteModel {
                     id: "gpt-6.1-sol".into(),
                     display_name: Some("GPT-6.1 Sol (conta)".into()),
-                    visibility: None,
+                    ..RemoteModel::default()
                 },
                 RemoteModel {
                     id: "gpt-6.2-future".into(),
                     display_name: Some("GPT-6.2 Future".into()),
-                    visibility: None,
+                    ..RemoteModel::default()
                 },
             ],
         );
@@ -442,5 +754,70 @@ mod tests {
         assert_eq!(unknown.protocols, vec!["openai-responses".to_string()]);
         // Catalog-only models stay available as fallback.
         assert!(merged.iter().any(|model| model.id == "gpt-5.3-codex"));
+    }
+
+    #[test]
+    fn estimated_anthropic_model_uses_the_account_capabilities() {
+        let catalog = crate::catalog::CatalogFile::load().expect("catalog");
+        let provider = catalog.provider("anthropic").expect("anthropic");
+        let remote = RemoteModel {
+            id: "claude-sonnet-6".into(),
+            display_name: Some("Claude Sonnet 6".into()),
+            context_window: Some(500_000),
+            max_output: Some(64_000),
+            input_modalities: vec!["text".into(), "image".into()],
+            reasoning_efforts: vec!["low".into(), "high".into()],
+            reasoning: true,
+            capabilities_reported: true,
+            ..RemoteModel::default()
+        };
+        let estimated = estimated_model(provider, &remote);
+        assert!(estimated.estimated);
+        assert_eq!(estimated.name, "Claude Sonnet 6");
+        assert_eq!(estimated.family, "claude");
+        assert_eq!(estimated.protocols, vec!["anthropic".to_string()]);
+        assert_eq!(estimated.context_window, 500_000);
+        assert_eq!(estimated.max_output, 64_000);
+        assert!(estimated.attachment);
+        assert_eq!(estimated.modalities.input, vec!["text", "image"]);
+        assert_eq!(
+            estimated.reasoning_options,
+            vec![ReasoningOption::Effort {
+                values: vec!["low".into(), "high".into()]
+            }]
+        );
+        assert!(estimated.reasoning);
+    }
+
+    #[test]
+    fn estimated_model_falls_back_to_the_provider_representative_metadata() {
+        let catalog = crate::catalog::CatalogFile::load().expect("catalog");
+        let provider = catalog.provider("anthropic").expect("anthropic");
+        let representative = provider.models.first().expect("seed");
+        let remote = RemoteModel {
+            id: "claude-account-only".into(),
+            ..RemoteModel::default()
+        };
+        let estimated = estimated_model(provider, &remote);
+        assert_eq!(estimated.family, "claude");
+        assert_eq!(estimated.protocols, vec!["anthropic".to_string()]);
+        assert_eq!(estimated.context_window, representative.context_window);
+        assert_eq!(estimated.max_output, representative.max_output);
+        assert_eq!(estimated.attachment, representative.attachment);
+        assert_eq!(estimated.reasoning_options, representative.reasoning_options);
+    }
+
+    #[test]
+    fn missing_credential_message_is_provider_aware() {
+        let catalog = crate::catalog::CatalogFile::load().expect("catalog");
+        let openai = missing_credential_message(catalog.provider("openai").expect("openai"));
+        assert!(openai.contains("ChatGPT"));
+        assert!(openai.starts_with("nenhuma credencial"));
+
+        let anthropic =
+            missing_credential_message(catalog.provider("anthropic").expect("anthropic"));
+        assert!(anthropic.starts_with("nenhuma credencial"));
+        assert!(anthropic.contains("API key"));
+        assert!(!anthropic.contains("ChatGPT"), "copy errada: {anthropic}");
     }
 }

@@ -119,14 +119,15 @@ async function openOpenAiTab(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('ModelPickerDialog — provedor OpenAI', () => {
-  it('lista OpenAI como terceira aba do provedor (ChatGPT)', async () => {
+  it('lista os quatro provedores do catálogo, incluindo OpenAI (ChatGPT) e Anthropic', async () => {
     await renderOpenDialog();
 
     const tabs = screen.getAllByRole('tab');
-    expect(tabs).toHaveLength(3);
+    expect(tabs).toHaveLength(4);
     expect(screen.getByRole('tab', { name: 'Go' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Zen' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'ChatGPT' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Anthropic' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Go' }).getAttribute('aria-selected')).toBe('true');
   });
 

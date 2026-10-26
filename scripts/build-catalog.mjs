@@ -25,6 +25,7 @@ const mdModels = (providerId) => modelsDev[providerId]?.models ?? {};
 const mdOpencode = mdModels('opencode');
 const mdGo = mdModels('opencode-go');
 const mdOpenai = mdModels('openai');
+const mdAnthropic = mdModels('anthropic');
 const docsOpenai = [];
 
 const byId = (list) => Object.fromEntries(list.map((m) => [m.id, m]));
@@ -382,6 +383,85 @@ function buildOpenAiProvider() {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Anthropic (API oficial, API key)                                    */
+/* ------------------------------------------------------------------ */
+
+const ANTHROPIC_ENDPOINTS = {
+  anthropic: '/messages',
+  models: '/models',
+};
+
+/**
+ * `anthropic-version` é obrigatório em toda requisição da API oficial. O valor é
+ * o mais recente do histórico documentado (platform.claude.com/docs/en/api/versioning)
+ * e fica no catálogo para poder ser atualizado sem recompilar o código.
+ */
+const ANTHROPIC_HEADERS = {
+  'anthropic-version': '2026-10-21',
+};
+
+const ANTHROPIC_DOCS = [
+  'https://platform.claude.com/docs/en/api/overview',
+  'https://platform.claude.com/docs/en/api/messages/create',
+  'https://platform.claude.com/docs/en/api/models/list',
+  'https://platform.claude.com/docs/en/api/versioning',
+];
+
+// Só a linha Claude: nada de modelos de imagem/embedding do mesmo fornecedor.
+const ANTHROPIC_SEED = /^claude-(opus|sonnet|haiku|fable|mythos)-/;
+// A partir da geração 4.6 os IDs são dateless; snapshots com data ficam para a
+// lista viva da conta (`GET /v1/models`), não para o seed embutido.
+const ANTHROPIC_DATED_SNAPSHOT = /-\d{8}$/;
+
+function buildAnthropicProvider() {
+  const models = Object.entries(mdAnthropic)
+    .filter(([id, md]) => {
+      if (!ANTHROPIC_SEED.test(id)) return false;
+      if (ANTHROPIC_DATED_SNAPSHOT.test(id)) return false;
+      const output = md?.modalities?.output ?? ['text'];
+      return output.includes('text');
+    })
+    .map(([id, md]) => {
+      const model = buildModel(id, { md, providerKind: 'anthropic' });
+      return {
+        ...model,
+        // O resolvedor de ícone/agrupamento do app só conhece a família "claude".
+        family: 'claude',
+        protocols: ['anthropic'],
+        // models.dev marca os aliases como "(latest)"; o nome exibido não precisa.
+        name: model.name.replace(/\s*\(latest\)$/i, ''),
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const ids = new Set(models.map((model) => model.id));
+  const defaultModelId = ids.has('claude-sonnet-5-5')
+    ? 'claude-sonnet-5-5'
+    : (models[0]?.id ?? '');
+
+  return {
+    id: 'anthropic',
+    name: 'Anthropic',
+    shortName: 'Anthropic',
+    description:
+      'Modelos Claude pela API oficial da Anthropic — cobrança por token na sua conta (pay-as-you-go).',
+    baseUrl: 'https://api.anthropic.com/v1',
+    consoleUrl: 'https://platform.claude.com/settings/keys',
+    endpoints: ANTHROPIC_ENDPOINTS,
+    headers: ANTHROPIC_HEADERS,
+    authEnv: 'ANTHROPIC_API_KEY',
+    defaultModelId,
+    models,
+    notes: [
+      'Cobrança por token na sua conta Anthropic (pay-as-you-go) — este provedor não usa assinatura/plano.',
+      'Crie ou revise a API key em https://platform.claude.com/settings/keys.',
+      'A lista da conta é buscada em GET /v1/models; use "Atualizar modelos" para mesclar novidades.',
+      'Versão da API fixada em anthropic-version: 2026-10-21 (sem headers beta).',
+    ],
+  };
+}
+
 const catalog = {
   version: 1,
   generatedAt: new Date().toISOString(),
@@ -390,6 +470,7 @@ const catalog = {
       'https://opencode.ai/v2/docs/console/go/',
       'https://opencode.ai/v2/docs/console/models/',
       ...OPENAI_DOCS,
+      ...ANTHROPIC_DOCS,
     ],
     models: 'https://models.dev/api.json',
     probe: 'scripts/probe-models.mjs',
@@ -423,6 +504,7 @@ const catalog = {
       notes: ['Funciona com créditos do OpenCode Console.', 'Modelos gratuitos exigem o cliente OpenCode.'],
     }),
     buildOpenAiProvider(),
+    buildAnthropicProvider(),
   ],
 };
 
@@ -430,23 +512,30 @@ const outDir = path.join(ROOT, 'data');
 fs.mkdirSync(outDir, { recursive: true });
 const outFile = path.join(outDir, 'catalog.json');
 
-// `--provider openai` updates only the OpenAI provider while leaving Go/Zen
-// byte-identical (the plan's catalog task requires a surgical diff).
+// `--provider <id>` updates only that provider while leaving the others
+// byte-identical (the catalog tasks require a surgical diff). Unknown ids fall
+// back to the full rebuild below.
+const SURGICAL_PROVIDERS = {
+  openai: { build: buildOpenAiProvider, docs: OPENAI_DOCS },
+  anthropic: { build: buildAnthropicProvider, docs: ANTHROPIC_DOCS },
+};
+
 const providerFlagIndex = process.argv.indexOf('--provider');
 const onlyProvider = providerFlagIndex >= 0 ? process.argv[providerFlagIndex + 1] : null;
 
 let output = catalog;
-if (onlyProvider === 'openai') {
+const surgical = onlyProvider ? SURGICAL_PROVIDERS[onlyProvider] : null;
+if (surgical) {
   const existing = JSON.parse(fs.readFileSync(outFile, 'utf8'));
-  const openai = buildOpenAiProvider();
+  const provider = surgical.build();
   output = {
     ...existing,
     generatedAt: new Date().toISOString(),
     sources: {
       ...existing.sources,
-      docs: [...new Set([...(existing.sources?.docs ?? []), ...OPENAI_DOCS])],
+      docs: [...new Set([...(existing.sources?.docs ?? []), ...surgical.docs])],
     },
-    providers: [...existing.providers.filter((provider) => provider.id !== 'openai'), openai],
+    providers: [...existing.providers.filter((item) => item.id !== provider.id), provider],
   };
 }
 

@@ -63,7 +63,12 @@ pub fn save_settings(
 
 /// Copy shown when the pasted key is too short to be a real API key.
 fn api_key_validation_hint(provider: &ProviderInfo) -> &'static str {
-    if provider.supports_oauth() {
+    // The catalog id is stable, so copy can be provider-specific without
+    // guessing from URLs. Direct providers get their own console text; the
+    // ChatGPT provider keeps the plan copy and the gateways the OpenCode copy.
+    if provider.id == "anthropic" {
+        "Copie a API key completa do Console da Anthropic (a chave começa com `sk-ant-`)."
+    } else if provider.supports_oauth() {
         "Copie a API key completa da plataforma (a alternativa ao login ChatGPT)."
     } else {
         "Copie a API key completa do OpenCode Console."
@@ -284,8 +289,15 @@ fn validate_status_message(provider: &ProviderInfo, status: u16, oauth: bool) ->
         402 if oauth => "Pagamento necessário (402). Verifique a assinatura/créditos da sua conta \
                          ChatGPT."
             .to_string(),
-        402 => "Pagamento necessário (402). Verifique os créditos do OpenCode Zen ou a assinatura \
-                do OpenCode Go."
+        402 if provider.id.starts_with("opencode-") => {
+            "Pagamento necessário (402). Verifique os créditos do OpenCode Zen ou a assinatura \
+             do OpenCode Go."
+                .to_string()
+        }
+        // Direct providers (Anthropic, OpenAI API key) must never see the
+        // OpenCode credits copy.
+        402 => "Pagamento necessário (402). Verifique o faturamento/créditos da sua conta no \
+                provedor."
             .to_string(),
         403 if oauth => {
             "Acesso negado (403): sua conta não tem permissão para usar este provedor ou \
@@ -355,17 +367,42 @@ fn oauth_blocker_message(registration: &StoredOAuthRegistration) -> Option<Strin
     }
 }
 
-async fn probe_models(
-    state: &AppState,
+/// Builds the model-list `GET` for a provider: Bearer credential, Lumina
+/// User-Agent and the static headers declared by the catalog (e.g.
+/// `anthropic-version` for the official Anthropic API).
+///
+/// Header names that belong to the transport/credential layer are skipped even
+/// if a catalog declares them: static headers are data, never credentials.
+fn models_request(
+    client: &reqwest::Client,
+    provider: &ProviderInfo,
     url: &str,
     token: &str,
-) -> Result<reqwest::Response, reqwest::Error> {
-    state
-        .http
+) -> reqwest::RequestBuilder {
+    let mut request = client
         .get(url)
         .header("Authorization", format!("Bearer {token}"))
         .header("User-Agent", concat!("Lumina/", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(15));
+    for (name, value) in provider.static_headers() {
+        if matches!(
+            name.as_str(),
+            "authorization" | "user-agent" | "host" | "content-length"
+        ) {
+            continue;
+        }
+        request = request.header(name.as_str(), value.as_str());
+    }
+    request
+}
+
+async fn probe_models(
+    state: &AppState,
+    provider: &ProviderInfo,
+    url: &str,
+    token: &str,
+) -> Result<reqwest::Response, reqwest::Error> {
+    models_request(&state.http, provider, url, token)
         .send()
         .await
 }
@@ -426,7 +463,7 @@ pub async fn validate_provider(
     };
 
     let started = std::time::Instant::now();
-    let mut response = probe_models(&state, &url, &token).await;
+    let mut response = probe_models(&state, &provider, &url, &token).await;
 
     // 401 on an OAuth request: force one refresh and retry once (PLAN §2.5).
     let unauthorized = response
@@ -438,7 +475,7 @@ pub async fn validate_provider(
         match state.force_refresh(&app, &provider_id).await {
             Ok(refreshed) => {
                 token = refreshed;
-                response = probe_models(&state, &url, &token).await;
+                response = probe_models(&state, &provider, &url, &token).await;
             }
             Err(error) => {
                 return Ok(validation_failure(
@@ -550,6 +587,23 @@ mod tests {
         )
     }
 
+    fn anthropic_provider() -> ProviderInfo {
+        provider(
+            r#"{
+                "id": "anthropic",
+                "name": "Anthropic",
+                "shortName": "Anthropic",
+                "baseUrl": "https://api.anthropic.com/v1",
+                "consoleUrl": "https://platform.claude.com/settings/keys",
+                "endpoints": { "anthropic": "/messages", "models": "/models" },
+                "headers": { "anthropic-version": "2026-10-21" },
+                "authEnv": "ANTHROPIC_API_KEY",
+                "defaultModelId": "claude-sonnet-5-5",
+                "models": []
+            }"#,
+        )
+    }
+
     #[test]
     fn models_endpoint_uses_the_catalog_path_without_duplicating_v1() {
         let url = models_endpoint(&openai_provider());
@@ -586,6 +640,86 @@ mod tests {
             "https://api.openai.com/v1/models"
         );
         assert!(!models_endpoint(provider).contains("/v1/v1/"));
+    }
+
+    #[test]
+    fn models_endpoint_supports_the_direct_anthropic_api() {
+        let url = models_endpoint(&anthropic_provider());
+        assert_eq!(url, "https://api.anthropic.com/v1/models");
+        assert!(!url.contains("/v1/v1/"), "base já termina em /v1: {url}");
+
+        let catalog = crate::catalog::CatalogFile::load().expect("catálogo embutido válido");
+        let provider = catalog.provider("anthropic").expect("provedor anthropic");
+        assert_eq!(
+            models_endpoint(provider),
+            "https://api.anthropic.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn models_request_sends_bearer_static_headers_and_user_agent() {
+        let client = reqwest::Client::new();
+        let mut fixture = anthropic_provider();
+        fixture
+            .headers
+            .insert("x-lumina-test".to_string(), "1".to_string());
+
+        let request = models_request(
+            &client,
+            &fixture,
+            "https://api.anthropic.com/v1/models",
+            "sk-ant-test-key",
+        )
+        .build()
+        .expect("request válido");
+        assert_eq!(request.method(), reqwest::Method::GET);
+        assert_eq!(
+            request.url().as_str(),
+            "https://api.anthropic.com/v1/models"
+        );
+
+        let headers = request.headers();
+        let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+        assert_eq!(header("authorization"), Some("Bearer sk-ant-test-key"));
+        assert_eq!(header("anthropic-version"), Some("2026-10-21"));
+        assert_eq!(header("x-lumina-test"), Some("1"));
+        assert!(
+            header("user-agent").is_some_and(|value| value.starts_with("Lumina/")),
+            "User-Agent do Lumina ausente"
+        );
+    }
+
+    #[test]
+    fn static_catalog_headers_can_never_override_credentials() {
+        let client = reqwest::Client::new();
+        let mut fixture = anthropic_provider();
+        // A catalog is data, not a credential source: these must be ignored.
+        fixture
+            .headers
+            .insert("authorization".to_string(), "Bearer leaked".to_string());
+        fixture
+            .headers
+            .insert("user-agent".to_string(), "intruso".to_string());
+
+        let request = models_request(
+            &client,
+            &fixture,
+            "https://api.anthropic.com/v1/models",
+            "sk-ant-real-key",
+        )
+        .build()
+        .expect("request válido");
+        let headers = request.headers();
+        assert_eq!(
+            headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer sk-ant-real-key")
+        );
+        assert!(headers
+            .get("user-agent")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("Lumina/")));
     }
 
     #[test]
@@ -626,6 +760,32 @@ mod tests {
         assert!(validate_status_message(&openai, 403, true).contains("permissão"));
         assert!(validate_status_message(&openai, 402, true).contains("Pagamento"));
         assert!(validate_status_message(&openai, 503, false).contains("503"));
+
+        // Direct Anthropic API key: actionable key copy, never ChatGPT session
+        // copy nor OpenCode credits.
+        let anthropic = anthropic_provider();
+        let anthropic_401 = validate_status_message(&anthropic, 401, false);
+        assert!(anthropic_401.contains("API key inválida"));
+        assert!(anthropic_401.contains("sk-ant-"));
+        assert!(!anthropic_401.contains("ChatGPT"), "{anthropic_401}");
+        assert!(!anthropic_401.contains("OpenCode"), "{anthropic_401}");
+
+        let anthropic_402 = validate_status_message(&anthropic, 402, false);
+        assert!(anthropic_402.contains("Pagamento"));
+        assert!(!anthropic_402.contains("OpenCode"), "{anthropic_402}");
+
+        let anthropic_429 = validate_status_message(&anthropic, 429, false);
+        assert!(anthropic_429.contains("Muitas requisições"));
+        assert!(!anthropic_429.contains("OpenCode"), "{anthropic_429}");
+
+        // Gateways keep their provider-specific credits copy; OpenAI API key
+        // must not borrow it.
+        assert!(
+            validate_status_message(&legacy_gateway_provider(), 402, false).contains("OpenCode")
+        );
+        let openai_402 = validate_status_message(&openai, 402, false);
+        assert!(openai_402.contains("Pagamento"));
+        assert!(!openai_402.contains("OpenCode"), "{openai_402}");
     }
 
     #[test]
@@ -640,6 +800,23 @@ mod tests {
         let error = normalize_provider_key(&gateway, Some("curta".to_string()))
             .expect_err("chave curta deve falhar");
         assert!(error.contains("OpenCode Console"));
+
+        // Anthropic = direct official API: own console copy, no ChatGPT/OpenCode.
+        let anthropic = anthropic_provider();
+        let hint = api_key_validation_hint(&anthropic);
+        assert!(hint.contains("Console da Anthropic"), "{hint}");
+        assert!(hint.contains("sk-ant-"), "{hint}");
+        assert!(!hint.contains("OpenCode"), "{hint}");
+        assert!(!hint.contains("ChatGPT"), "{hint}");
+        let error = normalize_provider_key(&anthropic, Some("curta".to_string()))
+            .expect_err("chave curta deve falhar");
+        assert!(error.contains("sk-ant-"), "{error}");
+        let key = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz";
+        assert_eq!(
+            normalize_provider_key(&anthropic, Some(key.to_string())).expect("chave sk-ant válida"),
+            Some(key.to_string()),
+            "chaves sk-ant-… com >= 20 caracteres são aceitas"
+        );
 
         let error = normalize_provider_key(&openai, Some("sk-com espaço 1234567890".to_string()))
             .expect_err("espaços devem falhar");

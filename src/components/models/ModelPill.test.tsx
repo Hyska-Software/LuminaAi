@@ -267,7 +267,7 @@ describe('ModelPill (model step)', () => {
     await user.type(search, 'opus');
 
     expect(await within(dialog).findByText('Zen · Claude')).toBeTruthy();
-    expect(within(dialog).getByText('Go + Zen + ChatGPT')).toBeTruthy();
+    expect(within(dialog).getByText('Go + Zen + ChatGPT + Anthropic')).toBeTruthy();
     expect(within(dialog).queryByRole('radio', { name: 'Go' })).toBeNull();
     expect(
       within(dialog)

@@ -510,3 +510,138 @@ impl<'a> Handler<'a> {
         Ok(())
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* Direct-provider request tests (official Anthropic API)              */
+/* ------------------------------------------------------------------ */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::{CatalogFile, ProviderAuth, RequestProfile};
+    use crate::providers::{ProviderConfig, ReasoningRequest, ToolDefinition};
+    use tokio_util::sync::CancellationToken;
+
+    fn direct_request_for(
+        reasoning: ReasoningRequest,
+        model_id: Option<&str>,
+    ) -> CompletionRequest {
+        let catalog = CatalogFile::load().expect("catalog.json carrega");
+        let provider = catalog
+            .provider("anthropic")
+            .expect("provider anthropic no catálogo");
+        let model_id = model_id.unwrap_or(provider.default_model_id.as_str());
+        let model = catalog
+            .model("anthropic", model_id)
+            .unwrap_or_else(|| panic!("modelo {model_id} no provider anthropic"))
+            .clone();
+        // Shape the harness uses for the direct provider: catalog base/endpoints,
+        // Bearer API key and the static catalog headers (`anthropic-version`).
+        let config = ProviderConfig {
+            provider_id: provider.id.clone(),
+            provider_name: provider.name.clone(),
+            base_url: provider.base_url.clone(),
+            api_key: "sk-ant-test".to_string(),
+            model,
+            session_id: "session-1".to_string(),
+            user_agent: "Lumina/test".to_string(),
+            endpoints: provider.endpoints.clone(),
+            request_profile: RequestProfile::Standard,
+            auth_mode: ProviderAuth::ApiKey,
+            extra_headers: provider.static_headers(),
+        };
+        CompletionRequest {
+            config,
+            protocols: vec![WireProtocol::Anthropic],
+            history: vec![HistoryMessage::user("diga olá")],
+            system_prompt: "Você é o Lumina.".to_string(),
+            tools: vec![ToolDefinition {
+                name: "echo".to_string(),
+                description: "Devolve o texto recebido.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                }),
+            }],
+            reasoning,
+            max_output_tokens: Some(64),
+            temperature: Some(0.5),
+            cancel: CancellationToken::new(),
+        }
+    }
+
+    fn direct_request(reasoning: ReasoningRequest) -> CompletionRequest {
+        direct_request_for(reasoning, None)
+    }
+
+    #[test]
+    fn direct_provider_body_uses_the_messages_shape() {
+        let request = direct_request(ReasoningRequest::Effort("high".to_string()));
+        let body = build_body(&request);
+        let catalog = CatalogFile::load().expect("catalog");
+        let provider = catalog.provider("anthropic").expect("provider anthropic");
+
+        assert_eq!(body["model"], json!(provider.default_model_id.as_str()));
+        assert_eq!(body["stream"], json!(true));
+        assert!(
+            body["max_tokens"].as_u64().unwrap_or(0) > 0,
+            "max_tokens ausente: {body}"
+        );
+        assert_eq!(body["system"], json!("Você é o Lumina."));
+        assert_eq!(
+            body["messages"],
+            json!([{
+                "role": "user",
+                "content": [{"type": "text", "text": "diga olá"}],
+            }])
+        );
+
+        // Anthropic tool shape: `{name, description, input_schema}`, never the
+        // OpenAI `{type:"function", function:{parameters}}` wrapper.
+        assert_eq!(body["tools"][0]["name"], json!("echo"));
+        assert_eq!(
+            body["tools"][0]["description"],
+            json!("Devolve o texto recebido.")
+        );
+        assert!(
+            body["tools"][0]["input_schema"].is_object(),
+            "input_schema: {}",
+            body["tools"][0]
+        );
+        assert!(body["tools"][0].get("parameters").is_none());
+        assert!(body["tools"][0].get("function").is_none());
+
+        // Thinking is enabled, and Anthropic rejects temperature alongside it:
+        // the requested 0.5 must not reach the body.
+        assert_eq!(body["thinking"], json!({"type": "adaptive"}));
+        assert_eq!(body["output_config"], json!({"effort": "high"}));
+        assert!(
+            body.get("temperature").is_none(),
+            "temperature não deve ir junto de thinking: {body}"
+        );
+    }
+
+    #[test]
+    fn budget_maps_to_enabled_thinking_and_raises_max_tokens() {
+        // The default model only exposes `effort`; a budget needs a model that
+        // declares `budget_tokens` (Claude 4.5/4.6 entries do).
+        let request = direct_request_for(ReasoningRequest::Budget(8_192), Some("claude-opus-4-5"));
+        let body = build_body(&request);
+
+        assert_eq!(
+            body["thinking"],
+            json!({"type": "enabled", "budget_tokens": 8_192})
+        );
+        assert!(body.get("output_config").is_none());
+        let max_tokens = body["max_tokens"].as_u64().unwrap_or(0);
+        assert!(
+            max_tokens > 8_192,
+            "max_tokens ({max_tokens}) precisa exceder o budget de 8192: {body}"
+        );
+        assert!(
+            body.get("temperature").is_none(),
+            "temperature não deve ir junto de thinking: {body}"
+        );
+    }
+}

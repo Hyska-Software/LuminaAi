@@ -99,6 +99,11 @@ export interface ProviderInfo {
   baseUrl: string;
   consoleUrl: string;
   endpoints: Record<string, string>;
+  /**
+   * Static headers sent with every request of the provider (no credentials).
+   * Today: `anthropic-version` for the direct Anthropic API.
+   */
+  headers?: Record<string, string>;
   authEnv: string;
   defaultModelId: string;
   auth?: ProviderAuth;

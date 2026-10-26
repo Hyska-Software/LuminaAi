@@ -234,7 +234,9 @@ fn provider_config(
         endpoints: provider.endpoints.clone(),
         request_profile: provider.request_profile(credential.auth_mode()),
         auth_mode: credential.auth_mode(),
-        extra_headers: Vec::new(),
+        // Catalog-declared static headers (e.g. `anthropic-version`), lowercased
+        // and sorted by `static_headers()`; credentials are never here.
+        extra_headers: provider.static_headers(),
     }
 }
 
@@ -2115,6 +2117,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            headers: Default::default(),
             auth_env: "OPENCODE_API_KEY".into(),
             default_model_id: "glm-5.3-flash".into(),
             auth: Default::default(),
@@ -2385,6 +2388,7 @@ mod agent_loop_tests {
             base_url: "https://example.invalid".to_string(),
             console_url: String::new(),
             endpoints: HashMap::new(),
+            headers: Default::default(),
             auth_env: "OPENCODE_API_KEY".to_string(),
             default_model_id: model.id.clone(),
             auth: Default::default(),
@@ -2466,6 +2470,7 @@ mod agent_loop_tests {
             endpoints: [("openai-responses".to_string(), "/responses".to_string())]
                 .into_iter()
                 .collect(),
+            headers: Default::default(),
             auth_env: OAUTH_TEST_ENV.to_string(),
             default_model_id: "gpt-6.1-sol".to_string(),
             auth: ProviderAuth::Oauth,
@@ -2551,6 +2556,112 @@ mod agent_loop_tests {
             reasoning: None,
             options: TurnOptions {
                 max_steps,
+                ..Default::default()
+            },
+            turn_id: Some(uuid::Uuid::new_v4().to_string()),
+        }
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Static provider headers (anthropic fixture)                       */
+    /* ---------------------------------------------------------------- */
+
+    /// Env var do fixture anthropic (não é a env real do provedor).
+    const ANTHROPIC_TEST_ENV: &str = "LUMINA_HARNESS_TEST_ANTHROPIC_KEY";
+
+    fn anthropic_model(id: &str) -> ModelInfo {
+        ModelInfo {
+            id: id.to_string(),
+            name: "Claude Sonnet 5.5".to_string(),
+            family: "claude".to_string(),
+            protocols: vec!["anthropic".to_string()],
+            reasoning: true,
+            reasoning_options: Vec::new(),
+            attachment: true,
+            modalities: Modalities {
+                input: vec!["text".to_string(), "image".to_string()],
+                output: vec!["text".to_string()],
+            },
+            context_window: 200_000,
+            max_output: 64_000,
+            cost: None,
+            release_date: None,
+            knowledge: None,
+            open_weights: false,
+            description: None,
+            tags: Vec::new(),
+            status: "stable".to_string(),
+            estimated: false,
+        }
+    }
+
+    /// Fixture realista do provedor `anthropic`: API key + header estático
+    /// `anthropic-version` declarado no catálogo (nunca credencial em header).
+    fn anthropic_provider() -> ProviderInfo {
+        ProviderInfo {
+            id: "anthropic".to_string(),
+            name: "Anthropic".to_string(),
+            short_name: "Anthropic".to_string(),
+            description: String::new(),
+            base_url: "https://api.anthropic.com/v1".to_string(),
+            console_url: "https://platform.claude.com/settings/keys".to_string(),
+            endpoints: [
+                ("anthropic".to_string(), "/messages".to_string()),
+                ("models".to_string(), "/models".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            headers: [("anthropic-version".to_string(), "2026-10-21".to_string())]
+                .into_iter()
+                .collect(),
+            auth_env: ANTHROPIC_TEST_ENV.to_string(),
+            default_model_id: "claude-sonnet-5-5".to_string(),
+            auth: Default::default(),
+            request_profiles: Default::default(),
+            oauth: None,
+            models: vec![anthropic_model("claude-sonnet-5-5")],
+            notes: Vec::new(),
+        }
+    }
+
+    fn anthropic_catalog() -> CatalogFile {
+        CatalogFile {
+            version: 1,
+            generated_at: String::new(),
+            sources: serde_json::Value::Null,
+            providers: vec![anthropic_provider()],
+        }
+    }
+
+    fn anthropic_deps(db: Arc<Db>, streamer: ProviderStreamer) -> HarnessDeps {
+        HarnessDeps {
+            app: None,
+            db,
+            http: reqwest::Client::new(),
+            search_http: reqwest::Client::new(),
+            catalog: anthropic_catalog(),
+            streamer: Some(streamer),
+            credential_override: Some(CredentialOverride::ApiKey("sk-ant-test".to_string())),
+            refresh_override: None,
+            model_source: None,
+            api_key_override: None,
+            data_dir: Some(test_data_dir()),
+            skills_roots: Some(Vec::new()),
+        }
+    }
+
+    fn anthropic_payload(conversation: &Conversation, model_id: &str) -> TurnPayload {
+        TurnPayload {
+            conversation_id: conversation.id.clone(),
+            content: "Explique MCP em duas frases".to_string(),
+            attachment_ids: Vec::new(),
+            provider_id: "anthropic".to_string(),
+            model_id: model_id.to_string(),
+            reasoning: None,
+            options: TurnOptions {
+                // The user asked for a temperature; Claude models must not get it.
+                temperature: Some(0.3),
+                max_steps: 2,
                 ..Default::default()
             },
             turn_id: Some(uuid::Uuid::new_v4().to_string()),
@@ -4174,5 +4285,135 @@ mod agent_loop_tests {
             resolve_model(&harness, &provider, "gpt-account-only").is_none(),
             "sem override, o catálogo continua sendo o fallback"
         );
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Static provider headers (catálogo `headers` → request)            */
+    /* ---------------------------------------------------------------- */
+
+    #[test]
+    fn static_headers_reach_the_provider_config_and_request_headers() {
+        let provider = anthropic_provider();
+        let model = anthropic_model("claude-sonnet-5-5");
+        let credential = Credential::ApiKey("sk-ant-test".to_string());
+        let config = provider_config(&provider, &model, &credential, "conv-1");
+
+        assert_eq!(
+            config.extra_headers,
+            provider.static_headers(),
+            "headers estáticos do catálogo viajam em extra_headers"
+        );
+        assert_eq!(
+            config.extra_headers,
+            vec![("anthropic-version".to_string(), "2026-10-21".to_string())]
+        );
+
+        let headers = config.headers();
+        assert!(
+            headers
+                .iter()
+                .any(|(name, value)| name == "authorization" && value == "Bearer sk-ant-test"),
+            "Authorization: Bearer continua sendo a autenticação: {headers:?}"
+        );
+        assert!(
+            headers
+                .iter()
+                .any(|(name, value)| name == "anthropic-version" && value == "2026-10-21"),
+            "header estático do catálogo ausente no request: {headers:?}"
+        );
+    }
+
+    #[test]
+    fn providers_without_static_headers_do_not_emit_extra_headers() {
+        let catalog = test_catalog();
+        let go = catalog.provider("opencode-go").expect("provedor go");
+        let go_model = catalog
+            .model("opencode-go", "deepseek-v4.1-flash")
+            .expect("modelo go")
+            .clone();
+        let go_config = provider_config(
+            go,
+            &go_model,
+            &Credential::ApiKey("sk-go".to_string()),
+            "conv-1",
+        );
+        assert!(
+            go_config.extra_headers.is_empty(),
+            "Go não declara headers: {:?}",
+            go_config.extra_headers
+        );
+
+        let openai = oauth_provider();
+        let openai_config = provider_config(
+            &openai,
+            &openai_model("gpt-6.1-sol"),
+            &Credential::Bearer("oauth-access-token".to_string()),
+            "conv-1",
+        );
+        assert!(
+            openai_config.extra_headers.is_empty(),
+            "OpenAI não declara headers: {:?}",
+            openai_config.extra_headers
+        );
+    }
+
+    #[test]
+    fn anthropic_claude_fixture_omits_temperature() {
+        let options = TurnOptions {
+            temperature: Some(0.4),
+            ..Default::default()
+        };
+        let settings = Settings::default();
+        assert_eq!(
+            temperature_request(&options, &settings, &anthropic_model("claude-sonnet-5-5")),
+            None,
+            "Claude rejeita temperature (família/id)"
+        );
+    }
+
+    #[tokio::test]
+    async fn claude_request_keeps_static_headers_and_omits_temperature() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "anthropic", "claude-sonnet-5-5")
+            .expect("conversation");
+        let captured: Arc<Mutex<Vec<(Vec<(String, String)>, Option<f32>, RequestProfile)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let streamer: ProviderStreamer = {
+            let captured = captured.clone();
+            Arc::new(move |request, sink| {
+                captured.lock().expect("captured lock").push((
+                    request.config.extra_headers.clone(),
+                    request.temperature,
+                    request.config.request_profile,
+                ));
+                Box::pin(async move {
+                    text_stream(&sink, "Resposta final.");
+                    Ok(())
+                })
+            })
+        };
+
+        let mut settings = Settings::default();
+        // Even with a global temperature configured, Claude must not receive it.
+        settings.temperature = Some(0.9);
+        let (channel, _events) = channel();
+        let result = run_turn(
+            anthropic_deps(temp.db.clone(), streamer),
+            anthropic_payload(&conversation, "claude-sonnet-5-5"),
+            settings,
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno anthropic");
+
+        assert_eq!(result.assistant_message.status, MessageStatus::Complete);
+        let captured = captured.lock().expect("captured lock");
+        let (headers, temperature, profile) = captured.first().expect("um request");
+        assert_eq!(headers, &anthropic_provider().static_headers());
+        assert_eq!(*temperature, None, "Claude não aceita temperature");
+        assert_eq!(*profile, RequestProfile::Standard);
     }
 }

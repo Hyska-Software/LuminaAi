@@ -1,13 +1,13 @@
 # Lumina
 
-Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usando **OpenCode Go**, **OpenCode Zen** e **OpenAI** (plano ChatGPT via "Sign in with ChatGPT" ou API key) como provedores.
+Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usando **OpenCode Go**, **OpenCode Zen**, **OpenAI** (plano ChatGPT via "Sign in with ChatGPT" ou API key) e **Anthropic** (API oficial, API key) como provedores.
 
 ![status](https://img.shields.io/badge/status-conclu%C3%ADdo-6446fb)
 
 ## Funcionalidades
 
 - **Conversas com streaming** em tempo real, com espaço de pensamento que mostra os passos do agente (raciocínio, buscas, páginas lidas e arquivos criados) numa timeline colapsável.
-- **Escolha de modelo e modo de pensamento** por modelo (esforço, orçamento de tokens ou desligado), com catálogo de 140+ modelos dos provedores OpenCode e OpenAI.
+- **Escolha de modelo e modo de pensamento** por modelo (esforço, orçamento de tokens ou desligado), com catálogo de 160+ modelos dos provedores OpenCode, OpenAI e Anthropic.
 - **Login com o plano ChatGPT**: "Continuar com ChatGPT" (OAuth oficial, Sign in with ChatGPT) usa o plano da sua conta para requisições elegíveis — sem API key; a lista de modelos é a da sua conta, com selo "Plano ChatGPT" e link para gerenciar o uso. A API key da OpenAI continua disponível como alternativa.
 - **Análise de documentos**: PDF, DOCX, XLSX/CSV, PPTX, texto/código e imagens (visão).
 - **Busca na web** com citações de fontes: chips na mensagem (até 8) e lista completa no painel lateral de fontes, com leitura de páginas.
@@ -38,6 +38,7 @@ Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usan
 - WebView2 (Windows 10/11)
 - Uma API key do [OpenCode Console](https://opencode.ai/console) (Go ou Zen). A chave existente do OpenCode CLI é detectada automaticamente.
 - Para OpenAI: uma conta ChatGPT elegível (botão **Continuar com ChatGPT** em Configurações → Provedores, sem API key) **ou** uma API key `sk-…` da plataforma.
+- Para Anthropic: uma API key `sk-ant-…` do [Claude Console](https://platform.claude.com/settings/keys) (a API oficial é pay-as-you-go; não usa assinatura). A variável `ANTHROPIC_API_KEY` também é detectada.
 - **Opcional**: Python 3.9+ (e/ou Node) para execução de código. Os helpers das skills usam somente a stdlib; pacotes como `python-docx`, `openpyxl` e `Pillow` melhoram o resultado quando instalados (a tela Configurações → Ferramentas mostra o ambiente detectado).
 
 ## Desenvolvimento
@@ -74,6 +75,8 @@ Testes de integração que chamam o gateway real ficam marcados como `#[ignore]`
 ```bash
 cd src-tauri
 cargo test --lib providers::smoke -- --ignored --nocapture --test-threads=1
+# Exige ANTHROPIC_API_KEY no ambiente; sem a chave o teste dá skip sem tocar a rede:
+cargo test --lib providers::smoke::anthropic_direct -- --ignored --nocapture
 cargo test --lib tools::web_search::tests::live -- --ignored --nocapture
 cargo test --lib tools::fetch_url::tests::live -- --ignored --nocapture
 ```
@@ -95,7 +98,7 @@ Documentação: [Arquitetura](docs/ARCHITECTURE.md) · [Arquivos, código e skil
 
 ## Privacidade
 
-Conversas, anexos e artefatos ficam apenas na sua máquina. As API keys são armazenadas localmente (`secrets.json` no app-data) e nunca são expostas ao renderer. Requisições vão direto para o gateway do OpenCode.
+Conversas, anexos e artefatos ficam apenas na sua máquina. As API keys são armazenadas localmente (`secrets.json` no app-data) e nunca são expostas ao renderer. Requisições vão direto para o provedor escolhido (gateway do OpenCode, API da OpenAI ou API da Anthropic); nada passa por um servidor do Lumina.
 
 ## Licença
 

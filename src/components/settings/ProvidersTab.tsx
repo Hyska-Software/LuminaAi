@@ -88,6 +88,19 @@ function planUsageUrl(provider: ProviderInfo): string {
 }
 
 /**
+ * Provider-aware hint for the API-key input. Direct API-key providers do not
+ * share a console, so the placeholder must name the right one (Anthropic keys
+ * start with `sk-ant-`); unknown providers fall back to a generic label.
+ */
+function apiKeyPlaceholder(provider: ProviderInfo, hasKey: boolean): string {
+  if (hasKey) return 'Colar nova chave para substituir…';
+  if (provider.id === 'openai') return 'Colar API key da OpenAI…';
+  if (provider.id === 'anthropic') return 'Colar API key da Anthropic (sk-ant-…)…';
+  if (provider.id.startsWith('opencode-')) return 'Colar API key do OpenCode Console…';
+  return `Colar API key de ${provider.name}…`;
+}
+
+/**
  * One-time confirmation shown after the first successful ChatGPT sign-in.
  * Persisted in localStorage so it never blocks the flow again.
  */
@@ -430,13 +443,7 @@ export function ProvidersTab() {
                 void saveKey(provider.id);
               }
             }}
-            placeholder={
-              key?.hasKey
-                ? 'Colar nova chave para substituir…'
-                : providerAuth(provider) === 'oauth'
-                  ? 'Colar API key da OpenAI…'
-                  : 'Colar API key do OpenCode Console…'
-            }
+            placeholder={apiKeyPlaceholder(provider, Boolean(key?.hasKey))}
             aria-label={`API key de ${provider.name}`}
             autoComplete="off"
             spellCheck={false}
@@ -780,8 +787,8 @@ export function ProvidersTab() {
       <div className="flex gap-2.5 rounded-xl border border-border bg-surface px-4 py-3">
         <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-success" />
         <p className="text-[11px] leading-relaxed text-foreground-muted">
-          As chaves de API e a sessão do ChatGPT são gravadas apenas no backend (
-          <code className="font-mono">secrets.json</code> no app-data) e nunca são expostas à
+          As chaves de API (OpenCode/Anthropic) e a sessão do ChatGPT são gravadas apenas no backend
+          (<code className="font-mono">secrets.json</code> no app-data) e nunca são expostas à
           interface. Também detectamos as variáveis de ambiente dos provedores e o login existente
           do OpenCode CLI.
         </p>
