@@ -35,7 +35,13 @@ pub async fn run_turn(
         skills_roots: None,
         streamer: None,
         api_key_override: None,
+        // Produção resolve credencial/modelos pelo `AppState` (OAuth refresh,
+        // lista de modelos da conta); os overrides existem só para testes.
+        credential_override: None,
+        refresh_override: None,
+        model_source: None,
     };
+    let events = on_event.clone();
     let result = harness::run_turn(
         deps,
         payload,
@@ -45,7 +51,22 @@ pub async fn run_turn(
     )
     .await;
     state.finish_turn(&turn_id);
-    result.map_err(|e| format!("{e:#}"))
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            // A turn that fails before the first provider call (missing/expired
+            // credential) persists nothing, so the renderer only learns about it
+            // through this error event; surface the actionable code/hint.
+            if let Some(credential) = error.downcast_ref::<harness::CredentialError>() {
+                let _ = events.send(TurnEvent::Error {
+                    message: credential.message.clone(),
+                    code: Some(credential.code.to_string()),
+                    hint: credential.hint.clone(),
+                });
+            }
+            Err(format!("{error:#}"))
+        }
+    }
 }
 
 #[tauri::command]

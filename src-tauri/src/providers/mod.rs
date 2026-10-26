@@ -13,11 +13,13 @@ pub mod openai_responses;
 pub mod reasoning;
 pub mod sse;
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use crate::catalog::ModelInfo;
+use crate::catalog::{ModelInfo, ProviderAuth, RequestProfile};
 use crate::domain::UsageInfo;
 
 /* ------------------------------------------------------------------ */
@@ -164,12 +166,78 @@ impl HistoryMessage {
 pub struct ProviderConfig {
     pub provider_id: String,
     pub provider_name: String,
+    /// Base URL from the catalog (`provider.baseUrl`) — endpoints are paths.
     pub base_url: String,
+    /// Bearer credential: API key **or** OAuth access token for the plan path.
     pub api_key: String,
     pub model: ModelInfo,
     /// Stable id sent as `x-opencode-session` for routing / prompt caching.
+    /// Only OpenCode gateway providers receive it.
     pub session_id: String,
     pub user_agent: String,
+    /// Catalog `provider.endpoints`: wire protocol id -> path template. It is
+    /// authoritative for every protocol (`google` carries a `{model}`
+    /// placeholder); there are no hardcoded protocol paths in the adapters.
+    pub endpoints: HashMap<String, String>,
+    /// Group of request-shape constraints used for the body (`standard` keeps
+    /// the full neutral request, `chatgpt-plan` applies the OpenAI plan rules).
+    pub request_profile: RequestProfile,
+    /// Credential mode the request is being built with (`api-key` or `oauth`).
+    pub auth_mode: ProviderAuth,
+    /// Provider-specific extra headers appended to the transport headers.
+    pub extra_headers: Vec<(String, String)>,
+}
+
+impl ProviderConfig {
+    /// True for providers hosted on the OpenCode gateway (Go/Zen).
+    pub fn is_opencode(&self) -> bool {
+        self.provider_id.starts_with("opencode")
+    }
+
+    /// Resolve the full URL of a wire protocol from the catalog `endpoints`.
+    ///
+    /// The Google endpoint declares a `{model}` placeholder and needs the
+    /// `:streamGenerateContent?alt=sse` suffix; the other protocols are plain
+    /// paths appended to `base_url`.
+    pub fn endpoint_for(&self, protocol: WireProtocol) -> ProviderResult<String> {
+        let template = self.endpoints.get(protocol.as_str()).ok_or_else(|| {
+            ProviderError::Other(format!(
+                "provedor {} não declara endpoint para o protocolo {}",
+                self.provider_id,
+                protocol.as_str()
+            ))
+        })?;
+        let mut path = template.clone();
+        if matches!(protocol, WireProtocol::Google) {
+            path = path.replace("{model}", &self.model.id);
+            path.push_str(":streamGenerateContent?alt=sse");
+        }
+        Ok(endpoint(&self.base_url, &path))
+    }
+
+    /// Transport headers shared by every wire adapter.
+    ///
+    /// `x-opencode-session` is only sent to OpenCode gateway providers: direct
+    /// providers (OpenAI) must not receive gateway-internal routing headers.
+    pub(crate) fn headers(&self) -> Vec<(String, String)> {
+        let mut headers: Vec<(String, String)> = Vec::new();
+        if !self.api_key.is_empty() {
+            headers.push((
+                "authorization".to_string(),
+                format!("Bearer {}", self.api_key),
+            ));
+        }
+        if self.is_opencode() && !self.session_id.is_empty() {
+            headers.push(("x-opencode-session".to_string(), self.session_id.clone()));
+        }
+        if !self.user_agent.is_empty() {
+            headers.push(("user-agent".to_string(), self.user_agent.clone()));
+        }
+        for (name, value) in &self.extra_headers {
+            headers.push((name.clone(), value.clone()));
+        }
+        headers
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -242,6 +310,117 @@ pub type EventSink = tokio::sync::mpsc::UnboundedSender<ProviderEvent>;
 /* Errors                                                              */
 /* ------------------------------------------------------------------ */
 
+/// Structured error payload returned by a provider.
+///
+/// The ChatGPT-plan route mixes two error shapes: `{"detail": "..."}`
+/// (admission errors, which may arrive without an `error` object at all) and
+/// `{"error": {"code": "...", "param": "...", "message": "..."}}` (structured
+/// errors). Both are parsed here so classification is independent of the shape.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StructuredError {
+    /// Human-readable message (the raw body when nothing structured was found).
+    pub message: String,
+    /// Provider `error.code` (`subscription_sharing_usage_limit_exceeded`, ...).
+    pub code: Option<String>,
+    /// Provider `error.param` — the request field a capability error refers to.
+    pub param: Option<String>,
+}
+
+impl std::fmt::Display for StructuredError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.message)?;
+        if let Some(code) = &self.code {
+            write!(formatter, " [{code}]")?;
+        }
+        Ok(())
+    }
+}
+
+impl StructuredError {
+    /// Parse an HTTP error body: JSON when possible, raw text otherwise.
+    pub fn from_body(body: &str) -> Self {
+        let trimmed = body.trim();
+        if trimmed.is_empty() {
+            return Self::default();
+        }
+        match serde_json::from_str::<Value>(trimmed) {
+            Ok(value) => Self::from_value(&value),
+            Err(_) => Self {
+                message: trimmed.to_string(),
+                code: None,
+                param: None,
+            },
+        }
+    }
+
+    /// Parse an already-decoded JSON error payload. Accepts the plain
+    /// `{"error": {...}}` / `{"detail": "..."}` shapes and the Responses API
+    /// `{"response": {"error": {...}}}` stream wrapper.
+    pub fn from_value(value: &Value) -> Self {
+        let unwrapped = value
+            .pointer("/response/error")
+            .or_else(|| value.get("error"))
+            .unwrap_or(value);
+        let mut structured = Self::default();
+
+        // `{"error": "boom"}` — the error is a plain string.
+        if let Some(text) = unwrapped.as_str() {
+            structured.message = text.to_string();
+            return structured;
+        }
+        if let Some(object) = unwrapped.as_object() {
+            if let Some(code) = object.get("code").and_then(Value::as_str) {
+                if !code.trim().is_empty() {
+                    structured.code = Some(code.to_string());
+                }
+            }
+            if let Some(param) = object.get("param").and_then(Value::as_str) {
+                if !param.trim().is_empty() {
+                    structured.param = Some(param.to_string());
+                }
+            }
+            for key in ["message", "detail"] {
+                if let Some(message) = object.get(key).and_then(Value::as_str) {
+                    if !message.trim().is_empty() {
+                        structured.message = message.to_string();
+                        break;
+                    }
+                }
+            }
+            // FastAPI-style validation errors: `detail` is an array of objects.
+            if structured.message.is_empty() {
+                if let Some(detail) = object.get("detail").filter(|detail| detail.is_array()) {
+                    structured.message = detail.to_string();
+                }
+            }
+            if structured.message.is_empty() {
+                if let Some(kind) = object.get("type").and_then(Value::as_str) {
+                    structured.message = kind.to_string();
+                }
+            }
+        } else if let Some(detail) = value.get("detail") {
+            if let Some(text) = detail.as_str() {
+                structured.message = text.to_string();
+            } else {
+                structured.message = detail.to_string();
+            }
+        }
+        if structured.message.is_empty() {
+            structured.message = value.to_string();
+        }
+        structured
+    }
+}
+
+/// Raw provider code for a 401 that explicitly rejects the account identity.
+const CODE_INVALID_USER: &str = "subscription_sharing_invalid_user";
+/// Raw provider code for "this account cannot use ChatGPT-plan usage".
+const CODE_USER_NOT_ELIGIBLE: &str = "subscription_sharing_user_not_eligible";
+/// Raw provider code for "the account used up the ChatGPT-plan allowance".
+const CODE_USAGE_LIMIT_EXCEEDED: &str = "subscription_sharing_usage_limit_exceeded";
+/// Raw provider code for "this route/method is not supported".
+const CODE_ROUTE_NOT_SUPPORTED: &str = "subscription_sharing_route_not_supported";
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     #[error("model does not support this protocol")]
@@ -256,6 +435,29 @@ pub enum ProviderError {
     Network(String),
     #[error("provider error: {0}")]
     Other(String),
+    /// The ChatGPT-plan allowance is exhausted (429
+    /// `subscription_sharing_usage_limit_exceeded`): pause plan requests and
+    /// offer the "Gerenciar uso" action — never auto-retry/log in a loop.
+    #[error("plan usage limit reached: {0}")]
+    PlanLimit(StructuredError),
+    /// The account may not use ChatGPT-plan usage (403
+    /// `subscription_sharing_user_not_eligible` or `chatpass_v2_*` grants).
+    #[error("plan usage is not eligible: {0}")]
+    PlanNotEligible(StructuredError),
+    /// The request used a field/tool/model the plan route rejects (400
+    /// `subscription_sharing_unsupported_capability`) — a preview-contract
+    /// change, actionable by dropping the offending field/tool.
+    #[error("unsupported capability: {0}")]
+    UnsupportedCapability(StructuredError),
+    /// The credential was rejected by the plan route (401
+    /// `subscription_sharing_invalid_user`): refresh once, then ask for login.
+    #[error("authentication required: {0}")]
+    AuthRequired(StructuredError),
+    /// The route/method is not supported (403
+    /// `subscription_sharing_route_not_supported`): use `POST
+    /// /v1/responses`, not a bug in the model/tools.
+    #[error("route not supported: {0}")]
+    RouteNotSupported(StructuredError),
 }
 
 pub type ProviderResult<T> = Result<T, ProviderError>;
@@ -264,17 +466,121 @@ impl ProviderError {
     /// Build a typed error from an HTTP status + response body.
     pub fn from_http(status: u16, body: &str) -> Self {
         let lower = body.to_lowercase();
-        if lower.contains("modelprotocolunsupported") || lower.contains("does not support this protocol") {
+        if lower.contains("modelprotocolunsupported")
+            || lower.contains("does not support this protocol")
+        {
             return Self::UnsupportedProtocol(body.to_string());
         }
+        let structured = StructuredError::from_body(body);
+        let code = structured.code.as_deref();
         match status {
-            401 | 403 => Self::Unauthorized(body.to_string()),
-            429 => Self::RateLimited(body.to_string()),
-            400 | 404 | 422 => Self::BadRequest(body.to_string()),
+            // The plan route answers 400 with a structured code when the
+            // request carries a field/tool/model the preview does not accept.
+            400 => {
+                if code.is_some() {
+                    Self::UnsupportedCapability(structured)
+                } else {
+                    Self::BadRequest(body.to_string())
+                }
+            }
+            401 => {
+                if code == Some(CODE_INVALID_USER) {
+                    Self::AuthRequired(structured)
+                } else {
+                    Self::Unauthorized(body.to_string())
+                }
+            }
             402 => Self::BadRequest(format!("saldo/créditos insuficientes: {body}")),
+            403 => match code {
+                Some(CODE_USER_NOT_ELIGIBLE) => Self::PlanNotEligible(structured),
+                Some(CODE_ROUTE_NOT_SUPPORTED) => Self::RouteNotSupported(structured),
+                // Grant/scope problems (`chatpass_v2_scope_not_authorized`,
+                // `chatpass_v2_invalid_authorization_context`): the account has
+                // no usable plan grant; do not silently switch billing.
+                Some(code) if code.starts_with("chatpass_v2_") => Self::PlanNotEligible(structured),
+                _ => Self::Unauthorized(body.to_string()),
+            },
+            429 => {
+                if code == Some(CODE_USAGE_LIMIT_EXCEEDED) {
+                    Self::PlanLimit(structured)
+                } else {
+                    Self::RateLimited(body.to_string())
+                }
+            }
             _ if (500..600).contains(&status) => Self::Other(body.to_string()),
             _ => Self::Other(body.to_string()),
         }
+    }
+
+    /// Classify an error object that arrived **inside** a provider stream
+    /// (`response.failed` / `error` events), where no HTTP status is available.
+    /// The ChatGPT-plan route can report quota failures after the stream has
+    /// started, so these must map exactly like their HTTP counterparts.
+    pub(crate) fn from_stream_error(value: &Value) -> Self {
+        let structured = StructuredError::from_value(value);
+        match structured.code.as_deref() {
+            Some(CODE_USAGE_LIMIT_EXCEEDED) | Some("insufficient_quota") => {
+                Self::PlanLimit(structured)
+            }
+            Some(CODE_USER_NOT_ELIGIBLE) => Self::PlanNotEligible(structured),
+            Some(CODE_INVALID_USER) => Self::AuthRequired(structured),
+            Some("subscription_sharing_unsupported_capability") => {
+                Self::UnsupportedCapability(structured)
+            }
+            Some(CODE_ROUTE_NOT_SUPPORTED) => Self::RouteNotSupported(structured),
+            _ => Self::Other(format!("resposta falhou: {value}")),
+        }
+    }
+
+    /// Transport-neutral app code for `TurnEvent::Error.code` (see PLAN §2.3:
+    /// `auth_required`, `rate_limited`, `plan_not_eligible`,
+    /// `unsupported_capability`). The raw provider code is available through
+    /// [`Self::provider_code`] when the UI needs the exact
+    /// `subscription_sharing_*` value.
+    pub fn code(&self) -> Option<&'static str> {
+        match self {
+            Self::Unauthorized(_) | Self::AuthRequired(_) => Some("auth_required"),
+            Self::RateLimited(_) | Self::PlanLimit(_) => Some("rate_limited"),
+            Self::PlanNotEligible(_) => Some("plan_not_eligible"),
+            Self::UnsupportedCapability(_) => Some("unsupported_capability"),
+            Self::RouteNotSupported(_) => Some("route_not_supported"),
+            Self::UnsupportedProtocol(_)
+            | Self::BadRequest(_)
+            | Self::Network(_)
+            | Self::Other(_) => None,
+        }
+    }
+
+    /// Raw `error.code` from the provider body, when present.
+    pub fn provider_code(&self) -> Option<&str> {
+        match self {
+            Self::PlanLimit(error)
+            | Self::PlanNotEligible(error)
+            | Self::UnsupportedCapability(error)
+            | Self::AuthRequired(error)
+            | Self::RouteNotSupported(error) => error.code.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// `error.param` of a capability error: the request field to drop.
+    pub fn param(&self) -> Option<&str> {
+        match self {
+            Self::UnsupportedCapability(error) => error.param.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// 401-class failure: the harness may refresh an OAuth bearer and retry
+    /// exactly once before asking for a new login.
+    pub fn is_auth_failure(&self) -> bool {
+        matches!(self, Self::Unauthorized(_) | Self::AuthRequired(_))
+    }
+
+    /// Plan allowance exhausted: do not auto-retry; surface the "Gerenciar
+    /// uso" CTA instead (the limit may be the plan's or this app's).
+    pub fn is_plan_limit(&self) -> bool {
+        matches!(self, Self::PlanLimit(_))
     }
 
     pub fn is_unsupported_protocol(&self) -> bool {
@@ -285,12 +591,6 @@ impl ProviderError {
 /* ------------------------------------------------------------------ */
 /* Shared plumbing for the protocol adapters                           */
 /* ------------------------------------------------------------------ */
-
-/// Fixed gateway path per wire protocol (appended to `config.base_url`).
-pub(crate) const CHAT_PATH: &str = "/openai/v1/chat/completions";
-pub(crate) const RESPONSES_PATH: &str = "/openai/v1/responses";
-pub(crate) const ANTHROPIC_PATH: &str = "/anthropic/v1/messages";
-pub(crate) const GOOGLE_MODELS_PATH: &str = "/google/v1beta/models";
 
 pub(crate) fn endpoint(base_url: &str, path: &str) -> String {
     format!("{}{}", base_url.trim_end_matches('/'), path)
@@ -323,7 +623,7 @@ pub(crate) async fn send_stream(
     url: &str,
     body: &Value,
 ) -> ProviderResult<Option<reqwest::Response>> {
-    use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
+    use reqwest::header::{ACCEPT, CONTENT_TYPE};
 
     if request.cancel.is_cancelled() {
         return Ok(None);
@@ -332,14 +632,8 @@ pub(crate) async fn send_stream(
         .post(url)
         .header(CONTENT_TYPE, "application/json")
         .header(ACCEPT, "text/event-stream");
-    if !request.config.api_key.is_empty() {
-        builder = builder.header(AUTHORIZATION, format!("Bearer {}", request.config.api_key));
-    }
-    if !request.config.session_id.is_empty() {
-        builder = builder.header("x-opencode-session", request.config.session_id.as_str());
-    }
-    if !request.config.user_agent.is_empty() {
-        builder = builder.header(USER_AGENT, request.config.user_agent.as_str());
+    for (name, value) in request.config.headers() {
+        builder = builder.header(name.as_str(), value.as_str());
     }
     let response = tokio::select! {
         _ = request.cancel.cancelled() => return Ok(None),
@@ -444,8 +738,7 @@ pub(crate) fn valid_json_arguments(raw: &str) -> String {
 }
 
 pub(crate) fn parse_arguments(raw: &str) -> Value {
-    serde_json::from_str::<Value>(raw.trim())
-        .unwrap_or_else(|_| Value::Object(Default::default()))
+    serde_json::from_str::<Value>(raw.trim()).unwrap_or_else(|_| Value::Object(Default::default()))
 }
 
 pub(crate) fn make_usage(
@@ -612,11 +905,7 @@ mod smoke {
             .map(str::to_string)
     }
 
-    fn provider_config(
-        provider: &ProviderInfo,
-        model: &ModelInfo,
-        key: &str,
-    ) -> ProviderConfig {
+    fn provider_config(provider: &ProviderInfo, model: &ModelInfo, key: &str) -> ProviderConfig {
         ProviderConfig {
             provider_id: provider.id.clone(),
             provider_name: provider.name.clone(),
@@ -625,6 +914,10 @@ mod smoke {
             model: model.clone(),
             session_id: format!("lumina-smoke-{}", uuid::Uuid::new_v4()),
             user_agent: concat!("Lumina/", env!("CARGO_PKG_VERSION")).to_string(),
+            endpoints: provider.endpoints.clone(),
+            request_profile: provider.request_profile(ProviderAuth::ApiKey),
+            auth_mode: ProviderAuth::ApiKey,
+            extra_headers: Vec::new(),
         }
     }
 
@@ -652,8 +945,15 @@ mod smoke {
         tools: Vec<ToolDefinition>,
         reasoning: ReasoningRequest,
     ) -> anyhow::Result<StreamResult> {
-        collect_with_cancel(config, protocols, history, tools, reasoning, CancellationToken::new())
-            .await
+        collect_with_cancel(
+            config,
+            protocols,
+            history,
+            tools,
+            reasoning,
+            CancellationToken::new(),
+        )
+        .await
     }
 
     async fn collect_with_cancel(
@@ -689,11 +989,15 @@ mod smoke {
         while let Some(event) = events.recv().await {
             match event {
                 ProviderEvent::TextDelta(delta) => {
-                    result.trace.push(format!("text({})", delta.chars().count()));
+                    result
+                        .trace
+                        .push(format!("text({})", delta.chars().count()));
                     result.text.push_str(&delta);
                 }
                 ProviderEvent::ReasoningDelta(delta) => {
-                    result.trace.push(format!("reasoning({})", delta.chars().count()));
+                    result
+                        .trace
+                        .push(format!("reasoning({})", delta.chars().count()));
                     result.reasoning.push_str(&delta);
                 }
                 ProviderEvent::ToolCallStart { index, id, name } => {
@@ -708,7 +1012,9 @@ mod smoke {
                     );
                 }
                 ProviderEvent::ToolCallArgsDelta { index, delta } => {
-                    result.trace.push(format!("tool_args({})", delta.chars().count()));
+                    result
+                        .trace
+                        .push(format!("tool_args({})", delta.chars().count()));
                     if let Some(call) = open.get_mut(&index) {
                         call.arguments.push_str(&delta);
                     }
@@ -791,7 +1097,9 @@ mod smoke {
             return;
         };
         let catalog = CatalogFile::load().expect("catalog");
-        let provider = catalog.provider("opencode-go").expect("provider opencode-go");
+        let provider = catalog
+            .provider("opencode-go")
+            .expect("provider opencode-go");
         let cases = [
             ("glm-5.3-flash", WireProtocol::OpenaiChat, "low"),
             ("deepseek-v4.1-flash", WireProtocol::OpenaiChat, "low"),
@@ -842,12 +1150,17 @@ mod smoke {
             return;
         };
         let catalog = CatalogFile::load().expect("catalog");
-        let provider = catalog.provider("opencode-go").expect("provider opencode-go");
+        let provider = catalog
+            .provider("opencode-go")
+            .expect("provider opencode-go");
         let model = catalog
             .model("opencode-go", "deepseek-v4.1-flash")
             .expect("deepseek-v4.1-flash no catálogo");
         assert!(
-            model.protocols.iter().any(|protocol| protocol == "openai-chat"),
+            model
+                .protocols
+                .iter()
+                .any(|protocol| protocol == "openai-chat"),
             "deepseek-v4.1-flash deve falar openai-chat"
         );
 
@@ -898,7 +1211,10 @@ mod smoke {
             ReasoningRequest::Effort("max".to_string()),
         )
         .await;
-        eprintln!("[deepseek-v4.1-flash max replay] texto={:?}", follow_up.text.trim());
+        eprintln!(
+            "[deepseek-v4.1-flash max replay] texto={:?}",
+            follow_up.text.trim()
+        );
         assert!(
             !follow_up.text.trim().is_empty(),
             "resposta de continuação vazia (replay do provider_state falhou)"
@@ -909,11 +1225,15 @@ mod smoke {
     #[ignore = "real gateway smoke test (needs ~/.local/share/opencode/auth.json)"]
     async fn smoke_tool_call_and_provider_state_replay() {
         let Some(key) = auth_key() else {
-            eprintln!("SKIP smoke_tool_call_and_provider_state_replay: auth.json sem chave opencode-go");
+            eprintln!(
+                "SKIP smoke_tool_call_and_provider_state_replay: auth.json sem chave opencode-go"
+            );
             return;
         };
         let catalog = CatalogFile::load().expect("catalog");
-        let provider = catalog.provider("opencode-go").expect("provider opencode-go");
+        let provider = catalog
+            .provider("opencode-go")
+            .expect("provider opencode-go");
         let cases = [
             ("glm-5.3-flash", WireProtocol::OpenaiChat),
             ("gpt-6-luna", WireProtocol::OpenaiResponses),
@@ -936,7 +1256,11 @@ mod smoke {
             eprintln!(
                 "[{}] tool_calls={:?} state={}",
                 model_id,
-                first.calls.iter().map(|call| call.name.as_str()).collect::<Vec<_>>(),
+                first
+                    .calls
+                    .iter()
+                    .map(|call| call.name.as_str())
+                    .collect::<Vec<_>>(),
                 first
                     .state
                     .as_ref()
@@ -1001,7 +1325,9 @@ mod smoke {
             return;
         };
         let catalog = CatalogFile::load().expect("catalog");
-        let provider = catalog.provider("opencode-go").expect("provider opencode-go");
+        let provider = catalog
+            .provider("opencode-go")
+            .expect("provider opencode-go");
         let claude = catalog
             .model("opencode-go", "claude-haiku-5-5")
             .expect("claude-haiku-5-5 in catalog");
@@ -1046,7 +1372,9 @@ mod smoke {
             return;
         };
         let catalog = CatalogFile::load().expect("catalog");
-        let provider = catalog.provider("opencode-go").expect("provider opencode-go");
+        let provider = catalog
+            .provider("opencode-go")
+            .expect("provider opencode-go");
         let model = catalog
             .model("opencode-go", "glm-5.3-flash")
             .expect("glm-5.3-flash in catalog");
@@ -1073,11 +1401,15 @@ mod smoke {
     #[ignore = "real gateway smoke test (needs ~/.local/share/opencode/auth.json)"]
     async fn smoke_cancellation_stops_without_done() {
         let Some(key) = auth_key() else {
-            eprintln!("SKIP smoke_cancellation_stops_without_done: auth.json sem chave opencode-go");
+            eprintln!(
+                "SKIP smoke_cancellation_stops_without_done: auth.json sem chave opencode-go"
+            );
             return;
         };
         let catalog = CatalogFile::load().expect("catalog");
-        let provider = catalog.provider("opencode-go").expect("provider opencode-go");
+        let provider = catalog
+            .provider("opencode-go")
+            .expect("provider opencode-go");
         let model = catalog
             .model("opencode-go", "glm-5.3-flash")
             .expect("glm-5.3-flash in catalog");
@@ -1121,7 +1453,10 @@ mod smoke {
         let outcome = task.await.expect("stream task panicked");
         eprintln!("cancel: deltas={deltas} done={saw_done} resultado={outcome:?}");
         assert!(outcome.is_ok(), "cancelamento deveria retornar Ok");
-        assert!(deltas >= 3, "esperava pelo menos 3 deltas antes de cancelar");
+        assert!(
+            deltas >= 3,
+            "esperava pelo menos 3 deltas antes de cancelar"
+        );
         assert!(!saw_done, "cancelamento não deve emitir Done");
     }
 
@@ -1304,5 +1639,369 @@ mod smoke {
             );
             eprintln!("[{label}] OK");
         }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Unit tests (deterministic, no network)                              */
+/* ------------------------------------------------------------------ */
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::catalog::CatalogFile;
+
+    fn catalog() -> CatalogFile {
+        CatalogFile::load().expect("catalog.json carrega")
+    }
+
+    fn test_config(provider_id: &str, model_id: &str) -> ProviderConfig {
+        let catalog = catalog();
+        let provider = catalog
+            .provider(provider_id)
+            .unwrap_or_else(|| panic!("provedor {provider_id} no catálogo"));
+        let model = catalog
+            .model(provider_id, model_id)
+            .unwrap_or_else(|| panic!("modelo {model_id} em {provider_id}"))
+            .clone();
+        ProviderConfig {
+            provider_id: provider.id.clone(),
+            provider_name: provider.name.clone(),
+            base_url: provider.base_url.clone(),
+            api_key: "sk-test".to_string(),
+            model,
+            session_id: "session-1".to_string(),
+            user_agent: "Lumina/test".to_string(),
+            endpoints: provider.endpoints.clone(),
+            request_profile: provider.request_profile(ProviderAuth::ApiKey),
+            auth_mode: ProviderAuth::ApiKey,
+            extra_headers: Vec::new(),
+        }
+    }
+
+    fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+        headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+
+    /* -------------------- catalog-driven endpoints ------------------- */
+
+    #[test]
+    fn endpoint_for_reads_catalog_paths_and_any_base_url() {
+        let mut config = test_config("opencode-go", "glm-5.3-flash");
+        config.base_url = "https://proxy.example.test/gateway/".to_string();
+        assert_eq!(
+            config.endpoint_for(WireProtocol::OpenaiChat).expect("chat"),
+            "https://proxy.example.test/gateway/openai/v1/chat/completions"
+        );
+        assert_eq!(
+            config
+                .endpoint_for(WireProtocol::OpenaiResponses)
+                .expect("responses"),
+            "https://proxy.example.test/gateway/openai/v1/responses"
+        );
+        assert_eq!(
+            config
+                .endpoint_for(WireProtocol::Anthropic)
+                .expect("anthropic"),
+            "https://proxy.example.test/gateway/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn openai_provider_uses_its_own_endpoints() {
+        let config = test_config("openai", "gpt-6.1-sol");
+        assert_eq!(
+            config
+                .endpoint_for(WireProtocol::OpenaiResponses)
+                .expect("responses"),
+            "https://api.openai.com/v1/responses"
+        );
+        // The OpenAI catalog entry does not declare gateway protocols.
+        assert!(config.endpoint_for(WireProtocol::OpenaiChat).is_err());
+        assert!(config.endpoint_for(WireProtocol::Anthropic).is_err());
+        assert!(config.endpoint_for(WireProtocol::Google).is_err());
+    }
+
+    /// Regression for the Google cutover: the catalog endpoint is
+    /// `/google/v1beta/models/{model}` and must keep the SSE suffix. The
+    /// bundled catalog declares 9 Google-protocol models (1 in Go + 8 in Zen).
+    #[test]
+    fn google_endpoint_substitutes_model_and_keeps_sse_suffix() {
+        let catalog = catalog();
+        let mut checked = 0usize;
+        for provider in &catalog.providers {
+            for model in &provider.models {
+                if !model.protocols.iter().any(|protocol| protocol == "google") {
+                    continue;
+                }
+                checked += 1;
+                let mut config = ProviderConfig {
+                    provider_id: provider.id.clone(),
+                    provider_name: provider.name.clone(),
+                    base_url: provider.base_url.clone(),
+                    api_key: "sk-test".to_string(),
+                    model: model.clone(),
+                    session_id: String::new(),
+                    user_agent: "Lumina/test".to_string(),
+                    endpoints: provider.endpoints.clone(),
+                    request_profile: provider.request_profile(ProviderAuth::ApiKey),
+                    auth_mode: ProviderAuth::ApiKey,
+                    extra_headers: Vec::new(),
+                };
+                // A live id that is not in the catalog must still build.
+                config.model.id = "gemini-live-test".to_string();
+                let url = config.endpoint_for(WireProtocol::Google).expect("google");
+                assert_eq!(
+                    url,
+                    format!(
+                        "{}/google/v1beta/models/gemini-live-test:streamGenerateContent?alt=sse",
+                        provider.base_url.trim_end_matches('/')
+                    ),
+                    "{} / {}",
+                    provider.id,
+                    model.id
+                );
+                assert!(
+                    !url.contains("{model}"),
+                    "placeholder não substituído: {url}"
+                );
+            }
+        }
+        assert_eq!(
+            checked, 9,
+            "catálogo deve declarar 9 modelos google (Go+Zen)"
+        );
+    }
+
+    /* ---------------------- transport headers ----------------------- */
+
+    #[test]
+    fn headers_send_opencode_session_only_to_gateway_providers() {
+        let go = test_config("opencode-go", "glm-5.3-flash");
+        let headers = go.headers();
+        assert_eq!(header(&headers, "authorization"), Some("Bearer sk-test"));
+        assert_eq!(header(&headers, "x-opencode-session"), Some("session-1"));
+        assert_eq!(header(&headers, "user-agent"), Some("Lumina/test"));
+
+        let zen = test_config("opencode-zen", "gpt-6-luna");
+        assert_eq!(
+            header(&zen.headers(), "x-opencode-session"),
+            Some("session-1")
+        );
+
+        // Direct providers never receive gateway-internal headers.
+        let openai = test_config("openai", "gpt-6.1-sol");
+        let headers = openai.headers();
+        assert_eq!(header(&headers, "authorization"), Some("Bearer sk-test"));
+        assert!(header(&headers, "x-opencode-session").is_none());
+        for forbidden in [
+            "originator",
+            "chatgpt-account-id",
+            "openai-beta",
+            "x-codex-turn-metadata",
+        ] {
+            assert!(
+                header(&headers, forbidden).is_none(),
+                "header interno vazou: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn extra_headers_are_appended_and_empty_credentials_are_skipped() {
+        let mut config = test_config("openai", "gpt-6.1-sol");
+        config.api_key.clear();
+        config.extra_headers = vec![
+            ("x-lumina-test".to_string(), "1".to_string()),
+            ("x-lumina-extra".to_string(), "dois".to_string()),
+        ];
+        let headers = config.headers();
+        assert!(header(&headers, "authorization").is_none());
+        assert_eq!(header(&headers, "x-lumina-test"), Some("1"));
+        assert_eq!(header(&headers, "x-lumina-extra"), Some("dois"));
+    }
+
+    /* --------------------- structured errors ------------------------ */
+
+    #[test]
+    fn parses_both_error_shapes() {
+        let structured = StructuredError::from_body(
+            r#"{"error":{"code":"subscription_sharing_usage_limit_exceeded","param":"temperature","message":"limite atingido"}}"#,
+        );
+        assert_eq!(
+            structured.code.as_deref(),
+            Some("subscription_sharing_usage_limit_exceeded")
+        );
+        assert_eq!(structured.param.as_deref(), Some("temperature"));
+        assert_eq!(structured.message, "limite atingido");
+
+        // Admission errors may come without an `error` object at all.
+        let structured = StructuredError::from_body(r#"{"detail":"not authorized"}"#);
+        assert_eq!(structured.message, "not authorized");
+        assert!(structured.code.is_none());
+
+        // Plain `{"error": "..."}` and non-JSON bodies keep the text.
+        let structured = StructuredError::from_body(r#"{"error":"boom"}"#);
+        assert_eq!(structured.message, "boom");
+        let structured = StructuredError::from_body("upstream connect error");
+        assert_eq!(structured.message, "upstream connect error");
+        assert_eq!(
+            StructuredError::from_body("   "),
+            StructuredError::default()
+        );
+    }
+
+    #[test]
+    fn maps_plan_usage_limit_429() {
+        let error = ProviderError::from_http(
+            429,
+            r#"{"error":{"code":"subscription_sharing_usage_limit_exceeded","message":"usage limit exceeded"}}"#,
+        );
+        assert!(matches!(error, ProviderError::PlanLimit(_)), "{error:?}");
+        assert!(error.is_plan_limit());
+        assert_eq!(error.code(), Some("rate_limited"));
+        assert_eq!(
+            error.provider_code(),
+            Some("subscription_sharing_usage_limit_exceeded")
+        );
+        assert!(error.to_string().contains("usage limit exceeded"));
+
+        // A plain 429 stays a transport-level rate limit.
+        let error = ProviderError::from_http(429, r#"{"detail":"slow down"}"#);
+        assert!(matches!(error, ProviderError::RateLimited(_)), "{error:?}");
+        assert!(!error.is_plan_limit());
+        assert_eq!(error.code(), Some("rate_limited"));
+        assert_eq!(error.provider_code(), None);
+    }
+
+    #[test]
+    fn maps_plan_not_eligible_and_route_errors_403() {
+        let error = ProviderError::from_http(
+            403,
+            r#"{"error":{"code":"subscription_sharing_user_not_eligible","message":"not eligible"}}"#,
+        );
+        assert!(matches!(error, ProviderError::PlanNotEligible(_)));
+        assert_eq!(error.code(), Some("plan_not_eligible"));
+
+        let error = ProviderError::from_http(
+            403,
+            r#"{"error":{"code":"subscription_sharing_route_not_supported","message":"route"}}"#,
+        );
+        assert!(matches!(error, ProviderError::RouteNotSupported(_)));
+        assert_eq!(error.code(), Some("route_not_supported"));
+
+        // Grant/scope failures are plan-eligibility problems, not billing ones.
+        let error = ProviderError::from_http(
+            403,
+            r#"{"error":{"code":"chatpass_v2_scope_not_authorized","message":"scope"}}"#,
+        );
+        assert!(matches!(error, ProviderError::PlanNotEligible(_)));
+
+        // A 403 without a known code keeps the legacy unauthorized mapping.
+        let error = ProviderError::from_http(403, r#"{"detail":"region blocked"}"#);
+        assert!(matches!(error, ProviderError::Unauthorized(_)));
+        assert_eq!(error.code(), Some("auth_required"));
+    }
+
+    #[test]
+    fn maps_unsupported_capability_400_with_param() {
+        let error = ProviderError::from_http(
+            400,
+            r#"{"error":{"code":"subscription_sharing_unsupported_capability","param":"max_output_tokens","message":"field not allowed"}}"#,
+        );
+        assert!(matches!(error, ProviderError::UnsupportedCapability(_)));
+        assert_eq!(error.param(), Some("max_output_tokens"));
+        assert_eq!(error.code(), Some("unsupported_capability"));
+        assert_eq!(
+            error.provider_code(),
+            Some("subscription_sharing_unsupported_capability")
+        );
+
+        // Validation errors without a code are still plain bad requests.
+        let error = ProviderError::from_http(
+            400,
+            r#"{"detail":[{"loc":["body","model"],"msg":"invalid"}]}"#,
+        );
+        assert!(matches!(error, ProviderError::BadRequest(_)));
+        assert!(error.to_string().contains("invalid"));
+    }
+
+    #[test]
+    fn maps_401_auth_required_only_for_the_invalid_user_code() {
+        let error = ProviderError::from_http(
+            401,
+            r#"{"error":{"code":"subscription_sharing_invalid_user","message":"invalid user"}}"#,
+        );
+        assert!(matches!(error, ProviderError::AuthRequired(_)));
+        assert!(error.is_auth_failure());
+        assert_eq!(error.code(), Some("auth_required"));
+        assert_eq!(
+            error.provider_code(),
+            Some("subscription_sharing_invalid_user")
+        );
+
+        let error = ProviderError::from_http(401, r#"{"error":{"message":"bad api key"}}"#);
+        assert!(matches!(error, ProviderError::Unauthorized(_)));
+        assert!(error.is_auth_failure());
+        assert_eq!(error.code(), Some("auth_required"));
+        assert_eq!(error.provider_code(), None);
+    }
+
+    #[test]
+    fn keeps_unsupported_protocol_and_5xx_detection() {
+        let error = ProviderError::from_http(
+            400,
+            r#"{"error":{"code":"ModelProtocolUnsupported","message":"Model does not support this protocol"}}"#,
+        );
+        assert!(error.is_unsupported_protocol());
+
+        let error = ProviderError::from_http(
+            503,
+            r#"{"error":{"code":"subscription_sharing_usage_unavailable","message":"try later"}}"#,
+        );
+        assert!(matches!(error, ProviderError::Other(_)));
+        assert!(error
+            .to_string()
+            .contains("subscription_sharing_usage_unavailable"));
+        assert_eq!(error.code(), None);
+
+        let error = ProviderError::from_http(402, "sem saldo");
+        assert!(matches!(error, ProviderError::BadRequest(_)));
+        assert!(error.to_string().contains("saldo/créditos insuficientes"));
+    }
+
+    #[test]
+    fn classifies_structured_errors_that_arrive_inside_the_stream() {
+        let error = ProviderError::from_stream_error(&json!({
+            "type": "response.failed",
+            "response": {
+                "error": {
+                    "code": "subscription_sharing_usage_limit_exceeded",
+                    "message": "quota"
+                }
+            }
+        }));
+        assert!(matches!(error, ProviderError::PlanLimit(_)), "{error:?}");
+        assert_eq!(
+            error.provider_code(),
+            Some("subscription_sharing_usage_limit_exceeded")
+        );
+
+        let error = ProviderError::from_stream_error(&json!({
+            "error": {"code": "insufficient_quota", "message": "no credits"}
+        }));
+        assert!(matches!(error, ProviderError::PlanLimit(_)));
+
+        let error = ProviderError::from_stream_error(&json!({
+            "type": "response.failed",
+            "response": {"error": {"message": "boom"}}
+        }));
+        assert!(matches!(error, ProviderError::Other(_)));
+        assert!(error.to_string().contains("resposta falhou"));
     }
 }

@@ -23,7 +23,7 @@ Observação: `cargo` usa um target dir compartilhado. Se aparecer `Blocking wai
 
 | Área | Arquivos | Dono |
 | --- | --- | --- |
-| Contratos compartilhados | `src/lib/types.ts`, `src/lib/api.ts`, `src/lib/catalog.ts`, `src/lib/utils.ts`, `src/lib/store/**`, `src/lib/genui/**`, `data/catalog.json`, **`data/genui-contract.json`**, **`data/genui-fixtures.json`**, `src-tauri/src/{domain,catalog,events,state,http}.rs`, `src-tauri/src/lib.rs`, `src-tauri/src/commands/{mod,turn,models}.rs`, `src/App.tsx` | Lead |
+| Contratos compartilhados | `src/lib/types.ts`, `src/lib/api.ts`, `src/lib/catalog.ts`, `src/lib/modelMenu.ts`, `src/lib/utils.ts`, `src/lib/store/**`, `src/lib/genui/**`, `data/catalog.json`, **`data/genui-contract.json`**, **`data/genui-fixtures.json`**, `scripts/**`, `src-tauri/src/{domain,catalog,events,state,http}.rs`, `src-tauri/src/lib.rs`, `src-tauri/src/commands/{mod,turn,models}.rs`, **`src-tauri/src/oauth/**`**, **`src-tauri/src/commands/oauth.rs`**, `src-tauri/Cargo.toml`, `src/App.tsx` | Lead |
 | Provedores | `src-tauri/src/providers/**` | provider-dev |
 | Harness/tools/docs | `src-tauri/src/harness/**`, `src-tauri/src/tools/**`, `src-tauri/src/documents/**` | harness-dev |
 | Skills embutidas | `src-tauri/skills/**` | formats-dev |

@@ -161,16 +161,26 @@ export function modelSupportsReasoning(model: ModelInfo): boolean {
   return reasoningUi(model).supported;
 }
 
+/** Favorites are keyed `providerId:modelId`; legacy bare ids match any provider. */
+export function favoriteEntryMatches(
+  favorites: readonly string[],
+  providerId: string,
+  modelId: string,
+): boolean {
+  return favorites.includes(modelKey(providerId, modelId)) || favorites.includes(modelId);
+}
+
 /** Every active filter must match (AND semantics). */
 export function modelMatchesFilters(
   model: ModelInfo,
   filters: ModelFilter[],
   favorites: string[] = [],
+  favoriteMatch?: (modelId: string) => boolean,
 ): boolean {
   return filters.every((filter) => {
     switch (filter) {
       case 'favorites':
-        return favorites.includes(model.id);
+        return favoriteMatch ? favoriteMatch(model.id) : favorites.includes(model.id);
       case 'vision':
         return modelSupportsVision(model);
       case 'reasoning':
@@ -209,17 +219,23 @@ export interface BuildModelGroupsOptions {
   query?: string;
   filters?: ModelFilter[];
   favorites?: string[];
+  /**
+   * Provider-aware favorite matcher. The store keys favorites by
+   * `providerId:modelId`; callers that already have the pair logic can pass it
+   * here (defaults to the legacy bare-id check for backwards compatibility).
+   */
+  favoriteMatch?: (providerId: string, modelId: string) => boolean;
   /** The dialog shows unavailable models (disabled); the compact pill hides them. */
   includeUnavailable?: boolean;
 }
 
-function toEntry(provider: ProviderInfo, model: ModelInfo, favoriteSet: Set<string>): ModelListEntry {
+function toEntry(provider: ProviderInfo, model: ModelInfo, favorite: boolean): ModelListEntry {
   return {
     providerId: provider.id,
     providerName: provider.name,
     providerShortName: provider.shortName,
     model,
-    favorite: favoriteSet.has(model.id),
+    favorite,
   };
 }
 
@@ -261,9 +277,13 @@ export function buildModelGroups(
     query = '',
     filters = [],
     favorites = [],
+    favoriteMatch,
     includeUnavailable = false,
   } = options;
-  const favoriteSet = new Set(favorites);
+  const isFavorite = (candidateProvider: ProviderInfo, model: ModelInfo): boolean =>
+    favoriteMatch
+      ? favoriteMatch(candidateProvider.id, model.id)
+      : favoriteEntryMatches(favorites, candidateProvider.id, model.id);
   const searching = normalizeSearch(query).length > 0;
 
   const scoped = searching || providerId == null
@@ -275,7 +295,11 @@ export function buildModelGroups(
       provider,
       models: provider.models.filter((model) => {
         if (!includeUnavailable && model.status === 'unavailable') return false;
-        if (!modelMatchesFilters(model, filters, favorites)) return false;
+        if (!modelMatchesFilters(model, filters, favorites, (modelId) => favoriteMatch
+          ? favoriteMatch(provider.id, modelId)
+          : favoriteEntryMatches(favorites, provider.id, modelId))) {
+          return false;
+        }
         if (!modelMatchesQuery(model, provider, query)) return false;
         return true;
       }),
@@ -292,7 +316,7 @@ export function buildModelGroups(
           key: `${provider.id}:${family.family}`,
           label: `${provider.shortName} · ${familyLabel(family.family)}`,
           providerId: provider.id,
-          items: family.models.map((model) => toEntry(provider, model, favoriteSet)),
+          items: family.models.map((model) => toEntry(provider, model, isFavorite(provider, model))),
         });
       }
     }
@@ -302,23 +326,23 @@ export function buildModelGroups(
   // Scoped mode: favorites first, then families (favorites removed from them).
   for (const { provider, models } of filtered) {
     const favoriteModels = models
-      .filter((model) => favoriteSet.has(model.id))
+      .filter((model) => isFavorite(provider, model))
       .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
     if (favoriteModels.length) {
       groups.push({
         key: `${provider.id}:favorites`,
         label: 'Favoritos',
         providerId: provider.id,
-        items: favoriteModels.map((model) => toEntry(provider, model, favoriteSet)),
+        items: favoriteModels.map((model) => toEntry(provider, model, true)),
       });
     }
-    const rest = models.filter((model) => !favoriteSet.has(model.id));
+    const rest = models.filter((model) => !isFavorite(provider, model));
     for (const family of groupModelsByFamily(rest)) {
       groups.push({
         key: `${provider.id}:${family.family}`,
         label: familyLabel(family.family),
         providerId: provider.id,
-        items: family.models.map((model) => toEntry(provider, model, favoriteSet)),
+        items: family.models.map((model) => toEntry(provider, model, false)),
       });
     }
   }
@@ -689,7 +713,9 @@ export function keyStatusLabel(key?: ProviderKeyStatus): string {
       return 'Chave via variável de ambiente';
     case 'opencode-cli':
       return 'Chave do OpenCode CLI';
+    case 'chatgpt':
+      return key?.hasKey ? 'Conta ChatGPT conectada' : 'Sessão do ChatGPT expirada';
     default:
-      return 'Sem chave de API';
+      return key?.mode === 'oauth' ? 'Sem conta ChatGPT' : 'Sem chave de API';
   }
 }

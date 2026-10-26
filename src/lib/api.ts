@@ -12,6 +12,8 @@ import type {
   CodeEnvironmentStatus,
   Conversation,
   ConversationDetail,
+  LoginChallenge,
+  ProviderAuthStatus,
   ProviderValidation,
   Settings,
   SettingsView,
@@ -46,6 +48,19 @@ export const api = {
   refreshCatalog: () => invoke<CatalogView>('refresh_catalog'),
   listRemoteModels: (providerId: string) =>
     invoke<string[]>('list_remote_models', { providerId }),
+  refreshProviderModels: (providerId: string) =>
+    invoke<CatalogView>('refresh_provider_models', { providerId }),
+
+  /* -------- OpenAI ChatGPT plan auth (two-phase login) -------- */
+  openaiLoginStart: (providerId: string, forceConsent = false) =>
+    invoke<LoginChallenge>('openai_login_start', { providerId, forceConsent }),
+  openaiLoginWait: (attemptId: string) =>
+    invoke<ProviderAuthStatus>('openai_login_wait', { attemptId }),
+  openaiLoginCancel: (attemptId: string) =>
+    invoke<void>('openai_login_cancel', { attemptId }),
+  openaiSignOut: (providerId: string) =>
+    invoke<ProviderAuthStatus>('openai_sign_out', { providerId }),
+  openaiAuthStatus: () => invoke<ProviderAuthStatus[]>('openai_auth_status'),
 
   /* -------- conversations -------- */
   listConversations: () => invoke<Conversation[]>('list_conversations'),

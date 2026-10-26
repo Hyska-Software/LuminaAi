@@ -5,6 +5,7 @@ import { IconButton, Kbd, Tooltip } from '@/components/ui';
 import { useUiStore } from '@/lib/store';
 import { cn, modKey } from '@/lib/utils';
 import { BrandMark } from '@/components/chat/BrandMark';
+import { PlanUsageChip } from './PlanUsageChip';
 
 /** Resolves the Tauri window lazily so the renderer also boots outside Tauri. */
 function appWindow(): ReturnType<typeof getCurrentWindow> | null {
@@ -24,7 +25,8 @@ const CONTROL_BASE =
 /**
  * Frameless window chrome (DESIGN §5): drag region, brand, command search and
  * native window controls. The model/thinking selector lives only in the chat
- * composer (`components/composer/Composer.tsx`).
+ * composer (`components/composer/Composer.tsx`); the "Plano ChatGPT" indicator
+ * is account-level and lives here, next to the global actions.
  */
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -125,6 +127,7 @@ export function TitleBar() {
       <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
 
       <div className="no-drag flex items-center gap-2">
+        <PlanUsageChip />
         <button
           type="button"
           onClick={() => setCommandPaletteOpen(true)}

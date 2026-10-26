@@ -1,5 +1,10 @@
 //! Settings, API keys, app info and code environment/skills commands
 //! (implemented by the storage module).
+//!
+//! Credential handling is auth-mode aware: the OAuth ("Sign in with ChatGPT")
+//! status comes from `crate::oauth` (derived from the store, never from the
+//! network), while API keys keep the previous secrets-file/env/CLI resolution.
+//! Tokens are never returned by these commands.
 
 use std::path::Path;
 use std::time::Duration;
@@ -7,15 +12,18 @@ use std::time::Duration;
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::config;
-use crate::domain::{
-    AppInfo, CodeEnvironmentStatus, ProviderValidation, Settings, SettingsView,
-};
+use crate::catalog::ProviderInfo;
+use crate::config::{self, StoredOAuthRegistration};
+use crate::domain::{AppInfo, CodeEnvironmentStatus, ProviderValidation, Settings, SettingsView};
 use crate::state::AppState;
 
 fn to_error(error: impl std::fmt::Display) -> String {
     format!("{error:#}")
 }
+
+/* ------------------------------------------------------------------ */
+/* Settings view                                                       */
+/* ------------------------------------------------------------------ */
 
 fn settings_view(app: &AppHandle, state: &AppState) -> SettingsView {
     let provider_ids: Vec<String> = state
@@ -27,6 +35,10 @@ fn settings_view(app: &AppHandle, state: &AppState) -> SettingsView {
     SettingsView {
         settings: config::load_settings(app),
         keys: config::all_key_status(app, &provider_ids),
+        // `oauth::statuses` is the single source of truth: one entry per catalog
+        // provider (OAuth registration or API key), in catalog order.
+        auth: state.auth_statuses(app),
+        secrets_error: config::secrets_error(),
     }
 }
 
@@ -49,6 +61,46 @@ pub fn save_settings(
     Ok(settings_view(&app, &state))
 }
 
+/// Copy shown when the pasted key is too short to be a real API key.
+fn api_key_validation_hint(provider: &ProviderInfo) -> &'static str {
+    if provider.supports_oauth() {
+        "Copie a API key completa da plataforma (a alternativa ao login ChatGPT)."
+    } else {
+        "Copie a API key completa do OpenCode Console."
+    }
+}
+
+/// Validates/trims the API key of a provider. `None` means "remove the key".
+fn normalize_provider_key(
+    provider: &ProviderInfo,
+    key: Option<String>,
+) -> Result<Option<String>, String> {
+    let key = key
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
+    let Some(key) = key else {
+        return Ok(None);
+    };
+    if key.starts_with("eyJ") && key.matches('.').count() == 2 {
+        return Err(
+            "isso parece um token de sessão, não uma API key. Use “Continuar com ChatGPT” \
+             para conectar a conta; a API key alternativa começa com `sk-`."
+                .to_string(),
+        );
+    }
+    let length = key.chars().count();
+    if length < 20 {
+        return Err(format!(
+            "a chave informada parece inválida ({length} caracteres; esperado pelo menos 20). {}",
+            api_key_validation_hint(provider)
+        ));
+    }
+    if key.chars().any(char::is_whitespace) {
+        return Err("a API key não pode conter espaços ou quebras de linha".to_string());
+    }
+    Ok(Some(key))
+}
+
 #[tauri::command]
 pub fn set_provider_key(
     app: AppHandle,
@@ -56,24 +108,13 @@ pub fn set_provider_key(
     provider_id: String,
     key: Option<String>,
 ) -> Result<SettingsView, String> {
-    if state.catalog.provider(&provider_id).is_none() {
-        return Err(format!("provedor desconhecido: {provider_id}"));
-    }
-    let key = key
-        .map(|key| key.trim().to_string())
-        .filter(|key| !key.is_empty());
-    if let Some(key) = key.as_deref() {
-        let length = key.chars().count();
-        if length < 20 {
-            return Err(format!(
-                "a chave informada parece inválida ({length} caracteres; esperado pelo menos 20). \
-                 Copie a API key completa do OpenCode Console."
-            ));
-        }
-        if key.chars().any(char::is_whitespace) {
-            return Err("a API key não pode conter espaços ou quebras de linha".to_string());
-        }
-    }
+    let provider = state
+        .catalog
+        .provider(&provider_id)
+        .cloned()
+        .ok_or_else(|| format!("provedor desconhecido: {provider_id}"))?;
+    let key = normalize_provider_key(&provider, key)?;
+    // `config` rewrites the whole v2 file, so the OAuth block is preserved.
     config::set_api_key(&app, &provider_id, key.as_deref()).map_err(to_error)?;
     Ok(settings_view(&app, &state))
 }
@@ -166,6 +207,11 @@ pub fn reset_app_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
     // grave linhas obsoletas no meio do reset.
     state.cancel_all();
     state.db.reset().map_err(to_error)?;
+    // D13: apaga também o arquivo de credenciais (API keys + OAuth) e o cache de
+    // modelos. O hook roda sob o lock de RMW do config, depois de cancelar
+    // logins e refreshes pendentes: nada recria credenciais no meio do reset (N4).
+    config::reset_credentials_with(&app, || state.cancel_oauth()).map_err(to_error)?;
+    state.clear_dynamic_models();
     let data_dir = config::data_dir(&app).map_err(to_error)?;
     for sub in ["attachments", "artifacts"] {
         clear_dir(&data_dir.join(sub)).map_err(|error| {
@@ -182,44 +228,230 @@ pub fn reset_app_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
 /* Provider validation                                                 */
 /* ------------------------------------------------------------------ */
 
+/// `GET` URL of the provider model list. The catalog endpoint is authoritative
+/// (`ProviderInfo.endpoints["models"]`): for OpenAI the base already ends in
+/// `/v1`, so the old `{base}/v1/models` hardcode would build `/v1/v1/models`.
+/// Legacy gateways (Go/Zen) do not declare the endpoint and keep the old path.
+fn models_endpoint(provider: &ProviderInfo) -> String {
+    let base = provider.base_url.trim_end_matches('/');
+    match provider
+        .endpoints
+        .get("models")
+        .map(|endpoint| endpoint.trim())
+        .filter(|endpoint| !endpoint.is_empty())
+    {
+        Some(endpoint) if endpoint.starts_with('/') => format!("{base}{endpoint}"),
+        Some(endpoint) => format!("{base}/{endpoint}"),
+        None => format!("{base}/v1/models"),
+    }
+}
+
+/// Model count from both response shapes: `{"data":[…]}` (API-key gateways)
+/// and `{"models":[…]}` (the ChatGPT-plan account list).
+fn count_models(json: &serde_json::Value) -> u32 {
+    let count = json
+        .get("models")
+        .and_then(serde_json::Value::as_array)
+        .or_else(|| json.get("data").and_then(serde_json::Value::as_array))
+        .map(Vec::len)
+        .unwrap_or(0);
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+fn credential_missing_message(provider: &ProviderInfo) -> String {
+    if provider.supports_oauth() {
+        format!(
+            "Nenhuma credencial configurada para {}. Entre com o ChatGPT (Continuar com \
+             ChatGPT) ou adicione uma API key da plataforma em Configurações → Provedores.",
+            provider.name
+        )
+    } else {
+        "Nenhuma API key configurada para este provedor. Adicione uma chave em \
+         Configurações → Provedores."
+            .to_string()
+    }
+}
+
+fn validate_status_message(provider: &ProviderInfo, status: u16, oauth: bool) -> String {
+    match status {
+        401 if oauth => "A sessão do ChatGPT expirou ou é inválida (401). Entre novamente com \
+                         ChatGPT em Configurações → Provedores."
+            .to_string(),
+        401 => format!(
+            "API key inválida ou expirada (401). {}",
+            api_key_validation_hint(provider)
+        ),
+        402 if oauth => "Pagamento necessário (402). Verifique a assinatura/créditos da sua conta \
+                         ChatGPT."
+            .to_string(),
+        402 => "Pagamento necessário (402). Verifique os créditos do OpenCode Zen ou a assinatura \
+                do OpenCode Go."
+            .to_string(),
+        403 if oauth => {
+            "Acesso negado (403): sua conta não tem permissão para usar este provedor ou \
+             região."
+                .to_string()
+        }
+        403 => "Acesso negado (403): esta chave não tem permissão para o provedor.".to_string(),
+        404 => "Endpoint de modelos não encontrado (404). A URL base do provedor pode ter \
+                mudado; atualize o catálogo."
+            .to_string(),
+        429 if oauth => "Limite de uso atingido (429) — pode ser do seu plano ou deste app. Use \
+                         “Gerenciar uso” no ChatGPT para verificar."
+            .to_string(),
+        429 => "Muitas requisições (429). Aguarde um instante e tente novamente.".to_string(),
+        _ if (500..=599).contains(&status) => {
+            format!("O provedor respondeu {status}. Tente novamente mais tarde.")
+        }
+        _ => format!("O provedor respondeu {status}."),
+    }
+}
+
+fn validation_failure(
+    provider_id: String,
+    message: impl Into<String>,
+    latency_ms: Option<u64>,
+) -> ProviderValidation {
+    ProviderValidation {
+        provider_id,
+        ok: false,
+        message: Some(message.into()),
+        latency_ms,
+        models: 0,
+    }
+}
+
+/// API-key resolution for validation: saved key → provider env → OpenCode CLI.
+fn resolve_api_key(app: &AppHandle, provider: &ProviderInfo) -> Option<String> {
+    config::api_key_from_secrets(app, &provider.id)
+        .or_else(|| config::api_key_from_env(&provider.id, &provider.auth_env))
+        .or_else(|| config::api_key_from_opencode_cli(&provider.id))
+}
+
+/// Actionable explanation when the stored OAuth account exists but cannot be
+/// used for a request. An API key is still preferred when present; this copy is
+/// only shown when there is no API key fallback either.
+fn oauth_blocker_message(registration: &StoredOAuthRegistration) -> Option<String> {
+    if registration.disconnected {
+        Some(
+            "Você saiu da conta ChatGPT. Entre novamente para usar o plano ou adicione uma \
+             API key da plataforma (as duas opções ficam em Configurações → Provedores)."
+                .to_string(),
+        )
+    } else if !registration.has_refresh_token() {
+        Some(
+            "Sua sessão do ChatGPT expirou. Entre novamente para usar o plano ou adicione uma \
+             API key da plataforma em Configurações → Provedores."
+                .to_string(),
+        )
+    } else if !registration.plan_usage {
+        Some(
+            "Sua conta ChatGPT está conectada, mas o uso do plano não está autorizado. Ative o \
+             uso do plano em Configurações → Provedores (ou adicione uma API key da plataforma)."
+                .to_string(),
+        )
+    } else {
+        None
+    }
+}
+
+async fn probe_models(
+    state: &AppState,
+    url: &str,
+    token: &str,
+) -> Result<reqwest::Response, reqwest::Error> {
+    state
+        .http
+        .get(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("User-Agent", concat!("Lumina/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+}
+
 #[tauri::command]
 pub async fn validate_provider(
     app: AppHandle,
     state: State<'_, AppState>,
     provider_id: String,
 ) -> Result<ProviderValidation, String> {
-    let base_url = state
+    let provider = state
         .catalog
         .provider(&provider_id)
-        .ok_or_else(|| format!("provedor desconhecido: {provider_id}"))?
-        .base_url
-        .trim_end_matches('/')
-        .to_string();
+        .cloned()
+        .ok_or_else(|| format!("provedor desconhecido: {provider_id}"))?;
+    let url = models_endpoint(&provider);
 
-    let Some(key) = config::api_key(&app, &provider_id) else {
-        return Ok(ProviderValidation {
-            provider_id,
-            ok: false,
-            message: Some(
-                "Nenhuma API key configurada para este provedor. Adicione uma chave em \
-                 Configurações → Provedores."
-                    .to_string(),
-            ),
-            latency_ms: None,
-            models: 0,
-        });
+    // Credential order (PLAN §2.4): a usable OAuth registration (plan usage +
+    // refresh token) wins; otherwise fall back to an API key and, only when
+    // there is none, explain why the OAuth account cannot be used.
+    let registration = if provider.supports_oauth() {
+        config::oauth_registration(&app, &provider_id)
+    } else {
+        None
+    };
+    let oauth_usable = registration
+        .as_ref()
+        .is_some_and(|registration| registration.plan_usage && registration.has_refresh_token());
+    let oauth_blocker = registration.as_ref().and_then(oauth_blocker_message);
+
+    let mut auth_mode = "api-key";
+    let mut token = if oauth_usable {
+        match state.ensure_bearer(&app, &provider_id).await {
+            Ok(token) => {
+                auth_mode = "oauth";
+                token
+            }
+            Err(error) => {
+                return Ok(validation_failure(
+                    provider_id,
+                    format!(
+                        "Não foi possível usar a conta ChatGPT: {error:#}. Entre novamente em \
+                             Configurações → Provedores (ou saia da conta para usar a API key)."
+                    ),
+                    None,
+                ));
+            }
+        }
+    } else {
+        match resolve_api_key(&app, &provider) {
+            Some(key) => key,
+            None => {
+                let message =
+                    oauth_blocker.unwrap_or_else(|| credential_missing_message(&provider));
+                return Ok(validation_failure(provider_id, message, None));
+            }
+        }
     };
 
-    let url = format!("{base_url}/v1/models");
     let started = std::time::Instant::now();
-    let response = state
-        .http
-        .get(&url)
-        .header("Authorization", format!("Bearer {key}"))
-        .header("User-Agent", concat!("Lumina/", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(15))
-        .send()
-        .await;
+    let mut response = probe_models(&state, &url, &token).await;
+
+    // 401 on an OAuth request: force one refresh and retry once (PLAN §2.5).
+    let unauthorized = response
+        .as_ref()
+        .ok()
+        .map(|response| response.status().as_u16())
+        == Some(401);
+    if unauthorized && auth_mode == "oauth" {
+        match state.force_refresh(&app, &provider_id).await {
+            Ok(refreshed) => {
+                token = refreshed;
+                response = probe_models(&state, &url, &token).await;
+            }
+            Err(error) => {
+                return Ok(validation_failure(
+                    provider_id,
+                    format!(
+                        "Sua sessão do ChatGPT expirou e não pôde ser renovada ({error:#}). Entre \
+                         novamente em Configurações → Provedores."
+                    ),
+                    None,
+                ));
+            }
+        }
+    }
     let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
 
     match response {
@@ -228,70 +460,250 @@ pub async fn validate_provider(
                 .json::<serde_json::Value>()
                 .await
                 .ok()
-                .and_then(|json| {
-                    json.get("data")
-                        .and_then(|data| data.as_array())
-                        .map(|models| models.len())
-                })
+                .map(|json| count_models(&json))
                 .unwrap_or(0);
-            let models = u32::try_from(models).unwrap_or(u32::MAX);
+            let message = if auth_mode == "oauth" {
+                format!("Conta ChatGPT validada — {models} modelos disponíveis para o seu plano.")
+            } else {
+                format!("Conexão validada — {models} modelos disponíveis no provedor.")
+            };
             Ok(ProviderValidation {
                 provider_id,
                 ok: true,
-                message: Some(format!(
-                    "Conexão validada — {models} modelos disponíveis no gateway."
-                )),
+                message: Some(message),
                 latency_ms: Some(latency_ms),
                 models,
             })
         }
         Ok(response) => {
-            let status = response.status();
-            let message = match status.as_u16() {
-                401 => {
-                    "API key inválida ou expirada (401). Gere uma nova chave no OpenCode Console."
-                        .to_string()
-                }
-                402 => "Pagamento necessário (402). Verifique os créditos do OpenCode Zen ou a \
-                        assinatura do OpenCode Go."
-                    .to_string(),
-                403 => {
-                    "Acesso negado (403): esta chave não tem permissão para o provedor.".to_string()
-                }
-                404 => "Endpoint /v1/models não encontrado (404). A URL base do provedor pode ter \
-                        mudado; atualize o catálogo."
-                    .to_string(),
-                429 => {
-                    "Muitas requisições (429). Aguarde um instante e tente novamente.".to_string()
-                }
-                _ if status.is_server_error() => {
-                    format!("O gateway respondeu {status}. Tente novamente mais tarde.")
-                }
-                _ => format!("O gateway respondeu {status}."),
-            };
-            Ok(ProviderValidation {
-                provider_id,
-                ok: false,
-                message: Some(message),
-                latency_ms: Some(latency_ms),
-                models: 0,
-            })
+            let status = response.status().as_u16();
+            let message = validate_status_message(&provider, status, auth_mode == "oauth");
+            Ok(validation_failure(provider_id, message, Some(latency_ms)))
         }
         Err(error) => {
             let message = if error.is_timeout() {
                 "Tempo esgotado ao contatar o provedor (15s).".to_string()
             } else if error.is_connect() {
-                format!("Não foi possível conectar a {base_url}. Verifique a rede.")
+                format!(
+                    "Não foi possível conectar a {}. Verifique a rede.",
+                    provider.base_url
+                )
             } else {
                 format!("Falha de rede ao contatar o provedor: {error}")
             };
-            Ok(ProviderValidation {
-                provider_id,
-                ok: false,
-                message: Some(message),
-                latency_ms: Some(latency_ms),
-                models: 0,
-            })
+            Ok(validation_failure(provider_id, message, Some(latency_ms)))
         }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Tests                                                               */
+/* ------------------------------------------------------------------ */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider(json: &str) -> ProviderInfo {
+        serde_json::from_str(json).expect("fixture de provedor válida")
+    }
+
+    fn openai_provider() -> ProviderInfo {
+        provider(
+            r#"{
+                "id": "openai",
+                "name": "OpenAI (ChatGPT)",
+                "shortName": "ChatGPT",
+                "baseUrl": "https://api.openai.com/v1",
+                "endpoints": { "openai-responses": "/responses", "models": "/models" },
+                "auth": "oauth",
+                "requestProfiles": { "oauth": "chatgpt-plan", "apiKey": "standard" },
+                "authEnv": "OPENAI_API_KEY",
+                "defaultModelId": "gpt-6.1-sol",
+                "oauth": {
+                    "issuer": "https://auth.openai.com",
+                    "registrationClientId": "dynamic_agent_client",
+                    "agentNameHint": "Lumina",
+                    "resource": "https://api.openai.com/v1",
+                    "scopes": ["openid"],
+                    "planUsageScope": "chatgpt.tokens.use.direct",
+                    "callbackPath": "/auth/callback",
+                    "loopbackHost": "127.0.0.1"
+                },
+                "models": []
+            }"#,
+        )
+    }
+
+    fn legacy_gateway_provider() -> ProviderInfo {
+        provider(
+            r#"{
+                "id": "opencode-go",
+                "name": "OpenCode Go",
+                "shortName": "Go",
+                "baseUrl": "https://opencode.ai/inference/go/",
+                "endpoints": { "openai-chat": "/openai/v1/chat/completions" },
+                "authEnv": "OPENCODE_API_KEY",
+                "defaultModelId": "deepseek-v4.1-flash",
+                "models": []
+            }"#,
+        )
+    }
+
+    #[test]
+    fn models_endpoint_uses_the_catalog_path_without_duplicating_v1() {
+        let url = models_endpoint(&openai_provider());
+        assert_eq!(url, "https://api.openai.com/v1/models");
+        assert!(!url.contains("/v1/v1/"), "regressão N2: {url}");
+    }
+
+    #[test]
+    fn models_endpoint_keeps_the_legacy_path_for_gateways() {
+        // Go/Zen do not declare a `models` endpoint; behavior must not change.
+        assert_eq!(
+            models_endpoint(&legacy_gateway_provider()),
+            "https://opencode.ai/inference/go/v1/models"
+        );
+    }
+
+    #[test]
+    fn models_endpoint_accepts_a_relative_path_without_leading_slash() {
+        let mut fixture = legacy_gateway_provider();
+        fixture.base_url = "https://exemplo.test/api".to_string();
+        fixture
+            .endpoints
+            .insert("models".to_string(), "models".to_string());
+        assert_eq!(models_endpoint(&fixture), "https://exemplo.test/api/models");
+    }
+
+    #[test]
+    fn embedded_catalog_openai_models_endpoint_is_correct() {
+        // Real catalog (not a fixture): base already ends in `/v1`.
+        let catalog = crate::catalog::CatalogFile::load().expect("catálogo embutido válido");
+        let provider = catalog.provider("openai").expect("provedor openai");
+        assert_eq!(
+            models_endpoint(provider),
+            "https://api.openai.com/v1/models"
+        );
+        assert!(!models_endpoint(provider).contains("/v1/v1/"));
+    }
+
+    #[test]
+    fn counts_both_documented_model_list_shapes() {
+        let account: serde_json::Value =
+            serde_json::from_str(r#"{"models":[{"slug":"a"},{"slug":"b"}]}"#).expect("json");
+        assert_eq!(count_models(&account), 2);
+
+        let gateway: serde_json::Value =
+            serde_json::from_str(r#"{"data":[{"id":"a"},{"id":"b"},{"id":"c"}]}"#).expect("json");
+        assert_eq!(count_models(&gateway), 3);
+
+        let empty: serde_json::Value = serde_json::from_str("{}").expect("json");
+        assert_eq!(count_models(&empty), 0);
+    }
+
+    #[test]
+    fn validation_messages_are_auth_aware() {
+        let openai = openai_provider();
+        let oauth_401 = validate_status_message(&openai, 401, true);
+        assert!(oauth_401.contains("ChatGPT"));
+        assert!(oauth_401.contains("Entre novamente"));
+
+        let key_401 = validate_status_message(&openai, 401, false);
+        assert!(key_401.contains("API key inválida"));
+        assert!(
+            !key_401.contains("Entre novamente") && !key_401.contains("sessão"),
+            "copy de sessão na chave: {key_401}"
+        );
+
+        let oauth_429 = validate_status_message(&openai, 429, true);
+        assert!(oauth_429.contains("pode ser do seu plano ou deste app"));
+        assert!(oauth_429.contains("Gerenciar uso"));
+
+        let gateway_429 = validate_status_message(&legacy_gateway_provider(), 429, false);
+        assert!(!gateway_429.contains("plano"));
+
+        assert!(validate_status_message(&openai, 403, true).contains("permissão"));
+        assert!(validate_status_message(&openai, 402, true).contains("Pagamento"));
+        assert!(validate_status_message(&openai, 503, false).contains("503"));
+    }
+
+    #[test]
+    fn api_key_validation_copy_is_provider_aware() {
+        let openai = openai_provider();
+        let error = normalize_provider_key(&openai, Some("curta".to_string()))
+            .expect_err("chave curta deve falhar");
+        assert!(error.contains("plataforma"));
+        assert!(!error.contains("OpenCode Console"), "copy errada: {error}");
+
+        let gateway = legacy_gateway_provider();
+        let error = normalize_provider_key(&gateway, Some("curta".to_string()))
+            .expect_err("chave curta deve falhar");
+        assert!(error.contains("OpenCode Console"));
+
+        let error = normalize_provider_key(&openai, Some("sk-com espaço 1234567890".to_string()))
+            .expect_err("espaços devem falhar");
+        assert!(error.contains("espaços"));
+
+        assert_eq!(
+            normalize_provider_key(&openai, None).expect("vazio remove a chave"),
+            None
+        );
+        assert_eq!(
+            normalize_provider_key(&openai, Some("   ".to_string())).expect("só espaços"),
+            None
+        );
+        assert_eq!(
+            normalize_provider_key(&openai, Some("  sk-openai-1234567890abcdef  ".to_string()))
+                .expect("chave válida"),
+            Some("sk-openai-1234567890abcdef".to_string())
+        );
+    }
+
+    #[test]
+    fn set_provider_key_rejects_session_tokens() {
+        let jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjMifQ.assinatura";
+        // A session token is never an API key, for any provider.
+        for fixture in [openai_provider(), legacy_gateway_provider()] {
+            let error = normalize_provider_key(&fixture, Some(jwt.to_string()))
+                .expect_err("token de sessão não é API key");
+            assert!(error.contains("token de sessão"), "{error}");
+        }
+        let error = normalize_provider_key(&openai_provider(), Some(jwt.to_string()))
+            .expect_err("token de sessão não é API key");
+        assert!(error.contains("ChatGPT"), "{error}");
+    }
+
+    #[test]
+    fn missing_credential_copy_mentions_both_auth_paths() {
+        let message = credential_missing_message(&openai_provider());
+        assert!(message.contains("ChatGPT"));
+        assert!(message.contains("API key"));
+
+        let message = credential_missing_message(&legacy_gateway_provider());
+        assert!(message.contains("API key"));
+        assert!(!message.contains("ChatGPT"));
+    }
+
+    #[test]
+    fn oauth_blocker_explains_reauth_and_plan_activation() {
+        let mut registration = StoredOAuthRegistration::default();
+        registration.refresh_token = "refresh".to_string();
+        registration.plan_usage = true;
+        assert!(oauth_blocker_message(&registration).is_none());
+
+        registration.disconnected = true;
+        let message = oauth_blocker_message(&registration).expect("conta desconectada");
+        assert!(message.contains("saiu da conta"));
+
+        registration.disconnected = false;
+        registration.refresh_token.clear();
+        let message = oauth_blocker_message(&registration).expect("sessão expirada");
+        assert!(message.contains("expirou"));
+
+        registration.refresh_token = "refresh".to_string();
+        registration.plan_usage = false;
+        let message = oauth_blocker_message(&registration).expect("plano não autorizado");
+        assert!(message.contains("não está autorizado"));
     }
 }

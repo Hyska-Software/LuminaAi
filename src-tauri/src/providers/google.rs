@@ -11,10 +11,9 @@ use crate::domain::UsageInfo;
 
 use super::sse;
 use super::{
-    emit, endpoint, image_base64, make_usage, max_output_tokens, parse_arguments, pointer_u32,
-    reasoning, send_stream, system_text, to_provider_error, CompletionRequest, EventSink,
-    HistoryMessage, HistoryRole, ProviderError, ProviderEvent, ProviderResult, WireProtocol,
-    GOOGLE_MODELS_PATH,
+    emit, image_base64, make_usage, max_output_tokens, parse_arguments, pointer_u32, reasoning,
+    send_stream, system_text, to_provider_error, CompletionRequest, EventSink, HistoryMessage,
+    HistoryRole, ProviderError, ProviderEvent, ProviderResult, WireProtocol,
 };
 
 pub(crate) async fn stream(
@@ -22,19 +21,16 @@ pub(crate) async fn stream(
     request: &CompletionRequest,
     sink: &EventSink,
 ) -> ProviderResult<()> {
-    let path = format!(
-        "{}/{}:streamGenerateContent?alt=sse",
-        GOOGLE_MODELS_PATH, request.config.model.id
-    );
-    let url = endpoint(&request.config.base_url, &path);
+    let url = request.config.endpoint_for(WireProtocol::Google)?;
     let body = build_body(request);
     let Some(response) = send_stream(http, request, &url, &body).await? else {
         return Ok(());
     };
     let mut handler = Handler::new(sink);
-    let outcome =
-        sse::stream_sse(response, &request.cancel, |event, data| handler.on_event(event, data))
-            .await;
+    let outcome = sse::stream_sse(response, &request.cancel, |event, data| {
+        handler.on_event(event, data)
+    })
+    .await;
     if let Err(error) = outcome {
         return Err(to_provider_error(error));
     }
@@ -55,7 +51,9 @@ fn build_body(request: &CompletionRequest) -> Value {
         match message.role {
             HistoryRole::System => {}
             HistoryRole::User => push_content(&mut contents, "user", user_parts(message)),
-            HistoryRole::Assistant => push_content(&mut contents, "model", assistant_parts(message)),
+            HistoryRole::Assistant => {
+                push_content(&mut contents, "model", assistant_parts(message))
+            }
             HistoryRole::Tool => push_content(&mut contents, "user", tool_parts(message)),
         }
     }
@@ -249,10 +247,7 @@ impl<'a> Handler<'a> {
                     delta: arguments.clone(),
                 },
             )?;
-            emit(
-                self.sink,
-                ProviderEvent::ToolCallDone { index, arguments },
-            )?;
+            emit(self.sink, ProviderEvent::ToolCallDone { index, arguments })?;
             let mut state_part = json!({"functionCall": {"name": name, "args": args}});
             if let Some(signature) = part.get("thoughtSignature") {
                 state_part["thoughtSignature"] = signature.clone();
@@ -308,11 +303,8 @@ impl<'a> Handler<'a> {
         if let Some(usage) = self.usage.take() {
             emit(self.sink, ProviderEvent::Usage(usage)).map_err(to_provider_error)?;
         }
-        emit(
-            self.sink,
-            ProviderEvent::ProviderState(Value::Array(parts)),
-        )
-        .map_err(to_provider_error)?;
+        emit(self.sink, ProviderEvent::ProviderState(Value::Array(parts)))
+            .map_err(to_provider_error)?;
         emit(self.sink, ProviderEvent::Done).map_err(to_provider_error)?;
         Ok(())
     }

@@ -3,7 +3,8 @@ import { ChevronDown, Lock, Search, SlidersHorizontal, Sparkles } from 'lucide-r
 import { toast } from 'sonner';
 import {
   defaultReasoningFor,
-  getModel,
+  findModelIn,
+  providerAuth,
   providers as catalogProviders,
   reasoningUi,
 } from '@/lib/catalog';
@@ -12,14 +13,13 @@ import {
   currentThinkingId,
   effortSegmentLabel,
   entryKey,
+  favoriteEntryMatches,
   firstSelectable,
   flattenGroups,
   keyStatusFor,
-  keyStatusLabel,
   modelKey,
   normalizeSearch,
   parseModelKey,
-  providerHasKey,
   reasoningForModel,
   selectionKey,
   thinkingHeadline,
@@ -27,6 +27,7 @@ import {
   type ModelListEntry,
   type ThinkingOption,
 } from '@/lib/modelMenu';
+import { openExternal } from '@/lib/genui/open-external';
 import type { ReasoningSelection } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
@@ -47,6 +48,7 @@ import {
 } from '@/components/ui';
 import { FamilyAvatar } from './FamilyAvatar';
 import { ModelDetailPanel } from './ModelDetailPanel';
+import { authStatusFor, providerAuthenticated, providerTabTitle } from './providerAuth';
 import { ModelList } from './ModelList';
 import { ModelSearchField } from './ModelSearchField';
 import { modelOptionId } from './ModelRow';
@@ -72,6 +74,9 @@ function domId(value: string): string {
 }
 
 const NO_REASONING_HINT = 'Este modelo não expõe controle de raciocínio';
+
+/** ChatGPT usage dashboard (same URL exposed by the provider console). */
+const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
 
 /** Floating details bubble: width, gap to the popover, margin and hide delay. */
 const DETAILS_WIDTH = 17 * 16;
@@ -205,6 +210,7 @@ export function ModelPill({
   const selection = useAppStore((state) => state.selection);
   const favorites = useAppStore((state) => state.favorites);
   const keys = useAppStore((state) => state.keys);
+  const auth = useAppStore((state) => state.auth);
   const storeProviders = useAppStore((state) => state.providers);
   const setSelection = useAppStore((state) => state.setSelection);
   const setReasoning = useAppStore((state) => state.setReasoning);
@@ -236,10 +242,11 @@ export function ModelPill({
   const hideDetailsTimerRef = useRef<number | null>(null);
   const detailsFrameRef = useRef<number | null>(null);
 
+  const providerList = storeProviders.length ? storeProviders : catalogProviders();
   const pid = providerId ?? selection.providerId;
   const mid = modelId ?? selection.modelId;
-  const model = getModel(pid, mid);
-  const providerList = storeProviders.length ? storeProviders : catalogProviders();
+  // The merged list resolves account-only models too (not just the static catalog).
+  const model = findModelIn(providerList, pid, mid);
 
   const effectiveReasoning: ReasoningSelection | null =
     reasoning !== undefined
@@ -257,12 +264,12 @@ export function ModelPill({
 
   const groups = useMemo(
     () =>
-      buildModelGroups(
-        providerList,
-        searching
-          ? { query, favorites, includeUnavailable: false }
-          : { providerId: listProviderId, favorites, includeUnavailable: false },
-      ),
+      buildModelGroups(providerList, {
+        ...(searching ? { query } : { providerId: listProviderId }),
+        includeUnavailable: false,
+        favorites,
+        favoriteMatch: (pid, modelId) => favoriteEntryMatches(favorites, pid, modelId),
+      }),
     [providerList, searching, query, favorites, listProviderId],
   );
 
@@ -271,6 +278,11 @@ export function ModelPill({
   const activeEntry = useMemo(
     () => entries.find((entry) => entryKey(entry) === activeKey) ?? null,
     [entries, activeKey],
+  );
+
+  const activeProvider = useMemo(
+    () => providerList.find((provider) => provider.id === activeEntry?.providerId),
+    [providerList, activeEntry],
   );
 
   const activeDescendant = activeEntry ? modelOptionId(listId, activeEntry) : undefined;
@@ -315,8 +327,9 @@ export function ModelPill({
 
   const thinkingTarget = thinkingTargetKey ? parseModelKey(thinkingTargetKey) : null;
   const thinkingModel =
-    (thinkingTarget ? getModel(thinkingTarget.providerId, thinkingTarget.modelId) : undefined) ??
-    model;
+    (thinkingTarget
+      ? findModelIn(providerList, thinkingTarget.providerId, thinkingTarget.modelId)
+      : undefined) ?? model;
   // The thinking menu is a compact surface: it sizes to its content instead of
   // inheriting the wide two-pane layout of the model step.
   const showingThinking = stage === 'thinking' && Boolean(thinkingModel);
@@ -494,8 +507,9 @@ export function ModelPill({
     setQuery('');
     const nextGroups = buildModelGroups(providerList, {
       providerId: value,
-      favorites,
       includeUnavailable: false,
+      favorites,
+      favoriteMatch: (pid, modelId) => favoriteEntryMatches(favorites, pid, modelId),
     });
     const next = firstSelectable(nextGroups);
     setActiveKey(next ? entryKey(next) : null);
@@ -625,16 +639,21 @@ export function ModelPill({
   };
 
   const providerOptions: SegmentedOption[] = providerList.map((provider) => {
-    const status = keyStatusFor(keys, provider.id);
-    const hasKey = providerHasKey(keys, provider.id);
+    const providerKey = keyStatusFor(keys, provider.id);
+    const providerAuthStatus = authStatusFor(auth, provider.id);
     return {
       value: provider.id,
-      title: keyStatusLabel(status),
+      title: providerTabTitle(provider, providerKey, providerAuthStatus),
       label: (
         <span className="flex items-center gap-1.5">
           <span
             aria-hidden
-            className={cn('size-1.5 rounded-full', hasKey ? 'bg-success' : 'bg-border-strong')}
+            className={cn(
+              'size-1.5 rounded-full',
+              providerAuthenticated(providerKey, providerAuthStatus)
+                ? 'bg-success'
+                : 'bg-border-strong',
+            )}
           />
           {provider.shortName}
         </span>
@@ -861,8 +880,14 @@ export function ModelPill({
               >
                 <ModelDetailPanel
                   entry={activeEntry}
-                  favorite={favorites.includes(activeEntry.model.id)}
-                  onFavoriteToggle={() => toggleFavorite(activeEntry.model.id)}
+                  favorite={favoriteEntryMatches(
+                    favorites,
+                    activeEntry.providerId,
+                    activeEntry.model.id,
+                  )}
+                  onFavoriteToggle={() =>
+                    toggleFavorite(activeEntry.providerId, activeEntry.model.id)
+                  }
                   variant="compact"
                   reasoning={
                     reasoningUi(activeEntry.model).supported ? (
@@ -873,9 +898,15 @@ export function ModelPill({
                     ) : null
                   }
                   keyStatus={keyStatusFor(keys, activeEntry.providerId)}
+                  providerAuth={activeProvider ? providerAuth(activeProvider) : 'api-key'}
+                  authStatus={authStatusFor(auth, activeEntry.providerId)}
+                  planUsage={Boolean(authStatusFor(auth, activeEntry.providerId)?.planUsage)}
+                  onManagePlan={() => {
+                    void openExternal(activeProvider?.consoleUrl ?? CHATGPT_USAGE_URL);
+                  }}
                   onConfigureProvider={() => {
                     handleOpenChange(false);
-                    useUiStore.getState().setSettingsOpen(true);
+                    useUiStore.getState().openSettings('providers');
                   }}
                   className="h-auto"
                 />

@@ -225,7 +225,7 @@ describe('ModelPill (edge) — busca hostil', () => {
     await user.type(search, '    ');
     // Só espaços não é uma busca: o seletor de provedor continua visível.
     expect(within(dialog).getByRole('radio', { name: 'Go' })).toBeTruthy();
-    expect(within(dialog).queryByText('Go + Zen')).toBeNull();
+    expect(within(dialog).queryByText('Go + Zen + ChatGPT')).toBeNull();
     expect(within(dialog).getByText('37 modelos')).toBeTruthy();
   });
 
@@ -279,7 +279,7 @@ describe('ModelPill (edge) — busca hostil', () => {
     const options = within(dialog).getAllByRole('option');
     expect(options).toHaveLength(119);
     expect(new Set(options.map((option) => option.id)).size).toBe(119);
-    expect(within(dialog).getByText('Go + Zen')).toBeTruthy();
+    expect(within(dialog).getByText('Go + Zen + ChatGPT')).toBeTruthy();
 
     const activeId = search.getAttribute('aria-activedescendant');
     expect(activeId).toBeTruthy();
@@ -479,9 +479,9 @@ describe('ModelPill (edge) — foco, reset e estados degenerados', () => {
     const user = userEvent.setup();
     renderPill();
 
-    // O catálogo injetado no store não é resolvido pelo getModel do catálogo
-    // empacotado: o pill fechado cai no id cru em vez de quebrar.
-    expect(modelTrigger().getAttribute('aria-label')).toContain('modelo-indisponivel');
+    // The pill resolves the model against the merged store list, so even a
+    // store-injected slug shows its display name instead of the raw id.
+    expect(modelTrigger().getAttribute('aria-label')).toContain('Modelo Indisponível');
 
     const dialog = await openModelStage(user);
     expect(within(dialog).getByText('Nenhum modelo encontrado')).toBeTruthy();

@@ -39,6 +39,12 @@ interface ChatState {
   streaming: StreamingState | null;
   pendingAttachments: AttachmentInfo[];
   error: string | null;
+  /** Machine-readable code of the last turn error (`subscription_sharing_*`, `auth_required`, ...). */
+  errorCode: string | null;
+  /** Actionable hint supplied by the backend for the last turn error. */
+  errorHint: string | null;
+
+  dismissError: () => void;
 
   init: () => Promise<void>;
   refreshConversations: () => Promise<void>;
@@ -453,9 +459,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
             ...message,
             status: message.content ? 'complete' : 'error',
           }));
-          set({ streaming: null, error: event.message });
+          set({
+            streaming: null,
+            error: event.message,
+            errorCode: event.code ?? null,
+            errorHint: event.hint ?? null,
+          });
           void syncArtifacts(context.conversationId);
-          toast.error('Falha na resposta', { description: event.message });
+          toast.error('Falha na resposta', { description: event.hint ?? event.message });
           break;
         default:
           break;
@@ -536,6 +547,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
     streaming: null,
     pendingAttachments: [],
     error: null,
+    errorCode: null,
+    errorHint: null,
 
     init: async () => {
       set({ conversationsLoading: true });
@@ -694,6 +707,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
 
     clearAttachments: () => set({ pendingAttachments: [] }),
 
+    dismissError: () => set({ error: null, errorCode: null, errorHint: null }),
+
     send: async (content, options) => {
       const state = get();
       if (state.streaming) {
@@ -709,6 +724,23 @@ export const useChatStore = create<ChatState>()((set, get) => {
       // changed the global selection (defense in depth for the model lock).
       const selection = options?.selection ?? lockedSelectionFor(state) ?? app.selection;
       const reasoning = options?.reasoning !== undefined ? options.reasoning : selection.reasoning;
+      // Never start a turn whose provider has no credential: show the same
+      // actionable CTA the settings screen offers (API key or ChatGPT login).
+      const activeProvider = app.providers?.find((provider) => provider.id === selection.providerId);
+      if (activeProvider) {
+        const key = app.keys?.find((entry) => entry.providerId === selection.providerId);
+        const auth = app.auth?.find((entry) => entry.providerId === selection.providerId);
+        const ready = Boolean(key?.hasKey) || auth?.state === 'signed-in';
+        if (!ready) {
+          toast.error('Conecte uma credencial para enviar', {
+            description:
+              activeProvider.auth === 'oauth'
+                ? 'Entre com o ChatGPT (Configurações → Provedores) ou adicione uma API key.'
+                : 'Adicione a API key deste provedor em Configurações → Provedores.',
+          });
+          return;
+        }
+      }
       const turnId = newId();
       let conversationId: string;
       try {
@@ -758,6 +790,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
         },
         pendingAttachments: [],
         error: null,
+        errorCode: null,
+        errorHint: null,
         streaming: {
           turnId,
           conversationId,
@@ -840,6 +874,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
           startedAt: Date.now(),
         },
         error: null,
+        errorCode: null,
+        errorHint: null,
       });
 
       const payload: TurnPayload = {

@@ -13,12 +13,55 @@ const windowMock = vi.hoisted(() => ({
 
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => windowMock }));
 vi.mock('@/lib/api', () => ({ api: {} }));
+vi.mock('@/components/chat/external', () => ({ openExternalUrl: vi.fn(async () => true) }));
 
 // Imported after the mocks.
+import { useAppStore } from '@/lib/store';
+import type { ProviderAuthStatus, ProviderInfo } from '@/lib/types';
 import { TitleBar } from './TitleBar';
+
+function openAiProvider(): ProviderInfo {
+  return {
+    id: 'openai',
+    name: 'OpenAI (ChatGPT)',
+    shortName: 'ChatGPT',
+    description: '',
+    baseUrl: 'https://api.openai.com/v1',
+    consoleUrl: 'https://chatgpt.com/settings/usage',
+    endpoints: { 'openai-responses': '/responses', models: '/models' },
+    authEnv: 'OPENAI_API_KEY',
+    defaultModelId: 'gpt-6.1-sol',
+    auth: 'oauth',
+    requestProfiles: { oauth: 'chatgpt-plan', apiKey: 'standard' },
+    oauth: {
+      issuer: 'https://auth.openai.com',
+      registrationClientId: 'dynamic_agent_client',
+      agentNameHint: 'Lumina',
+      resource: 'https://api.openai.com/v1',
+      scopes: ['openid', 'chatgpt.tokens.use.direct'],
+      planUsageScope: 'chatgpt.tokens.use.direct',
+      callbackPath: '/auth/callback',
+      loopbackHost: '127.0.0.1',
+    },
+    models: [],
+    notes: [],
+  };
+}
+
+function planAuth(): ProviderAuthStatus {
+  return {
+    providerId: 'openai',
+    mode: 'oauth',
+    state: 'signed-in',
+    accountLabel: 'user@example.com',
+    planUsage: true,
+    scopes: ['openid', 'chatgpt.tokens.use.direct'],
+  };
+}
 
 afterEach(() => {
   cleanup();
+  useAppStore.setState({ providers: [], auth: [], keys: [] });
 });
 
 describe('TitleBar', () => {
@@ -53,5 +96,38 @@ describe('TitleBar', () => {
     expect(header.className).toContain('bg-surface');
     // A divisão com o chat é feita pelo canto arredondado do painel, não por linha.
     expect(header.className).not.toContain('border');
+  });
+
+  it('mostra o selo "Plano ChatGPT" no chrome quando a conta usa o plano', async () => {
+    useAppStore.setState({
+      providers: [openAiProvider()],
+      auth: [planAuth()],
+      keys: [],
+      selection: { providerId: 'openai', modelId: 'gpt-6.1-sol', reasoning: null },
+    });
+    render(<TitleBar />);
+
+    await waitFor(() => expect(windowMock.isMaximized).toHaveBeenCalled());
+
+    const header = screen.getByRole('banner');
+    const chip = screen.getByText('Plano ChatGPT');
+    expect(header.contains(chip)).toBe(true);
+    expect(
+      screen.getByRole('button', { name: 'Gerenciar uso do plano ChatGPT' }),
+    ).toBeTruthy();
+  });
+
+  it('não mostra o selo sem plano ativo', async () => {
+    useAppStore.setState({
+      providers: [openAiProvider()],
+      auth: [{ ...planAuth(), planUsage: false, state: 'plan-disabled' }],
+      keys: [],
+      selection: { providerId: 'openai', modelId: 'gpt-6.1-sol', reasoning: null },
+    });
+    render(<TitleBar />);
+
+    await waitFor(() => expect(windowMock.isMaximized).toHaveBeenCalled());
+
+    expect(screen.queryByText('Plano ChatGPT')).toBeNull();
   });
 });

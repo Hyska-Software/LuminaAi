@@ -9,9 +9,10 @@ use anyhow::anyhow;
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use futures_util::future::{join_all, BoxFuture};
 use serde_json::Value;
+use tauri::Manager;
 use tokio_util::sync::CancellationToken;
 
-use crate::catalog::{CatalogFile, ModelInfo, ProviderInfo};
+use crate::catalog::{CatalogFile, ModelInfo, ProviderAuth, ProviderInfo};
 use crate::db::{Db, StoredAttachment};
 use crate::domain::{
     now_ms, AttachmentInfo, ChatMessage, Citation, MessageRole, MessageStatus, ReasoningMode,
@@ -21,7 +22,7 @@ use crate::domain::{
 use crate::events::TurnEvent;
 use crate::providers::{
     self, CompletionRequest, EventSink, HistoryMessage, HistoryRole, HistoryToolCall, ImagePart,
-    ProviderConfig, ProviderEvent, ReasoningRequest, WireProtocol,
+    ProviderConfig, ProviderError, ProviderEvent, ReasoningRequest, WireProtocol,
 };
 use crate::tools::{self, ToolOutcome, ToolRuntime};
 
@@ -63,10 +64,95 @@ impl EventEmitter for tauri::ipc::Channel<TurnEvent> {
 }
 
 pub type ProviderStreamer = Arc<
-    dyn Fn(CompletionRequest, EventSink) -> BoxFuture<'static, anyhow::Result<()>>
-        + Send
-        + Sync,
+    dyn Fn(CompletionRequest, EventSink) -> BoxFuture<'static, anyhow::Result<()>> + Send + Sync,
 >;
+
+/* ------------------------------------------------------------------ */
+/* Credential/model contracts (T3.3 / T3.4b)                           */
+/* ------------------------------------------------------------------ */
+
+/// Credential used to authenticate one provider request.
+///
+/// The wire profile derives from the credential (PLAN §2.5): API keys use the
+/// provider catalog's `apiKey` request profile (`standard`), OAuth bearers use
+/// its `oauth` profile (`chatgpt-plan` for the OpenAI provider).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Credential {
+    /// API key (settings → env → OpenCode CLI), sent as `Authorization: Bearer`.
+    ApiKey(String),
+    /// OAuth access token of the connected ChatGPT account.
+    Bearer(String),
+}
+
+impl Credential {
+    /// Raw token sent in the `Authorization: Bearer` header.
+    pub fn token(&self) -> &str {
+        match self {
+            Self::ApiKey(token) | Self::Bearer(token) => token,
+        }
+    }
+
+    /// Provider auth mode the credential represents.
+    pub fn auth_mode(&self) -> ProviderAuth {
+        match self {
+            Self::ApiKey(_) => ProviderAuth::ApiKey,
+            Self::Bearer(_) => ProviderAuth::Oauth,
+        }
+    }
+
+    /// True for an OAuth bearer (only those are refreshed after a 401).
+    pub fn is_bearer(&self) -> bool {
+        matches!(self, Self::Bearer(_))
+    }
+}
+
+/// Test hook that replaces credential resolution (no Tauri/AppState needed).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub enum CredentialOverride {
+    ApiKey(String),
+    Bearer(String),
+}
+
+impl CredentialOverride {
+    pub fn into_credential(self) -> Credential {
+        match self {
+            Self::ApiKey(token) => Credential::ApiKey(token),
+            Self::Bearer(token) => Credential::Bearer(token),
+        }
+    }
+}
+
+/// Model lookup used by the harness.
+///
+/// Production resolves models through the managed
+/// [`crate::state::AppState`] (account list merged with the bundled catalog), so
+/// `HarnessDeps::model_source` is only filled by tests that need a fake.
+pub trait ModelSource: Send + Sync {
+    fn model(&self, provider_id: &str, model_id: &str) -> Option<ModelInfo>;
+}
+
+/// Typed failure raised when no usable credential exists.
+///
+/// It is returned by [`run_turn`] **before** the user message/assistant
+/// placeholder are persisted, so the renderer can offer "sign in" / "set API
+/// key" instead of showing a broken assistant message.
+#[derive(Debug, Clone)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct CredentialError {
+    /// `missing_credentials` | `auth_required` | `plan_disabled` | `auth_network`.
+    pub code: &'static str,
+    pub message: String,
+    pub hint: Option<String>,
+}
+
+impl std::fmt::Display for CredentialError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.message)
+    }
+}
+
+impl std::error::Error for CredentialError {}
 
 #[derive(Clone)]
 pub struct HarnessDeps {
@@ -80,7 +166,14 @@ pub struct HarnessDeps {
     pub catalog: CatalogFile,
     /// Test hook: when set, replaces `providers::stream_completion`.
     pub streamer: Option<ProviderStreamer>,
-    /// Test hook: resolves the API key without a Tauri AppHandle.
+    /// Test hook: forces the turn credential (API key or OAuth bearer).
+    pub credential_override: Option<CredentialOverride>,
+    /// Test hook: token returned by the forced refresh after a provider 401.
+    pub refresh_override: Option<String>,
+    /// Test hook: replaces account/catalog model resolution.
+    pub model_source: Option<Arc<dyn ModelSource>>,
+    /// Deprecated alias of [`Self::credential_override`] kept for the existing
+    /// agent-loop tests (API-key providers); ignored when an override is set.
     pub api_key_override: Option<String>,
     /// Test hook: explicit `<app-data>` directory. When `None`, the app handle
     /// resolves it through `config::data_dir` (artifacts, code-runs, skills).
@@ -89,6 +182,421 @@ pub struct HarnessDeps {
     /// `None` uses [`crate::tools::skills::standard_external_roots`]; tests pass
     /// `Some(Vec::new())` so they never read the developer's home directory.
     pub skills_roots: Option<Vec<crate::tools::skills::ExternalSkillRoot>>,
+}
+
+/// Actionable copy for planned limits. The renderer knows the fixed
+/// `https://chatgpt.com/settings/usage` target when the active provider is the
+/// ChatGPT plan; the hint itself stays a plain sentence.
+const PLAN_USAGE_HINT: &str =
+    "Limite de uso atingido — pode ser do seu plano ou deste app. Use \"Gerenciar uso\".";
+/// Actionable copy after a double 401 with an OAuth bearer.
+const REAUTH_HINT: &str = "Entre novamente com o ChatGPT para renovar sua sessão.";
+/// Actionable copy after a 401 on an API-key provider.
+const API_KEY_HINT: &str = "Verifique a API key do provedor nas configurações.";
+/// Actionable copy for a plan-ineligible account/workspace.
+const PLAN_NOT_ELIGIBLE_HINT: &str = "Esta conta/workspace não tem acesso ao plano ChatGPT.";
+
+/// Resolves the turn model: test `model_source` → managed `AppState` (account
+/// list merged with the catalog) → bundled catalog.
+fn resolve_model(deps: &HarnessDeps, provider: &ProviderInfo, model_id: &str) -> Option<ModelInfo> {
+    if let Some(source) = deps.model_source.as_ref() {
+        if let Some(model) = source.model(&provider.id, model_id) {
+            return Some(model);
+        }
+    }
+    if let Some(app) = deps.app.as_ref() {
+        if let Some(state) = app.try_state::<crate::state::AppState>() {
+            if let Some(model) = state.model(&provider.id, model_id) {
+                return Some(model);
+            }
+        }
+    }
+    deps.catalog.model(&provider.id, model_id).cloned()
+}
+
+/// Builds the provider request config from the catalog + resolved credential.
+/// Both request sites (agent loop and forced final answer) use this single
+/// helper so the request profile always derives from the credential.
+fn provider_config(
+    provider: &ProviderInfo,
+    model: &ModelInfo,
+    credential: &Credential,
+    session_id: &str,
+) -> ProviderConfig {
+    ProviderConfig {
+        provider_id: provider.id.clone(),
+        provider_name: provider.name.clone(),
+        base_url: provider.base_url.clone(),
+        api_key: credential.token().to_string(),
+        model: model.clone(),
+        session_id: session_id.to_string(),
+        user_agent: format!("Lumina/{}", env!("CARGO_PKG_VERSION")),
+        endpoints: provider.endpoints.clone(),
+        request_profile: provider.request_profile(credential.auth_mode()),
+        auth_mode: credential.auth_mode(),
+        extra_headers: Vec::new(),
+    }
+}
+
+/// Resolves the credential for a turn **before** any message is persisted.
+///
+/// Order (PLAN §2.4): test override → active OAuth registration (ChatGPT plan)
+/// → saved API key → provider env var → OpenCode CLI → typed
+/// [`CredentialError`].
+async fn resolve_credential(
+    deps: &HarnessDeps,
+    provider: &ProviderInfo,
+) -> anyhow::Result<Credential> {
+    if let Some(forced) = deps.credential_override.clone() {
+        return Ok(forced.into_credential());
+    }
+    if let Some(key) = deps.api_key_override.clone() {
+        return Ok(Credential::ApiKey(key));
+    }
+
+    // OAuth first: a connected ChatGPT account with a renewable registration
+    // wins over an API key on the same provider. Any auth failure falls back to
+    // the API-key path so `sk-...` keeps working without a login.
+    let mut oauth_error: Option<anyhow::Error> = None;
+    if provider.supports_oauth() {
+        if let Some(app) = deps.app.as_ref() {
+            if let Some(state) = app.try_state::<crate::state::AppState>() {
+                match state.ensure_bearer(app, &provider.id).await {
+                    Ok(token) if !token.trim().is_empty() => {
+                        return Ok(Credential::Bearer(token.trim().to_string()))
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        // Missing/plan-disabled registrations are expected when
+                        // the user only configured an API key; do not add noise
+                        // to the console for the documented fallback path.
+                        let expected_fallback = error
+                            .downcast_ref::<crate::oauth::AuthError>()
+                            .is_some_and(|auth| {
+                                matches!(auth.code, "missing_credentials" | "plan_disabled")
+                            });
+                        if !expected_fallback {
+                            // Never log tokens: the auth errors carry messages only.
+                            eprintln!(
+                                "lumina: sessão OAuth indisponível para {}: {error:#}",
+                                provider.id
+                            );
+                        }
+                        oauth_error = Some(error);
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(key) = resolve_api_key(deps, provider) {
+        return Ok(Credential::ApiKey(key));
+    }
+
+    Err(anyhow::Error::new(missing_credential_error(
+        provider,
+        oauth_error.as_ref(),
+    )))
+}
+
+/// API key primitives: secrets → provider env var → OpenCode CLI.
+fn resolve_api_key(deps: &HarnessDeps, provider: &ProviderInfo) -> Option<String> {
+    deps.app
+        .as_ref()
+        .and_then(|app| crate::config::api_key_from_secrets(app, &provider.id))
+        .or_else(|| crate::config::api_key_from_env(&provider.id, &provider.auth_env))
+        .or_else(|| crate::config::api_key_from_opencode_cli(&provider.id))
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
+}
+
+/// Typed "no credential" error carrying the actionable code/hint to the UI.
+fn missing_credential_error(
+    provider: &ProviderInfo,
+    oauth_error: Option<&anyhow::Error>,
+) -> CredentialError {
+    if let Some(auth) =
+        oauth_error.and_then(|error| error.downcast_ref::<crate::oauth::AuthError>())
+    {
+        let hint = if auth.reauth_required {
+            REAUTH_HINT
+        } else if provider.supports_oauth() {
+            "Conecte sua conta ChatGPT ou configure uma API key nas configurações."
+        } else {
+            API_KEY_HINT
+        };
+        return CredentialError {
+            code: auth.code,
+            message: auth.message.clone(),
+            hint: Some(hint.to_string()),
+        };
+    }
+    let message = match oauth_error {
+        Some(error) => format!(
+            "Não foi possível obter uma credencial para {}: {error:#}",
+            provider.name
+        ),
+        None => format!("Nenhuma credencial configurada para {}.", provider.name),
+    };
+    CredentialError {
+        code: "missing_credentials",
+        message,
+        hint: Some(if provider.supports_oauth() {
+            "Conecte sua conta ChatGPT ou configure uma API key nas configurações.".to_string()
+        } else {
+            API_KEY_HINT.to_string()
+        }),
+    }
+}
+
+/// Forces an OAuth refresh after a provider 401 (once per step).
+async fn refresh_credential(
+    deps: &HarnessDeps,
+    provider: &ProviderInfo,
+) -> anyhow::Result<Credential> {
+    if let Some(token) = deps
+        .refresh_override
+        .as_ref()
+        .map(|token| token.trim())
+        .filter(|token| !token.is_empty())
+    {
+        return Ok(Credential::Bearer(token.to_string()));
+    }
+    let app = deps
+        .app
+        .as_ref()
+        .ok_or_else(|| anyhow!("AppHandle ausente para renovar a sessão OAuth"))?;
+    let state = app
+        .try_state::<crate::state::AppState>()
+        .ok_or_else(|| anyhow!("AppState ausente para renovar a sessão OAuth"))?;
+    let token = state.force_refresh(app, &provider.id).await?;
+    let token = token.trim();
+    if token.is_empty() {
+        return Err(anyhow!(
+            "a renovação da sessão OAuth devolveu um token vazio"
+        ));
+    }
+    Ok(Credential::Bearer(token.to_string()))
+}
+
+/// Failure of the forced refresh: the account must sign in again.
+fn auth_required_failure(error: &anyhow::Error, credential: &Credential) -> TurnFailure {
+    let message = match error.downcast_ref::<crate::oauth::AuthError>() {
+        Some(auth) => auth.message.clone(),
+        None => format!("{error:#}"),
+    };
+    TurnFailure {
+        message,
+        code: Some("auth_required".to_string()),
+        hint: Some(if credential.is_bearer() {
+            REAUTH_HINT.to_string()
+        } else {
+            API_KEY_HINT.to_string()
+        }),
+    }
+}
+
+/// Error classification carried to `TurnEvent::Error`.
+#[derive(Debug, Clone, Default)]
+struct TurnFailure {
+    message: String,
+    /// Raw provider code (`subscription_sharing_*`) when present, otherwise the
+    /// transport-neutral app code (PLAN §2.3 + T4.4a contract).
+    code: Option<String>,
+    hint: Option<String>,
+}
+
+impl TurnFailure {
+    fn plain(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            code: None,
+            hint: None,
+        }
+    }
+
+    /// Maps an `anyhow` chain to the event shape, preserving typed provider
+    /// errors (`ProviderError`) and harness failures (`TurnFailure`).
+    fn from_anyhow(error: &anyhow::Error, credential: &Credential) -> Self {
+        if let Some(failure) = error.downcast_ref::<TurnFailure>() {
+            return failure.clone();
+        }
+        match error.downcast_ref::<ProviderError>() {
+            Some(provider_error) => Self::from_provider(provider_error, credential),
+            None => Self::plain(format!("{error:#}")),
+        }
+    }
+
+    fn from_provider(error: &ProviderError, credential: &Credential) -> Self {
+        // T4.4a: raw provider code wins when it exists (the UI banner matches
+        // `subscription_sharing_usage_limit_exceeded`); neutral codes cover the
+        // providers without structured codes.
+        let neutral = error.code();
+        let code = error.provider_code().or(neutral).map(str::to_string);
+        let hint = if error.is_plan_limit() {
+            Some(PLAN_USAGE_HINT.to_string())
+        } else {
+            // The hint is chosen from the neutral classification: the raw code
+            // is `subscription_sharing_*` on the OpenAI path.
+            match neutral {
+                Some("rate_limited") => Some(
+                    "O provedor limitou a taxa de requisições; tente novamente em instantes."
+                        .to_string(),
+                ),
+                Some("auth_required") => Some(if credential.is_bearer() {
+                    REAUTH_HINT.to_string()
+                } else {
+                    API_KEY_HINT.to_string()
+                }),
+                Some("plan_not_eligible") => Some(PLAN_NOT_ELIGIBLE_HINT.to_string()),
+                Some("unsupported_capability") => Some(match error.param() {
+                    Some(param) => format!(
+                        "A API do plano ChatGPT (preview) recusou `{param}`; ajuste a requisição."
+                    ),
+                    None => "A API do plano ChatGPT (preview) recusou um campo/ferramenta; ajuste a requisição.".to_string(),
+                }),
+                Some("route_not_supported") => Some(
+                    "A rota usada não é suportada por esta conta; use o endpoint do catálogo."
+                        .to_string(),
+                ),
+                _ => None,
+            }
+        };
+        Self {
+            // Keep the provider error display (includes the raw `[code]`).
+            message: format!("{error:#}"),
+            code,
+            hint,
+        }
+    }
+}
+
+impl std::fmt::Display for TurnFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.message)
+    }
+}
+
+impl std::error::Error for TurnFailure {}
+
+/// Accumulated state of one provider-stream attempt (a step may be retried once
+/// after a forced OAuth refresh).
+#[derive(Default)]
+struct StepAttempt {
+    text: String,
+    reasoning: String,
+    state: Option<Value>,
+    usage: Option<UsageInfo>,
+    tool_calls: Vec<StreamingToolCall>,
+}
+
+enum AttemptOutcome {
+    /// The stream ended; the attempt may contain text, reasoning and tool calls.
+    Completed(StepAttempt),
+    /// The turn was cancelled while streaming (the stream task was aborted).
+    Cancelled,
+    /// The provider/stream failed (`ProviderError` when typed).
+    Failed {
+        attempt: StepAttempt,
+        error: anyhow::Error,
+    },
+}
+
+/// Runs one provider stream attempt, forwarding deltas to the renderer and
+/// collecting the step state. A retry starts from a fresh attempt.
+async fn run_stream_attempt(
+    deps: &HarnessDeps,
+    request: CompletionRequest,
+    on_event: &Arc<dyn EventEmitter>,
+    cancel: &CancellationToken,
+) -> AttemptOutcome {
+    let mut attempt = StepAttempt::default();
+    let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let stream_task = {
+        let streamer = deps.streamer.clone();
+        let http = deps.http.clone();
+        tokio::spawn(async move { run_provider_stream(streamer, http, request, sink).await })
+    };
+
+    let mut cancelled = false;
+    loop {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                cancelled = true;
+                break;
+            }
+            event = events.recv() => {
+                let Some(event) = event else { break; };
+                match event {
+                    ProviderEvent::ReasoningDelta(delta) => {
+                        if !delta.is_empty() {
+                            attempt.reasoning.push_str(&delta);
+                            emit(on_event, TurnEvent::ReasoningDelta { delta });
+                        }
+                    }
+                    ProviderEvent::TextDelta(delta) => {
+                        if !delta.is_empty() {
+                            attempt.text.push_str(&delta);
+                            emit(on_event, TurnEvent::TextDelta { delta });
+                        }
+                    }
+                    ProviderEvent::ToolCallStart { index, id, name } => {
+                        if index >= MAX_STREAMED_TOOL_CALLS {
+                            continue;
+                        }
+                        while attempt.tool_calls.len() <= index {
+                            attempt.tool_calls.push(StreamingToolCall::default());
+                        }
+                        let call = &mut attempt.tool_calls[index];
+                        call.id = id.clone();
+                        call.name = name.clone();
+                        emit(
+                            on_event,
+                            TurnEvent::ToolCallStarted {
+                                tool_call: ToolCallRecord::running(id, name),
+                            },
+                        );
+                    }
+                    ProviderEvent::ToolCallArgsDelta { index, delta } => {
+                        if let Some(call) = attempt.tool_calls.get_mut(index) {
+                            call.arguments.push_str(&delta);
+                            emit(
+                                on_event,
+                                TurnEvent::ToolCallArgs {
+                                    id: call.id.clone(),
+                                    delta,
+                                },
+                            );
+                        }
+                    }
+                    ProviderEvent::ToolCallDone { index, arguments } => {
+                        if let Some(call) = attempt.tool_calls.get_mut(index) {
+                            if !arguments.is_empty() {
+                                call.arguments = arguments;
+                            }
+                        }
+                    }
+                    ProviderEvent::Usage(usage) => attempt.usage = Some(usage),
+                    ProviderEvent::ProviderState(state) => attempt.state = Some(state),
+                    ProviderEvent::Done => {}
+                }
+            }
+        }
+    }
+
+    if cancelled {
+        stream_task.abort();
+        return AttemptOutcome::Cancelled;
+    }
+    match stream_task.await {
+        Ok(Ok(())) => AttemptOutcome::Completed(attempt),
+        Ok(Err(error)) => AttemptOutcome::Failed { attempt, error },
+        Err(join_error) => AttemptOutcome::Failed {
+            attempt,
+            error: anyhow!("falha interna no streaming: {join_error}"),
+        },
+    }
 }
 
 /// Runs the real provider stream unless a test streamer is installed.
@@ -123,7 +631,7 @@ pub async fn run_turn(
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     /* ---------------------------------------------------------------- */
-    /* 1. Setup: conversation, provider, model and API key               */
+    /* 1. Setup: conversation, provider, model and credential            */
     /* ---------------------------------------------------------------- */
 
     let conversation = deps
@@ -140,27 +648,17 @@ pub async fn run_turn(
     } else {
         payload.model_id.trim().to_string()
     };
-    let model = deps
-        .catalog
-        .model(&provider.id, &model_id)
-        .cloned()
-        .ok_or_else(|| {
-            anyhow!(
-                "modelo `{model_id}` não está disponível no provedor `{}`",
-                provider.id
-            )
-        })?;
-    let api_key = match deps.api_key_override.clone() {
-        Some(key) => key,
-        None => {
-            let app = deps
-                .app
-                .as_ref()
-                .ok_or_else(|| anyhow!("AppHandle ausente para resolver a chave de API"))?;
-            crate::config::api_key(app, &provider.id)
-                .ok_or_else(|| anyhow!("nenhuma chave de API configurada para {}", provider.name))?
-        }
-    };
+    // Account/merged model source first, bundled catalog as fallback: an
+    // account-only slug (or a slug that changed) must still resolve.
+    let model = resolve_model(&deps, &provider, &model_id).ok_or_else(|| {
+        anyhow!(
+            "modelo `{model_id}` não está disponível no provedor `{}`",
+            provider.id
+        )
+    })?;
+    // Resolve the credential BEFORE persisting the user message: a turn without
+    // a usable credential must not create a broken assistant message.
+    let mut credential = resolve_credential(&deps, &provider).await?;
     let protocols = resolve_protocols(&provider, &model)?;
 
     if conversation.provider_id != provider.id || conversation.model_id != model.id {
@@ -238,11 +736,9 @@ pub async fn run_turn(
         .clone()
         .unwrap_or_else(tools::skills::standard_external_roots);
     let skills = match &injected_roots {
-        Some(roots) => tools::skills::catalog_enabled_with_roots(
-            &data_dir,
-            &settings.disabled_skills,
-            roots,
-        ),
+        Some(roots) => {
+            tools::skills::catalog_enabled_with_roots(&data_dir, &settings.disabled_skills, roots)
+        }
         // Production path: the default-roots variant scans the standard
         // repositories (agents/codex/claude/opencode + bundled).
         None => tools::skills::catalog_enabled(&data_dir, &settings.disabled_skills),
@@ -281,7 +777,7 @@ pub async fn run_turn(
     // passo), para que o próximo turno reconstrua o turno multi-step inteiro.
     let mut replay_steps: Vec<ReplayStep> = Vec::new();
     let mut cancelled = false;
-    let mut turn_error: Option<String> = None;
+    let mut turn_failure: Option<TurnFailure> = None;
 
     while step_number < options.max_steps {
         if cancel.is_cancelled() {
@@ -291,136 +787,89 @@ pub async fn run_turn(
         step_number += 1;
         emit(&on_event, TurnEvent::StepStarted { step: step_number });
 
-        let request = CompletionRequest {
-            config: ProviderConfig {
-                provider_id: provider.id.clone(),
-                provider_name: provider.name.clone(),
-                base_url: provider.base_url.clone(),
-                api_key: api_key.clone(),
-                model: model.clone(),
-                session_id: payload.conversation_id.clone(),
-                user_agent: format!("Lumina/{}", env!("CARGO_PKG_VERSION")),
-            },
-            protocols: protocols.clone(),
-            history: history.clone(),
-            system_prompt: system_prompt.clone(),
-            tools: tool_definitions.clone(),
-            reasoning: reasoning.clone(),
-            max_output_tokens,
-            temperature,
-            cancel: cancel.clone(),
-        };
-
-        let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
-        let stream_task = {
-            let streamer = deps.streamer.clone();
-            let http = deps.http.clone();
-            tokio::spawn(async move { run_provider_stream(streamer, http, request, sink).await })
-        };
-
-        let mut step_text = String::new();
-        let mut step_reasoning = String::new();
-        let mut step_state: Option<Value> = None;
-        let mut step_usage: Option<UsageInfo> = None;
-        let mut streaming_calls: Vec<StreamingToolCall> = Vec::new();
-        let mut provider_error: Option<String> = None;
-
-        loop {
-            tokio::select! {
-                biased;
-                _ = cancel.cancelled() => {
-                    cancelled = true;
-                    break;
+        // One provider attempt may be retried once after a forced OAuth refresh
+        // (401 → force_refresh → same step again).
+        let mut auth_retried = false;
+        let outcome = loop {
+            let request = CompletionRequest {
+                config: provider_config(&provider, &model, &credential, &payload.conversation_id),
+                protocols: protocols.clone(),
+                history: history.clone(),
+                system_prompt: system_prompt.clone(),
+                tools: tool_definitions.clone(),
+                reasoning: reasoning.clone(),
+                max_output_tokens,
+                temperature,
+                cancel: cancel.clone(),
+            };
+            let outcome = run_stream_attempt(&deps, request, &on_event, &cancel).await;
+            let retry = match &outcome {
+                AttemptOutcome::Failed { error, .. } => {
+                    error
+                        .downcast_ref::<ProviderError>()
+                        .is_some_and(ProviderError::is_auth_failure)
+                        && credential.is_bearer()
+                        && !auth_retried
                 }
-                event = events.recv() => {
-                    let Some(event) = event else { break; };
-                    match event {
-                        ProviderEvent::ReasoningDelta(delta) => {
-                            if !delta.is_empty() {
-                                step_reasoning.push_str(&delta);
-                                emit(&on_event, TurnEvent::ReasoningDelta { delta });
-                            }
-                        }
-                        ProviderEvent::TextDelta(delta) => {
-                            if !delta.is_empty() {
-                                step_text.push_str(&delta);
-                                emit(&on_event, TurnEvent::TextDelta { delta });
-                            }
-                        }
-                        ProviderEvent::ToolCallStart { index, id, name } => {
-                            if index >= MAX_STREAMED_TOOL_CALLS {
-                                continue;
-                            }
-                            while streaming_calls.len() <= index {
-                                streaming_calls.push(StreamingToolCall::default());
-                            }
-                            let call = &mut streaming_calls[index];
-                            call.id = id.clone();
-                            call.name = name.clone();
-                            emit(
-                                &on_event,
-                                TurnEvent::ToolCallStarted {
-                                    tool_call: ToolCallRecord::running(id, name),
-                                },
-                            );
-                        }
-                        ProviderEvent::ToolCallArgsDelta { index, delta } => {
-                            if let Some(call) = streaming_calls.get_mut(index) {
-                                call.arguments.push_str(&delta);
-                                emit(
-                                    &on_event,
-                                    TurnEvent::ToolCallArgs {
-                                        id: call.id.clone(),
-                                        delta,
-                                    },
-                                );
-                            }
-                        }
-                        ProviderEvent::ToolCallDone { index, arguments } => {
-                            if let Some(call) = streaming_calls.get_mut(index) {
-                                if !arguments.is_empty() {
-                                    call.arguments = arguments;
-                                }
-                            }
-                        }
-                        ProviderEvent::Usage(usage) => step_usage = Some(usage),
-                        ProviderEvent::ProviderState(state) => step_state = Some(state),
-                        ProviderEvent::Done => {}
+                _ => false,
+            };
+            if !retry {
+                break outcome;
+            }
+            auth_retried = true;
+            match refresh_credential(&deps, &provider).await {
+                Ok(refreshed) => credential = refreshed,
+                Err(error) => {
+                    break AttemptOutcome::Failed {
+                        attempt: StepAttempt::default(),
+                        error: anyhow::Error::new(auth_required_failure(&error, &credential)),
                     }
                 }
             }
-        }
+        };
 
-        if cancelled {
-            stream_task.abort();
-            break;
-        }
-        match stream_task.await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => provider_error = Some(format!("{error:#}")),
-            Err(join_error) => {
-                provider_error = Some(format!("falha interna no streaming: {join_error}"))
-            }
-        }
+        let (step_text, step_reasoning, step_state, step_usage, streaming_calls, failure) =
+            match outcome {
+                AttemptOutcome::Cancelled => {
+                    cancelled = true;
+                    break;
+                }
+                AttemptOutcome::Completed(attempt) => (
+                    attempt.text,
+                    attempt.reasoning,
+                    attempt.state,
+                    attempt.usage,
+                    attempt.tool_calls,
+                    None,
+                ),
+                AttemptOutcome::Failed { attempt, error } => (
+                    attempt.text,
+                    attempt.reasoning,
+                    attempt.state,
+                    attempt.usage,
+                    attempt.tool_calls,
+                    Some(TurnFailure::from_anyhow(&error, &credential)),
+                ),
+            };
 
         if !step_reasoning.is_empty() {
             emit(&on_event, TurnEvent::ReasoningDone);
-        }
-
-        if !step_reasoning.is_empty() {
             if !full_reasoning.is_empty() {
                 full_reasoning.push_str("\n\n");
             }
             full_reasoning.push_str(&step_reasoning);
         }
-        if let Some(usage) = step_usage.take() {
+        if let Some(usage) = step_usage {
             merge_usage(&mut total_usage, &usage);
         }
 
-        if let Some(error) = provider_error {
-            turn_error = Some(error);
+        if let Some(failure) = failure {
+            turn_failure = Some(failure);
             let mut failed: Vec<ToolCallRecord> = Vec::new();
-            for call in streaming_calls.drain(..).filter(|call| !call.id.is_empty()) {
+            for call in streaming_calls
+                .into_iter()
+                .filter(|call| !call.id.is_empty())
+            {
                 let mut record = tool_call_record(call);
                 record.status = ToolCallStatus::Error;
                 record.result = Some("Interrompida por um erro do provedor.".to_string());
@@ -494,7 +943,10 @@ pub async fn run_turn(
                 );
             }
             for citation in &outcome.citations {
-                if !citations.iter().any(|existing| existing.url == citation.url) {
+                if !citations
+                    .iter()
+                    .any(|existing| existing.url == citation.url)
+                {
                     citations.push(citation.clone());
                 }
             }
@@ -522,10 +974,7 @@ pub async fn run_turn(
                 truncate_chars(&outcome.content, MAX_MODEL_TOOL_RESULT_CHARS),
             ));
         }
-        let step_call_ids: Vec<String> = paired
-            .iter()
-            .map(|(call, _)| call.id.clone())
-            .collect();
+        let step_call_ids: Vec<String> = paired.iter().map(|(call, _)| call.id.clone()).collect();
         for (call, _) in paired {
             all_tool_calls.push(call);
         }
@@ -553,107 +1002,104 @@ pub async fn run_turn(
     /* 5b. Forced final answer when the loop ended without one            */
     /* ---------------------------------------------------------------- */
 
-    if !cancelled && full_text.trim().is_empty() {
-        emit(&on_event, TurnEvent::StepStarted { step: step_number + 1 });
+    // A hard provider failure (auth/plan/quota) ends the turn: it must not be
+    // amplified by another forced completion (which would retry auth/refresh in
+    // a loop). The forced pass only summarizes a loop that ran out of steps.
+    if !cancelled && turn_failure.is_none() && full_text.trim().is_empty() {
+        emit(
+            &on_event,
+            TurnEvent::StepStarted {
+                step: step_number + 1,
+            },
+        );
         let forced_prompt = format!(
             "{system_prompt}\n\n# Encerramento\n\
              Você não pode chamar mais ferramentas nesta resposta. Responda agora, em Markdown, \
              usando apenas as informações já coletadas nos resultados acima. Se algum dado não \
              foi confirmado, deixe isso explícito. Não narre o processo: entregue a resposta final."
         );
-        let forced_request = CompletionRequest {
-            config: ProviderConfig {
-                provider_id: provider.id.clone(),
-                provider_name: provider.name.clone(),
-                base_url: provider.base_url.clone(),
-                api_key: api_key.clone(),
-                model: model.clone(),
-                session_id: payload.conversation_id.clone(),
-                user_agent: format!("Lumina/{}", env!("CARGO_PKG_VERSION")),
-            },
-            protocols: protocols.clone(),
-            history: history.clone(),
-            system_prompt: forced_prompt,
-            tools: Vec::new(),
-            reasoning: reasoning.clone(),
-            max_output_tokens,
-            temperature,
-            cancel: cancel.clone(),
+        // Same single 401 → refresh → retry rule for the forced final answer.
+        let mut forced_auth_retried = false;
+        let outcome = loop {
+            let forced_request = CompletionRequest {
+                config: provider_config(&provider, &model, &credential, &payload.conversation_id),
+                protocols: protocols.clone(),
+                history: history.clone(),
+                system_prompt: forced_prompt.clone(),
+                tools: Vec::new(),
+                reasoning: reasoning.clone(),
+                max_output_tokens,
+                temperature,
+                cancel: cancel.clone(),
+            };
+            let outcome = run_stream_attempt(&deps, forced_request, &on_event, &cancel).await;
+            let retry = match &outcome {
+                AttemptOutcome::Failed { error, .. } => {
+                    error
+                        .downcast_ref::<ProviderError>()
+                        .is_some_and(ProviderError::is_auth_failure)
+                        && credential.is_bearer()
+                        && !forced_auth_retried
+                }
+                _ => false,
+            };
+            if !retry {
+                break outcome;
+            }
+            forced_auth_retried = true;
+            match refresh_credential(&deps, &provider).await {
+                Ok(refreshed) => credential = refreshed,
+                Err(error) => {
+                    break AttemptOutcome::Failed {
+                        attempt: StepAttempt::default(),
+                        error: anyhow::Error::new(auth_required_failure(&error, &credential)),
+                    }
+                }
+            }
         };
-        let (forced_sink, mut forced_events) = tokio::sync::mpsc::unbounded_channel();
-        let forced_task = {
-            let streamer = deps.streamer.clone();
-            let http = deps.http.clone();
-            tokio::spawn(async move { run_provider_stream(streamer, http, forced_request, forced_sink).await })
-        };
-        let mut forced_text = String::new();
-        let mut forced_reasoning = String::new();
-        let mut forced_state: Option<Value> = None;
-        let mut forced_usage: Option<UsageInfo> = None;
-        loop {
-            tokio::select! {
-                biased;
-                _ = cancel.cancelled() => {
-                    cancelled = true;
-                    break;
+
+        let mut forced_attempt = StepAttempt::default();
+        let mut forced_failure: Option<TurnFailure> = None;
+        match outcome {
+            AttemptOutcome::Cancelled => cancelled = true,
+            AttemptOutcome::Completed(attempt) => forced_attempt = attempt,
+            AttemptOutcome::Failed { attempt, error } => {
+                forced_attempt = attempt;
+                let mut failure = TurnFailure::from_anyhow(&error, &credential);
+                if failure.code.is_none() {
+                    failure.message =
+                        format!("Falha ao gerar a resposta final: {}", failure.message);
                 }
-                event = forced_events.recv() => {
-                    let Some(event) = event else { break; };
-                    match event {
-                        ProviderEvent::TextDelta(delta) if !delta.is_empty() => {
-                            forced_text.push_str(&delta);
-                            emit(&on_event, TurnEvent::TextDelta { delta });
-                        }
-                        ProviderEvent::ReasoningDelta(delta) if !delta.is_empty() => {
-                            forced_reasoning.push_str(&delta);
-                            emit(&on_event, TurnEvent::ReasoningDelta { delta });
-                        }
-                        ProviderEvent::Usage(usage) => forced_usage = Some(usage),
-                        ProviderEvent::ProviderState(state) => forced_state = Some(state),
-                        ProviderEvent::ToolCallStart { .. }
-                        | ProviderEvent::ToolCallArgsDelta { .. }
-                        | ProviderEvent::ToolCallDone { .. }
-                        | ProviderEvent::Done => {}
-                        _ => {}
-                    }
-                }
+                forced_failure = Some(failure);
             }
         }
-        if cancelled {
-            forced_task.abort();
-        } else {
-            match forced_task.await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => {
-                    if turn_error.is_none() {
-                        turn_error = Some(format!("Falha ao gerar a resposta final: {error:#}"));
-                    }
-                }
-                Err(join_error) => {
-                    if turn_error.is_none() {
-                        turn_error = Some(format!("Falha interna ao gerar a resposta final: {join_error}"));
-                    }
-                }
-            }
-        }
-        if let Some(usage) = forced_usage {
-            merge_usage(&mut total_usage, &usage);
-        }
-        if !forced_reasoning.trim().is_empty() {
-            if !full_reasoning.is_empty() {
-                full_reasoning.push_str("\n\n");
-            }
-            full_reasoning.push_str(&forced_reasoning);
-        }
-        push_trace_step(&mut trace, &forced_reasoning, 0);
-        if !forced_text.trim().is_empty() {
-            full_text = forced_text.trim().to_string();
-        } else if turn_error.is_none() {
-            turn_error = Some("O modelo não produziu uma resposta final.".to_string());
-        }
-        // A resposta final forçada é o último passo do replay. Um turno
-        // cancelado no meio dela não tem estado replayável.
         if !cancelled {
+            if let Some(failure) = forced_failure {
+                if turn_failure.is_none() {
+                    turn_failure = Some(failure);
+                }
+            }
+            if let Some(usage) = forced_attempt.usage {
+                merge_usage(&mut total_usage, &usage);
+            }
+            let forced_reasoning = forced_attempt.reasoning;
+            let forced_text = forced_attempt.text;
+            let forced_state = forced_attempt.state;
+            if !forced_reasoning.trim().is_empty() {
+                if !full_reasoning.is_empty() {
+                    full_reasoning.push_str("\n\n");
+                }
+                full_reasoning.push_str(&forced_reasoning);
+            }
+            push_trace_step(&mut trace, &forced_reasoning, 0);
+            if !forced_text.trim().is_empty() {
+                full_text = forced_text.trim().to_string();
+            } else if turn_failure.is_none() {
+                turn_failure = Some(TurnFailure::plain(
+                    "O modelo não produziu uma resposta final.",
+                ));
+            }
+            // A resposta final forçada é o último passo do replay.
             replay_steps.push(ReplayStep {
                 text: forced_text.trim().to_string(),
                 state: forced_state,
@@ -711,7 +1157,7 @@ pub async fn run_turn(
 
     let status = if cancelled {
         MessageStatus::Cancelled
-    } else if turn_error.is_some() {
+    } else if turn_failure.is_some() {
         if full_text.trim().is_empty() {
             MessageStatus::Error
         } else {
@@ -722,7 +1168,8 @@ pub async fn run_turn(
     };
 
     assistant_message.content = full_text.trim_end().to_string();
-    assistant_message.reasoning = (!full_reasoning.trim().is_empty()).then(|| full_reasoning.clone());
+    assistant_message.reasoning =
+        (!full_reasoning.trim().is_empty()).then(|| full_reasoning.clone());
     assistant_message.status = status;
     assistant_message.tool_calls = all_tool_calls.clone();
     assistant_message.citations = citations.clone();
@@ -743,7 +1190,12 @@ pub async fn run_turn(
         eprintln!("lumina: falha ao registrar usage: {error:#}");
     }
 
-    emit(&on_event, TurnEvent::Usage { usage: usage.clone() });
+    emit(
+        &on_event,
+        TurnEvent::Usage {
+            usage: usage.clone(),
+        },
+    );
     emit(
         &on_event,
         TurnEvent::MessageUpdated {
@@ -787,22 +1239,30 @@ pub async fn run_turn(
         user_message: user_message.clone(),
         assistant_message: assistant_message.clone(),
         usage: Some(usage.clone()),
-        error: turn_error.clone(),
+        // TurnResult keeps the plain message string; `TurnEvent::Error` carries
+        // the structured code/hint for the renderer.
+        error: turn_failure.as_ref().map(|failure| failure.message.clone()),
         conversation: updated_conversation,
     };
 
     if cancelled {
         emit(&on_event, TurnEvent::Cancelled);
-    } else if let Some(error) = &turn_error {
+    } else if let Some(failure) = &turn_failure {
         emit(
             &on_event,
             TurnEvent::Error {
-                message: error.clone(),
-                code: None,
+                message: failure.message.clone(),
+                code: failure.code.clone(),
+                hint: failure.hint.clone(),
             },
         );
     } else {
-        emit(&on_event, TurnEvent::Done { result: result.clone() });
+        emit(
+            &on_event,
+            TurnEvent::Done {
+                result: result.clone(),
+            },
+        );
     }
 
     Ok(result)
@@ -861,7 +1321,12 @@ fn prepare_regenerate(
 
 fn resolve_attachment_infos(db: &Db, ids: &[String]) -> Vec<AttachmentInfo> {
     ids.iter()
-        .filter_map(|id| db.get_attachment(id).ok().flatten().map(|stored| stored.info()))
+        .filter_map(|id| {
+            db.get_attachment(id)
+                .ok()
+                .flatten()
+                .map(|stored| stored.info())
+        })
         .collect()
 }
 
@@ -982,7 +1447,11 @@ fn history_tool_call(call: &ToolCallRecord) -> HistoryToolCall {
 /// Tool result para o replay. Resultado ausente/vazio vira um output sintético:
 /// o provedor recusa uma tool call sem output, então nenhuma call fica órfã.
 fn tool_result_message(call: &ToolCallRecord) -> HistoryMessage {
-    let content = match call.result.as_deref().filter(|result| !result.trim().is_empty()) {
+    let content = match call
+        .result
+        .as_deref()
+        .filter(|result| !result.trim().is_empty())
+    {
         Some(result) => truncate_chars(result, MAX_MODEL_TOOL_RESULT_CHARS),
         None => MISSING_TOOL_RESULT.to_string(),
     };
@@ -1161,7 +1630,10 @@ fn replay_steps_history(message: &ChatMessage, steps: &[ReplayStep]) -> Vec<Hist
         .collect();
     if !unreferenced.is_empty() {
         let mut assistant = HistoryMessage::assistant(String::new());
-        assistant.tool_calls = unreferenced.iter().map(|call| history_tool_call(call)).collect();
+        assistant.tool_calls = unreferenced
+            .iter()
+            .map(|call| history_tool_call(call))
+            .collect();
         group.push(assistant);
         for call in unreferenced {
             group.push(tool_result_message(call));
@@ -1217,7 +1689,9 @@ fn history_message_size(message: &HistoryMessage) -> usize {
     // O payload opaco do provedor também ocupa a janela de contexto: sem contar
     // aqui, conversas com replay gravado estourariam o orçamento estimado.
     if let Some(state) = &message.provider_state {
-        size += serde_json::to_string(state).map(|json| json.len()).unwrap_or(0);
+        size += serde_json::to_string(state)
+            .map(|json| json.len())
+            .unwrap_or(0);
     }
     size
 }
@@ -1449,17 +1923,12 @@ fn reasoning_request(
             ReasoningMode::Off => ReasoningRequest::Off,
             // Toggle-only models have no effort list: let the provider decide.
             ReasoningMode::Effort => match selection.effort.as_deref().map(str::trim) {
-                Some(effort) if !effort.is_empty() => {
-                    ReasoningRequest::Effort(effort.to_string())
-                }
+                Some(effort) if !effort.is_empty() => ReasoningRequest::Effort(effort.to_string()),
                 _ => ReasoningRequest::Auto,
             },
             ReasoningMode::Budget => {
                 let maximum = model.max_output.max(1_024);
-                let budget = selection
-                    .budget
-                    .unwrap_or(8_192)
-                    .clamp(1_024, maximum);
+                let budget = selection.budget.unwrap_or(8_192).clamp(1_024, maximum);
                 ReasoningRequest::Budget(budget)
             }
         },
@@ -1628,6 +2097,7 @@ mod tests {
             description: None,
             tags: Vec::new(),
             status: "stable".to_string(),
+            estimated: false,
         }
     }
 
@@ -1639,11 +2109,17 @@ mod tests {
             description: String::new(),
             base_url: "https://opencode.ai/inference/go".into(),
             console_url: String::new(),
-            endpoints: [("openai-chat".to_string(), "/openai/v1/chat/completions".to_string())]
-                .into_iter()
-                .collect(),
+            endpoints: [(
+                "openai-chat".to_string(),
+                "/openai/v1/chat/completions".to_string(),
+            )]
+            .into_iter()
+            .collect(),
             auth_env: "OPENCODE_API_KEY".into(),
             default_model_id: "glm-5.3-flash".into(),
+            auth: Default::default(),
+            request_profiles: Default::default(),
+            oauth: None,
             models: Vec::new(),
             notes: Vec::new(),
         }
@@ -1851,8 +2327,12 @@ mod agent_loop_tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::catalog::{ModelInfo, ProviderInfo};
+    use crate::catalog::{
+        Modalities, ModelInfo, OAuthProviderInfo, ProviderAuth, ProviderInfo, RequestProfile,
+        RequestProfiles,
+    };
     use crate::domain::{Conversation, MessageStatus, ToolCallStatus, TurnOptions, TurnPayload};
+    use crate::providers::StructuredError;
 
     struct TempDb {
         db: Arc<Db>,
@@ -1861,10 +2341,8 @@ mod agent_loop_tests {
 
     impl TempDb {
         fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "lumina-harness-test-{}.db",
-                uuid::Uuid::new_v4()
-            ));
+            let path = std::env::temp_dir()
+                .join(format!("lumina-harness-test-{}.db", uuid::Uuid::new_v4()));
             let db = Arc::new(Db::open(&path).expect("open temp db"));
             Self { db, path }
         }
@@ -1897,6 +2375,7 @@ mod agent_loop_tests {
             description: None,
             tags: Vec::new(),
             status: "stable".to_string(),
+            estimated: false,
         };
         let provider = ProviderInfo {
             id: "opencode-go".to_string(),
@@ -1908,6 +2387,9 @@ mod agent_loop_tests {
             endpoints: HashMap::new(),
             auth_env: "OPENCODE_API_KEY".to_string(),
             default_model_id: model.id.clone(),
+            auth: Default::default(),
+            request_profiles: Default::default(),
+            oauth: None,
             models: vec![model],
             notes: Vec::new(),
         };
@@ -1927,6 +2409,9 @@ mod agent_loop_tests {
             search_http: reqwest::Client::new(),
             catalog: test_catalog(),
             streamer: Some(streamer),
+            credential_override: None,
+            refresh_override: None,
+            model_source: None,
             api_key_override: Some("test-key".to_string()),
             data_dir: Some(test_data_dir()),
             // Tests never read the developer's real skill repositories.
@@ -1938,6 +2423,122 @@ mod agent_loop_tests {
     /// materialized by the catalog).
     fn test_data_dir() -> PathBuf {
         std::env::temp_dir().join(format!("lumina-harness-data-{}", uuid::Uuid::new_v4()))
+    }
+
+    /// Env var used by the OAuth test provider. It is intentionally not a real
+    /// provider env var so credential resolution stays deterministic.
+    const OAUTH_TEST_ENV: &str = "LUMINA_HARNESS_TEST_OPENAI_KEY";
+
+    fn openai_model(id: &str) -> ModelInfo {
+        ModelInfo {
+            id: id.to_string(),
+            name: id.to_string(),
+            family: "gpt".to_string(),
+            protocols: vec!["openai-responses".to_string()],
+            reasoning: true,
+            reasoning_options: Vec::new(),
+            attachment: false,
+            modalities: Modalities {
+                input: vec!["text".to_string()],
+                output: vec!["text".to_string()],
+            },
+            context_window: 272_000,
+            max_output: 32_000,
+            cost: None,
+            release_date: None,
+            knowledge: None,
+            open_weights: false,
+            description: None,
+            tags: Vec::new(),
+            status: "stable".to_string(),
+            estimated: false,
+        }
+    }
+
+    fn oauth_provider() -> ProviderInfo {
+        ProviderInfo {
+            id: "openai".to_string(),
+            name: "OpenAI (ChatGPT)".to_string(),
+            short_name: "ChatGPT".to_string(),
+            description: String::new(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            console_url: "https://chatgpt.com/settings/usage".to_string(),
+            endpoints: [("openai-responses".to_string(), "/responses".to_string())]
+                .into_iter()
+                .collect(),
+            auth_env: OAUTH_TEST_ENV.to_string(),
+            default_model_id: "gpt-6.1-sol".to_string(),
+            auth: ProviderAuth::Oauth,
+            request_profiles: RequestProfiles {
+                oauth: Some(RequestProfile::ChatgptPlan),
+                api_key: Some(RequestProfile::Standard),
+            },
+            oauth: Some(OAuthProviderInfo {
+                issuer: "https://auth.openai.com".to_string(),
+                discovery_url: String::new(),
+                registration_client_id: "dynamic_agent_client".to_string(),
+                agent_name_hint: "Lumina".to_string(),
+                resource: "https://api.openai.com/v1".to_string(),
+                scopes: vec!["openid".to_string()],
+                plan_usage_scope: "chatgpt.tokens.use.direct".to_string(),
+                callback_path: "/auth/callback".to_string(),
+                loopback_host: "127.0.0.1".to_string(),
+            }),
+            models: vec![openai_model("gpt-6.1-sol")],
+            notes: Vec::new(),
+        }
+    }
+
+    fn oauth_catalog() -> CatalogFile {
+        CatalogFile {
+            version: 1,
+            generated_at: String::new(),
+            sources: serde_json::Value::Null,
+            providers: vec![oauth_provider()],
+        }
+    }
+
+    fn oauth_deps(db: Arc<Db>, streamer: ProviderStreamer) -> HarnessDeps {
+        HarnessDeps {
+            app: None,
+            db,
+            http: reqwest::Client::new(),
+            search_http: reqwest::Client::new(),
+            catalog: oauth_catalog(),
+            streamer: Some(streamer),
+            credential_override: Some(CredentialOverride::Bearer("oauth-access-token".to_string())),
+            refresh_override: None,
+            model_source: None,
+            api_key_override: None,
+            data_dir: Some(test_data_dir()),
+            skills_roots: Some(Vec::new()),
+        }
+    }
+
+    fn oauth_payload(conversation: &Conversation, model_id: &str) -> TurnPayload {
+        TurnPayload {
+            conversation_id: conversation.id.clone(),
+            content: "Explique MCP em duas frases".to_string(),
+            attachment_ids: Vec::new(),
+            provider_id: "openai".to_string(),
+            model_id: model_id.to_string(),
+            reasoning: None,
+            options: TurnOptions {
+                max_steps: 2,
+                ..Default::default()
+            },
+            turn_id: Some(uuid::Uuid::new_v4().to_string()),
+        }
+    }
+
+    /// Returns the serialized `error` event, if any.
+    fn error_event(events: &Arc<Mutex<Vec<String>>>) -> Option<serde_json::Value> {
+        events
+            .lock()
+            .expect("events lock")
+            .iter()
+            .find(|json| json.contains("\"type\":\"error\""))
+            .and_then(|json| serde_json::from_str(json).ok())
     }
 
     fn payload(conversation: &Conversation, max_steps: u32) -> TurnPayload {
@@ -1990,9 +2591,28 @@ mod agent_loop_tests {
     }
 
     fn tool_call_stream(sink: &EventSink, id: &str, name: &str) {
-        emit(sink, ProviderEvent::ToolCallStart { index: 0, id: id.to_string(), name: name.to_string() });
-        emit(sink, ProviderEvent::ToolCallArgsDelta { index: 0, delta: "{}".to_string() });
-        emit(sink, ProviderEvent::ToolCallDone { index: 0, arguments: "{}".to_string() });
+        emit(
+            sink,
+            ProviderEvent::ToolCallStart {
+                index: 0,
+                id: id.to_string(),
+                name: name.to_string(),
+            },
+        );
+        emit(
+            sink,
+            ProviderEvent::ToolCallArgsDelta {
+                index: 0,
+                delta: "{}".to_string(),
+            },
+        );
+        emit(
+            sink,
+            ProviderEvent::ToolCallDone {
+                index: 0,
+                arguments: "{}".to_string(),
+            },
+        );
         emit(sink, ProviderEvent::Done);
     }
 
@@ -2046,10 +2666,16 @@ mod agent_loop_tests {
         // Tools are offered on both steps; only the first one produces a tool call.
         assert_eq!(calls.lock().expect("calls lock").as_slice(), &[true, true]);
         assert_eq!(result.assistant_message.status, MessageStatus::Complete);
-        assert_eq!(result.assistant_message.content, "Resposta final em duas frases.");
+        assert_eq!(
+            result.assistant_message.content,
+            "Resposta final em duas frases."
+        );
         assert!(!result.assistant_message.content.contains("Narração"));
         assert_eq!(result.assistant_message.tool_calls.len(), 1);
-        assert_eq!(result.assistant_message.tool_calls[0].status, ToolCallStatus::Error);
+        assert_eq!(
+            result.assistant_message.tool_calls[0].status,
+            ToolCallStatus::Error
+        );
         assert!(result.error.is_none());
         assert!(has_event(&events, "done"));
         assert!(has_event(&events, "tool_call_finished"));
@@ -2107,7 +2733,10 @@ mod agent_loop_tests {
         .expect("turn should complete");
 
         // Two tool-calling steps + one forced final-answer step without tools.
-        assert_eq!(calls.lock().expect("calls lock").as_slice(), &[true, true, false]);
+        assert_eq!(
+            calls.lock().expect("calls lock").as_slice(),
+            &[true, true, false]
+        );
         assert_eq!(
             result.assistant_message.content,
             "Resposta final baseada no que já foi coletado."
@@ -2119,9 +2748,20 @@ mod agent_loop_tests {
             2,
             "one trace entry per acting step"
         );
-        assert!(result.assistant_message.trace.iter().all(|step| step.reasoning.is_none()));
-        assert!(result.assistant_message.trace.iter().all(|step| step.tool_calls == 1));
-        assert!(result.error.is_none(), "forced answer must not surface an error");
+        assert!(result
+            .assistant_message
+            .trace
+            .iter()
+            .all(|step| step.reasoning.is_none()));
+        assert!(result
+            .assistant_message
+            .trace
+            .iter()
+            .all(|step| step.tool_calls == 1));
+        assert!(
+            result.error.is_none(),
+            "forced answer must not surface an error"
+        );
     }
 
     #[tokio::test]
@@ -2212,10 +2852,11 @@ mod agent_loop_tests {
                     .contains("# Execução de código (`run_code`)");
                 let has_skills = request.tools.iter().any(|tool| tool.name == "read_skill")
                     && request.system_prompt.contains("# Skills");
-                captured
-                    .lock()
-                    .expect("captured lock")
-                    .push((has_run_code, has_code_section, has_skills));
+                captured.lock().expect("captured lock").push((
+                    has_run_code,
+                    has_code_section,
+                    has_skills,
+                ));
                 Box::pin(async move {
                     text_stream(&sink, "Resposta final.");
                     Ok(())
@@ -2333,10 +2974,8 @@ mod agent_loop_tests {
 
     impl TempSkillRepo {
         fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "lumina-external-skills-{}",
-                uuid::Uuid::new_v4()
-            ));
+            let path = std::env::temp_dir()
+                .join(format!("lumina-external-skills-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&path).expect("criar repositório externo");
             Self { path }
         }
@@ -2658,7 +3297,11 @@ mod agent_loop_tests {
         assert_eq!(step.load(std::sync::atomic::Ordering::SeqCst), 3);
 
         let requests = captured.lock().expect("captured lock").clone();
-        assert_eq!(requests.len(), 3, "2 passos no turno 1 + 1 passo no turno 2");
+        assert_eq!(
+            requests.len(),
+            3,
+            "2 passos no turno 1 + 1 passo no turno 2"
+        );
         let history = &requests[2];
         assert_eq!(
             history
@@ -2740,7 +3383,9 @@ mod agent_loop_tests {
             Some("R$ 5,40"),
         )];
         assistant.provider_state = provider_state;
-        temp.db.insert_message(&assistant).expect("assistant message");
+        temp.db
+            .insert_message(&assistant)
+            .expect("assistant message");
 
         let mut placeholder = ChatMessage::assistant(&conversation.id);
         placeholder.model_id = Some(model.id.clone());
@@ -3017,11 +3662,517 @@ mod agent_loop_tests {
             false,
         );
 
-        assert_eq!(history.len(), 4, "user + 2 passos + tool result: {history:?}");
+        assert_eq!(
+            history.len(),
+            4,
+            "user + 2 passos + tool result: {history:?}"
+        );
         assert_tool_results_are_paired(&history);
         assert_eq!(history[2].role, HistoryRole::Tool);
         assert_eq!(history[2].text, MISSING_TOOL_RESULT);
         assert_eq!(history[3].text, "Resposta final.");
         assert!(history[3].provider_state.is_none(), "state nulo é omitido");
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* T3.3 credential resolution / 401 retry / error mapping            */
+    /* ---------------------------------------------------------------- */
+
+    #[tokio::test]
+    async fn oauth_credential_uses_bearer_and_the_chatgpt_plan_profile() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "openai", "gpt-6.1-sol")
+            .expect("conversation");
+        let captured: Arc<Mutex<Vec<ProviderConfig>>> = Arc::new(Mutex::new(Vec::new()));
+        let streamer: ProviderStreamer = {
+            let captured = captured.clone();
+            Arc::new(move |request, sink| {
+                captured
+                    .lock()
+                    .expect("captured lock")
+                    .push(request.config.clone());
+                Box::pin(async move {
+                    text_stream(&sink, "Resposta final.");
+                    Ok(())
+                })
+            })
+        };
+
+        let (channel, events) = channel();
+        let result = run_turn(
+            oauth_deps(temp.db.clone(), streamer),
+            oauth_payload(&conversation, "gpt-6.1-sol"),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn should complete");
+
+        assert_eq!(result.assistant_message.status, MessageStatus::Complete);
+        assert!(result.error.is_none());
+        assert!(has_event(&events, "done"));
+        let configs = captured.lock().expect("captured lock");
+        let config = configs.first().expect("one provider request");
+        assert_eq!(config.api_key, "oauth-access-token");
+        assert_eq!(config.auth_mode, ProviderAuth::Oauth);
+        assert_eq!(config.request_profile, RequestProfile::ChatgptPlan);
+        assert_eq!(
+            config.endpoints,
+            oauth_provider().endpoints,
+            "endpoints vêm do catálogo, não de constantes"
+        );
+        assert!(config.extra_headers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn api_key_credential_uses_the_standard_profile() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "openai", "gpt-6.1-sol")
+            .expect("conversation");
+        let captured: Arc<Mutex<Vec<ProviderConfig>>> = Arc::new(Mutex::new(Vec::new()));
+        let streamer: ProviderStreamer = {
+            let captured = captured.clone();
+            Arc::new(move |request, sink| {
+                captured
+                    .lock()
+                    .expect("captured lock")
+                    .push(request.config.clone());
+                Box::pin(async move {
+                    text_stream(&sink, "Resposta final.");
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = oauth_deps(temp.db.clone(), streamer);
+        harness.credential_override = Some(CredentialOverride::ApiKey("sk-platform".to_string()));
+        let (channel, _events) = channel();
+        let result = run_turn(
+            harness,
+            oauth_payload(&conversation, "gpt-6.1-sol"),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn with the API-key fallback should complete");
+
+        assert_eq!(result.assistant_message.status, MessageStatus::Complete);
+        let configs = captured.lock().expect("captured lock");
+        let config = configs.first().expect("one provider request");
+        assert_eq!(config.api_key, "sk-platform");
+        assert_eq!(config.auth_mode, ProviderAuth::ApiKey);
+        assert_eq!(config.request_profile, RequestProfile::Standard);
+    }
+
+    #[tokio::test]
+    async fn auth_failure_refreshes_the_bearer_and_retries_the_step_once() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "openai", "gpt-6.1-sol")
+            .expect("conversation");
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let tokens: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let streamer: ProviderStreamer = {
+            let calls = calls.clone();
+            let tokens = tokens.clone();
+            Arc::new(move |request, sink| {
+                let current = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokens
+                    .lock()
+                    .expect("tokens lock")
+                    .push(request.config.api_key.clone());
+                Box::pin(async move {
+                    if current == 0 {
+                        return Err(anyhow::Error::new(ProviderError::Unauthorized(
+                            "401 não autorizado".to_string(),
+                        )));
+                    }
+                    text_stream(&sink, "Resposta final após refresh.");
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = oauth_deps(temp.db.clone(), streamer);
+        harness.refresh_override = Some("refreshed-token".to_string());
+        let (channel, events) = channel();
+        let result = run_turn(
+            harness,
+            oauth_payload(&conversation, "gpt-6.1-sol"),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn should complete after the forced refresh");
+
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "401 → refresh → exactly one retry"
+        );
+        assert_eq!(
+            tokens.lock().expect("tokens lock").as_slice(),
+            &[
+                "oauth-access-token".to_string(),
+                "refreshed-token".to_string()
+            ],
+            "the retry uses the refreshed bearer"
+        );
+        assert_eq!(
+            result.assistant_message.content,
+            "Resposta final após refresh."
+        );
+        assert!(result.error.is_none());
+        assert!(!has_event(&events, "error"));
+    }
+
+    #[tokio::test]
+    async fn double_auth_failure_requires_a_new_chatgpt_login() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "openai", "gpt-6.1-sol")
+            .expect("conversation");
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let calls = calls.clone();
+            Arc::new(move |_request, _sink| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    Err(anyhow::Error::new(ProviderError::Unauthorized(
+                        "401 não autorizado".to_string(),
+                    )))
+                })
+            })
+        };
+
+        let mut harness = oauth_deps(temp.db.clone(), streamer);
+        harness.refresh_override = Some("refreshed-token".to_string());
+        let (channel, events) = channel();
+        let result = run_turn(
+            harness,
+            oauth_payload(&conversation, "gpt-6.1-sol"),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn resolves with an error payload");
+
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "only one retry after the 401"
+        );
+        assert_eq!(result.assistant_message.status, MessageStatus::Error);
+        let message = result.error.clone().unwrap_or_default();
+        assert!(message.contains("não autorizado"), "{message}");
+        let event = error_event(&events).expect("error event");
+        assert_eq!(event["code"], serde_json::json!("auth_required"));
+        let hint = event["hint"].as_str().unwrap_or_default();
+        assert!(hint.contains("Entre novamente com o ChatGPT"), "{hint}");
+    }
+
+    #[tokio::test]
+    async fn failed_refresh_requires_a_new_chatgpt_login() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "openai", "gpt-6.1-sol")
+            .expect("conversation");
+        // No `refresh_override` and no AppHandle: the forced refresh fails
+        // locally, so the account has to sign in again.
+        let streamer: ProviderStreamer = Arc::new(|_request, _sink| {
+            Box::pin(async move {
+                Err(anyhow::Error::new(ProviderError::Unauthorized(
+                    "401".to_string(),
+                )))
+            })
+        });
+
+        let (channel, events) = channel();
+        let result = run_turn(
+            oauth_deps(temp.db.clone(), streamer),
+            oauth_payload(&conversation, "gpt-6.1-sol"),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn resolves with an error payload");
+
+        assert_eq!(result.assistant_message.status, MessageStatus::Error);
+        let event = error_event(&events).expect("error event");
+        assert_eq!(event["code"], serde_json::json!("auth_required"));
+        let message = event["message"].as_str().unwrap_or_default();
+        assert!(message.contains("AppHandle ausente"), "{message}");
+        let hint = event["hint"].as_str().unwrap_or_default();
+        assert!(hint.contains("Entre novamente com o ChatGPT"), "{hint}");
+    }
+
+    #[tokio::test]
+    async fn plan_limit_maps_the_raw_provider_code_and_the_usage_hint() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "openai", "gpt-6.1-sol")
+            .expect("conversation");
+        let streamer: ProviderStreamer = Arc::new(|_request, _sink| {
+            Box::pin(async move {
+                Err(anyhow::Error::new(ProviderError::PlanLimit(
+                    StructuredError {
+                        message: "usage limit exceeded".to_string(),
+                        code: Some("subscription_sharing_usage_limit_exceeded".to_string()),
+                        param: None,
+                    },
+                )))
+            })
+        });
+
+        let (channel, events) = channel();
+        let result = run_turn(
+            oauth_deps(temp.db.clone(), streamer),
+            oauth_payload(&conversation, "gpt-6.1-sol"),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn resolves with an error payload");
+
+        assert_eq!(result.assistant_message.status, MessageStatus::Error);
+        let message = result.error.clone().unwrap_or_default();
+        assert!(message.contains("usage limit exceeded"), "{message}");
+        let event = error_event(&events).expect("error event");
+        assert_eq!(
+            event["code"],
+            serde_json::json!("subscription_sharing_usage_limit_exceeded"),
+            "raw provider code wins over the neutral one (T4.4a)"
+        );
+        let hint = event["hint"].as_str().unwrap_or_default();
+        assert!(hint.contains("Gerenciar uso"), "{hint}");
+        assert!(
+            event["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("subscription_sharing_usage_limit_exceeded"),
+            "the provider message keeps the raw code: {event}"
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_not_eligible_maps_the_raw_code_and_no_retry() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "openai", "gpt-6.1-sol")
+            .expect("conversation");
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let calls = calls.clone();
+            Arc::new(move |_request, _sink| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    Err(anyhow::Error::new(ProviderError::PlanNotEligible(
+                        StructuredError {
+                            message: "account is not eligible for plan usage".to_string(),
+                            code: Some("subscription_sharing_user_not_eligible".to_string()),
+                            param: None,
+                        },
+                    )))
+                })
+            })
+        };
+
+        let (channel, events) = channel();
+        let result = run_turn(
+            oauth_deps(temp.db.clone(), streamer),
+            oauth_payload(&conversation, "gpt-6.1-sol"),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn resolves with an error payload");
+
+        assert_eq!(result.assistant_message.status, MessageStatus::Error);
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "inelegível não pode repetir request/login"
+        );
+        let event = error_event(&events).expect("error event");
+        assert_eq!(
+            event["code"],
+            serde_json::json!("subscription_sharing_user_not_eligible")
+        );
+        let hint = event["hint"].as_str().unwrap_or_default();
+        assert!(hint.contains("não tem acesso ao plano ChatGPT"), "{hint}");
+    }
+
+    #[tokio::test]
+    async fn missing_credential_fails_before_persisting_the_user_message() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "openai", "gpt-6.1-sol")
+            .expect("conversation");
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let calls = calls.clone();
+            Arc::new(move |_request, _sink| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            })
+        };
+
+        let mut harness = oauth_deps(temp.db.clone(), streamer);
+        harness.credential_override = None;
+        harness.api_key_override = None;
+        let (channel, _events) = channel();
+        let error = run_turn(
+            harness,
+            oauth_payload(&conversation, "gpt-6.1-sol"),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("a turn without a credential must fail before persisting");
+
+        let typed = error
+            .downcast_ref::<CredentialError>()
+            .expect("typed credential error");
+        assert_eq!(typed.code, "missing_credentials");
+        assert!(
+            typed
+                .hint
+                .as_deref()
+                .unwrap_or_default()
+                .contains("ChatGPT"),
+            "hint deve oferecer login: {:?}",
+            typed.hint
+        );
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "nenhum request ao provedor sem credencial"
+        );
+        assert!(
+            temp.db
+                .list_messages(&conversation.id)
+                .expect("messages")
+                .is_empty(),
+            "nenhuma mensagem pode ser persistida sem credencial"
+        );
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* T3.4b ModelSource                                                 */
+    /* ---------------------------------------------------------------- */
+
+    struct FakeModelSource {
+        models: Vec<ModelInfo>,
+    }
+
+    impl ModelSource for FakeModelSource {
+        fn model(&self, provider_id: &str, model_id: &str) -> Option<ModelInfo> {
+            if provider_id != "openai" {
+                return None;
+            }
+            self.models
+                .iter()
+                .find(|model| model.id == model_id)
+                .cloned()
+        }
+    }
+
+    #[tokio::test]
+    async fn model_source_resolves_an_account_only_slug() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "openai", "gpt-6.1-sol")
+            .expect("conversation");
+        assert!(
+            oauth_catalog()
+                .model("openai", "gpt-account-only")
+                .is_none(),
+            "o slug do teste não pode existir no catálogo embutido"
+        );
+        let captured: Arc<Mutex<Vec<ModelInfo>>> = Arc::new(Mutex::new(Vec::new()));
+        let streamer: ProviderStreamer = {
+            let captured = captured.clone();
+            Arc::new(move |request, sink| {
+                captured
+                    .lock()
+                    .expect("captured lock")
+                    .push(request.config.model.clone());
+                Box::pin(async move {
+                    text_stream(&sink, "Resposta final.");
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = oauth_deps(temp.db.clone(), streamer);
+        harness.model_source = Some(Arc::new(FakeModelSource {
+            models: vec![openai_model("gpt-account-only")],
+        }));
+        let (channel, _events) = channel();
+        let result = run_turn(
+            harness,
+            oauth_payload(&conversation, "gpt-account-only"),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno com modelo da conta (fora do catálogo)");
+
+        assert_eq!(result.assistant_message.status, MessageStatus::Complete);
+        assert_eq!(
+            result.assistant_message.model_id.as_deref(),
+            Some("gpt-account-only")
+        );
+        let captured = captured.lock().expect("captured lock");
+        assert_eq!(
+            captured.first().map(|model| model.id.as_str()),
+            Some("gpt-account-only"),
+            "o request usa o modelo resolvido pelo ModelSource"
+        );
+        let stored = temp
+            .db
+            .get_conversation(&conversation.id)
+            .expect("conversation query")
+            .expect("conversation exists");
+        assert_eq!(stored.model_id, "gpt-account-only");
+    }
+
+    #[test]
+    fn catalog_model_resolution_is_the_fallback_without_an_override() {
+        let temp = TempDb::new();
+        let streamer: ProviderStreamer = Arc::new(|_request, _sink| Box::pin(async { Ok(()) }));
+        let harness = oauth_deps(temp.db.clone(), streamer);
+        let provider = harness
+            .catalog
+            .provider("openai")
+            .cloned()
+            .expect("provider");
+        let resolved =
+            resolve_model(&harness, &provider, "gpt-6.1-sol").expect("catálogo embutido");
+        assert_eq!(resolved.id, "gpt-6.1-sol");
+        assert!(
+            resolve_model(&harness, &provider, "gpt-account-only").is_none(),
+            "sem override, o catálogo continua sendo o fallback"
+        );
     }
 }

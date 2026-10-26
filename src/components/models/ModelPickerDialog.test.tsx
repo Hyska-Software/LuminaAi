@@ -139,7 +139,7 @@ describe('ModelPickerDialog', () => {
     expect(search.getAttribute('aria-activedescendant')).toBe(current.id);
   });
 
-  it('busca global encontra modelos dos dois provedores', async () => {
+  it('busca global encontra modelos de todos os provedores', async () => {
     await renderOpenDialog();
     const user = userEvent.setup();
 

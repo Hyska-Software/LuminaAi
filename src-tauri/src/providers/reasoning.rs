@@ -58,12 +58,10 @@ fn effort_values(model: &ModelInfo) -> Option<&Vec<String>> {
 }
 
 fn has_budget(model: &ModelInfo) -> bool {
-    model.reasoning_options.iter().any(|option| {
-        matches!(
-            option,
-            crate::catalog::ReasoningOption::BudgetTokens { .. }
-        )
-    })
+    model
+        .reasoning_options
+        .iter()
+        .any(|option| matches!(option, crate::catalog::ReasoningOption::BudgetTokens { .. }))
 }
 
 fn has_any_control(model: &ModelInfo) -> bool {
@@ -226,10 +224,7 @@ fn apply_google(model: &ModelInfo, request: &ReasoningRequest, body: &mut Value)
         }
         ReasoningRequest::Effort(effort) => {
             if has_any_control(model) {
-                set_google_thinking(
-                    body,
-                    json!({"thinkingLevel": effort.trim().to_uppercase()}),
-                );
+                set_google_thinking(body, json!({"thinkingLevel": effort.trim().to_uppercase()}));
             }
         }
         ReasoningRequest::Budget(budget) => {
@@ -407,7 +402,10 @@ mod tests {
             &ReasoningRequest::Effort("low".into()),
             &mut body,
         );
-        assert_eq!(body["generationConfig"]["thinkingConfig"]["thinkingLevel"], "LOW");
+        assert_eq!(
+            body["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "LOW"
+        );
 
         let mut body = json!({"generationConfig": {"maxOutputTokens": 100}});
         apply(
@@ -428,7 +426,10 @@ mod tests {
             &ReasoningRequest::Off,
             &mut body,
         );
-        assert_eq!(body["generationConfig"]["thinkingConfig"]["thinkingBudget"], 0);
+        assert_eq!(
+            body["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            0
+        );
     }
 
     #[test]

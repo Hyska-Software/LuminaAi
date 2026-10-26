@@ -55,7 +55,8 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 
 ```
 ┌──────────────────────────────── janela (1320×860) ────────────────────────────────┐
-│ TitleBar 56px: chrome · drag region · marca · [busca ⌘K] · controles de janela    │
+│ TitleBar 56px: chrome · drag region · marca · [Plano ChatGPT · Gerenciar uso]* ·    │
+│               [busca ⌘K] · controles de janela                                      │
 │               ╭──────────────────────── painel do chat ────────────────────────────│
 │ Sidebar 272px │  Chat (max-w-3xl centrado)                    │ Artifact panel    │
 │  novo chat    │  mensagens…                                   │ 360–900px, dock   │
@@ -66,7 +67,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 ```
 
 - **Chrome contínuo**: topbar e sidebar formam uma única superfície (`bg-surface`), sem linhas divisórias entre si. O chat é um painel `bg-background` com **apenas o canto superior esquerdo arredondado** (`rounded-tl-lg`), encostado nas duas áreas — a divisão é feita só pelo contraste de superfície, sem `border` de 1px. O canto acompanha a borda da sidebar ao abrir/fechar/redimensionar e os painéis laterais à direita não mudam.
-- **TitleBar**: 56px, `decorations: false`, `bg-surface` sem borda inferior; arrastável (`data-tauri-drag-region`); controles nativos custom (minimizar/maximizar/fechar) com hover `surface-hover` e fechar em vermelho.
+- **TitleBar**: 56px, `decorations: false`, `bg-surface` sem borda inferior; arrastável (`data-tauri-drag-region`); controles nativos custom (minimizar/maximizar/fechar) com hover `surface-hover` e fechar em vermelho. Quando a conta conectada está usando o plano ChatGPT, o chrome mostra o indicador **Plano ChatGPT · Gerenciar uso** à direita (antes da busca) — é account-level, por isso vive na topbar e não no composer; sem plano ativo ele não aparece.
 - **Sidebar**: 272px (padrão), `bg-surface` (sem borda divisória à direita), colapsável (⌘/Ctrl+B) e **redimensionável** arrastando a borda direita (220–480px, largura persistida; duplo clique restaura 272px; foco no divisor + ←/→ movem 16px, Home/End vão aos limites). Contém: botão "Novo chat" (pill com borda), item **"Skills"** (abre a view de gestão no lugar do chat; oculto quando o painel é desativado nas configurações), busca, lista agrupada (Fixadas, Hoje, Ontem, 7 dias, 30 dias, Mais antigas), rodapé com atalho de configurações e versão.
 - **Chat**: painel `bg-background` (`rounded-tl-lg`) que recebe a coluna central `max-w-3xl` (768px), padding 24px, espaçamento entre mensagens 28px.
 - **Composer**: sticky no rodapé com gradiente de fade; container `rounded-3xl`, borda 1px, fundo `surface-raised`, sombra sutil; cresce até 10 linhas.
@@ -130,8 +131,8 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 > diálogo é o modo avançado, aberto por "Ver todos os modelos…" no rodapé da lista.
 
 - Largura 760px, altura 580px, `rounded-2xl`, com `max-w`/`max-h` para janelas pequenas (mín. da janela: 900×620).
-- Header: título "Selecionar modelo", descrição curta, busca (global, nos dois provedores) e chips de filtro — Favoritos, Visão, Raciocínio, Grátis (`aria-pressed`) — com contagem de modelos.
-- Abas de provedor `OpenCode Go` / `OpenCode Zen` com dot de status da chave (tooltip com a origem). Com busca ativa, as abas dão lugar a "Todos os provedores" e os grupos viram "Go · Claude", "Zen · Claude", etc.
+- Header: título "Selecionar modelo", descrição curta, busca (global, em todos os provedores) e chips de filtro — Favoritos, Visão, Raciocínio, Grátis (`aria-pressed`) — com contagem de modelos.
+- Abas de provedor `OpenCode Go` / `OpenCode Zen` / `OpenAI (ChatGPT)` com dot de status (chave ou conta conectada; tooltip com a origem/estado). Com busca ativa, as abas dão lugar a "Todos os provedores" e os grupos viram "Go · Claude", "Zen · Claude", "ChatGPT · GPT", etc. Modelos `estimated` (só da conta) mostram selo próprio; com plano ChatGPT ativo o preço por token é substituído por "Incluído no seu plano ChatGPT" + "Gerenciar uso".
 - Lista agrupada por família (favoritos primeiro, "Outros" por último); cada linha: glifo da marca do modelo (LobeHub, mono, tingido por tokens), nome, badges (Grátis/Visão/Raciocínio/Preview), contexto, preço, check no modelo em uso e estrela de favorito (visível no hover/foco).
 - Coluna direita (300px): identidade do modelo (nome, provedor, id), badges, descrição, especificações (contexto, saída máxima, custo, protocolo, entrada, conhecimento, lançamento), aviso de status (indisponível/preview/grátis), aviso de chave ausente com "Configurar" e **seletor de modo de pensamento** (segmented: Desligado + esforços; slider para `budget_tokens`).
 - Interação: clique = prévia; duplo-clique, Enter na busca ou "Usar este modelo" = confirma. Setas/Home/End navegam e atualizam a prévia. Esc limpa a busca antes de fechar.
@@ -143,7 +144,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 
 Tabs à esquerda (180px), conteúdo à direita (520px):
 1. **Geral**: tema (Claro/Escuro/Sistema), idioma, tamanho da fonte, enviar com Enter/Ctrl+Enter, reduzir movimento.
-2. **Provedores**: OpenCode Go e Zen — campo de API key (mascarado), status (Configurada via settings/env/CLI OpenCode), botão testar conexão, link para o console, aviso de privacidade.
+2. **Provedores**: OpenCode Go e Zen — campo de API key (mascarado), status (Configurada via settings/env/CLI OpenCode), botão testar conexão, link para o console, aviso de privacidade. OpenAI — card de conta com **Continuar com ChatGPT** (OAuth oficial, sem API key), estados (aguardando/cancelar/abrir novamente), conta conectada com e-mail + selo **Plano ChatGPT** + **Gerenciar uso** + **Sair** + detalhes (client/host mascarados, escopos, expiração de 1 h), "Ativar uso do plano" quando o escopo não foi concedido e API key `sk-…` como alternativa; erro de segredos corrompidos vira banner com "Abrir pasta de dados".
 3. **Modelo padrão**: provider + modelo + modo de pensamento padrão (com uma conversa em andamento, alterações aqui valem apenas para novas conversas).
 4. **Instruções do sistema**: textarea com o prompt customizado (placeholder mostra o padrão), contador de caracteres.
 5. **Ferramentas**: busca web (on/off), criação de arquivos (on/off), máximo de passos do agente (1–1000, padrão 64).

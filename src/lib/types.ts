@@ -60,6 +60,35 @@ export interface ModelInfo {
   description?: string | null;
   tags: string[];
   status: ModelStatus;
+  /** Capabilities inferred because the model came from the account list. */
+  estimated?: boolean;
+}
+
+/** How a provider is authenticated. Defaults to `api-key` for older catalogs. */
+export type ProviderAuth = 'api-key' | 'oauth';
+
+/**
+ * Wire-request constraints. `chatgpt-plan` applies the OpenAI plan-usage
+ * restrictions (store:false, no max_output_tokens/temperature, instructions
+ * only); `standard` sends the full neutral body.
+ */
+export type RequestProfile = 'standard' | 'chatgpt-plan';
+
+export interface RequestProfiles {
+  oauth?: RequestProfile;
+  apiKey?: RequestProfile;
+}
+
+export interface OAuthProviderInfo {
+  issuer: string;
+  discoveryUrl?: string;
+  registrationClientId: string;
+  agentNameHint: string;
+  resource: string;
+  scopes: string[];
+  planUsageScope: string;
+  callbackPath: string;
+  loopbackHost: string;
 }
 
 export interface ProviderInfo {
@@ -72,6 +101,9 @@ export interface ProviderInfo {
   endpoints: Record<string, string>;
   authEnv: string;
   defaultModelId: string;
+  auth?: ProviderAuth;
+  requestProfiles?: RequestProfiles;
+  oauth?: OAuthProviderInfo | null;
   models: ModelInfo[];
   notes: string[];
 }
@@ -249,7 +281,7 @@ export type TurnEvent =
   | { type: 'title_updated'; conversationId: string; title: string }
   | { type: 'done'; result: TurnResult }
   | { type: 'cancelled' }
-  | { type: 'error'; message: string; code?: string };
+  | { type: 'error'; message: string; code?: string; hint?: string };
 
 /* ------------------------------------------------------------------ */
 /* Artifacts                                                           */
@@ -417,12 +449,43 @@ export interface ProviderKeyStatus {
   providerId: string;
   hasKey: boolean;
   masked?: string | null;
-  source: 'settings' | 'env' | 'opencode-cli' | 'none';
+  source: 'settings' | 'env' | 'opencode-cli' | 'chatgpt' | 'none';
+  /** api-key | oauth */
+  mode?: ProviderAuth;
+}
+
+/** Two-phase ChatGPT login attempt handle. */
+export interface LoginChallenge {
+  attemptId: string;
+  authUrl: string;
+  expiresAt: number;
+}
+
+export type ProviderAuthState =
+  | 'signed-in'
+  | 'signed-out'
+  | 'reauth-required'
+  | 'plan-disabled';
+
+/** Auth state of one provider; never contains credential material. */
+export interface ProviderAuthStatus {
+  providerId: string;
+  mode: ProviderAuth;
+  state: ProviderAuthState;
+  accountLabel?: string | null;
+  planUsage: boolean;
+  expiresAt?: number | null;
+  scopes: string[];
+  clientIdMasked?: string | null;
+  hostIdMasked?: string | null;
+  hint?: string | null;
 }
 
 export interface SettingsView {
   settings: Settings;
   keys: ProviderKeyStatus[];
+  auth?: ProviderAuthStatus[];
+  secretsError?: string | null;
 }
 
 export interface AppInfo {
@@ -445,6 +508,7 @@ export interface ProviderValidation {
 export interface CatalogView {
   catalog: CatalogFile;
   keys: ProviderKeyStatus[];
+  auth?: ProviderAuthStatus[];
   remoteRefreshedAt?: number | null;
 }
 

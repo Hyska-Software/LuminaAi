@@ -9,27 +9,33 @@ import {
 import { Search } from 'lucide-react';
 import {
   defaultReasoningFor,
-  getModel,
-  getProvider,
+  findModelIn,
+  findProviderIn,
+  providerAuth,
   providers as catalogProviders,
 } from '@/lib/catalog';
 import {
   buildModelGroups,
   entryKey,
+  favoriteEntryMatches,
   firstSelectable,
   flattenGroups,
   keyStatusFor,
-  keyStatusLabel,
   modelFilterOptions,
   modelKey,
   normalizeSearch,
-  providerHasKey,
   reasoningForModel,
   selectionKey,
   type ModelFilter,
   type ModelListEntry,
 } from '@/lib/modelMenu';
-import type { ModelInfo, ModelSelection, ProviderInfo, ReasoningSelection } from '@/lib/types';
+import { openExternal } from '@/lib/genui/open-external';
+import type {
+  ModelInfo,
+  ModelSelection,
+  ProviderInfo,
+  ReasoningSelection,
+} from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
   MODEL_LOCKED_DESCRIPTION,
@@ -56,6 +62,7 @@ import {
 } from '@/components/ui';
 import { ModelDetailPanel } from './ModelDetailPanel';
 import { FamilyAvatar } from './FamilyAvatar';
+import { authStatusFor, providerAuthenticated, providerTabTitle } from './providerAuth';
 import { ModelList } from './ModelList';
 import { ModelSearchField } from './ModelSearchField';
 import { modelOptionId } from './ModelRow';
@@ -109,6 +116,9 @@ function initialPreview(providerList: ProviderInfo[], selection: ModelSelection)
   };
 }
 
+/** ChatGPT usage dashboard (same URL exposed by the provider console). */
+const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
+
 function EmptyResults({ onClear, canClear }: { onClear: () => void; canClear: boolean }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 py-10 text-center">
@@ -143,6 +153,7 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
   const selection = useAppStore((state) => state.selection);
   const favorites = useAppStore((state) => state.favorites);
   const keys = useAppStore((state) => state.keys);
+  const auth = useAppStore((state) => state.auth);
   const storeProviders = useAppStore((state) => state.providers);
   const toggleFavorite = useAppStore((state) => state.toggleFavorite);
   const setSelection = useAppStore((state) => state.setSelection);
@@ -171,19 +182,13 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
   const searching = normalizeSearch(query).length > 0;
   const groups = useMemo(
     () =>
-      searching
-        ? buildModelGroups(providerList, {
-            query,
-            filters,
-            favorites,
-            includeUnavailable: true,
-          })
-        : buildModelGroups(providerList, {
-            providerId,
-            filters,
-            favorites,
-            includeUnavailable: true,
-          }),
+      buildModelGroups(providerList, {
+        ...(searching ? { query } : { providerId }),
+        filters,
+        includeUnavailable: true,
+        favorites,
+        favoriteMatch: (pid, modelId) => favoriteEntryMatches(favorites, pid, modelId),
+      }),
     [providerList, providerId, query, filters, favorites, searching],
   );
   const entries = useMemo(() => flattenGroups(groups), [groups]);
@@ -217,6 +222,7 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
 
   const previewProvider = providerList.find((provider) => provider.id === preview.providerId);
   const previewModel = previewProvider?.models.find((model) => model.id === preview.modelId);
+  const previewAuthStatus = authStatusFor(auth, preview.providerId);
   const previewEntry = useMemo<ModelListEntry | null>(
     () =>
       previewProvider && previewModel
@@ -225,7 +231,7 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
             providerName: previewProvider.name,
             providerShortName: previewProvider.shortName,
             model: previewModel,
-            favorite: favorites.includes(previewModel.id),
+            favorite: favoriteEntryMatches(favorites, previewProvider.id, previewModel.id),
           }
         : null,
     [previewProvider, previewModel, favorites],
@@ -438,9 +444,16 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
               );
             })}
           </div>
-          <span className="shrink-0 text-[11px] tabular-nums text-foreground-subtle">
-            {`${entryCount} ${entryCount === 1 ? 'modelo' : 'modelos'}`}
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            {previewAuthStatus?.planUsage ? (
+              <Badge tone="accent" title="Modelos inclusos no seu plano ChatGPT">
+                Plano ChatGPT
+              </Badge>
+            ) : null}
+            <span className="text-[11px] tabular-nums text-foreground-subtle">
+              {`${entryCount} ${entryCount === 1 ? 'modelo' : 'modelos'}`}
+            </span>
+          </div>
         </div>
       </DialogHeader>
 
@@ -457,24 +470,30 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
               </span>
             ) : (
               <TabsList aria-label="Provedores" className="h-8 gap-0.5 bg-transparent p-0">
-                {providerList.map((provider) => (
-                  <TabsTrigger
-                    key={provider.id}
-                    value={provider.id}
-                    variant="pill"
-                    title={keyStatusLabel(keyStatusFor(keys, provider.id))}
-                    className="h-8 gap-1.5 px-3 text-[12.5px]"
-                  >
-                    {provider.shortName}
-                    <span
-                      aria-hidden
-                      className={cn(
-                        'size-1.5 rounded-full',
-                        providerHasKey(keys, provider.id) ? 'bg-success' : 'bg-border-strong',
-                      )}
-                    />
-                  </TabsTrigger>
-                ))}
+                {providerList.map((provider) => {
+                  const providerKey = keyStatusFor(keys, provider.id);
+                  const providerAuthStatus = authStatusFor(auth, provider.id);
+                  return (
+                    <TabsTrigger
+                      key={provider.id}
+                      value={provider.id}
+                      variant="pill"
+                      title={providerTabTitle(provider, providerKey, providerAuthStatus)}
+                      className="h-8 gap-1.5 px-3 text-[12.5px]"
+                    >
+                      {provider.shortName}
+                      <span
+                        aria-hidden
+                        className={cn(
+                          'size-1.5 rounded-full',
+                          providerAuthenticated(providerKey, providerAuthStatus)
+                            ? 'bg-success'
+                            : 'bg-border-strong',
+                        )}
+                      />
+                    </TabsTrigger>
+                  );
+                })}
               </TabsList>
             )}
           </div>
@@ -513,7 +532,7 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
             entry={previewEntry}
             favorite={previewEntry?.favorite ?? false}
             onFavoriteToggle={() => {
-              if (previewEntry) toggleFavorite(previewEntry.model.id);
+              if (previewEntry) toggleFavorite(previewEntry.providerId, previewEntry.model.id);
             }}
             variant="dialog"
             reasoning={
@@ -525,6 +544,12 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
               />
             }
             keyStatus={previewKeyStatus}
+            providerAuth={previewProvider ? providerAuth(previewProvider) : 'api-key'}
+            authStatus={previewAuthStatus}
+            planUsage={Boolean(previewAuthStatus?.planUsage)}
+            onManagePlan={() => {
+              void openExternal(previewProvider?.consoleUrl ?? CHATGPT_USAGE_URL);
+            }}
             onConfigureProvider={openProviderSettings}
             className="h-full min-h-0"
           />
@@ -568,8 +593,11 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
  */
 function ModelLockedDialog({ onClose }: { onClose: () => void }) {
   const selection = useAppStore((state) => state.selection);
-  const model = getModel(selection.providerId, selection.modelId);
-  const provider = getProvider(selection.providerId);
+  const storeProviders = useAppStore((state) => state.providers);
+  const providerList = storeProviders.length ? storeProviders : catalogProviders();
+  // Resolve against the merged list so account-only models keep their name.
+  const model = findModelIn(providerList, selection.providerId, selection.modelId);
+  const provider = findProviderIn(providerList, selection.providerId);
   const modelName = model?.name ?? selection.modelId;
   const providerName = provider?.name ?? selection.providerId;
 

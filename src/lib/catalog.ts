@@ -7,9 +7,11 @@ import type {
   CatalogFile,
   ModelInfo,
   ModelSelection,
+  ProviderAuth,
   ProviderInfo,
   ReasoningOption,
   ReasoningSelection,
+  RequestProfile,
   Settings,
 } from './types';
 
@@ -20,11 +22,45 @@ export function providers(): ProviderInfo[] {
 }
 
 export function getProvider(providerId: string): ProviderInfo | undefined {
-  return catalog.providers.find((p) => p.id === providerId);
+  return findProviderIn(catalog.providers, providerId);
+}
+
+export function findProviderIn(
+  list: readonly ProviderInfo[],
+  providerId: string,
+): ProviderInfo | undefined {
+  return list.find((p) => p.id === providerId);
 }
 
 export function getModel(providerId: string, modelId: string): ModelInfo | undefined {
-  return getProvider(providerId)?.models.find((m) => m.id === modelId);
+  return findModelIn(catalog.providers, providerId, modelId);
+}
+
+export function findModelIn(
+  list: readonly ProviderInfo[],
+  providerId: string,
+  modelId: string,
+): ModelInfo | undefined {
+  return findProviderIn(list, providerId)?.models.find((m) => m.id === modelId);
+}
+
+/** Authentication mode, defaulting to API key for older catalogs. */
+export function providerAuth(provider: ProviderInfo | undefined): ProviderAuth {
+  return provider?.auth ?? 'api-key';
+}
+
+/** Request profile for a provider + credential kind. */
+export function requestProfileFor(
+  provider: ProviderInfo | undefined,
+  credential: ProviderAuth,
+): RequestProfile {
+  if (!provider) return 'standard';
+  return (credential === 'oauth' ? provider.requestProfiles?.oauth : provider.requestProfiles?.apiKey) ?? 'standard';
+}
+
+/** True when the provider can use the user's ChatGPT plan (OAuth flow). */
+export function providerSupportsPlan(provider: ProviderInfo | undefined): boolean {
+  return provider?.auth === 'oauth' && Boolean(provider.oauth);
 }
 
 export function findModel(modelId: string): { provider: ProviderInfo; model: ModelInfo } | null {
@@ -40,8 +76,20 @@ export function providerLabel(providerId: string): string {
 }
 
 export function defaultSelection(settings?: Settings | null): ModelSelection {
+  return defaultSelectionFrom(settings, catalog.providers);
+}
+
+/**
+ * Same selection policy as {@link defaultSelection}, but against a caller
+ * supplied provider list (the renderer uses the merged `CatalogView` list so
+ * account-only models survive a restart).
+ */
+export function defaultSelectionFrom(
+  settings: Settings | null | undefined,
+  list: readonly ProviderInfo[],
+): ModelSelection {
   const providerId = settings?.defaultProvider ?? 'opencode-go';
-  const provider = getProvider(providerId) ?? providers()[0];
+  const provider = findProviderIn(list, providerId) ?? list[0];
   const configured = settings?.defaultModel;
   const modelId =
     configured && provider?.models.some((m) => m.id === configured)

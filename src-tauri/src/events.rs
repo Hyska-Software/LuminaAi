@@ -63,5 +63,9 @@ pub enum TurnEvent {
         message: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         code: Option<String>,
+        /// Actionable hint for the renderer (e.g. "Entre novamente para usar
+        /// seu plano ChatGPT"), separate from the raw provider message.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hint: Option<String>,
     },
 }

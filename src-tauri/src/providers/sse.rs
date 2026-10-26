@@ -229,7 +229,8 @@ mod tests {
 
     #[test]
     fn stops_on_done_sentinel() {
-        let (events, stopped) = collect(&[b"data: {\"x\":1}\n\ndata: [DONE]\n\ndata: {\"y\":2}\n\n"]);
+        let (events, stopped) =
+            collect(&[b"data: {\"x\":1}\n\ndata: [DONE]\n\ndata: {\"y\":2}\n\n"]);
         assert!(stopped);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].1, "{\"x\":1}");

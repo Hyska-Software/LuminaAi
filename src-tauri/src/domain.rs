@@ -649,8 +649,45 @@ pub struct ProviderKeyStatus {
     pub has_key: bool,
     #[serde(default)]
     pub masked: Option<String>,
-    /// settings | env | opencode-cli | none
+    /// settings | env | opencode-cli | chatgpt | none
     pub source: String,
+    /// api-key | oauth
+    #[serde(default)]
+    pub mode: String,
+}
+
+/// Two-phase login attempt handle returned by `openai_login_start`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginChallenge {
+    pub attempt_id: String,
+    pub auth_url: String,
+    pub expires_at: i64,
+}
+
+/// Auth state of one provider, derived from stored credentials (no network).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAuthStatus {
+    pub provider_id: String,
+    /// "oauth" | "api-key"
+    pub mode: String,
+    /// "signed-in" | "signed-out" | "reauth-required" | "plan-disabled"
+    pub state: String,
+    #[serde(default)]
+    pub account_label: Option<String>,
+    #[serde(default)]
+    pub plan_usage: bool,
+    #[serde(default)]
+    pub expires_at: Option<i64>,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub client_id_masked: Option<String>,
+    #[serde(default)]
+    pub host_id_masked: Option<String>,
+    #[serde(default)]
+    pub hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -658,6 +695,12 @@ pub struct ProviderKeyStatus {
 pub struct SettingsView {
     pub settings: Settings,
     pub keys: Vec<ProviderKeyStatus>,
+    #[serde(default)]
+    pub auth: Vec<ProviderAuthStatus>,
+    /// Present when the app secrets file could not be parsed; the UI surfaces it
+    /// and never overwrites the file automatically.
+    #[serde(default)]
+    pub secrets_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -690,6 +733,8 @@ pub struct CatalogView {
     pub catalog: crate::catalog::CatalogFile,
     pub keys: Vec<ProviderKeyStatus>,
     #[serde(default)]
+    pub auth: Vec<ProviderAuthStatus>,
+    #[serde(default)]
     pub remote_refreshed_at: Option<i64>,
 }
 
@@ -704,6 +749,53 @@ pub fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Auth-status DTOs are renderer-facing: they may carry account labels and
+    /// masked ids, but never any credential material.
+    #[test]
+    fn auth_status_never_serializes_tokens() {
+        let status = ProviderAuthStatus {
+            provider_id: "openai".into(),
+            mode: "oauth".into(),
+            state: "signed-in".into(),
+            account_label: Some("user@example.com".into()),
+            plan_usage: true,
+            expires_at: Some(1_700_000_000_000),
+            scopes: vec!["openid".into(), "chatgpt.tokens.use.direct".into()],
+            client_id_masked: Some("oaiapp…1234".into()),
+            host_id_masked: Some("urn:uuid:…".into()),
+            hint: None,
+        };
+        let json = serde_json::to_string(&status).expect("serialize auth status");
+        for forbidden in ["access_token", "refresh_token", "id_token", "accessToken", "refreshToken"] {
+            assert!(!json.contains(forbidden), "{forbidden} vazou no status: {json}");
+        }
+        assert!(json.contains("\"planUsage\":true"));
+        assert!(json.contains("\"clientIdMasked\""));
+
+        let view = SettingsView {
+            settings: Settings::default(),
+            keys: Vec::new(),
+            auth: vec![status],
+            secrets_error: None,
+        };
+        let json = serde_json::to_string(&view).expect("serialize settings view");
+        assert!(json.contains("\"auth\""));
+        assert!(json.contains("\"secretsError\":null"));
+    }
+
+    #[test]
+    fn login_challenge_uses_camel_case() {
+        let challenge = LoginChallenge {
+            attempt_id: "a1".into(),
+            auth_url: "https://auth.openai.com/api/accounts/authorize?x=1".into(),
+            expires_at: 123,
+        };
+        let json = serde_json::to_value(&challenge).expect("serialize challenge");
+        assert_eq!(json["attemptId"], "a1");
+        assert_eq!(json["authUrl"], "https://auth.openai.com/api/accounts/authorize?x=1");
+        assert_eq!(json["expiresAt"], 123);
+    }
 
     /// O replay opaco do provedor fica só no backend (SQLite): o renderer nunca
     /// usou o campo e, a partir do formato v2, ele carrega o estado de todos os

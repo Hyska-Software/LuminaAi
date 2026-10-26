@@ -3,6 +3,7 @@ import { Check, Star } from 'lucide-react';
 import { formatContextWindow, formatPrice } from '@/lib/catalog';
 import { modelKey, type ModelListEntry } from '@/lib/modelMenu';
 import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui';
 import { CapabilityBadges } from './CapabilityBadges';
 import { FamilyAvatar } from './FamilyAvatar';
 
@@ -100,7 +101,18 @@ export const ModelRow = React.forwardRef<HTMLDivElement, ModelRowProps>(function
               {model.name}
             </span>
             {!compact ? (
-              <CapabilityBadges model={model} max={3} className="shrink-0" />
+              <>
+                <CapabilityBadges model={model} max={3} className="shrink-0" />
+                {model.estimated ? (
+                  <Badge
+                    tone="outline"
+                    className="shrink-0"
+                    title="Modelo listado pela sua conta: capacidades estimadas."
+                  >
+                    Estimado
+                  </Badge>
+                ) : null}
+              </>
             ) : null}
           </span>
           {compact ? (

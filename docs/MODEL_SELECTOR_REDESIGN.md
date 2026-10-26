@@ -2,6 +2,15 @@
 
 > Status: **implementado e verificado** (2026-10-24). Documento de trabalho; o
 > resultado final está incorporado em `docs/DESIGN.md` §7 e §8.
+>
+> **Atualização v1.6 (2026-10-26):** terceiro provedor **OpenAI (ChatGPT)**.
+> Onde este documento diz "Go/Zen" / "dois provedores", leia "Go/Zen/OpenAI":
+> as abas do dialog e o switcher do pill ganham `OpenAI (ChatGPT)`, a busca
+> global cobre os três, favoritos passam a ser por par `providerId:modelId`
+> (ids legados continuam válidos), modelos só-da-conta recebem badge
+> `estimated`, e com o plano ChatGPT ativo o preço por token vira "Incluído no
+> seu plano ChatGPT" + "Gerenciar uso". Conta não conectada mostra CTA
+> "Conectar conta ChatGPT" (Configurações → Provedores).
 
 ## 1. Objetivo e escopo
 

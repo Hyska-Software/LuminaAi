@@ -16,7 +16,8 @@ export interface ModelListProps {
   onActivate: (key: string) => void;
   onPick: (entry: ModelListEntry) => void;
   onCommit?: (entry: ModelListEntry) => void;
-  onFavoriteToggle?: (modelId: string) => void;
+  /** Favorites are keyed by `providerId:modelId`; the provider is always passed. */
+  onFavoriteToggle?: (providerId: string, modelId: string) => void;
   variant?: 'compact' | 'dialog';
   showProvider?: boolean;
   emptyState?: ReactNode;
@@ -103,7 +104,9 @@ export function ModelList({
                   onPick={() => onPick(entry)}
                   onCommit={onCommit ? () => onCommit(entry) : undefined}
                   onFavoriteToggle={
-                    onFavoriteToggle ? () => onFavoriteToggle(entry.model.id) : undefined
+                    onFavoriteToggle
+                      ? () => onFavoriteToggle(entry.providerId, entry.model.id)
+                      : undefined
                   }
                 />
               );

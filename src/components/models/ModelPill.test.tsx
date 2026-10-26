@@ -257,7 +257,7 @@ describe('ModelPill (model step)', () => {
     expect(await within(dialog).findByRole('option', { name: 'DeepSeek V4 Pro' })).toBeTruthy();
   });
 
-  it('searches both providers globally and replaces the switch with "Go + Zen"', async () => {
+  it('searches every provider globally and replaces the switch with the provider label', async () => {
     const user = userEvent.setup();
     renderPill();
 
@@ -267,7 +267,7 @@ describe('ModelPill (model step)', () => {
     await user.type(search, 'opus');
 
     expect(await within(dialog).findByText('Zen · Claude')).toBeTruthy();
-    expect(within(dialog).getByText('Go + Zen')).toBeTruthy();
+    expect(within(dialog).getByText('Go + Zen + ChatGPT')).toBeTruthy();
     expect(within(dialog).queryByRole('radio', { name: 'Go' })).toBeNull();
     expect(
       within(dialog)
@@ -392,7 +392,9 @@ describe('ModelPill (model step)', () => {
       within(details).getByRole('button', { name: 'Favoritar DeepSeek V4.1 Flash' }),
     );
 
-    expect(useAppStore.getState().favorites).toContain(CURRENT_MODEL);
+    // Favorites are now stored as providerId:modelId pairs.
+    expect(useAppStore.getState().favorites).toContain(`${GO}:${CURRENT_MODEL}`);
+    expect(useAppStore.getState().favorites).not.toContain(CURRENT_MODEL);
 
     const updated = within(dialog).getByRole('group', { name: 'Detalhes do modelo' });
     const pressed = within(updated).getByRole('button', {

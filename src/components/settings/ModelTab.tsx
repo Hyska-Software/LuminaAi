@@ -4,7 +4,7 @@ import {
   defaultReasoningFor,
   formatContextWindow,
   formatPrice,
-  getModel,
+  providerAuth,
   providers as catalogProviders,
 } from '@/lib/catalog';
 import type { ProviderInfo, ReasoningSelection, Settings } from '@/lib/types';
@@ -37,6 +37,7 @@ export function ModelTab() {
   const settings = useAppStore((state) => state.settings);
   const selection = useAppStore((state) => state.selection);
   const storeProviders = useAppStore((state) => state.providers);
+  const auth = useAppStore((state) => state.auth);
   const setSelection = useAppStore((state) => state.setSelection);
   const setReasoning = useAppStore((state) => state.setReasoning);
   const saveSettings = useAppStore((state) => state.saveSettings);
@@ -66,7 +67,14 @@ export function ModelTab() {
   const resolvedModelId = availableModels.some((entry) => entry.id === displayModelId)
     ? displayModelId
     : (availableModels[0]?.id ?? '');
-  const model = activeProvider ? getModel(activeProvider.id, resolvedModelId) : undefined;
+  const model = activeProvider?.models.find((entry) => entry.id === resolvedModelId);
+  const activeAuth = auth.find((entry) => entry.providerId === activeProvider?.id);
+  /** A connected ChatGPT plan hides the per-token price (presentation decision). */
+  const includedInPlan =
+    Boolean(activeProvider) &&
+    providerAuth(activeProvider) === 'oauth' &&
+    activeAuth?.state === 'signed-in' &&
+    activeAuth.planUsage;
 
   const [pendingReasoning, setPendingReasoning] = useState<ReasoningSelection | null>(() =>
     defaultReasoningFor(model),
@@ -108,7 +116,7 @@ export function ModelTab() {
 
   const handleModelChange = (modelId: string) => {
     if (!activeProvider) return;
-    const next = getModel(activeProvider.id, modelId);
+    const next = activeProvider.models.find((entry) => entry.id === modelId);
     commit(activeProvider.id, modelId, defaultReasoningFor(next));
   };
 
@@ -128,7 +136,10 @@ export function ModelTab() {
           </SettingsBlock>
         ) : null}
 
-        <SettingRow label="Provedor" description="OpenCode Go (assinatura) ou OpenCode Zen (créditos).">
+        <SettingRow
+          label="Provedor"
+          description="OpenCode Go (assinatura), OpenCode Zen (créditos) ou OpenAI (plano ChatGPT ou API key)."
+        >
           <NativeSelect
             value={activeProvider?.id ?? ''}
             onChange={(event) => handleProviderChange(event.target.value)}
@@ -163,8 +174,14 @@ export function ModelTab() {
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <CapabilityBadges model={model} max={5} />
+                {model.estimated ? (
+                  <Badge tone="outline" title="Modelo listado pela sua conta: capacidades estimadas.">
+                    Estimado
+                  </Badge>
+                ) : null}
                 <span className="text-[11px] tabular-nums text-foreground-subtle">
-                  {formatContextWindow(model.contextWindow)} contexto · {formatPrice(model.cost)}
+                  {formatContextWindow(model.contextWindow)} contexto ·{' '}
+                  {includedInPlan ? 'Incluído no plano ChatGPT' : formatPrice(model.cost)}
                 </span>
               </div>
               <ThinkingSelector

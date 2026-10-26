@@ -1,6 +1,6 @@
 # Lumina — Arquitetura
 
-Lumina é um aplicativo desktop de conversação com LLMs, construído em **Tauri 2 + React 19 + Tailwind CSS 4**. O objetivo é reproduzir a experiência dos chats de IA modernos (ChatGPT/Claude) — streaming com raciocínio visível, ferramentas, anexos, artefatos e UI generativa — usando **OpenCode Go** e **OpenCode Zen** como únicos provedores.
+Lumina é um aplicativo desktop de conversação com LLMs, construído em **Tauri 2 + React 19 + Tailwind CSS 4**. O objetivo é reproduzir a experiência dos chats de IA modernos (ChatGPT/Claude) — streaming com raciocínio visível, ferramentas, anexos, artefatos e UI generativa — usando **OpenCode Go**, **OpenCode Zen** e **OpenAI** (plano ChatGPT via "Sign in with ChatGPT" ou API key) como provedores.
 
 ## 1. Princípios
 
@@ -115,14 +115,42 @@ O frontend importa o catálogo estaticamente (render instantâneo) e o backend o
 
 ## 7. Provedores (4 protocolos)
 
-| Protocolo | Endpoint (base `https://opencode.ai/inference[/go]`) | Modelos típicos |
+| Provedor | Base URL | Protocolos | Autenticação |
+| --- | --- | --- | --- |
+| OpenCode Go | `https://opencode.ai/inference/go` | openai-chat, openai-responses, anthropic, google | API key |
+| OpenCode Zen | `https://opencode.ai/inference` | idem | API key |
+| OpenAI | `https://api.openai.com/v1` | openai-responses | OAuth ChatGPT (plano) ou API key |
+
+Os endpoints de cada protocolo vêm do mapa `endpoints` do catálogo (não há
+caminhos fixos no código dos adaptadores; o Google usa o placeholder `{model}` e
+o sufixo `:streamGenerateContent?alt=sse`). `x-opencode-session` só é enviado a
+provedores OpenCode.
+
+| Protocolo | Endpoint (base OpenCode) | Modelos típicos |
 | --- | --- | --- |
 | `openai-chat` | `/openai/v1/chat/completions` | GLM, DeepSeek, Kimi (chat), Qwen, MiMo, LongCat, Step |
-| `openai-responses` | `/openai/v1/responses` | GPT, Grok, Muse |
+| `openai-responses` | `/openai/v1/responses` (OpenAI: `/responses`) | GPT, Grok, Muse, OpenAI `gpt-*` |
 | `anthropic` | `/anthropic/v1/messages` | Claude, MiniMax, Kimi K3/K3.1, Qwen (alguns) |
-| `google` | `/google/v1beta/models/{model}:streamGenerateContent` | Gemini |
+| `google` | `/google/v1beta/models/{model}` | Gemini |
 
-Cabeçalhos: `Authorization: Bearer <key>`, `x-opencode-session: <session>`, `User-Agent: Lumina/<versão>`.
+Cabeçalhos: `Authorization: Bearer <key>`, `x-opencode-session: <session>` (só
+OpenCode), `User-Agent: Lumina/<versão>`.
+
+### Autenticação OpenAI (plano ChatGPT)
+
+`src-tauri/src/oauth/**` implementa o fluxo oficial "Sign in with ChatGPT —
+ChatGPT plan usage" para apps open-source/locais: PKCE S256 + `state` + `nonce`,
+registro dinâmico (`dynamic_agent_client`) com `ext_agent_host_id` persistido,
+callback loopback em `127.0.0.1` (porta efêmera), troca de code, validação do ID
+token por JWKS, refresh rotativo single-flight e revogação no sign-out (mantendo
+o mapping conta/`client_id`). Tokens ficam no backend (`secrets.json` v2, 0600,
+escrita atômica sob um único writer); o renderer recebe apenas
+`ProviderAuthStatus` (e-mail, ids mascarados, escopos, expiração). A lista de
+modelos é específica da conta (`/v1/models`), cacheada em `models-cache.json` e
+mesclada ao catálogo no `CatalogView`; o harness resolve modelos pela visão
+mesclada. Perfis de request: `chatgpt-plan` (store:false/stream:true, sem
+`max_output_tokens`/`temperature`, `instructions` + function tools) e `standard`
+(API key). Detalhes/limites: `docs/MODELS.md`.
 
 ### Mapeamento de "modo de pensamento"
 
@@ -392,6 +420,8 @@ Comandos (todos camelCase no JS):
 ```
 app_info, get_settings, save_settings, set_provider_key, validate_provider,
 open_data_dir, reset_app_data, get_catalog, refresh_catalog, list_remote_models,
+refresh_provider_models, openai_login_start, openai_login_wait,
+openai_login_cancel, openai_sign_out, openai_auth_status,
 list_conversations, create_conversation, get_conversation, rename_conversation,
 delete_conversation, set_conversation_pinned, search_conversations,
 truncate_conversation, export_conversation, import_attachments, get_attachment,
@@ -400,9 +430,24 @@ save_artifact, open_artifact, delete_artifact, get_code_environment,
 open_skills_dir, get_skills, set_skill_enabled, delete_skill, run_turn, cancel_turn
 ```
 
+O login ChatGPT é **em duas fases**: `openai_login_start` devolve
+`{ attemptId, authUrl, expiresAt }` e abre o navegador; `openai_login_wait`
+(`async`, até 10 min) resolve quando o callback chega; `openai_login_cancel`
+encerra. `refresh_provider_models` devolve o `CatalogView` mesclado
+(catálogo + modelos da conta).
+
 ## 13. Segurança
 
 - API keys ficam só no backend; o renderer recebe apenas `hasKey`, `masked`, `source`.
+- **OAuth ChatGPT**: access/refresh/id tokens também ficam só no backend
+  (`secrets.json` v2, 0600, escrita atômica sob um único writer, com lock de
+  RMW; arquivo corrompido nunca é sobrescrito — a UI mostra `secretsError`). O
+  renderer recebe só `ProviderAuthStatus` (e-mail, ids mascarados, escopos,
+  expiração). `state`+PKCE+`nonce` protegem o loopback; o ID token é verificado
+  por JWKS; refresh é single-flight e rotativo; sign-out revoga o refresh token e
+  mantém apenas o mapping conta/`client_id`. Tokens nunca vão para URL, log,
+  localStorage ou mensagens; `id_token_hint` só aparece na URL de authorize
+  (redigida em diagnósticos).
 - CSP restritiva em produção; sem `eval`, sem imports remotos em runtime.
 - HTML/SVG de artefatos e blocos `html` rodam em iframe `sandbox="allow-scripts"` sem acesso ao IPC (sem `allow-same-origin`).
 - Links externos abrem no navegador padrão via plugin-opener, nunca no webview.
@@ -449,3 +494,5 @@ A verificação é feita por testes automatizados — unitários e de integraç�
 | 9 | Preview de PDF com pdf.js | viewer nativo do WebView2 / conversão via LibreOffice | comportamento igual em Windows/macOS/Linux e testável; sem dependência externa |
 | 10 | Prévia de imagem no backend (TIFF→PNG com `image`) e ZIP listado sem extração | conversão no renderer (WASM) / abrir no app externo | WebView não abre TIFF; listar entradas é seguro, barato e cobre `.jar/.epub` |
 | 11 | Prism estendido com grammars extras carregadas sob demanda | trocar por Shiki/highlight.js | reaproveita o `prism-react-renderer` já usado no chat e mantém um tema único de tokens |
+| 12 | OpenAI via "Sign in with ChatGPT" (plano) + API key, endpoints/perfis no catálogo | OAuth interno do Codex CLI/`backend-api` | caminho documentado para apps OSS, sem headers/tokens internos; o backend `backend-api` não é autorizado a terceiros (ver `docs/research/openai-oauth.md`) |
+| 13 | Instância única do app + refresh OAuth single-flight | múltiplas instâncias com refresh rotativo concorrente | refresh token é rotativo; duas instâncias poderiam invalidar a sessão uma da outra |

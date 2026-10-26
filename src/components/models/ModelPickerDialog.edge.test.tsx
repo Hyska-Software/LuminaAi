@@ -152,10 +152,10 @@ describe('ModelPickerDialog (edge) — catálogo grande e busca hostil', () => {
 
     await user.type(searchField(), 'o');
 
-    // 1 letra casa nos dois provedores: 38 no Go + 82 no Zen.
-    expect(screen.getAllByRole('option')).toHaveLength(120);
-    expect(modelCount()).toBe('120 modelos');
-    expect(new Set(screen.getAllByRole('option').map((option) => option.id)).size).toBe(120);
+    // 1 letra casa nos três provedores: 38 no Go + 82 no Zen + 27 no OpenAI.
+    expect(screen.getAllByRole('option')).toHaveLength(147);
+    expect(modelCount()).toBe('147 modelos');
+    expect(new Set(screen.getAllByRole('option').map((option) => option.id)).size).toBe(147);
     expect(screen.getByText('Todos os provedores')).toBeTruthy();
     expect(screen.queryAllByRole('tab')).toHaveLength(0);
     // O destaque é reancorado no primeiro resultado e aponta para um id real.
@@ -178,7 +178,7 @@ describe('ModelPickerDialog (edge) — catálogo grande e busca hostil', () => {
     expect(screen.getAllByRole('option')).toHaveLength(38);
 
     await user.type(searchField(), '    ');
-    expect(screen.queryAllByRole('tab')).toHaveLength(2);
+    expect(screen.queryAllByRole('tab')).toHaveLength(3);
     expect(modelCount()).toBe('38 modelos');
     expect(screen.queryByText('Todos os provedores')).toBeNull();
 

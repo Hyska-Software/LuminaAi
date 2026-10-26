@@ -24,6 +24,8 @@ const goProtocols = readJson('go-protocols.json');
 const mdModels = (providerId) => modelsDev[providerId]?.models ?? {};
 const mdOpencode = mdModels('opencode');
 const mdGo = mdModels('opencode-go');
+const mdOpenai = mdModels('openai');
+const docsOpenai = [];
 
 const byId = (list) => Object.fromEntries(list.map((m) => [m.id, m]));
 
@@ -290,11 +292,105 @@ function buildProvider({ id, name, shortName, description, baseUrl, defaultModel
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* OpenAI (ChatGPT plan usage — Sign in with ChatGPT)                  */
+/* ------------------------------------------------------------------ */
+
+const OPENAI_ENDPOINTS = {
+  'openai-responses': '/responses',
+  models: '/models',
+};
+
+const OPENAI_OAUTH = {
+  issuer: 'https://auth.openai.com',
+  discoveryUrl: 'https://auth.openai.com/.well-known/openid-configuration',
+  registrationClientId: 'dynamic_agent_client',
+  agentNameHint: 'Lumina',
+  resource: 'https://api.openai.com/v1',
+  scopes: [
+    'openid',
+    'profile',
+    'email',
+    'offline_access',
+    'resource.invoke',
+    'chatgpt.tokens.use.direct',
+  ],
+  planUsageScope: 'chatgpt.tokens.use.direct',
+  callbackPath: '/auth/callback',
+  loopbackHost: '127.0.0.1',
+};
+
+const OPENAI_DOCS = [
+  'https://developers.openai.com/siwc/token-sharing-open-source/',
+  'https://developers.openai.com/siwc/token-sharing-open-source/sign-in',
+  'https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference',
+];
+
+// Models that are not chat/completion endpoints of the Responses API (or that
+// exist only for hosted tools) are not selectable in the chat UI.
+const OPENAI_EXCLUDED = /(image|imagen|dall-e|embedding|realtime|transcribe|tts|audio|moderation|whisper|computer[-_]use|deep[-_]research|search[-_]preview|sora|babbage|davinci|daybreak)/i;
+// The bundled seed stays on current chat families; the live `/v1/models` list
+// (fetched after sign-in) is authoritative for the account.
+const OPENAI_SEED_FAMILIES = /^(gpt-5(\.\d+)?(-|$)|gpt-6(\.\d+)?(-|$)|o3(-|$)|o4-mini(-|$))/i;
+
+function buildOpenAiProvider() {
+  const models = Object.entries(mdOpenai)
+    .filter(([id, md]) => {
+      if (OPENAI_EXCLUDED.test(id)) return false;
+      if (!OPENAI_SEED_FAMILIES.test(id)) return false;
+      const output = md?.modalities?.output ?? ['text'];
+      if (!output.includes('text')) return false;
+      return true;
+    })
+    .map(([id, md]) => {
+      const model = buildModel(id, { md, providerKind: 'openai' });
+      // The app's icon resolver and grouping only know the "gpt" family
+      // (models.dev exposes gpt-sol/gpt-luna/gpt-astra/...).
+      return {
+        ...model,
+        family: 'gpt',
+        protocols: ['openai-responses'],
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const ids = new Set(models.map((model) => model.id));
+  const defaultModelId = ids.has('gpt-6.1-sol')
+    ? 'gpt-6.1-sol'
+    : (ids.has('gpt-6-astra') ? 'gpt-6-astra' : (models[0]?.id ?? ''));
+
+  return {
+    id: 'openai',
+    name: 'OpenAI (ChatGPT)',
+    shortName: 'ChatGPT',
+    description:
+      'Modelos OpenAI usando o plano ChatGPT da sua conta (Sign in with ChatGPT) ou uma API key da plataforma.',
+    baseUrl: 'https://api.openai.com/v1',
+    consoleUrl: 'https://chatgpt.com/settings/usage',
+    endpoints: OPENAI_ENDPOINTS,
+    auth: 'oauth',
+    requestProfiles: { oauth: 'chatgpt-plan', apiKey: 'standard' },
+    authEnv: 'OPENAI_API_KEY',
+    defaultModelId,
+    oauth: OPENAI_OAUTH,
+    models,
+    notes: [
+      'O uso consome o limite do seu plano ChatGPT (o mesmo pool compartilhado por apps, Codex e ChatGPT Work).',
+      'Contas Plus têm a janela de 5 h compartilhada; Pro não tem esse limite. Limites específicos deste app também podem valer.',
+      'A lista de modelos é específica da conta: use "Atualizar modelos" após entrar.',
+    ],
+  };
+}
+
 const catalog = {
   version: 1,
   generatedAt: new Date().toISOString(),
   sources: {
-    docs: ['https://opencode.ai/v2/docs/console/go/', 'https://opencode.ai/v2/docs/console/models/'],
+    docs: [
+      'https://opencode.ai/v2/docs/console/go/',
+      'https://opencode.ai/v2/docs/console/models/',
+      ...OPENAI_DOCS,
+    ],
     models: 'https://models.dev/api.json',
     probe: 'scripts/probe-models.mjs',
   },
@@ -326,15 +422,37 @@ const catalog = {
       kind: 'zen',
       notes: ['Funciona com créditos do OpenCode Console.', 'Modelos gratuitos exigem o cliente OpenCode.'],
     }),
+    buildOpenAiProvider(),
   ],
 };
 
 const outDir = path.join(ROOT, 'data');
 fs.mkdirSync(outDir, { recursive: true });
 const outFile = path.join(outDir, 'catalog.json');
-fs.writeFileSync(outFile, JSON.stringify(catalog, null, 1));
 
-for (const p of catalog.providers) {
+// `--provider openai` updates only the OpenAI provider while leaving Go/Zen
+// byte-identical (the plan's catalog task requires a surgical diff).
+const providerFlagIndex = process.argv.indexOf('--provider');
+const onlyProvider = providerFlagIndex >= 0 ? process.argv[providerFlagIndex + 1] : null;
+
+let output = catalog;
+if (onlyProvider === 'openai') {
+  const existing = JSON.parse(fs.readFileSync(outFile, 'utf8'));
+  const openai = buildOpenAiProvider();
+  output = {
+    ...existing,
+    generatedAt: new Date().toISOString(),
+    sources: {
+      ...existing.sources,
+      docs: [...new Set([...(existing.sources?.docs ?? []), ...OPENAI_DOCS])],
+    },
+    providers: [...existing.providers.filter((provider) => provider.id !== 'openai'), openai],
+  };
+}
+
+fs.writeFileSync(outFile, JSON.stringify(output, null, 1));
+
+for (const p of output.providers) {
   const byProtocol = p.models.reduce((acc, m) => {
     const key = m.protocols[0] ?? 'none';
     acc[key] = (acc[key] ?? 0) + 1;

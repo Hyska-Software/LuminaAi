@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { ArrowUp, FilePlus, Globe, Plus, Square } from 'lucide-react';
+import { ArrowUp, FilePlus, Globe, Plus, Square, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
+import { credentialGateMessage } from '@/components/chat/turnError';
 import { useReduceMotion } from '@/components/layout/hooks';
 import { ModelPill } from '@/components/models/ModelPill';
-import { IconButton } from '@/components/ui';
+import { Button, IconButton } from '@/components/ui';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { AttachmentChips } from './AttachmentChips';
@@ -32,10 +33,21 @@ export function Composer() {
   const sendKey = useAppStore((state) => state.settings.sendKey);
   const webSearchEnabled = useAppStore((state) => state.settings.webSearchEnabled);
   const fileCreationEnabled = useAppStore((state) => state.settings.fileCreationEnabled);
+  // D9 gate: the active provider needs a usable credential (API key or a
+  // signed-in ChatGPT plan) before a turn can start. Only enforced when the
+  // provider exists in the merged list, so an empty catalog (boot/unit tests)
+  // keeps the composer usable — `chatStore.send` still guards the real send.
+  const selectedProvider = useAppStore((state) =>
+    state.providers.find((provider) => provider.id === state.selection.providerId),
+  );
+  const providerReady = useAppStore((state) => state.providerReady(state.selection.providerId));
   const setModelPickerOpen = useUiStore((state) => state.setModelPickerOpen);
+  const openSettings = useUiStore((state) => state.openSettings);
 
   const isStreaming = streaming !== null;
-  const canSend = !isStreaming && (value.trim().length > 0 || pendingAttachments.length > 0);
+  const providerBlocked = selectedProvider !== undefined && !providerReady;
+  const canSend =
+    !isStreaming && !providerBlocked && (value.trim().length > 0 || pendingAttachments.length > 0);
 
   const resizeTextarea = useCallback(() => {
     const element = textareaRef.current;
@@ -125,6 +137,22 @@ export function Composer() {
 
   return (
     <div>
+      {providerBlocked ? (
+        <div
+          id="composer-credential-notice"
+          role="status"
+          className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-xl border border-warning/30 bg-warning-soft px-3 py-2"
+        >
+          <TriangleAlert aria-hidden className="size-4 shrink-0 text-warning" strokeWidth={2} />
+          <span className="min-w-0 flex-1 text-[12px] leading-relaxed text-foreground-muted">
+            {credentialGateMessage(selectedProvider)}
+          </span>
+          <Button variant="secondary" size="sm" onClick={() => openSettings('providers')}>
+            Abrir Provedores
+          </Button>
+        </div>
+      ) : null}
+
       <div
         className={cn(
           'relative overflow-hidden rounded-3xl border border-border bg-surface-raised shadow-sm',
@@ -160,6 +188,7 @@ export function Composer() {
             rows={1}
             placeholder="Pergunte alguma coisa…"
             aria-label="Mensagem para o Lumina"
+            aria-describedby={providerBlocked ? 'composer-credential-notice' : undefined}
             className={cn(
               'block max-h-[220px] w-full resize-none bg-transparent px-1.5 py-0.5',
               'text-[15px] leading-relaxed text-foreground placeholder:text-foreground-subtle',

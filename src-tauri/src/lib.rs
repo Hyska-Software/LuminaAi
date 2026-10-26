@@ -19,6 +19,7 @@ mod domain;
 mod events;
 mod harness;
 mod http;
+mod oauth;
 mod providers;
 mod state;
 mod tools;
@@ -27,6 +28,14 @@ use tauri::Manager;
 
 pub fn run() {
     tauri::Builder::default()
+        // Must be the first plugin: a second instance focuses the existing
+        // window instead of racing the rotating OAuth refresh token and the
+        // secrets file.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -43,6 +52,12 @@ pub fn run() {
             commands::models::get_catalog,
             commands::models::refresh_catalog,
             commands::models::list_remote_models,
+            commands::oauth::refresh_provider_models,
+            commands::oauth::openai_login_start,
+            commands::oauth::openai_login_wait,
+            commands::oauth::openai_login_cancel,
+            commands::oauth::openai_sign_out,
+            commands::oauth::openai_auth_status,
             commands::conversations::list_conversations,
             commands::conversations::create_conversation,
             commands::conversations::get_conversation,

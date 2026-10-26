@@ -13,10 +13,10 @@ use crate::domain::UsageInfo;
 
 use super::sse;
 use super::{
-    as_u32, emit, endpoint, image_data_url, make_usage, max_output_tokens, normalize_arguments,
-    pointer_u32, reasoning, send_stream, system_text, to_provider_error, valid_json_arguments,
+    as_u32, emit, image_data_url, make_usage, max_output_tokens, normalize_arguments, pointer_u32,
+    reasoning, send_stream, system_text, to_provider_error, valid_json_arguments,
     CompletionRequest, EventSink, HistoryMessage, HistoryRole, ProviderError, ProviderEvent,
-    ProviderResult, WireProtocol, CHAT_PATH,
+    ProviderResult, WireProtocol,
 };
 
 pub(crate) async fn stream(
@@ -24,15 +24,16 @@ pub(crate) async fn stream(
     request: &CompletionRequest,
     sink: &EventSink,
 ) -> ProviderResult<()> {
-    let url = endpoint(&request.config.base_url, CHAT_PATH);
+    let url = request.config.endpoint_for(WireProtocol::OpenaiChat)?;
     let body = build_body(request);
     let Some(response) = send_stream(http, request, &url, &body).await? else {
         return Ok(());
     };
     let mut handler = Handler::new(sink);
-    let outcome =
-        sse::stream_sse(response, &request.cancel, |event, data| handler.on_event(event, data))
-            .await;
+    let outcome = sse::stream_sse(response, &request.cancel, |event, data| {
+        handler.on_event(event, data)
+    })
+    .await;
     if let Err(error) = outcome {
         return Err(to_provider_error(error));
     }
@@ -94,7 +95,12 @@ fn build_body(request: &CompletionRequest) -> Value {
             .collect();
         body["tools"] = json!(tools);
     }
-    reasoning::apply(WireProtocol::OpenaiChat, model, &request.reasoning, &mut body);
+    reasoning::apply(
+        WireProtocol::OpenaiChat,
+        model,
+        &request.reasoning,
+        &mut body,
+    );
     body
 }
 
@@ -124,7 +130,11 @@ fn assistant_message(message: &HistoryMessage) -> Option<Value> {
         }
         return Some(json!({"role": "assistant", "content": message.text}));
     }
-    let content = if has_text { json!(message.text) } else { Value::Null };
+    let content = if has_text {
+        json!(message.text)
+    } else {
+        Value::Null
+    };
     Some(json!({
         "role": "assistant",
         "content": content,
@@ -137,10 +147,7 @@ fn assistant_message(message: &HistoryMessage) -> Option<Value> {
 fn chat_tool_calls(message: &HistoryMessage) -> Vec<Value> {
     if let Some(Value::Object(state)) = &message.provider_state {
         if let Some(Value::Array(calls)) = state.get("tool_calls") {
-            let mapped: Vec<Value> = calls
-                .iter()
-                .filter_map(normalize_chat_tool_call)
-                .collect();
+            let mapped: Vec<Value> = calls.iter().filter_map(normalize_chat_tool_call).collect();
             if !mapped.is_empty() {
                 return mapped;
             }

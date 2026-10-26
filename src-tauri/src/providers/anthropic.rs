@@ -13,10 +13,10 @@ use serde_json::{json, Value};
 
 use super::sse;
 use super::{
-    as_u32, emit, endpoint, image_base64, make_usage, max_output_tokens, normalize_arguments,
+    as_u32, emit, image_base64, make_usage, max_output_tokens, normalize_arguments,
     parse_arguments, reasoning, send_stream, system_text, to_provider_error, CompletionRequest,
     EventSink, HistoryMessage, HistoryRole, ProviderError, ProviderEvent, ProviderResult,
-    WireProtocol, ANTHROPIC_PATH,
+    WireProtocol,
 };
 
 pub(crate) async fn stream(
@@ -24,15 +24,16 @@ pub(crate) async fn stream(
     request: &CompletionRequest,
     sink: &EventSink,
 ) -> ProviderResult<()> {
-    let url = endpoint(&request.config.base_url, ANTHROPIC_PATH);
+    let url = request.config.endpoint_for(WireProtocol::Anthropic)?;
     let body = build_body(request);
     let Some(response) = send_stream(http, request, &url, &body).await? else {
         return Ok(());
     };
     let mut handler = Handler::new(sink);
-    let outcome =
-        sse::stream_sse(response, &request.cancel, |event, data| handler.on_event(event, data))
-            .await;
+    let outcome = sse::stream_sse(response, &request.cancel, |event, data| {
+        handler.on_event(event, data)
+    })
+    .await;
     if let Err(error) = outcome {
         return Err(to_provider_error(error));
     }
@@ -91,13 +92,15 @@ fn build_body(request: &CompletionRequest) -> Value {
             .collect();
         body["tools"] = json!(tools);
     }
-    reasoning::apply(WireProtocol::Anthropic, model, &request.reasoning, &mut body);
+    reasoning::apply(
+        WireProtocol::Anthropic,
+        model,
+        &request.reasoning,
+        &mut body,
+    );
 
     // With extended thinking enabled `max_tokens` must exceed `budget_tokens`.
-    if let Some(budget) = body
-        .pointer("/thinking/budget_tokens")
-        .and_then(as_u32)
-    {
+    if let Some(budget) = body.pointer("/thinking/budget_tokens").and_then(as_u32) {
         let required = budget.saturating_add(1_024);
         let current = body.get("max_tokens").and_then(as_u32).unwrap_or(0);
         if current < required {
@@ -209,8 +212,16 @@ fn push_tool_result(messages: &mut Vec<Value>, message: &HistoryMessage) {
 
 enum BlockState {
     Text(String),
-    Thinking { text: String, signature: String },
-    ToolUse { id: String, name: String, json: String, done: bool },
+    Thinking {
+        text: String,
+        signature: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        json: String,
+        done: bool,
+    },
     Redacted(Value),
     Other,
 }
@@ -311,7 +322,8 @@ impl<'a> Handler<'a> {
                         );
                     }
                     Some("redacted_thinking") => {
-                        self.blocks.insert(index, BlockState::Redacted(block.clone()));
+                        self.blocks
+                            .insert(index, BlockState::Redacted(block.clone()));
                     }
                     _ => {
                         self.blocks.insert(index, BlockState::Other);
@@ -358,8 +370,9 @@ impl<'a> Handler<'a> {
                             .get("signature")
                             .and_then(Value::as_str)
                             .unwrap_or_default();
-                        if let Some(BlockState::Thinking { signature: store, .. }) =
-                            self.blocks.get_mut(&index)
+                        if let Some(BlockState::Thinking {
+                            signature: store, ..
+                        }) = self.blocks.get_mut(&index)
                         {
                             store.push_str(signature);
                         }
@@ -399,10 +412,7 @@ impl<'a> Handler<'a> {
             "message_stop" => {}
             "ping" => {}
             "error" => {
-                let detail = value
-                    .get("error")
-                    .cloned()
-                    .unwrap_or_else(|| value.clone());
+                let detail = value.get("error").cloned().unwrap_or_else(|| value.clone());
                 return Err(anyhow::Error::new(ProviderError::Other(format!(
                     "erro do provedor: {detail}"
                 ))));
@@ -429,7 +439,9 @@ impl<'a> Handler<'a> {
     }
 
     fn finish_tool(&mut self, index: usize) -> anyhow::Result<()> {
-        let Some(BlockState::ToolUse { json: buffer, done, .. }) = self.blocks.get_mut(&index)
+        let Some(BlockState::ToolUse {
+            json: buffer, done, ..
+        }) = self.blocks.get_mut(&index)
         else {
             return Ok(());
         };
@@ -438,10 +450,7 @@ impl<'a> Handler<'a> {
         }
         *done = true;
         let arguments = normalize_arguments(buffer);
-        emit(
-            self.sink,
-            ProviderEvent::ToolCallDone { index, arguments },
-        )?;
+        emit(self.sink, ProviderEvent::ToolCallDone { index, arguments })?;
         Ok(())
     }
 

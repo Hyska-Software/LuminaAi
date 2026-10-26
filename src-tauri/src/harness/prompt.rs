@@ -387,7 +387,11 @@ fn generative_ui_section(contract: &Contract) -> String {
     section.push_str(&format!(
         "- Mais de {} {} `ui` na mesma resposta (ideal {}).\n",
         contract.blocks.max_per_message,
-        if contract.blocks.max_per_message == 1 { "bloco" } else { "blocos" },
+        if contract.blocks.max_per_message == 1 {
+            "bloco"
+        } else {
+            "blocos"
+        },
         contract.blocks.recommended_per_message
     ));
     section.push_str(
@@ -417,9 +421,7 @@ fn generative_ui_section(contract: &Contract) -> String {
     section.push_str("```ui\n");
     section.push_str(contract::EXAMPLE_JSON.trim());
     section.push_str("\n```\n\n");
-    section.push_str(
-        "Exemplo 2 — laboratório interativo (seções, escolhas e checklist):\n\n",
-    );
+    section.push_str("Exemplo 2 — laboratório interativo (seções, escolhas e checklist):\n\n");
     section.push_str("```ui\n");
     section.push_str(contract::EXAMPLE_INTERACTIVE_JSON.trim());
     section.push_str("\n```\n\n");
@@ -480,7 +482,11 @@ fn generative_ui_section(contract: &Contract) -> String {
     section.push_str(&format!(
         "- No máximo {} {} `ui` por resposta (ideal {}).\n",
         contract.blocks.max_per_message,
-        if contract.blocks.max_per_message == 1 { "bloco" } else { "blocos" },
+        if contract.blocks.max_per_message == 1 {
+            "bloco"
+        } else {
+            "blocos"
+        },
         contract.blocks.recommended_per_message
     ));
     section.push_str(&format!(
@@ -587,6 +593,7 @@ mod tests {
             description: None,
             tags: Vec::new(),
             status: "stable".to_string(),
+            estimated: false,
         }
     }
 
@@ -695,8 +702,7 @@ mod tests {
             );
         }
         assert!(prompt.contains("somente leitura"));
-        assert!(prompt.contains("podem ser desativadas")
-            || prompt.contains("pode desativá-las"));
+        assert!(prompt.contains("podem ser desativadas") || prompt.contains("pode desativá-las"));
     }
 
     #[test]
@@ -716,7 +722,10 @@ mod tests {
             &skills,
         );
         assert!(prompt.contains("`longa` (user): descrição muito longa"));
-        assert!(prompt.contains('…'), "description longa deve ser truncada com `…`");
+        assert!(
+            prompt.contains('…'),
+            "description longa deve ser truncada com `…`"
+        );
         assert!(
             !prompt.contains(&long_description),
             "a description inteira não deve ir para o prompt (read_skill traz o texto completo)"
@@ -759,12 +768,8 @@ mod tests {
 
     #[test]
     fn prompt_without_skills_says_so() {
-        let prompt = build_system_prompt(
-            &model(),
-            &TurnOptions::default(),
-            &Settings::default(),
-            &[],
-        );
+        let prompt =
+            build_system_prompt(&model(), &TurnOptions::default(), &Settings::default(), &[]);
         assert!(prompt.contains("# Skills"));
         assert!(prompt.contains("Nenhuma skill instalada no momento."));
         assert!(!prompt.contains("## Skills instaladas"));
@@ -870,7 +875,10 @@ mod tests {
         let interactions = &contract::contract().interactions;
         assert!(prompt.contains(interactions.description.trim()));
         for rule in &interactions.rules {
-            assert!(prompt.contains(rule.trim()), "regra de interação ausente: {rule}");
+            assert!(
+                prompt.contains(rule.trim()),
+                "regra de interação ausente: {rule}"
+            );
         }
         for kind in &interactions.action_kinds {
             assert!(prompt.contains(&format!("`{}`", kind.kind)));
@@ -893,7 +901,10 @@ mod tests {
         // Formato: raiz e notes vêm do contrato.
         assert!(prompt.contains(contract.format.root.trim()));
         for note in &contract.format.notes {
-            assert!(prompt.contains(note.trim()), "nota de formato ausente: {note}");
+            assert!(
+                prompt.contains(note.trim()),
+                "nota de formato ausente: {note}"
+            );
         }
     }
 

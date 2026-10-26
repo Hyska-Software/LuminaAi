@@ -1,13 +1,16 @@
 # Modelos & Provedores
 
-Os únicos provedores suportados são **OpenCode Go** (assinatura) e **OpenCode Zen** (pay-as-you-go do OpenCode Console). Ambos expõem o mesmo gateway com bases diferentes:
+Provedores suportados: **OpenCode Go** (assinatura), **OpenCode Zen** (pay-as-you-go
+do OpenCode Console) e **OpenAI** (plano ChatGPT via "Sign in with ChatGPT" ou API
+key da plataforma). Go/Zen expõem o mesmo gateway com bases diferentes:
 
-| Provedor | Base URL | Chave |
+| Provedor | Base URL | Autenticação |
 | --- | --- | --- |
 | OpenCode Go | `https://opencode.ai/inference/go` | API key do Console com assinatura Go/Go Plus |
 | OpenCode Zen | `https://opencode.ai/inference` | API key do Console com créditos |
+| OpenAI | `https://api.openai.com/v1` | OAuth "Sign in with ChatGPT" (plano) **ou** API key `sk-…` |
 
-Headers obrigatórios/recomendados:
+Headers obrigatórios/recomendados (Go/Zen):
 
 ```
 Authorization: Bearer <OPENCODE_API_KEY>
@@ -15,6 +18,51 @@ Content-Type: application/json
 User-Agent: Lumina/<versão>
 x-opencode-session: <id estável da conversa>
 ```
+
+`x-opencode-session` é enviado **somente** para provedores OpenCode; o provedor
+OpenAI não recebe headers internos do ChatGPT/Codex.
+
+## OpenAI — "ChatGPT plan usage" (Sign in with ChatGPT)
+
+Caminho oficial para apps open-source/locais
+(`https://developers.openai.com/siwc/token-sharing-open-source/`). O app é um
+public client: registro dinâmico (`client_id=dynamic_agent_client`) + host id
+estável (`ext_agent_host_id`), PKCE S256, `state` e `nonce`.
+
+| Item | Valor |
+| --- | --- |
+| Authorize | `https://auth.openai.com/api/accounts/authorize` |
+| Token/refresh/revoke | `https://auth.openai.com/api/accounts/oauth/{token,revoke}` (form) |
+| Discovery/JWKS | `https://auth.openai.com/.well-known/openid-configuration`, `…/jwks.json` |
+| Escopos | `openid profile email offline_access resource.invoke chatgpt.tokens.use.direct` |
+| `resource` | `https://api.openai.com/v1` |
+| Callback | `http://127.0.0.1:<porta>/auth/callback` (só a porta varia) |
+| Inferência | `POST https://api.openai.com/v1/responses` |
+| Modelos | `GET https://api.openai.com/v1/models` (lista por conta, `visibility:"list"`) |
+
+Ciclo de vida: access token de 1 h; refresh token de 30 dias **rotativo** (refresh
+single-flight, persistido de forma atômica). O ID token é verificado por JWKS
+(iss/aud/exp/nonce) e o `sub` é a identidade; em reautorização o `sub` e o
+`client_id` precisam bater com o registro salvo. Sign-out revoga o refresh token
+(mantendo o mapping conta/`client_id` para o próximo login). Nada de token cruza
+o IPC; o renderer recebe apenas e-mail, ids mascarados, escopos e expiração.
+
+Perfil de request do plano (`RequestProfile::ChatgptPlan`): `store:false`,
+`stream:true`, system prompt via `instructions`, sem `max_output_tokens`,
+`temperature`, `top_p`, `metadata`, `previous_response_id`, etc.; tools do Lumina
+são function tools do cliente; `include:["reasoning.encrypted_content"]` permite
+replay de raciocínio. O perfil `Standard` (API key) mantém o body completo.
+
+Erros de plano vêm em `error.code` (`subscription_sharing_usage_limit_exceeded`,
+`…_user_not_eligible`, `…_unsupported_capability`, …) e são mapeados para
+`TurnEvent::Error.code`/`hint`, com CTA "Gerenciar uso"
+(`https://chatgpt.com/settings/usage`). Limite de 5 h é compartilhado entre apps
+(Plus); Pro não tem essa janela; limites específicos do app também podem valer —
+por isso a UI nunca inventa percentual/reset.
+
+> Não usar o OAuth/backend interno do Codex CLI (`chatgpt.com/backend-api`): não é
+> documentado para terceiros e contraria a doc oficial/ToS. Ver
+> `docs/research/openai-oauth.md`.
 
 ## Protocolos por modelo (Go — verificado em 2026-10-23)
 

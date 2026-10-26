@@ -1,13 +1,14 @@
 # Lumina
 
-Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usando **OpenCode Go** e **OpenCode Zen** como provedores.
+Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usando **OpenCode Go**, **OpenCode Zen** e **OpenAI** (plano ChatGPT via "Sign in with ChatGPT" ou API key) como provedores.
 
 ![status](https://img.shields.io/badge/status-conclu%C3%ADdo-6446fb)
 
 ## Funcionalidades
 
 - **Conversas com streaming** em tempo real, com espaço de pensamento que mostra os passos do agente (raciocínio, buscas, páginas lidas e arquivos criados) numa timeline colapsável.
-- **Escolha de modelo e modo de pensamento** por modelo (esforço, orçamento de tokens ou desligado), com catálogo de 120+ modelos dos dois provedores.
+- **Escolha de modelo e modo de pensamento** por modelo (esforço, orçamento de tokens ou desligado), com catálogo de 140+ modelos dos provedores OpenCode e OpenAI.
+- **Login com o plano ChatGPT**: "Continuar com ChatGPT" (OAuth oficial, Sign in with ChatGPT) usa o plano da sua conta para requisições elegíveis — sem API key; a lista de modelos é a da sua conta, com selo "Plano ChatGPT" e link para gerenciar o uso. A API key da OpenAI continua disponível como alternativa.
 - **Análise de documentos**: PDF, DOCX, XLSX/CSV, PPTX, texto/código e imagens (visão).
 - **Busca na web** com citações de fontes: chips na mensagem (até 8) e lista completa no painel lateral de fontes, com leitura de páginas.
 - **Criação de arquivos** (artefatos) com cards compactos no chat, lista completa no painel lateral e "Salvar como…" nativo — Markdown, HTML, SVG, CSV, JSON e código.
@@ -36,6 +37,7 @@ Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usan
 - Rust (toolchain MSVC no Windows)
 - WebView2 (Windows 10/11)
 - Uma API key do [OpenCode Console](https://opencode.ai/console) (Go ou Zen). A chave existente do OpenCode CLI é detectada automaticamente.
+- Para OpenAI: uma conta ChatGPT elegível (botão **Continuar com ChatGPT** em Configurações → Provedores, sem API key) **ou** uma API key `sk-…` da plataforma.
 - **Opcional**: Python 3.9+ (e/ou Node) para execução de código. Os helpers das skills usam somente a stdlib; pacotes como `python-docx`, `openpyxl` e `Pillow` melhoram o resultado quando instalados (a tela Configurações → Ferramentas mostra o ambiente detectado).
 
 ## Desenvolvimento

@@ -8,6 +8,8 @@ import { SettingRow, SettingsSection } from './shared';
 
 const OPENCODE_URL = 'https://opencode.ai';
 const CONSOLE_URL = 'https://opencode.ai/console';
+const CHATGPT_URL = 'https://chatgpt.com';
+const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
 /** Repository URL is filled once the public project page exists. */
 const REPOSITORY_URL: string | null = null;
 
@@ -22,7 +24,7 @@ export function AboutTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <SettingsSection title="Sobre o Lumina" description="Chat desktop local-first com OpenCode Go e Zen.">
+      <SettingsSection title="Sobre o Lumina" description="Chat desktop local-first com OpenCode Go, Zen e OpenAI (ChatGPT).">
         <div className="flex items-center gap-3 py-3">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft">
             <BrandMark size={24} />
@@ -72,6 +74,29 @@ export function AboutTab() {
             rightIcon={<ExternalLink className="size-3.5" />}
           >
             Abrir console
+          </Button>
+        </SettingRow>
+        <SettingRow
+          label="ChatGPT (OpenAI)"
+          description="Entre com sua conta ChatGPT e acompanhe o uso do plano."
+        >
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void openExternal(CHATGPT_URL)}
+            rightIcon={<ExternalLink className="size-3.5" />}
+          >
+            Abrir ChatGPT
+          </Button>
+        </SettingRow>
+        <SettingRow label="Uso do plano ChatGPT" description="Limites e consumo compartilhados do seu plano.">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void openExternal(CHATGPT_USAGE_URL)}
+            rightIcon={<ExternalLink className="size-3.5" />}
+          >
+            Gerenciar uso
           </Button>
         </SettingRow>
         <SettingRow

@@ -78,7 +78,8 @@ export function WelcomeScreen() {
 
       <h1 className="mt-6 text-[32px] font-semibold tracking-tight text-foreground">Como posso ajudar?</h1>
       <p className="mt-2 max-w-md text-[15px] leading-relaxed text-foreground-muted">
-        Pergunte, pesquise, analise documentos ou crie arquivos com os modelos OpenCode Go e Zen.
+        Pergunte, pesquise, analise documentos ou crie arquivos com os modelos OpenCode e OpenAI —
+        incluindo o uso do seu plano ChatGPT.
       </p>
 
       <div className="mt-8 grid w-full grid-cols-1 gap-2.5 text-left sm:grid-cols-2">

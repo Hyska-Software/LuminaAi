@@ -2,14 +2,28 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { ArrowDown } from 'lucide-react';
 import { Composer } from '@/components/composer/Composer';
 import { useReduceMotion } from '@/components/layout/hooks';
-import { selectActiveMessages, useChatStore } from '@/lib/store';
+import { providerSupportsPlan } from '@/lib/catalog';
+import { selectActiveMessages, useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import type { ChatMessage } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { LoadingSkeleton } from './LoadingSkeleton';
 import { MessageList } from './MessageList';
+import { TurnErrorBanner } from './TurnErrorBanner';
+import { planUsageUrl } from './turnError';
 import { WelcomeScreen } from './WelcomeScreen';
 
 /** Distance from the bottom (px) still considered "reading the latest message". */
 const BOTTOM_THRESHOLD = 96;
+
+/** True when the turn that produced the last assistant message ended in error. */
+function lastAssistantFailed(messages: ChatMessage[]): boolean {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== 'assistant') continue;
+    return message.status === 'error';
+  }
+  return false;
+}
 
 /**
  * Chat column: scrollable conversation with smart auto-scroll, the welcome
@@ -20,6 +34,14 @@ export function ChatView() {
   const activeId = useChatStore((state) => state.activeId);
   const streaming = useChatStore((state) => state.streaming);
   const loadingConversationId = useChatStore((state) => state.loadingConversationId);
+  // T4.4a: classified turn errors drive the banner above the composer.
+  const errorCode = useChatStore((state) => state.errorCode);
+  const errorHint = useChatStore((state) => state.errorHint);
+  const selectedProvider = useAppStore((state) =>
+    state.providers.find((provider) => provider.id === state.selection.providerId),
+  );
+  const selectedAuth = useAppStore((state) => state.authStatus(state.selection.providerId));
+  const openSettings = useUiStore((state) => state.openSettings);
   const reduceMotion = useReduceMotion();
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -27,6 +49,14 @@ export function ChatView() {
   const [showJump, setShowJump] = useState(false);
 
   const loading = loadingConversationId !== null && loadingConversationId === activeId;
+  const planProvider = Boolean(
+    providerSupportsPlan(selectedProvider) &&
+      selectedAuth?.state === 'signed-in' &&
+      selectedAuth.planUsage,
+  );
+  // Only the turn that produced the current conversation's last error can show
+  // the banner: navigating to another conversation must not inherit it.
+  const showTurnError = errorCode !== null && lastAssistantFailed(messages);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const element = scrollRef.current;
@@ -92,6 +122,15 @@ export function ChatView() {
           className="pointer-events-none absolute inset-x-0 -top-10 bottom-0 bg-linear-to-t from-background via-background/90 to-transparent"
         />
         <div className="relative mx-auto w-full max-w-3xl">
+          {showTurnError ? (
+            <TurnErrorBanner
+              code={errorCode}
+              hint={errorHint}
+              planProvider={planProvider}
+              usageUrl={planUsageUrl(selectedProvider)}
+              onOpenProviders={() => openSettings('providers')}
+            />
+          ) : null}
           <Composer />
         </div>
       </div>
