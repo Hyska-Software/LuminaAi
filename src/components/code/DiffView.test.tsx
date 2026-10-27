@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 
 const utilsMocks = vi.hoisted(() => ({ copyText: vi.fn(async () => true) }));
 const toastMocks = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
@@ -35,6 +35,16 @@ function bigHunkDiff(lines: number): string {
   ].join('\n');
 }
 
+
+/** Span de conteúdo de uma linha do diff (o texto é dividido em tokens do Prism). */
+function diffLine(path: string, text: string): HTMLElement {
+  const group = screen.getByRole('group', { name: `Diff de ${path}` });
+  return within(group).getByText(
+    (_, element) =>
+      element?.textContent?.replace(/\u00A0/g, '').trim() === text &&
+      (element?.className ?? '').includes('whitespace-pre-wrap'),
+  ) as HTMLElement;
+}
 afterEach(cleanup);
 
 beforeEach(() => {
@@ -55,23 +65,40 @@ describe('DiffView', () => {
 
   it('renders additions/removals with theme-token backgrounds and both line numbers', () => {
     render(<DiffView path="src/app.ts" diff={SMALL_DIFF} />);
-    const added = screen.getByText('const b = 3;');
+
+    const added = diffLine('src/app.ts', 'const b = 3;');
     expect(added.parentElement?.className ?? '').toContain('bg-success-soft');
     expect(added.parentElement?.textContent ?? '').toContain('21');
 
-    const removed = screen.getByText('const b = 2;');
+    const removed = diffLine('src/app.ts', 'const b = 2;');
     expect(removed.parentElement?.className ?? '').toContain('bg-danger-soft');
     expect(removed.parentElement?.textContent ?? '').toContain('11');
   });
 
+  it('destaca a sintaxe com as cores do tema compartilhado', () => {
+    render(<DiffView path="src/app.ts" diff={SMALL_DIFF} />);
+
+    const added = diffLine('src/app.ts', 'const b = 3;');
+    const keyword = within(added).getByText('const');
+    expect(keyword.getAttribute('style') ?? '').toContain('var(--accent)');
+    const number = within(added).getByText('3');
+    expect(number.getAttribute('style') ?? '').toContain('var(--warning)');
+
+    // Arquivo sem gramática conhecida continua legível em texto puro (sem tokens).
+    const plain = render(<DiffView path="notes.unknown" diff={SMALL_DIFF} />);
+    const plainLine = diffLine('notes.unknown', 'const b = 3;');
+    expect(plainLine.children.length).toBe(0);
+    plain.unmount();
+  });
+
   it('collapses hunks over 200 lines behind "ver mais"', () => {
     render(<DiffView path="big.ts" diff={bigHunkDiff(250)} />);
-    expect(screen.queryByText('linha 220')).toBeNull();
+    expect(screen.queryByText((_, element) => element?.textContent?.trim() === 'linha 220' && element?.className.includes('whitespace-pre-wrap') ? true : false)).toBeNull();
     const more = screen.getByRole('button', { name: 'Ver mais (210 linhas)' });
     expect(more.getAttribute('aria-expanded')).toBe('false');
 
     fireEvent.click(more);
-    expect(screen.getByText('linha 220')).toBeTruthy();
+    expect(diffLine('big.ts', 'linha 220')).toBeTruthy();
     expect(
       screen.getByRole('button', { name: 'Recolher trecho' }).getAttribute('aria-expanded'),
     ).toBe('true');

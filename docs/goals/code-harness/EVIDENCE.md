@@ -197,3 +197,9 @@ configuração para MCP/servidores e "Verificações" no painel (backend exposto
 - **Configurável**: `Settings.diffOpenMode` (`tab` padrão | `panel`) normalizado no backend (`config::normalize_settings`) e exposto em Configurações → Ferramentas → Workbench de código; `panel` mantém o detalhe inline anterior.
 - **Sem backend novo**: o alvo vive em `uiStore.codeDiffTab` (workspace/path/staged/knownDiff) e o diff usa `get_file_diff`/journal.
 - Testes: `uiStore` (abrir/fechar/setCodeView), `CodeDiffView` (diff conhecido, API, erro), `ChangesPanel` (delega para a aba), `CodeSessionHeader` (aba `Diff` ativa/fecha), `WorkspaceCenter` (centro + header/chat montados), `ToolsTab` (padrão e troca para painel) e `config`/serialização. Verificação: `cargo test --lib` 711 verdes, `pnpm typecheck`, `pnpm build` e testes afetados (201) verdes.
+## 14. Diff com syntax highlight (aba Alterações e aba central)
+
+- `DiffView` agora tokeniza cada linha visível com o **Prism/tema compartilhado** (`src/lib/highlight`: `prism`, `SYNTAX_THEME`), então os tokens coloridos seguem as variáveis CSS do tema claro/escuro; as linhas mantêm `bg-success-soft`/`bg-danger-soft`, números e prefixos.
+- Linguagem inferida do caminho (`languageForPath`) com fallback para texto puro quando não há gramática; guarda de custo em 4.000 linhas (hunks grandes recolhidos + "ver mais") e `memo` por linha para não re-tokenizar em interações (copiar, expandir).
+- Vale para o diff inline do painel e para o diff como aba central (`CodeDiffView` reutiliza `DiffView`).
+- Testes: linhas com tokens (keyword/número), arquivo sem gramática em texto puro, contagens/fundos preservados e estados honestos. Verificação: 227 testes afetados verdes, `pnpm typecheck` e `pnpm build` verdes.

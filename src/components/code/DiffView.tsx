@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { CircleAlert, Copy, FileExclamationPoint } from 'lucide-react';
+import { Highlight } from 'prism-react-renderer';
 import { Spinner } from '@/components/ui';
+import { prism, SYNTAX_THEME } from '@/lib/highlight';
 import { cn, copyText } from '@/lib/utils';
 import { toast } from 'sonner';
+import { languageForPath } from './FilePreview';
 
 export interface DiffViewProps {
   /** Path shown in the header (relative to the workspace). */
@@ -42,6 +45,11 @@ interface ParsedDiff {
 export const BIG_HUNK_THRESHOLD = 200;
 /** Number of lines visible when a big hunk is collapsed. */
 export const COLLAPSED_HUNK_LINES = 40;
+/**
+ * Teto de linhas para o syntax highlight: acima disso o diff continua legível
+ * em texto puro (evita tokenizar milhares de linhas ao expandir um hunk).
+ */
+export const SYNTAX_HIGHLIGHT_LINE_LIMIT = 4_000;
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
@@ -129,6 +137,18 @@ export function DiffView({ path, diff, loading, error, binary = false, className
   const parsed = useMemo(() => parseDiff(diff ?? ''), [diff]);
   const isBinary = binary || parsed.binary;
   const hasChanges = parsed.hunks.length > 0;
+  const language = useMemo(() => {
+    const detected = languageForPath(path);
+    // Gramática ausente no Prism compartilhado → texto puro (sem quebrar a linha).
+    return prism.languages[detected] ? detected : 'text';
+  }, [path]);
+  const totalLines = useMemo(
+    () => parsed.hunks.reduce((total, hunk) => total + hunk.lines.length, 0),
+    [parsed],
+  );
+  // Guarda de custo: diffs gigantes continuam em texto puro (hunks recolhidos
+  // já limitam a renderização, mas um "ver mais" pode abrir milhares de linhas).
+  const highlightEnabled = language !== 'text' && totalLines <= SYNTAX_HIGHLIGHT_LINE_LIMIT;
 
   useEffect(
     () => () => {
@@ -252,7 +272,11 @@ export function DiffView({ path, diff, loading, error, binary = false, className
                 </div>
 
                 {visible.map((line, lineIndex) => (
-                  <DiffLineRow key={`${hunkIndex}-${lineIndex}`} line={line} />
+                  <DiffLineRow
+                    key={`${hunkIndex}-${lineIndex}`}
+                    line={line}
+                    language={highlightEnabled ? language : 'text'}
+                  />
                 ))}
 
                 {big ? (
@@ -286,14 +310,24 @@ const LINE_STYLES: Record<DiffLineKind, string> = {
   meta: 'text-foreground-subtle',
 };
 
-function DiffLineRow({ line }: { line: DiffLine }) {
-  const numberClass = 'w-10 shrink-0 select-none pr-2 text-right text-[10.5px] tabular-nums text-foreground-subtle';
+const DiffLineRow = memo(function DiffLineRow({
+  line,
+  language,
+}: {
+  line: DiffLine;
+  language: string;
+}) {
+  const numberClass =
+    'w-10 shrink-0 select-none pr-2 text-right text-[10.5px] tabular-nums text-foreground-subtle';
   const prefix =
     line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : line.kind === 'context' ? ' ' : '';
 
   if (line.kind === 'note') {
     return <div className="px-3 text-[11px] text-foreground-subtle">{line.text}</div>;
   }
+
+  const content = line.text || '\u00A0';
+  const highlighted = language !== 'text';
 
   return (
     <div className={cn('flex min-h-[20px] items-start', LINE_STYLES[line.kind])}>
@@ -306,9 +340,23 @@ function DiffLineRow({ line }: { line: DiffLine }) {
       <span aria-hidden className="w-4 shrink-0 select-none text-center text-foreground-subtle">
         {prefix}
       </span>
-      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words pr-3">{line.text || '\u00A0'}</span>
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words pr-3">
+        {highlighted ? (
+          <Highlight prism={prism} theme={SYNTAX_THEME} language={language} code={content}>
+            {({ tokens, getTokenProps }) => (
+              <>
+                {(tokens[0] ?? []).map((token, tokenIndex) => (
+                  <span key={tokenIndex} {...getTokenProps({ token })} />
+                ))}
+              </>
+            )}
+          </Highlight>
+        ) : (
+          content
+        )}
+      </span>
     </div>
   );
-}
+});
 
 export default DiffView;
