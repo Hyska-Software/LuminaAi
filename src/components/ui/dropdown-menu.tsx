@@ -91,7 +91,28 @@ export const DropdownMenuCheckboxItem = React.forwardRef<
   );
 });
 
-export const DropdownMenuLabel = React.forwardRef<
+
+export const DropdownMenuRadioItem = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem>
+>(function DropdownMenuRadioItem({ className, children, ...props }, ref) {
+  return (
+    <DropdownMenuPrimitive.RadioItem
+      ref={ref}
+      className={cn(
+        'relative flex cursor-default select-none items-center gap-2 rounded-lg py-1.5 pl-7 pr-2 text-[13px] outline-none',
+        'transition-colors data-[highlighted]:bg-surface-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        className,
+      )}
+      {...props}
+    >
+      <DropdownMenuPrimitive.ItemIndicator className="absolute left-2 inline-flex">
+        <Check className="size-3.5 text-accent" />
+      </DropdownMenuPrimitive.ItemIndicator>
+      {children}
+    </DropdownMenuPrimitive.RadioItem>
+  );
+});export const DropdownMenuLabel = React.forwardRef<
   HTMLDivElement,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Label>
 >(function DropdownMenuLabel({ className, ...props }, ref) {

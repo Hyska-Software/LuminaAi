@@ -410,6 +410,51 @@ describe('CodeSidebar — Workspaces reais', () => {
     expect(screen.queryByText(/Nenhuma sessão sem workspace/)).toBeNull();
   });
 
+  it('pesquisa workspaces por nome/caminho e sessão com filtro real', async () => {
+    mocks.listWorkspaces.mockResolvedValue([
+      workspace(),
+      workspace({ id: 'ws-2', name: 'Site Hyska', path: 'C:/dev/hyska', git: null }),
+    ]);
+    renderSidebar();
+    await screen.findByRole('button', { name: 'lumina-core' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pesquisar workspaces' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /Pesquisar workspaces/ }), {
+      target: { value: 'hyska' },
+    });
+
+    expect(screen.queryByRole('button', { name: 'lumina-core' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Site Hyska' })).toBeTruthy();
+    expect(screen.getByText('1 de 2 workspaces')).toBeTruthy();
+  });
+
+  it('filtra por "Com git" e limpa os filtros depois', async () => {
+    mocks.listWorkspaces.mockResolvedValue([
+      workspace(),
+      workspace({ id: 'ws-2', name: 'Site Hyska', path: 'C:/dev/hyska', git: null }),
+    ]);
+    renderSidebar();
+    await screen.findByRole('button', { name: 'lumina-core' });
+
+    openMenu(screen.getByRole('button', { name: 'Filtrar workspaces' }));
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Com git' }));
+
+    expect(screen.getByRole('button', { name: 'lumina-core' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Site Hyska' })).toBeNull();
+
+    openMenu(screen.getByRole('button', { name: 'Filtrar workspaces' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Limpar filtros' }));
+    expect(await screen.findByRole('button', { name: 'Site Hyska' })).toBeTruthy();
+  });
+
+  it('"Adicionar workspace" abre o seletor nativo de pasta', async () => {
+    mocks.pickWorkspaceFolder.mockResolvedValue(null);
+    renderSidebar();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar workspace' }));
+    await waitFor(() => expect(mocks.pickWorkspaceFolder).toHaveBeenCalledTimes(1));
+  });
+
   it('abre a conversa ao clicar na sessão e registra a aba do workspace', async () => {
     mocks.listWorkspaces.mockResolvedValue([workspace()]);
     useChatStore.setState({

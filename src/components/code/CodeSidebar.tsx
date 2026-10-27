@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  SlidersHorizontal,
   Sparkles,
   SquarePen,
   Trash2,
@@ -33,6 +34,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   IconButton,
@@ -427,6 +430,61 @@ function RenameWorkspaceDialog({
   );
 }
 
+/** Filtros do cabeçalho da lista de workspaces (WORKBENCH §3). */
+type WorkspaceFilter = 'all' | 'git' | 'no-git' | 'untrusted' | 'with-sessions' | 'empty';
+
+const WORKSPACE_FILTERS: ReadonlyArray<{ id: WorkspaceFilter; label: string }> = [
+  { id: 'all', label: 'Todos' },
+  { id: 'git', label: 'Com git' },
+  { id: 'no-git', label: 'Sem git' },
+  { id: 'untrusted', label: 'Não confiáveis' },
+  { id: 'with-sessions', label: 'Com sessões' },
+  { id: 'empty', label: 'Sem sessões' },
+];
+
+function normalizeSearch(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('pt-BR')
+    .trim();
+}
+
+/** Botão de ícone compacto do cabeçalho da seção (32px de área de toque via padding). */
+function SectionIconButton({
+  label,
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-pressed={active ? true : undefined}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        'flex size-6 items-center justify-center rounded-md transition-colors duration-150',
+        'text-foreground-subtle hover:bg-surface-hover hover:text-foreground',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+        'disabled:pointer-events-none disabled:opacity-40',
+        active && 'bg-surface-hover text-foreground',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
 interface RemoveWorkspaceDialogProps {
   workspace: Workspace | null;
   busy: boolean;
@@ -498,6 +556,9 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [openingFolder, setOpeningFolder] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
+  const [workspaceQuery, setWorkspaceQuery] = useState('');
+  const [workspaceSearchOpen, setWorkspaceSearchOpen] = useState(false);
+  const [workspaceFilter, setWorkspaceFilter] = useState<WorkspaceFilter>('all');
   const [renameTarget, setRenameTarget] = useState<Workspace | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [renameBusy, setRenameBusy] = useState(false);
@@ -534,6 +595,55 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
     unassigned.sort((left, right) => right.updatedAt - left.updatedAt);
     return { sessionsByWorkspace: byWorkspace, unassignedSessions: unassigned };
   }, [codeConversations, workspaceIds]);
+
+  /** Pesquisa + filtros reais do cabeçalho "Workspaces" (nome, caminho, branch,
+   * título de sessão; com/sem git, não confiáveis, com/sem sessões). */
+  const normalizedQuery = normalizeSearch(workspaceQuery);
+  const visibleWorkspaces = useMemo(() => {
+    const sessionsOf = (workspaceId: string) => sessionsByWorkspace.get(workspaceId) ?? [];
+    return workspaces.filter((workspace) => {
+      const sessions = sessionsOf(workspace.id);
+      if (normalizedQuery) {
+        const haystack = [
+          workspace.name,
+          workspace.path,
+          workspace.git?.branch ?? '',
+          ...sessions.map((session) => session.title),
+        ]
+          .map(normalizeSearch)
+          .join(' ');
+        if (!haystack.includes(normalizedQuery)) return false;
+      }
+      switch (workspaceFilter) {
+        case 'git':
+          return workspace.git != null;
+        case 'no-git':
+          return workspace.git == null;
+        case 'untrusted':
+          return workspace.trusted === false;
+        case 'with-sessions':
+          return sessions.length > 0;
+        case 'empty':
+          return sessions.length === 0;
+        default:
+          return true;
+      }
+    });
+  }, [workspaces, sessionsByWorkspace, normalizedQuery, workspaceFilter]);
+
+  const visibleUnassignedSessions = useMemo(() => {
+    if (!normalizedQuery) return unassignedSessions;
+    return unassignedSessions.filter((session) =>
+      normalizeSearch(session.title).includes(normalizedQuery),
+    );
+  }, [unassignedSessions, normalizedQuery]);
+
+  const hasWorkspaceFilters = workspaceFilter !== 'all' || normalizedQuery.length > 0;
+  const clearWorkspaceFilters = () => {
+    setWorkspaceFilter('all');
+    setWorkspaceQuery('');
+    setWorkspaceSearchOpen(false);
+  };
 
   const isExpanded = (workspaceId: string) => !collapsed.has(workspaceId);
 
@@ -725,12 +835,111 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
           aria-labelledby="code-workspaces-heading"
           className="flex min-h-0 flex-1 flex-col border-t border-border px-2 pb-1 pt-3"
         >
-          <h2
-            id="code-workspaces-heading"
-            className="px-1 text-[11px] font-medium tracking-tight text-foreground-subtle"
-          >
-            Workspaces
-          </h2>
+          <div className="flex items-center justify-between gap-1">
+            <h2
+              id="code-workspaces-heading"
+              className="px-1 text-[11px] font-medium tracking-tight text-foreground-subtle"
+            >
+              Workspaces
+            </h2>
+            <div className="flex items-center gap-0.5">
+              <SectionIconButton
+                label="Pesquisar workspaces"
+                active={workspaceSearchOpen || normalizedQuery.length > 0}
+                onClick={() => {
+                  if (workspaceSearchOpen) {
+                    setWorkspaceSearchOpen(false);
+                    setWorkspaceQuery('');
+                  } else {
+                    setWorkspaceSearchOpen(true);
+                  }
+                }}
+              >
+                <Search aria-hidden className="size-3.5" strokeWidth={1.75} />
+              </SectionIconButton>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Filtrar workspaces"
+                    title="Filtrar workspaces"
+                    aria-pressed={workspaceFilter !== 'all' ? true : undefined}
+                    className={cn(
+                      'flex size-6 items-center justify-center rounded-md transition-colors duration-150',
+                      'text-foreground-subtle hover:bg-surface-hover hover:text-foreground',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                      workspaceFilter !== 'all' && 'bg-surface-hover text-foreground',
+                    )}
+                  >
+                    <SlidersHorizontal aria-hidden className="size-3.5" strokeWidth={1.75} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-44">
+                  <DropdownMenuLabel>Filtrar workspaces</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={workspaceFilter}
+                    onValueChange={(value) => setWorkspaceFilter(value as WorkspaceFilter)}
+                  >
+                    {WORKSPACE_FILTERS.map((filter) => (
+                      <DropdownMenuRadioItem key={filter.id} value={filter.id}>
+                        {filter.label}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                  {hasWorkspaceFilters ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem icon={<X className="size-4" />} onSelect={clearWorkspaceFilters}>
+                        Limpar filtros
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <SectionIconButton
+                label="Adicionar workspace"
+                disabled={openingFolder}
+                onClick={() => void handleOpenFolder()}
+              >
+                <FolderPlus aria-hidden className="size-3.5" strokeWidth={1.75} />
+              </SectionIconButton>
+            </div>
+          </div>
+
+          {workspaceSearchOpen ? (
+            <div className="relative mt-1.5">
+              <Input
+                autoFocus
+                value={workspaceQuery}
+                onChange={(event) => setWorkspaceQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setWorkspaceQuery('');
+                    setWorkspaceSearchOpen(false);
+                  }
+                }}
+                aria-label="Pesquisar workspaces por nome, caminho ou sessão"
+                placeholder="Pesquisar workspaces…"
+                className="h-7 rounded-md pr-7 text-[12px]"
+              />
+              {workspaceQuery ? (
+                <button
+                  type="button"
+                  aria-label="Limpar pesquisa"
+                  onClick={() => setWorkspaceQuery('')}
+                  className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-foreground-subtle hover:text-foreground"
+                >
+                  <X aria-hidden className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {hasWorkspaceFilters ? (
+            <p className="mt-1 px-1 text-[10.5px] tabular-nums text-foreground-subtle">
+              {visibleWorkspaces.length} de {workspaces.length} workspaces
+            </p>
+          ) : null}
 
           <div className="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2">
             {workspacesLoading && !workspacesLoaded ? (
@@ -784,9 +993,27 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                   Abrir pasta…
                 </Button>
               </div>
+            ) : visibleWorkspaces.length === 0 ? (
+              <div className="px-1 py-2">
+                <p className="text-[12.5px] font-medium text-foreground-muted">
+                  Nenhum workspace encontrado
+                </p>
+                <p className="mt-1 text-[11.5px] leading-relaxed text-foreground-subtle">
+                  Ajuste a pesquisa ou os filtros para ver outros workspaces.
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-2"
+                  leftIcon={<X className="size-3.5" />}
+                  onClick={clearWorkspaceFilters}
+                >
+                  Limpar filtros
+                </Button>
+              </div>
             ) : (
               <div className="flex flex-col gap-0.5">
-                {workspaces.map((workspace) => (
+                {visibleWorkspaces.map((workspace) => (
                   <WorkspaceRow
                     key={workspace.id}
                     workspace={workspace}
@@ -810,7 +1037,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
           </div>
         </section>
 
-        {unassignedSessions.length > 0 ? (
+        {visibleUnassignedSessions.length > 0 ? (
           <section
             aria-labelledby="code-unassigned-heading"
             className="shrink-0 border-t border-border px-2 pb-1 pt-2"
@@ -823,7 +1050,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
             </h2>
             <div className="mt-1 max-h-44 overflow-y-auto overscroll-contain pb-1">
               <div className="flex flex-col gap-0.5">
-                {unassignedSessions.map((conversation) => (
+                {visibleUnassignedSessions.map((conversation) => (
                   <SessionRow
                     key={conversation.id}
                     conversation={conversation}
