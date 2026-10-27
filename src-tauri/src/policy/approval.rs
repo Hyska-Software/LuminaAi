@@ -125,6 +125,23 @@ impl ApprovalRegistry {
             .map(|entry| entry.request.clone())
     }
 
+    /// Cancela apenas os pedidos de uma sessão (fim do turno Code).
+    pub fn cancel_for_conversation(&self, conversation_id: &str) -> usize {
+        let mut pending = self.pending.lock();
+        let ids: Vec<String> = pending
+            .iter()
+            .filter(|(_, entry)| entry.request.conversation_id == conversation_id)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let count = ids.len();
+        for id in ids {
+            if let Some(entry) = pending.remove(&id) {
+                let _ = entry.sender.send(ApprovalOutcome::cancelled());
+            }
+        }
+        count
+    }
+
     /// Cancela todos os pedidos pendentes (fim de turno/cancelamento/app).
     pub fn cancel_all(&self) -> usize {
         let pending: Vec<(String, PendingApproval)> = self.pending.lock().drain().collect();
@@ -142,6 +159,46 @@ impl ApprovalRegistry {
     pub fn has_pending(&self, approval_id: &str) -> bool {
         self.pending.lock().contains_key(approval_id)
     }
+}
+
+/// Pede aprovação de forma interativa: registra o pedido, emite
+/// `ApprovalRequested`, aguarda decisão (usuário, timeout ou cancelamento) e
+/// emite `ApprovalResolved`. Sempre resolve — falha fechada em `expired`.
+pub async fn request_interactive(
+    registry: &ApprovalRegistry,
+    emit: Option<std::sync::Arc<dyn crate::harness::EventEmitter>>,
+    request: ApprovalRequest,
+    timeout: std::time::Duration,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> ApprovalOutcome {
+    let id = request.id.clone();
+    let receiver = registry.register_request(request.clone());
+    if let Some(emit) = &emit {
+        emit.emit(crate::events::TurnEvent::ApprovalRequested {
+            approval: request,
+        });
+    }
+    let outcome = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => ApprovalOutcome::cancelled(),
+        result = tokio::time::timeout(timeout, receiver) => match result {
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(_)) => ApprovalOutcome::expired(),
+            Err(_) => {
+                // Timeout: remove o pedido para a UI não mostrar um card morto.
+                registry.resolve(&id, ApprovalOutcome::expired());
+                ApprovalOutcome::expired()
+            }
+        },
+    };
+    if let Some(emit) = &emit {
+        emit.emit(crate::events::TurnEvent::ApprovalResolved {
+            approval_id: id,
+            decision: outcome.decision.as_str().to_string(),
+            scope: outcome.scope.map(|scope| scope.as_str().to_string()),
+        });
+    }
+    outcome
 }
 
 #[cfg(test)]

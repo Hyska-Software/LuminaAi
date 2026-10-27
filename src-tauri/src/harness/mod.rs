@@ -183,6 +183,10 @@ pub struct HarnessDeps {
     /// `None` uses [`crate::tools::skills::standard_external_roots`]; tests pass
     /// `Some(Vec::new())` so they never read the developer's home directory.
     pub skills_roots: Option<Vec<crate::tools::skills::ExternalSkillRoot>>,
+    /// Aprovações interativas do harness de código (`AppState::approvals`).
+    pub approvals: Option<Arc<crate::policy::approval::ApprovalRegistry>>,
+    /// Arquivos observados nesta execução do app (read-before-write/CAS).
+    pub observed: Option<Arc<crate::harness::code::observed::ObservedFiles>>,
 }
 
 /// Actionable copy for planned limits. The renderer knows the fixed
@@ -632,6 +636,8 @@ pub async fn run_turn(
         .turn_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    // O id do turno também é chave do journal/eventos do harness de código.
+    let tool_turn_id = turn_id.clone();
 
     /* ---------------------------------------------------------------- */
     /* 1. Setup: conversation, provider, model and credential            */
@@ -775,27 +781,40 @@ pub async fn run_turn(
         None => tools::skills::catalog_enabled(&data_dir, &settings.disabled_skills),
     }
     .unwrap_or_default();
-    let system_prompt = match profile {
-        TurnProfile::Code => {
-            // Contexto do workspace: preenchido na Fase 1 (workspaces) — por ora
-            // o perfil já entra com o prompt de código e a política da sessão.
-            let code_ctx = code::prompt::CodeContext {
-                permission_mode: conversation.permission_mode,
-                ..Default::default()
-            };
+    // Perfil Code: contexto do workspace (git/projeto/AGENTS.md/árvore) e as
+    // regras de aprovação aplicáveis à sessão. O Chat não paga esse custo.
+    let code_context = match profile {
+        TurnProfile::Code => Some(code::context::build(&deps.db, &conversation, true).await),
+        TurnProfile::Chat => None,
+    };
+    let code_rules = if profile == TurnProfile::Code {
+        deps.db
+            .list_approval_rules_for_context(
+                Some(&conversation.id),
+                conversation.workspace_id.as_deref(),
+            )
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let system_prompt = match (profile, code_context.as_ref()) {
+        (TurnProfile::Code, Some(code_ctx)) => {
+            let prompt_ctx = code_ctx.prompt_context();
+            let tool_prompts = code_tool_prompts(code_ctx, &settings);
             code::prompt::build_system_prompt(
                 &model,
-                &code_ctx,
-                // Orientações de tool: o registry da Fase 0 vira a fonte única;
-                // enquanto ele não está plugado, o prompt não promete tools.
-                &[],
+                &prompt_ctx,
+                &tool_prompts,
                 std::env::consts::OS,
                 &chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
             )
         }
-        TurnProfile::Chat => prompt::build_system_prompt(&model, &options, &settings, &skills),
+        _ => prompt::build_system_prompt(&model, &options, &settings, &skills),
     };
-    let tool_definitions = tools::definitions(&options);
+    let tool_definitions = match (profile, code_context.as_ref()) {
+        (TurnProfile::Code, Some(code_ctx)) => code_tool_definitions(code_ctx, &settings),
+        _ => tools::definitions(&options),
+    };
     let reasoning = reasoning_request(payload.reasoning.as_ref(), &model);
     let temperature = temperature_request(&options, &settings, &model);
     let max_output_tokens = Some(model.max_output.clamp(1_024, 32_768));
@@ -810,6 +829,27 @@ pub async fn run_turn(
         cancel: cancel.clone(),
         data_dir: data_dir.clone(),
         skills_roots: skills_roots.clone(),
+    };
+    // Contexto de execução das tools do perfil Code (aprovação, observação,
+    // eventos, regras e modo Plano). O Chat continua usando `ToolRuntime`.
+    let code_tool_ctx = match (profile, code_context.as_ref()) {
+        (TurnProfile::Code, Some(code_ctx)) => Some(crate::tools::registry::ToolCtx {
+            db: deps.db.clone(),
+            http: deps.search_http.clone(),
+            conversation_id: payload.conversation_id.clone(),
+            message_id: assistant_message.id.clone(),
+            turn_id: tool_turn_id.clone(),
+            workspace: code_ctx.workspace_handle(),
+            settings: settings.clone(),
+            cancel: cancel.clone(),
+            data_dir: data_dir.clone(),
+            approval: deps.approvals.clone(),
+            observed: deps.observed.clone(),
+            emit: Some(on_event.clone()),
+            rules: code_rules.clone(),
+            plan_mode: code_ctx.plan_mode,
+        }),
+        _ => None,
     };
 
     /* ---------------------------------------------------------------- */
@@ -962,7 +1002,10 @@ pub async fn run_turn(
         // Tools requested on the last allowed step still run: artifacts and other
         // deliverables must never be lost. A forced final-answer pass (below)
         // then summarizes what was collected.
-        let outcomes = execute_tools(&runtime, &step_calls).await;
+        let outcomes = match (&code_tool_ctx, profile) {
+            (Some(ctx), TurnProfile::Code) => code::tools::execute_batch(ctx, &step_calls).await,
+            _ => execute_tools(&runtime, &step_calls).await,
+        };
         let mut paired: Vec<(ToolCallRecord, ToolOutcome)> = Vec::new();
         for (mut call, outcome) in step_calls.into_iter().zip(outcomes.into_iter()) {
             call.status = if outcome.is_error {
@@ -972,6 +1015,7 @@ pub async fn run_turn(
             };
             call.result = Some(outcome.content.clone());
             call.summary = outcome.summary.clone();
+            call.presentation = outcome.presentation.clone();
             call.finished_at = Some(now_ms());
 
             emit(
@@ -982,6 +1026,7 @@ pub async fn run_turn(
                     result: truncate_chars(&outcome.content, MAX_EVENT_TOOL_RESULT_CHARS),
                     summary: outcome.summary.clone(),
                     citations: outcome.citations.clone(),
+                    presentation: outcome.presentation.clone(),
                 },
             );
             for artifact in &outcome.artifacts {
@@ -1294,6 +1339,59 @@ pub async fn run_turn(
         error: turn_failure.as_ref().map(|failure| failure.message.clone()),
         conversation: updated_conversation,
     };
+
+    // Fecho do turno Code: alterações do turno, medidor de contexto e auditoria.
+    if profile == TurnProfile::Code {
+        if let Some(summary) = code::session::turn_changes(&deps.db, &conversation.id, &tool_turn_id)
+        {
+            emit(&on_event, TurnEvent::WorkspaceChanges { summary });
+        }
+        let history_chars: usize = messages
+            .iter()
+            .map(|message| {
+                message.content.chars().count()
+                    + message.reasoning.as_deref().unwrap_or("").chars().count()
+            })
+            .sum();
+        let tool_chars: usize = all_tool_calls
+            .iter()
+            .map(|call| call.result.as_deref().unwrap_or("").chars().count())
+            .sum();
+        let stats = code::session::estimate_context(
+            system_prompt.chars().count(),
+            history_chars,
+            tool_chars,
+            model.context_window,
+            model.max_output.clamp(1_024, 32_768),
+            u32::try_from(messages.len()).unwrap_or(u32::MAX),
+        );
+        if let Err(error) =
+            code::session::save_context_stats(&deps.db, &conversation.id, &tool_turn_id, &stats)
+        {
+            eprintln!("lumina: falha ao salvar contexto da sessão: {error:#}");
+        }
+        emit(&on_event, TurnEvent::ContextStats { stats });
+        let turn_status = if cancelled {
+            "cancelled"
+        } else if turn_failure.is_some() {
+            "error"
+        } else {
+            "done"
+        };
+        if let Err(error) = code::session::append(
+            &deps.db,
+            &conversation.id,
+            Some(&tool_turn_id),
+            code::session::KIND_TURN_ENDED,
+            &serde_json::json!({ "status": turn_status, "usage": usage }),
+        ) {
+            eprintln!("lumina: falha ao registrar fim do turno Code: {error:#}");
+        }
+        // Nenhuma aprovação pode sobreviver ao fim do turno.
+        if let Some(approvals) = &deps.approvals {
+            approvals.cancel_for_conversation(&conversation.id);
+        }
+    }
 
     if cancelled {
         emit(&on_event, TurnEvent::Cancelled);
@@ -1907,6 +2005,49 @@ fn tool_call_record(call: StreamingToolCall) -> ToolCallRecord {
     }
 }
 
+/// Tools habilitadas no perfil Code para este turno (workspace confiável e
+/// `shell_enabled` aplicam-se antes de gerar prompt/definições).
+fn code_enabled_specs(
+    ctx: &code::context::CodeTurnContext,
+    settings: &Settings,
+) -> Vec<&'static crate::tools::registry::ToolSpec> {
+    let has_workspace = ctx.root.is_some();
+    crate::tools::registry::code_spec_refs()
+        .into_iter()
+        .filter(|spec| has_workspace || !spec.requires_workspace)
+        .filter(|spec| settings.shell_enabled || spec.name != "run_command")
+        .collect()
+}
+
+/// Definições wire das tools do perfil Code.
+fn code_tool_definitions(
+    ctx: &code::context::CodeTurnContext,
+    settings: &Settings,
+) -> Vec<crate::providers::ToolDefinition> {
+    code_enabled_specs(ctx, settings)
+        .into_iter()
+        .map(|spec| crate::providers::ToolDefinition {
+            name: spec.name.to_string(),
+            description: spec.description.to_string(),
+            parameters: (spec.schema)(),
+        })
+        .collect()
+}
+
+/// Orientações que entram no system prompt (fonte única: registry).
+fn code_tool_prompts(
+    ctx: &code::context::CodeTurnContext,
+    settings: &Settings,
+) -> Vec<code::prompt::ToolPrompt> {
+    code_enabled_specs(ctx, settings)
+        .into_iter()
+        .map(|spec| code::prompt::ToolPrompt {
+            name: spec.name,
+            guidance: spec.guidance,
+        })
+        .collect()
+}
+
 /// Appends one step of the agent loop to the persisted thinking trace. Steps
 /// without visible reasoning and without tool calls are ignored.
 fn push_trace_step(trace: &mut Vec<TraceStep>, reasoning: &str, tool_calls: usize) {
@@ -2469,6 +2610,8 @@ mod agent_loop_tests {
             data_dir: Some(test_data_dir()),
             // Tests never read the developer's real skill repositories.
             skills_roots: Some(Vec::new()),
+            approvals: None,
+            observed: None,
         }
     }
 
@@ -2566,6 +2709,8 @@ mod agent_loop_tests {
             api_key_override: None,
             data_dir: Some(test_data_dir()),
             skills_roots: Some(Vec::new()),
+            approvals: None,
+            observed: None,
         }
     }
 
@@ -2698,6 +2843,8 @@ mod agent_loop_tests {
             api_key_override: None,
             data_dir: Some(test_data_dir()),
             skills_roots: Some(Vec::new()),
+            approvals: None,
+            observed: None,
         }
     }
 

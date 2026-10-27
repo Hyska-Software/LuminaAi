@@ -324,6 +324,16 @@ pub fn resolve_program(program: &str, env: &[(String, String)]) -> PathBuf {
     if program.contains('\\') || program.contains('/') || program.contains(':') {
         return PathBuf::from(program);
     }
+    // Shells do sistema têm caminho real conhecido: preferir evita o alias de execução
+    // do WindowsApps, que adiciona um launcher extra e atrapalha o kill de árvore.
+    #[cfg(windows)]
+    {
+        if let Some(path) = windows_shell_fallback(program) {
+            if path.is_file() {
+                return path;
+            }
+        }
+    }
     let names = executable_names(program);
     let path_var = env
         .iter()
@@ -334,16 +344,10 @@ pub fn resolve_program(program: &str, env: &[(String, String)]) -> PathBuf {
         for dir in std::env::split_paths(&path_var) {
             for name in &names {
                 let candidate = dir.join(name);
-                if candidate.is_file() {
+                if candidate.is_file() && !is_windows_app_alias(&candidate) {
                     return candidate;
                 }
             }
-        }
-    }
-    #[cfg(windows)]
-    {
-        if let Some(path) = windows_shell_fallback(program) {
-            return path;
         }
     }
     PathBuf::from(program)
@@ -355,22 +359,36 @@ pub fn find_executable(program: &str) -> Option<PathBuf> {
         let path = PathBuf::from(program);
         return path.is_file().then_some(path);
     }
+    #[cfg(windows)]
+    {
+        if let Some(path) = windows_shell_fallback(program) {
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
     let path_var = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path_var) {
         for name in executable_names(program) {
             let candidate = dir.join(name);
-            if candidate.is_file() {
+            if candidate.is_file() && !is_windows_app_alias(&candidate) {
                 return Some(candidate);
             }
         }
     }
-    #[cfg(windows)]
-    {
-        if let Some(path) = windows_shell_fallback(program) {
-            return path.is_file().then_some(path);
-        }
-    }
     None
+}
+
+#[cfg(windows)]
+fn is_windows_app_alias(path: &Path) -> bool {
+    path.to_string_lossy()
+        .to_ascii_lowercase()
+        .contains("\\windowsapps\\")
+}
+
+#[cfg(not(windows))]
+fn is_windows_app_alias(_path: &Path) -> bool {
+    false
 }
 
 fn executable_names(program: &str) -> Vec<String> {
@@ -427,7 +445,7 @@ where
     let mut total = 0usize;
     let mut truncated = false;
     let mut buffer = [0u8; 8192];
-    let mut emit = |text: String| {
+    let emit = |text: String| {
         if let Some(sink) = &sink {
             if !text.is_empty() {
                 let _ = sink.send((kind, text));

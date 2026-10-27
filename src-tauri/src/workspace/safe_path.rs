@@ -68,12 +68,12 @@ pub fn resolve(root: &Path, requested: &str, access: Access) -> Result<PathBuf, 
         ));
     }
 
-    let root_canon = dunce::canonicalize(root).map_err(|e| {
+    let root_canon = simplify_verbatim(&dunce::canonicalize(root).map_err(|e| {
         FsError::new(
             FS_NOT_FOUND,
             format!("workspace indisponível ({}): {e}", root.display()),
         )
-    })?;
+    })?);
     if !root_canon.is_dir() {
         return Err(FsError::new(
             FS_NOT_A_FILE,
@@ -94,12 +94,12 @@ pub fn resolve(root: &Path, requested: &str, access: Access) -> Result<PathBuf, 
     // Canonicaliza o ancestral existente mais próximo: é ele que resolve symlinks/junctions.
     // Componentes que ainda não existem não podem ser links, então basta reanexá-los.
     let (existing, rest) = split_existing_ancestor(&normalized);
-    let existing_canon = dunce::canonicalize(&existing).map_err(|e| {
+    let existing_canon = simplify_verbatim(&dunce::canonicalize(&existing).map_err(|e| {
         FsError::new(
             FS_NOT_FOUND,
             format!("caminho inexistente ({}): {e}", existing.display()),
         )
-    })?;
+    })?);
     let mut candidate = existing_canon;
     for part in rest.iter().rev() {
         candidate.push(part);
@@ -256,9 +256,29 @@ fn split_existing_ancestor(path: &Path) -> (PathBuf, Vec<std::ffi::OsString>) {
 }
 
 fn canonical_or_lexical(path: &Path) -> PathBuf {
-    dunce::canonicalize(path).unwrap_or_else(|_| {
+    let resolved = dunce::canonicalize(path).unwrap_or_else(|_| {
         normalize_lexically(path).unwrap_or_else(|_| path.to_path_buf())
-    })
+    });
+    simplify_verbatim(&resolved)
+}
+
+/// Remove o prefixo verbatim `\\?\` (e converte `\\?\UNC\` de volta para UNC).
+///
+/// `dunce` preserva o prefixo quando o caminho resultante não é seguro para APIs
+/// legadas — em particular em caminhos > 260 chars. Para comparar paths (prefixo do
+/// workspace) precisamos da forma "humana"; o IO continua funcionando porque o Rust
+/// adiciona o prefixo verbatim sozinho quando necessário.
+fn simplify_verbatim(path: &Path) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    path.to_path_buf()
 }
 
 #[cfg(windows)]

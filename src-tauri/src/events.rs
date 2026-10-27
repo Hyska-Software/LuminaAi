@@ -42,6 +42,9 @@ pub enum TurnEvent {
         summary: Option<String>,
         #[serde(default)]
         citations: Vec<Citation>,
+        /// Apresentação estruturada (diff/todo/plano/job) para o card ao vivo.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        presentation: Option<serde_json::Value>,
     },
     /// A file artifact was created by the agent.
     ArtifactCreated { artifact: Artifact },

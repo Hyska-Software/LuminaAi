@@ -465,6 +465,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
                     status: event.status,
                     result: event.result,
                     summary: event.summary ?? tool.summary,
+                    presentation: event.presentation ?? tool.presentation ?? null,
                     finishedAt: Date.now(),
                   }
                 : tool,

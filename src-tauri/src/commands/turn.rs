@@ -33,6 +33,8 @@ pub async fn run_turn(
         // `None` = repositórios padrão de skills (Agent Skills/Codex/Claude/
         // OpenCode) resolvidos a partir do home do usuário.
         skills_roots: None,
+        approvals: Some(state.approvals.clone()),
+        observed: Some(state.observed.clone()),
         streamer: None,
         api_key_override: None,
         // Produção resolve credencial/modelos pelo `AppState` (OAuth refresh,

@@ -1297,7 +1297,7 @@ impl Db {
         let conn = self.conn.lock();
         let sql = format!(
             "SELECT {WORKSPACE_COLUMNS} FROM workspaces \
-             ORDER BY pinned DESC, COALESCE(last_opened_at, 0) DESC, updated_at DESC, \
+             ORDER BY pinned DESC, COALESCE(last_opened_at, 0) DESC, \
              name COLLATE NOCASE ASC"
         );
         let mut stmt = conn.prepare(&sql)?;

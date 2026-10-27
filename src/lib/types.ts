@@ -569,6 +569,7 @@ export type TurnEvent =
       result: string;
       summary?: string;
       citations?: Citation[];
+      presentation?: ToolPresentation | null;
     }
   | { type: 'artifact_created'; artifact: Artifact }
   | { type: 'usage'; usage: UsageInfo }

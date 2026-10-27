@@ -376,7 +376,7 @@ mod tests {
             "# Formato da resposta",
             "branch `main`",
             "npm test",
-            "Antes de commitar",
+            "antes de commitar",
         ] {
             assert!(prompt.contains(needle), "seção/trecho ausente: {needle}");
         }

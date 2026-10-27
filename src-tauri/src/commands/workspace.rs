@@ -282,59 +282,65 @@ pub async fn open_workspace_in_explorer(
 /* Árvore, busca e prévia                                              */
 /* ------------------------------------------------------------------ */
 
-fn build_tree(entries: &[(String, bool, u64)], root_label: &str) -> Vec<WorkspaceFileEntry> {
-    // Constrói a árvore em duas passagens: nós por path e depois os filhos.
+fn build_tree(entries: &[(String, bool, u64)], _root_label: &str) -> Vec<WorkspaceFileEntry> {
     use std::collections::HashMap;
-    let mut nodes: HashMap<String, WorkspaceFileEntry> = HashMap::new();
-    let mut order: Vec<String> = Vec::new();
+    // Passo 1: agrupa filhos por pai (None = raiz da listagem).
+    let mut children: HashMap<Option<String>, Vec<String>> = HashMap::new();
+    let mut info: HashMap<String, (bool, u64)> = HashMap::new();
     for (path, is_dir, size) in entries {
+        let parent = path.rsplit_once('/').map(|(parent, _)| parent.to_string());
+        children.entry(parent).or_default().push(path.clone());
+        info.insert(path.clone(), (*is_dir, *size));
+    }
+    // Passo 2: monta recursivamente, diretórios primeiro e nome ordenado.
+    fn build(
+        path: &str,
+        children: &HashMap<Option<String>, Vec<String>>,
+        info: &HashMap<String, (bool, u64)>,
+    ) -> WorkspaceFileEntry {
+        let (is_dir, size) = info.get(path).copied().unwrap_or((false, 0));
         let name = path.rsplit('/').next().unwrap_or(path).to_string();
         let depth = path.matches('/').count() as u32;
-        let node = WorkspaceFileEntry {
-            path: path.clone(),
-            name,
-            is_dir: *is_dir,
-            depth,
-            size: if *is_dir { None } else { Some(*size) },
-            git_status: None,
-            children: Vec::new(),
-        };
-        order.push(path.clone());
-        nodes.insert(path.clone(), node);
-    }
-    let mut roots: Vec<WorkspaceFileEntry> = Vec::new();
-    for path in &order {
-        let parent = path.rsplit_once('/').map(|(parent, _)| parent.to_string());
-        match parent {
-            Some(parent) if nodes.contains_key(&parent) => {
-                let node = match nodes.remove(path) {
-                    Some(node) => node,
-                    None => continue,
-                };
-                if let Some(parent_node) = nodes.get_mut(&parent) {
-                    parent_node.children.push(node);
-                }
-            }
-            _ => {
-                if let Some(node) = nodes.remove(path) {
-                    roots.push(node);
-                }
-            }
-        }
-    }
-    fn sort_entries(entries: &mut Vec<WorkspaceFileEntry>) {
-        entries.sort_by(|left, right| {
+        let mut child_nodes: Vec<WorkspaceFileEntry> = children
+            .get(&Some(path.to_string()))
+            .map(|paths| {
+                paths
+                    .iter()
+                    .map(|child| build(child, children, info))
+                    .collect()
+            })
+            .unwrap_or_default();
+        child_nodes.sort_by(|left, right| {
             right
                 .is_dir
                 .cmp(&left.is_dir)
                 .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
         });
-        for entry in entries.iter_mut() {
-            sort_entries(&mut entry.children);
+        WorkspaceFileEntry {
+            path: path.to_string(),
+            name,
+            is_dir,
+            depth,
+            size: if is_dir { None } else { Some(size) },
+            git_status: None,
+            children: child_nodes,
         }
     }
-    sort_entries(&mut roots);
-    let _ = root_label;
+    let mut roots: Vec<WorkspaceFileEntry> = children
+        .get(&None)
+        .map(|paths| {
+            paths
+                .iter()
+                .map(|path| build(path, &children, &info))
+                .collect()
+        })
+        .unwrap_or_default();
+    roots.sort_by(|left, right| {
+        right
+            .is_dir
+            .cmp(&left.is_dir)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
     roots
 }
 
@@ -563,7 +569,7 @@ mod tests {
         assert_eq!(tree[0].name, "src");
         assert!(tree[0].is_dir);
         assert_eq!(tree[0].children.len(), 2);
-        assert_eq!(tree[2].name, "README.md");
+        assert_eq!(tree[1].name, "README.md");
     }
 
     #[test]

@@ -98,6 +98,16 @@ pub struct ToolCtx {
     pub settings: Settings,
     pub cancel: CancellationToken,
     pub data_dir: PathBuf,
+    /// Aprovações interativas do app (presente no perfil Code em produção).
+    pub approval: Option<Arc<crate::policy::approval::ApprovalRegistry>>,
+    /// Arquivos lidos nesta execução do app (read-before-write/CAS).
+    pub observed: Option<Arc<crate::harness::code::observed::ObservedFiles>>,
+    /// Emissor de eventos do turno (aprovação, diff, tarefas, jobs).
+    pub emit: Option<Arc<dyn crate::harness::EventEmitter>>,
+    /// Regras "sempre permitir/negar" aplicáveis a esta sessão/workspace.
+    pub rules: Vec<crate::domain::ApprovalRule>,
+    /// Modo Plano ativo (mutação negada pela política).
+    pub plan_mode: bool,
 }
 
 impl ToolCtx {
@@ -105,6 +115,37 @@ impl ToolCtx {
     /// devem falhar com `FS_NO_WORKSPACE`).
     pub fn workspace_root(&self) -> Option<&std::path::Path> {
         self.workspace.as_ref().map(|workspace| workspace.root.as_path())
+    }
+
+    /// Emite um evento do turno (no-op quando o contexto é de teste).
+    pub fn emit_event(&self, event: crate::events::TurnEvent) {
+        if let Some(emit) = &self.emit {
+            emit.emit(event);
+        }
+    }
+
+    /// Pede aprovação do usuário e aguarda a decisão (timeout/cancel = falha
+    /// fechada). Sem aprovador disponível devolve `unavailable` (nega).
+    pub async fn request_approval(
+        &self,
+        request: crate::domain::ApprovalRequest,
+    ) -> crate::policy::approval::ApprovalOutcome {
+        let Some(registry) = &self.approval else {
+            return crate::policy::approval::ApprovalOutcome::expired();
+        };
+        crate::policy::approval::request_interactive(
+            registry,
+            self.emit.clone(),
+            request,
+            std::time::Duration::from_secs(self.settings.approval_timeout_secs.max(30) as u64),
+            &self.cancel,
+        )
+        .await
+    }
+
+    /// Matcher/consulta de regras para a política.
+    pub fn policy_rules(&self) -> &[crate::domain::ApprovalRule] {
+        &self.rules
     }
 }
 
@@ -414,16 +455,9 @@ impl ToolExec {
         }
     }
 
-    /// Executa a tool no contexto do turno (stub em F0).
-    pub async fn execute(self, _ctx: &ToolCtx, _args: Value) -> ToolOutcome {
-        match self {
-            Self::ReadFile => code::fs_read::run(_ctx, _args).await,
-            Self::GitStatus => code::git_read::run(_ctx, _args).await,
-            Self::WriteFile => code::fs_write::run(_ctx, _args).await,
-            Self::RunCommand => code::shell::run(_ctx, _args).await,
-            Self::TodoWrite => code::plan::run(_ctx, _args).await,
-            other => code::not_wired(other.name()),
-        }
+    /// Executa a tool no contexto do turno (implementação em `code::exec`).
+    pub async fn execute(self, ctx: &ToolCtx, args: Value) -> ToolOutcome {
+        code::exec::run(ctx, self, args).await
     }
 }
 
@@ -585,25 +619,17 @@ mod tests {
     }
 
     #[test]
-    fn tool_exec_resolves_every_code_tool_and_returns_stub_errors() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime de teste");
-        let ctx = test_ctx();
+    fn tool_exec_resolves_every_code_tool_and_helpers_work() {
         for spec in code_spec_refs() {
             let exec = ToolExec::for_tool(spec.name).expect(spec.name);
             assert_eq!(exec.name(), spec.name);
-            let outcome = runtime.block_on(exec.execute(&ctx, serde_json::json!({})));
-            assert!(outcome.is_error, "{} deveria ser stub", spec.name);
-            assert!(
-                outcome.content.starts_with("Error: tool"),
-                "{}: {}",
-                spec.name,
-                outcome.content
-            );
         }
         assert!(ToolExec::for_tool("web_search").is_none());
+        // `ToolCtx` de teste continua construível com todos os campos novos.
+        let ctx = test_ctx();
+        assert!(ctx.workspace_root().is_some());
+        assert!(ctx.policy_rules().is_empty());
+        assert!(!ctx.plan_mode);
     }
 
     fn test_ctx() -> ToolCtx {
@@ -621,6 +647,11 @@ mod tests {
             settings: Settings::default(),
             cancel: CancellationToken::new(),
             data_dir: std::env::temp_dir().join("lumina-registry-test"),
+            approval: None,
+            observed: None,
+            emit: None,
+            rules: Vec::new(),
+            plan_mode: false,
         }
     }
 }

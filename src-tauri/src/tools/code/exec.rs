@@ -1,0 +1,2188 @@
+//! Execução real das tools do perfil Code (F2/F3/F4).
+//!
+//! Cada braço de [`run`] implementa uma das 14 tools do catálogo (`registry`),
+//! usando os módulos de apoio já publicados:
+//! - `workspace::safe_path` (confinamento ao workspace),
+//! - `workspace::exec` (shell/timeout/cancelamento/env higienizado),
+//! - `workspace::git` (status/diff/log read-only),
+//! - `workspace::journal` (hashes, line stats, diff unificado, object store),
+//! - `harness::code::{observed, session}` (read-before-write e projeções),
+//! - `policy` (matriz de permissões + aprovação interativa).
+//!
+//! Regras de ouro: pt-BR nas mensagens, códigos estáveis (`FS_*`, `POLICY_*`,
+//! `APPROVAL_*`…), nunca `panic`/`unwrap` em dado do usuário, todo resultado
+//! grande vai para spill com caminho de recuperação (`read_tool_output`).
+
+use std::io;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde_json::{json, Value};
+
+use crate::domain::{
+    now_ms, ApprovalDetail, ApprovalOption, ApprovalRequest, ApprovalScope, FileChange,
+    FileChangeKind, RiskClass, TodoItem,
+};
+use crate::harness::code::{observed::ObservationState, session};
+use crate::policy::{decide, CallFacts, PolicyContext, PolicyDecision};
+use crate::tools::registry::{ToolCtx, ToolExec};
+use crate::tools::ToolOutcome;
+use crate::workspace::{exec, git, journal, safe_path};
+
+/// Limite de texto que volta ao modelo antes de ir para spill.
+pub const MAX_INLINE_CHARS: usize = 24_000;
+const SPILL_HEAD_CHARS: usize = 12_000;
+const SPILL_TAIL_CHARS: usize = 4_000;
+/// Teto de leitura de arquivo por chamada (TOOLS.md §2.1).
+const MAX_READ_BYTES: u64 = 5 * 1024 * 1024;
+const MAX_WRITE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_DIFF_CHARS: usize = 4_000;
+const MAX_SEARCH_RESULTS: usize = 200;
+const MAX_LIST_ENTRIES: usize = 400;
+const MAX_LINE_CHARS: usize = 2_000;
+
+/// Ponto de entrada único das tools de código.
+pub async fn run(ctx: &ToolCtx, exec: ToolExec, args: Value) -> ToolOutcome {
+    match exec {
+        ToolExec::ReadFile => read_file(ctx, &args).await,
+        ToolExec::ListDir => list_dir(ctx, &args).await,
+        ToolExec::SearchFiles => search_files(ctx, &args).await,
+        ToolExec::SearchText => search_text(ctx, &args).await,
+        ToolExec::ReadToolOutput => read_tool_output(ctx, &args).await,
+        ToolExec::GitStatus => git_status(ctx, &args).await,
+        ToolExec::GitDiff => git_diff(ctx, &args).await,
+        ToolExec::GitLog => git_log(ctx, &args).await,
+        ToolExec::WriteFile => write_file(ctx, &args).await,
+        ToolExec::EditFile => edit_file(ctx, &args).await,
+        ToolExec::RunCommand => run_command(ctx, &args).await,
+        ToolExec::TodoWrite => todo_write(ctx, &args).await,
+        ToolExec::SubmitPlan => submit_plan(ctx, &args).await,
+        ToolExec::AskUser => err("ASK_USER_UNAVAILABLE", "o card de perguntas interativas chega na próxima fase; faça a pergunta em prosa e prossiga com a hipótese mais segura"),
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Helpers: erro, args, workspace e spill                              */
+/* ------------------------------------------------------------------ */
+
+fn err(code: &str, message: impl Into<String>) -> ToolOutcome {
+    ToolOutcome::error(format!("{code}: {}", message.into()))
+}
+
+fn arg_str(args: &Value, key: &str) -> Result<String, ToolOutcome> {
+    match args.get(key).and_then(Value::as_str) {
+        Some(value) if !value.trim().is_empty() => Ok(value.trim().to_string()),
+        Some(_) => Err(err("TOOL_INVALID_ARGS", format!("`{key}` não pode ser vazio"))),
+        None => Err(err("TOOL_INVALID_ARGS", format!("`{key}` é obrigatório"))),
+    }
+}
+
+fn opt_str(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn opt_u32(args: &Value, key: &str) -> Option<u32> {
+    args.get(key)
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+}
+
+fn opt_bool(args: &Value, key: &str) -> Option<bool> {
+    args.get(key).and_then(Value::as_bool)
+}
+
+fn opt_string_array(args: &Value, key: &str) -> Vec<String> {
+    args.get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn workspace_handle(ctx: &ToolCtx) -> Result<&crate::tools::registry::WorkspaceHandle, ToolOutcome> {
+    ctx.workspace.as_ref().ok_or_else(|| {
+        err(
+            "FS_NO_WORKSPACE",
+            "esta sessão não tem workspace aberto; abra uma pasta antes de usar ferramentas de arquivo",
+        )
+    })
+}
+
+fn workspace_root(ctx: &ToolCtx) -> Result<PathBuf, ToolOutcome> {
+    Ok(workspace_handle(ctx)?.root.clone())
+}
+
+/// Workspace para operações que mutam o disco: exige pasta confiável.
+fn writable_root(ctx: &ToolCtx) -> Result<PathBuf, ToolOutcome> {
+    let workspace = workspace_handle(ctx)?;
+    if !workspace.trusted {
+        return Err(err(
+            "FS_UNTRUSTED_WORKSPACE",
+            "o workspace não foi confirmado como confiável; confie na pasta para liberar escritas",
+        ));
+    }
+    Ok(workspace.root.clone())
+}
+
+fn resolve_path(ctx: &ToolCtx, requested: &str, access: safe_path::Access) -> Result<PathBuf, ToolOutcome> {
+    let root = workspace_root(ctx)?;
+    safe_path::resolve(&root, requested, access).map_err(|error| err(error.code, error.message))
+}
+
+fn relative_path(ctx: &ToolCtx, path: &Path) -> String {
+    ctx.workspace_root()
+        .map(|root| safe_path::to_relative(root, path))
+        .unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"))
+}
+
+/// Resolve um diretório dentro do workspace (`safe_path::resolve` só aceita
+/// arquivos na leitura, então tratamos o caso `FS_NOT_A_FILE` como diretório).
+fn resolve_dir(ctx: &ToolCtx, requested: &str) -> Result<PathBuf, ToolOutcome> {
+    let root = workspace_root(ctx)?;
+    match safe_path::resolve(&root, requested, safe_path::Access::Read) {
+        Ok(path) => Err(err(
+            "FS_NOT_A_FILE",
+            format!("'{}' não é um diretório", relative_path(ctx, &path)),
+        )),
+        Err(error) if error.code == safe_path::FS_NOT_A_FILE => {
+            let joined = if Path::new(requested).is_absolute() {
+                PathBuf::from(requested)
+            } else {
+                root.join(requested)
+            };
+            let canonical = dunce::canonicalize(&joined).map_err(|_| {
+                err("FS_NOT_FOUND", format!("diretório não encontrado: {requested}"))
+            })?;
+            if !safe_path::is_within(&root, &canonical) {
+                return Err(err(
+                    "FS_OUTSIDE_WORKSPACE",
+                    format!("'{requested}' está fora do workspace"),
+                ));
+            }
+            Ok(canonical)
+        }
+        Err(error) => Err(err(error.code, error.message)),
+    }
+}
+
+fn dir_skip_name(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | ".hg"
+            | ".svn"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | "out"
+            | ".venv"
+            | "venv"
+            | "__pycache__"
+            | ".next"
+            | ".nuxt"
+            | "coverage"
+            | ".idea"
+            | ".vscode"
+    )
+}
+
+/// Pasta de spill por sessão (`<app-data>/spill/<conversation>`).
+fn spill_dir(ctx: &ToolCtx) -> PathBuf {
+    ctx.data_dir.join("spill").join(&ctx.conversation_id)
+}
+
+/// Encurta um texto grande para o modelo, gravando o completo em spill.
+/// Devolve `(inline, Some((id, path)))` quando houve spill.
+fn spill_text(ctx: &ToolCtx, text: &str) -> (String, Option<(String, PathBuf)>) {
+    let total = text.chars().count();
+    if total <= MAX_INLINE_CHARS {
+        return (text.to_string(), None);
+    }
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    let dir = spill_dir(ctx);
+    let path = dir.join(format!("{id}.txt"));
+    let write = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, text.as_bytes()));
+    if write.is_err() {
+        // Sem spill disponível: nunca perder o resultado, devolve truncado.
+        let head: String = text.chars().take(SPILL_HEAD_CHARS).collect();
+        return (
+            format!("{head}\n…[saída completa indisponível: falha ao gravar spill]\n"),
+            None,
+        );
+    }
+    let head: String = text.chars().take(SPILL_HEAD_CHARS).collect();
+    let tail: String = {
+        let skip = total.saturating_sub(SPILL_TAIL_CHARS);
+        text.chars().skip(skip).collect()
+    };
+    let inline = format!(
+        "{head}\n…[saída completa: spill {id} · use read_tool_output(id=\"{id}\")]\n{tail}"
+    );
+    (inline, Some((id, path)))
+}
+
+/// Valida o id de spill (anti path traversal) e lê o arquivo completo.
+fn read_spill(ctx: &ToolCtx, id: &str) -> Result<String, ToolOutcome> {
+    let valid = (8..=32).contains(&id.len())
+        && id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-');
+    if !valid {
+        return Err(err("SPILL_NOT_FOUND", format!("id de spill inválido: {id}")));
+    }
+    let path = spill_dir(ctx).join(format!("{id}.txt"));
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(err(
+            "SPILL_NOT_FOUND",
+            format!("a saída `{id}` não existe mais (retenção de spill expirou?)"),
+        )),
+        Err(error) => Err(err(
+            "SPILL_NOT_FOUND",
+            format!("não foi possível ler a saída `{id}`: {error}"),
+        )),
+    }
+}
+
+fn finish(
+    ctx: &ToolCtx,
+    content: String,
+    summary: Option<String>,
+    presentation: Option<Value>,
+) -> ToolOutcome {
+    let (inline, spill) = spill_text(ctx, &content);
+    let presentation = match (presentation, &spill) {
+        (Some(Value::Object(mut map)), Some((id, _))) => {
+            map.insert("spill".into(), Value::String(id.clone()));
+            Some(Value::Object(map))
+        }
+        (Some(value), _) => Some(value),
+        (None, Some((id, _))) => Some(json!({ "kind": "output", "spill": id })),
+        (None, None) => None,
+    };
+    ToolOutcome {
+        content: inline,
+        summary,
+        presentation,
+        ..Default::default()
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Política e aprovação                                                */
+/* ------------------------------------------------------------------ */
+
+const EV_APPROVAL_ASKED: &str = "approval/asked";
+const EV_APPROVAL_DECIDED: &str = "approval/decided";
+
+fn audit_append(ctx: &ToolCtx, kind: &str, payload: &Value) {
+    // Evento de auditoria: nunca derruba a execução se o log falhar.
+    let _ = session::append(&ctx.db, &ctx.conversation_id, Some(&ctx.turn_id), kind, payload);
+}
+
+fn approval_options() -> Vec<ApprovalOption> {
+    vec![
+        ApprovalOption {
+            id: "allow".into(),
+            label: "Permitir uma vez".into(),
+            scope: None,
+        },
+        ApprovalOption {
+            id: "deny".into(),
+            label: "Negar".into(),
+            scope: None,
+        },
+        ApprovalOption {
+            id: "allow_session".into(),
+            label: "Sempre permitir nesta sessão".into(),
+            scope: Some(ApprovalScope::Session),
+        },
+        ApprovalOption {
+            id: "allow_workspace".into(),
+            label: "Sempre permitir neste workspace".into(),
+            scope: Some(ApprovalScope::Workspace),
+        },
+        ApprovalOption {
+            id: "allow_global".into(),
+            label: "Sempre permitir (global)".into(),
+            scope: Some(ApprovalScope::Global),
+        },
+    ]
+}
+
+/// Aplica a matriz de permissões e, se necessário, pausa o turno pedindo
+/// aprovação humana. `Allow` → `Ok`; `Deny`/`Ask` recusado → `Err(erro)`.
+async fn policy_check(
+    ctx: &ToolCtx,
+    tool: &str,
+    risk: RiskClass,
+    mutating: bool,
+    target: Option<&str>,
+    secret: bool,
+    destructive_reason: Option<&'static str>,
+    detail: ApprovalDetail,
+    title: &str,
+) -> Result<(), ToolOutcome> {
+    let Some(workspace) = ctx.workspace.as_ref() else {
+        if mutating {
+            return Err(err(
+                "FS_NO_WORKSPACE",
+                "não há workspace aberto para autorizar esta operação",
+            ));
+        }
+        return Ok(());
+    };
+    let facts = CallFacts {
+        tool,
+        risk,
+        mutating,
+        target,
+        inside_workspace: true,
+        secret,
+        destructive_reason,
+    };
+    let policy_ctx = PolicyContext {
+        mode: workspace.permission_mode,
+        plan_mode: ctx.plan_mode,
+        trusted: workspace.trusted,
+        session_id: ctx.conversation_id.as_str(),
+        workspace_id: None,
+        rules: ctx.policy_rules(),
+    };
+    match decide(&policy_ctx, &facts) {
+        PolicyDecision::Allow => Ok(()),
+        PolicyDecision::Deny { code, reason } => Err(err(code, reason)),
+        PolicyDecision::Ask { risk, reason } => {
+            if ctx.approval.is_none() {
+                return Err(err(
+                    "APPROVAL_UNAVAILABLE",
+                    format!("{reason} — mas não há canal de aprovação disponível; falhando fechado"),
+                ));
+            }
+            let request = ApprovalRequest {
+                id: format!("apr-{}", uuid::Uuid::new_v4().simple()),
+                conversation_id: ctx.conversation_id.clone(),
+                tool_call_id: String::new(),
+                tool: tool.to_string(),
+                title: title.to_string(),
+                detail,
+                risk,
+                preview: None,
+                options: approval_options(),
+                created_at: now_ms(),
+            };
+            audit_append(
+                ctx,
+                EV_APPROVAL_ASKED,
+                &json!({
+                    "approvalId": request.id,
+                    "tool": tool,
+                    "risk": risk,
+                    "title": title,
+                    "reason": reason,
+                }),
+            );
+            let approval_id = request.id.clone();
+            let outcome = ctx.request_approval(request).await;
+            audit_append(
+                ctx,
+                EV_APPROVAL_DECIDED,
+                &json!({
+                    "approvalId": approval_id,
+                    "decision": outcome.decision.as_str(),
+                    "scope": outcome.scope.map(|scope| scope.as_str()),
+                    "feedback": outcome.feedback,
+                }),
+            );
+            if outcome.is_approved() {
+                return Ok(());
+            }
+            let feedback = outcome
+                .feedback
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| format!(": {value}"))
+                .unwrap_or_default();
+            match outcome.decision {
+                crate::domain::ApprovalDecision::Denied => Err(err(
+                    "APPROVAL_DENIED",
+                    format!("a ação foi negada pelo usuário{feedback}; ajuste a abordagem"),
+                )),
+                crate::domain::ApprovalDecision::Cancelled => Err(err(
+                    "APPROVAL_CANCELLED",
+                    "a aprovação foi cancelada (turno interrompido)",
+                )),
+                _ => Err(err(
+                    "APPROVAL_TIMEOUT",
+                    "o usuário não respondeu a tempo; falhando fechado",
+                )),
+            }
+        }
+    }
+}
+
+fn is_secret_path(relative: &str) -> bool {
+    let lower = relative.to_ascii_lowercase();
+    let name = lower.rsplit('/').next().unwrap_or(&lower);
+    lower.contains("/.aws/credentials")
+        || lower.ends_with(".git-credentials")
+        || name == ".env"
+        || name.starts_with(".env.")
+        || name == ".npmrc"
+        || name.ends_with(".pem")
+        || name.ends_with(".key")
+        || name.ends_with(".p12")
+        || name.ends_with(".pfx")
+        || name.starts_with("id_rsa")
+        || name.starts_with("id_ed25519")
+        || name.starts_with("secrets.")
+        || name.ends_with(".secret")
+}
+
+fn write_detail(path: &str) -> ApprovalDetail {
+    ApprovalDetail::Paths {
+        paths: vec![path.to_string()],
+        change: "write".to_string(),
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Leitura: read_file, list_dir, search_files, search_text            */
+/* ------------------------------------------------------------------ */
+
+fn decode_text(bytes: &[u8]) -> (String, String) {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return (String::from_utf8_lossy(&bytes[3..]).into_owned(), "UTF-8 (BOM)".into());
+    }
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        let (text, _, _) = encoding_rs::UTF_16LE.decode(&bytes[2..]);
+        return (text.into_owned(), "UTF-16LE".into());
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        let (text, _, _) = encoding_rs::UTF_16BE.decode(&bytes[2..]);
+        return (text.into_owned(), "UTF-16BE".into());
+    }
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return (text.to_string(), "UTF-8".into());
+    }
+    let mut detector =
+        chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
+    detector.feed(bytes, true);
+    let encoding = detector.guess(None, chardetng::Utf8Detection::Allow);
+    let (text, _, _) = encoding.decode(bytes);
+    (text.into_owned(), encoding.name().to_string())
+}
+
+fn looks_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(8 * 1024).any(|byte| *byte == 0)
+}
+
+async fn read_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let requested = match arg_str(args, "path") {
+        Ok(value) => value,
+        Err(outcome) => return outcome,
+    };
+    let path = match resolve_path(ctx, &requested, safe_path::Access::Read) {
+        Ok(path) => path,
+        Err(outcome) => return outcome,
+    };
+    let relative = relative_path(ctx, &path);
+    // Arquivos de segredo exigem consentimento explícito mesmo na leitura.
+    if is_secret_path(&relative) {
+        if let Err(outcome) = policy_check(
+            ctx,
+            "read_file",
+            RiskClass::Secret,
+            false,
+            Some(relative.as_str()),
+            true,
+            None,
+            ApprovalDetail::Secret { path: relative.clone() },
+            "Ler arquivo de segredo?",
+        )
+        .await
+        {
+            return outcome;
+        }
+    }
+    let metadata = match std::fs::metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) => return err("FS_NOT_FOUND", format!("não foi possível ler '{relative}': {error}")),
+    };
+    if metadata.len() > MAX_READ_BYTES {
+        return err(
+            "FS_TOO_LARGE",
+            format!(
+                "'{relative}' tem {} bytes (máximo {}); use search_text/grep para inspecionar partes",
+                metadata.len(),
+                MAX_READ_BYTES
+            ),
+        );
+    }
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) => return err("FS_NOT_FOUND", format!("não foi possível ler '{relative}': {error}")),
+    };
+    if looks_binary(&bytes) {
+        return err(
+            "FS_BINARY",
+            format!("cannot read \"{relative}\": binary file; use list_dir ou outra ferramenta"),
+        );
+    }
+    let (text, encoding) = decode_text(&bytes);
+    if let Some(observed) = &ctx.observed {
+        observed.record(&path, &bytes);
+    }
+
+    let lines: Vec<&str> = text.lines().collect();
+    let total = lines.len();
+    let offset = opt_u32(args, "offset").unwrap_or(1).max(1) as usize;
+    if total > 0 && offset > total {
+        return err(
+            "TOOL_INVALID_ARGS",
+            format!("offset {offset} fora do intervalo de '{relative}' ({total} linhas)"),
+        );
+    }
+    let limit = opt_u32(args, "limit").unwrap_or(800).clamp(1, 2_000) as usize;
+    let start = offset.saturating_sub(1).min(total);
+    let end = (start + limit).min(total);
+    let mut body = String::new();
+    if total == 0 {
+        body.push_str("(arquivo vazio)");
+    } else {
+        for (index, line) in lines[start..end].iter().enumerate() {
+            let number = start + index + 1;
+            let rendered = if line.chars().count() > MAX_LINE_CHARS {
+                format!("{}…", line.chars().take(MAX_LINE_CHARS).collect::<String>())
+            } else {
+                (*line).to_string()
+            };
+            body.push_str(&format!("{number:>4}│ {rendered}\n"));
+        }
+    }
+    let next_offset = end + 1;
+    let footer = if end >= total {
+        format!("(fim do arquivo · {total} linhas)")
+    } else {
+        format!("(próximo: offset={next_offset}; {total} linhas no total)")
+    };
+    let size_kb = metadata.len() as f64 / 1024.0;
+    let content = format!(
+        "{relative} · linhas {}-{} de {total} · {size_kb:.1} KB · {encoding}\n{body}{footer}",
+        if total == 0 { 0 } else { start + 1 },
+        end
+    );
+    finish(
+        ctx,
+        content,
+        Some(format!("Ler {relative}:{}-{}", if total == 0 { 0 } else { start + 1 }, end)),
+        Some(json!({ "kind": "output", "path": relative, "lines": end.saturating_sub(start) })),
+    )
+}
+
+async fn list_dir(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let requested = opt_str(args, "path").unwrap_or_else(|| ".".to_string());
+    let base = match resolve_dir(ctx, &requested) {
+        Ok(path) => path,
+        Err(outcome) => return outcome,
+    };
+    let root = match workspace_root(ctx) {
+        Ok(root) => root,
+        Err(outcome) => return outcome,
+    };
+    let depth = opt_u32(args, "depth").unwrap_or(2).clamp(1, 4) as usize;
+    let include_hidden = opt_bool(args, "include_hidden").unwrap_or(false);
+    let limit = opt_u32(args, "limit").unwrap_or(400).clamp(1, 2_000) as usize;
+
+    let mut entries: Vec<(String, bool)> = Vec::new();
+    let walker = ignore::WalkBuilder::new(&base)
+        .hidden(!include_hidden)
+        .git_ignore(true)
+        .max_depth(Some(depth))
+        .filter_entry(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .map(|name| !dir_skip_name(name))
+                .unwrap_or(true)
+        })
+        .build();
+    for entry in walker.flatten() {
+        if entry.depth() == 0 {
+            continue;
+        }
+        let path = entry.path();
+        let relative = safe_path::to_relative(&root, path);
+        if relative.is_empty() {
+            continue;
+        }
+        let is_dir = entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
+        entries.push((relative, is_dir));
+        if entries.len() > limit * 4 {
+            break;
+        }
+    }
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    let total = entries.len();
+    entries.truncate(limit);
+
+    let mut content = String::new();
+    content.push_str(&format!(
+        "{} ({} entradas{})\n",
+        if requested == "." { ".".to_string() } else { requested.clone() },
+        total,
+        if total > limit { format!(", mostrando {limit}") } else { String::new() }
+    ));
+    for (relative, is_dir) in &entries {
+        let depth_marker = relative.matches('/').count();
+        content.push_str(&"  ".repeat(depth_marker));
+        content.push_str(relative.rsplit('/').next().unwrap_or(relative));
+        if *is_dir {
+            content.push('/');
+        }
+        content.push('\n');
+    }
+    if total > limit {
+        content.push_str(&format!(
+            "… {total} entradas no total; mostre um subdiretório para ver o restante\n"
+        ));
+    }
+    if entries.is_empty() {
+        content.push_str("(diretório vazio ou sem entradas visíveis)\n");
+    }
+    finish(
+        ctx,
+        content,
+        Some(format!("Listar {} · {total} entradas", requested)),
+        Some(json!({ "kind": "output", "entries": total })),
+    )
+}
+
+fn build_walker(base: &Path, include_hidden: bool) -> ignore::Walk {
+    ignore::WalkBuilder::new(base)
+        .hidden(!include_hidden)
+        .git_ignore(true)
+        .filter_entry(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .map(|name| !dir_skip_name(name))
+                .unwrap_or(true)
+        })
+        .build()
+}
+
+async fn search_files(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let pattern = match arg_str(args, "pattern") {
+        Ok(value) => value,
+        Err(outcome) => return outcome,
+    };
+    let glob = match globset::Glob::new(&pattern) {
+        Ok(glob) => glob.compile_matcher(),
+        Err(error) => return err("TOOL_INVALID_ARGS", format!("glob inválido: {error}")),
+    };
+    let requested = opt_str(args, "path").unwrap_or_else(|| ".".to_string());
+    let base = match resolve_dir(ctx, &requested) {
+        Ok(path) => path,
+        Err(outcome) => return outcome,
+    };
+    let root = match workspace_root(ctx) {
+        Ok(root) => root,
+        Err(outcome) => return outcome,
+    };
+    let cap = opt_u32(args, "max_results").unwrap_or(200).clamp(1, 1_000) as usize;
+    let basename_only = !pattern.contains('/');
+    let mut matches: Vec<String> = Vec::new();
+    for entry in build_walker(&base, false).flatten() {
+        if entry.depth() == 0 {
+            continue;
+        }
+        if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let path = entry.path();
+        let relative = safe_path::to_relative(&root, path);
+        let candidate = if basename_only {
+            path.file_name().map(|name| name.to_string_lossy().into_owned())
+        } else {
+            Some(relative.clone())
+        };
+        if let Some(candidate) = candidate {
+            if glob.is_match(candidate.as_str()) || (!basename_only && glob.is_match(&relative)) {
+                matches.push(relative);
+            }
+        }
+        if matches.len() > cap * 4 {
+            break;
+        }
+    }
+    matches.sort();
+    matches.dedup();
+    let total = matches.len();
+    matches.truncate(cap);
+    let mut content = String::new();
+    if matches.is_empty() {
+        content.push_str(&format!(
+            "Nenhum arquivo casou com `{pattern}` em {requested}. Tente um glob mais amplo (ex.: `**/*`) ou use search_text para buscar conteúdo.\n"
+        ));
+    } else {
+        content.push_str(&format!("{total} arquivo(s) casando com `{pattern}`:\n"));
+        for relative in &matches {
+            content.push_str(relative);
+            content.push('\n');
+        }
+        if total > cap {
+            content.push_str(&format!("… mostra {cap} de {total}; refine o padrão\n"));
+        }
+    }
+    finish(
+        ctx,
+        content,
+        Some(format!("Buscar arquivos · {total} resultado(s)")),
+        Some(json!({ "kind": "output", "results": total })),
+    )
+}
+
+async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let query = match arg_str(args, "query") {
+        Ok(value) => value,
+        Err(outcome) => return outcome,
+    };
+    let is_regex = opt_bool(args, "is_regex").unwrap_or(false);
+    let case_sensitive = opt_bool(args, "case_sensitive").unwrap_or(false);
+    let context_lines = opt_u32(args, "context_lines").unwrap_or(0).clamp(0, 5) as usize;
+    let cap = opt_u32(args, "max_results").unwrap_or(200).clamp(1, 1_000) as usize;
+    let requested = opt_str(args, "path").unwrap_or_else(|| ".".to_string());
+    let base = match resolve_dir(ctx, &requested) {
+        Ok(path) => path,
+        Err(outcome) => return outcome,
+    };
+    let root = match workspace_root(ctx) {
+        Ok(root) => root,
+        Err(outcome) => return outcome,
+    };
+    let pattern = if is_regex { query.clone() } else { regex::escape(&query) };
+    let matcher = match regex::RegexBuilder::new(&pattern)
+        .case_insensitive(!case_sensitive)
+        .build()
+    {
+        Ok(matcher) => matcher,
+        Err(error) => return err("TOOL_INVALID_ARGS", format!("regex inválida: {error}")),
+    };
+    let glob = opt_str(args, "glob").and_then(|value| match globset::Glob::new(&value) {
+        Ok(glob) => Some(glob.compile_matcher()),
+        Err(_) => None,
+    });
+
+    let mut blocks: Vec<String> = Vec::new();
+    let mut total_matches = 0usize;
+    let mut displayed_lines = 0usize;
+    'files: for entry in build_walker(&base, false).flatten() {
+        if entry.depth() == 0 {
+            continue;
+        }
+        if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let path = entry.path();
+        let relative = safe_path::to_relative(&root, path);
+        if let Some(glob) = &glob {
+            if !glob.is_match(relative.as_str()) {
+                continue;
+            }
+        }
+        let Ok(bytes) = std::fs::read(path) else { continue };
+        if looks_binary(&bytes) {
+            continue;
+        }
+        let Ok(text) = std::str::from_utf8(&bytes) else { continue };
+        let lines: Vec<&str> = text.lines().collect();
+        let mut block = String::new();
+        for (index, line) in lines.iter().enumerate() {
+            if !matcher.is_match(line) {
+                continue;
+            }
+            total_matches += 1;
+            if total_matches > cap {
+                break 'files;
+            }
+            let number = index + 1;
+            let start = index.saturating_sub(context_lines);
+            let end = (index + context_lines + 1).min(lines.len());
+            if context_lines > 0 {
+                block.push_str(&format!("{relative}\n"));
+            }
+            for context_index in start..end {
+                let prefix = if context_index == index { ':' } else { '-' };
+                let rendered = if lines[context_index].chars().count() > MAX_LINE_CHARS {
+                    lines[context_index].chars().take(MAX_LINE_CHARS).collect::<String>()
+                } else {
+                    lines[context_index].to_string()
+                };
+                block.push_str(&format!(
+                    "{relative}:{}{prefix} {rendered}\n",
+                    context_index + 1
+                ));
+                displayed_lines += 1;
+            }
+            if displayed_lines > 4_000 {
+                break 'files;
+            }
+        }
+        if !block.is_empty() {
+            blocks.push(block);
+        }
+        if blocks.len() > 200 {
+            break;
+        }
+    }
+
+    let mut content = String::new();
+    if total_matches == 0 {
+        content.push_str(&format!(
+            "Nenhuma ocorrência de `{query}` em {requested}. Confira maiúsculas/acentos ou tente `is_regex`.\n"
+        ));
+    } else {
+        for block in &blocks {
+            content.push_str(block);
+        }
+        if total_matches >= cap {
+            content.push_str(&format!(
+                "… resultado truncado em {cap} ocorrências; refine a busca (glob/path) para ver mais\n"
+            ));
+        }
+    }
+    finish(
+        ctx,
+        content,
+        Some(format!("Buscar texto · {total_matches} ocorrência(s)")),
+        Some(json!({ "kind": "output", "matches": total_matches })),
+    )
+}
+
+async fn read_tool_output(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let id = match arg_str(args, "id") {
+        Ok(value) => value,
+        Err(outcome) => return outcome,
+    };
+    let text = match read_spill(ctx, &id) {
+        Ok(text) => text,
+        Err(outcome) => return outcome,
+    };
+    let chars: Vec<char> = text.chars().collect();
+    let total = chars.len();
+    let offset = opt_u32(args, "offset").unwrap_or(0) as usize;
+    if offset >= total && total > 0 {
+        return err(
+            "TOOL_INVALID_ARGS",
+            format!("offset {offset} fora do intervalo (spill tem {total} caracteres)"),
+        );
+    }
+    let limit = opt_u32(args, "limit").unwrap_or(4_000).clamp(1, 20_000) as usize;
+    let end = (offset + limit).min(total);
+    let page: String = chars[offset..end].iter().collect();
+    let content = format!(
+        "{page}\n(spill {id}: caracteres {}-{end} de {total}{})",
+        offset,
+        if end < total {
+            format!("; próximo: offset={end}")
+        } else {
+            "; fim da saída".to_string()
+        }
+    );
+    finish(
+        ctx,
+        content,
+        Some(format!("Ler saída {id}:{offset}-{end}")),
+        Some(json!({ "kind": "output", "lines": 0 })),
+    )
+}
+
+/* ------------------------------------------------------------------ */
+/* Escrita: write_file e edit_file                                     */
+/* ------------------------------------------------------------------ */
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "arquivo".to_string());
+    let temp = path.with_file_name(format!(
+        ".{file_name}.lumina-{}.tmp",
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::write(&temp, bytes)?;
+    match std::fs::rename(&temp, path) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = std::fs::remove_file(&temp);
+            Err(error)
+        }
+    }
+}
+
+fn ensure_observed(ctx: &ToolCtx, path: &Path, relative: &str, current: &[u8]) -> Result<(), ToolOutcome> {
+    let Some(observed) = &ctx.observed else {
+        return Ok(());
+    };
+    match observed.check(path, current) {
+        ObservationState::Fresh => Ok(()),
+        ObservationState::Missing => Err(err(
+            "FS_NOT_OBSERVED",
+            format!(
+                "cannot modify \"{relative}\": file has not been read — read the file, then retry"
+            ),
+        )),
+        ObservationState::Stale => Err(err(
+            "FS_STALE_VERSION",
+            format!(
+                "cannot modify \"{relative}\": o arquivo mudou desde a leitura — re-read the file, then retry"
+            ),
+        )),
+    }
+}
+
+fn normalize_eol(content: &str, before: Option<&[u8]>) -> String {
+    let Some(before) = before else {
+        return content.to_string();
+    };
+    let before_text = String::from_utf8_lossy(before);
+    if before_text.contains("\r\n") && !content.contains("\r\n") {
+        return content.replace('\n', "\r\n");
+    }
+    if !before_text.contains("\r\n") && content.contains("\r\n") {
+        return content.replace("\r\n", "\n");
+    }
+    content.to_string()
+}
+
+fn preserve_bom(content: &str, before: Option<&[u8]>) -> String {
+    match before {
+        Some(bytes) if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) => {
+            if content.starts_with('\u{feff}') {
+                content.to_string()
+            } else {
+                format!("\u{feff}{content}")
+            }
+        }
+        _ => content.to_string(),
+    }
+}
+
+/// Aplica a mutação já calculada: grava atômico, registra journal/observação,
+/// emite `FileChanged` e devolve o conteúdo para o modelo.
+fn commit_mutation(
+    ctx: &ToolCtx,
+    path: &Path,
+    relative: &str,
+    before: Option<&[u8]>,
+    after: &[u8],
+    kind: FileChangeKind,
+) -> Result<(String, Value), ToolOutcome> {
+    if after.len() > MAX_WRITE_BYTES {
+        return Err(err(
+            "FS_TOO_LARGE",
+            format!("conteúdo de '{relative}' excede o limite de {} bytes", MAX_WRITE_BYTES),
+        ));
+    }
+    let store = journal::ObjectStore::new(ctx.data_dir.join("checkpoints").join("objects"));
+    let before_hash = match before {
+        Some(bytes) => store.put_bytes(bytes).ok(),
+        None => None,
+    };
+    if let Err(error) = atomic_write(path, after) {
+        return Err(err(
+            "FS_WRITE_FAILED",
+            format!("não foi possível gravar '{relative}': {error}"),
+        ));
+    }
+    let after_hash = observed_hash(after);
+    let before_hash = before_hash.or_else(|| before.map(observed_hash));
+    let (added, removed) = journal::line_stats(before, Some(after));
+    let before_text = before
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+        .unwrap_or_default();
+    let after_text = String::from_utf8_lossy(after).into_owned();
+    let diff = journal::unified_diff(relative, &before_text, &after_text);
+    let diff_short: String = diff.chars().take(MAX_DIFF_CHARS).collect();
+
+    let entry = crate::db::FileJournalEntry::new(
+        ctx.conversation_id.clone(),
+        ctx.turn_id.clone(),
+        relative.to_string(),
+        kind,
+    )
+    .with_hashes(before_hash.as_deref(), Some(after_hash.as_str()))
+    .with_line_counts(added, removed);
+    ctx.db.append_file_journal(&entry).map_err(|error| {
+        err("JOURNAL_FAILED", format!("não foi possível registrar a alteração: {error}"))
+    })?;
+    if let Some(observed) = &ctx.observed {
+        observed.record(path, after);
+    }
+    ctx.emit_event(crate::events::TurnEvent::FileChanged {
+        change: FileChange {
+            path: relative.to_string(),
+            kind,
+            added,
+            removed,
+            diff: if diff.is_empty() { None } else { Some(diff.clone()) },
+        },
+    });
+
+    let header = match kind {
+        FileChangeKind::Created => format!("Created file {relative} (+{added})"),
+        FileChangeKind::Deleted => format!("Deleted file {relative} (−{removed})"),
+        _ => format!("Updated file {relative} (+{added} −{removed})"),
+    };
+    let content = if diff_short.is_empty() {
+        header
+    } else {
+        format!("{header}\n{diff_short}")
+    };
+    let presentation = json!({
+        "kind": "file_change",
+        "path": relative,
+        "change": match kind {
+            FileChangeKind::Created => "created",
+            FileChangeKind::Modified => "modified",
+            FileChangeKind::Deleted => "deleted",
+            FileChangeKind::Renamed => "renamed",
+        },
+        "added": added,
+        "removed": removed,
+        "diff": diff.chars().take(12_000).collect::<String>(),
+    });
+    Ok((content, presentation))
+}
+
+fn observed_hash(bytes: &[u8]) -> String {
+    crate::harness::code::observed::hash_bytes(bytes)
+}
+
+async fn write_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let requested = match arg_str(args, "path") {
+        Ok(value) => value,
+        Err(outcome) => return outcome,
+    };
+    let content = match args.get("content").and_then(Value::as_str) {
+        Some(value) => value.to_string(),
+        None => return err("TOOL_INVALID_ARGS", "`content` é obrigatório"),
+    };
+    if content.len() > MAX_WRITE_BYTES {
+        return err(
+            "FS_TOO_LARGE",
+            format!("conteúdo excede o limite de {} bytes", MAX_WRITE_BYTES),
+        );
+    }
+    if let Err(outcome) = writable_root(ctx) {
+        return outcome;
+    }
+    let path = match resolve_path(ctx, &requested, safe_path::Access::Write) {
+        Ok(path) => path,
+        Err(outcome) => return outcome,
+    };
+    let relative = relative_path(ctx, &path);
+    let existing = std::fs::read(&path).ok();
+    let kind = if existing.is_some() {
+        FileChangeKind::Modified
+    } else {
+        FileChangeKind::Created
+    };
+    if let Err(outcome) = policy_check(
+        ctx,
+        "write_file",
+        RiskClass::Write,
+        true,
+        Some(relative.as_str()),
+        is_secret_path(&relative),
+        None,
+        write_detail(&relative),
+        "Escrever arquivo?",
+    )
+    .await
+    {
+        return outcome;
+    }
+    if let Some(before) = &existing {
+        if let Err(outcome) = ensure_observed(ctx, &path, &relative, before) {
+            return outcome;
+        }
+    }
+    let normalized = preserve_bom(&normalize_eol(&content, existing.as_deref()), existing.as_deref());
+    let after = normalized.into_bytes();
+    match commit_mutation(ctx, &path, &relative, existing.as_deref(), &after, kind) {
+        Ok((content, presentation)) => finish(
+            ctx,
+            content,
+            Some(format!("Escrever {relative}")),
+            Some(presentation),
+        ),
+        Err(outcome) => outcome,
+    }
+}
+
+async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let requested = match arg_str(args, "path") {
+        Ok(value) => value,
+        Err(outcome) => return outcome,
+    };
+    let old_string = match args.get("old_string").and_then(Value::as_str) {
+        Some(value) if !value.is_empty() => value.to_string(),
+        _ => return err("TOOL_INVALID_ARGS", "`old_string` é obrigatório e não pode ser vazio"),
+    };
+    let new_string = match args.get("new_string").and_then(Value::as_str) {
+        Some(value) => value.to_string(),
+        None => return err("TOOL_INVALID_ARGS", "`new_string` é obrigatório (use \"\" para remover)"),
+    };
+    if old_string == new_string {
+        return err("TOOL_INVALID_ARGS", "`old_string` e `new_string` são iguais");
+    }
+    let replace_all = opt_bool(args, "replace_all").unwrap_or(false);
+    if let Err(outcome) = writable_root(ctx) {
+        return outcome;
+    }
+    let path = match resolve_path(ctx, &requested, safe_path::Access::Write) {
+        Ok(path) => path,
+        Err(outcome) => return outcome,
+    };
+    let relative = relative_path(ctx, &path);
+    // A política roda antes do IO: modo Leitura/Plano nega sem tocar no disco.
+    if let Err(outcome) = policy_check(
+        ctx,
+        "edit_file",
+        RiskClass::Write,
+        true,
+        Some(relative.as_str()),
+        is_secret_path(&relative),
+        None,
+        write_detail(&relative),
+        "Editar arquivo?",
+    )
+    .await
+    {
+        return outcome;
+    }
+    let before = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return err("FS_NOT_FOUND", format!("arquivo não encontrado: {relative}"))
+        }
+        Err(error) => return err("FS_NOT_FOUND", format!("não foi possível ler '{relative}': {error}")),
+    };
+    if looks_binary(&before) {
+        return err("FS_BINARY", format!("cannot modify \"{relative}\": binary file"));
+    }
+    if let Err(outcome) = ensure_observed(ctx, &path, &relative, &before) {
+        return outcome;
+    }
+    let text = match String::from_utf8(before.clone()) {
+        Ok(text) => text,
+        Err(_) => return err("FS_BINARY", format!("cannot modify \"{relative}\": arquivo não é UTF-8")),
+    };
+    let occurrences = text.matches(old_string.as_str()).count();
+    if occurrences == 0 {
+        return err(
+            "FS_NOT_FOUND",
+            format!("trecho não encontrado em '{relative}'; releia o arquivo e copie o trecho exato"),
+        );
+    }
+    if occurrences > 1 && !replace_all {
+        return err(
+            "TOOL_INVALID_ARGS",
+            format!(
+                "o trecho aparece {occurrences} vezes em '{relative}'; inclua mais contexto ou use replace_all"
+            ),
+        );
+    }
+    let after_text = if replace_all {
+        text.replacen(old_string.as_str(), new_string.as_str(), occurrences)
+    } else {
+        text.replacen(old_string.as_str(), new_string.as_str(), 1)
+    };
+    let after = after_text.into_bytes();
+    match commit_mutation(ctx, &path, &relative, Some(&before), &after, FileChangeKind::Modified) {
+        Ok((content, presentation)) => finish(
+            ctx,
+            content,
+            Some(format!("Editar {relative}")),
+            Some(presentation),
+        ),
+        Err(outcome) => outcome,
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Shell: run_command                                                  */
+/* ------------------------------------------------------------------ */
+
+async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let command = match arg_str(args, "command") {
+        Ok(value) => value,
+        Err(outcome) => return outcome,
+    };
+    if opt_bool(args, "run_in_background").unwrap_or(false) {
+        return err(
+            "JOB_UNAVAILABLE",
+            "comandos em background chegam na próxima fase; rode em foreground com timeout",
+        );
+    }
+    let description = opt_str(args, "description").unwrap_or_else(|| "executar comando".to_string());
+    let root = match writable_root(ctx) {
+        Ok(root) => root,
+        Err(outcome) => return outcome,
+    };
+    let workdir = match opt_str(args, "workdir") {
+        Some(requested) => match resolve_dir(ctx, &requested) {
+            Ok(path) => path,
+            Err(outcome) => return outcome,
+        },
+        None => root,
+    };
+    let workdir_relative = relative_path(ctx, &workdir);
+    let destructive = exec::is_destructive_command(&command);
+    let detail = ApprovalDetail::Command {
+        command: command.clone(),
+        workdir: workdir_relative.clone(),
+    };
+    if let Err(outcome) = policy_check(
+        ctx,
+        "run_command",
+        RiskClass::Shell,
+        true,
+        Some(command.as_str()),
+        false,
+        destructive,
+        detail,
+        "Executar comando?",
+    )
+    .await
+    {
+        return outcome;
+    }
+
+    let timeout_ms = opt_u32(args, "timeout_ms")
+        .map(|value| value.clamp(1_000, 600_000))
+        .unwrap_or(120_000);
+    let (program, program_args) = exec::shell_for(&command);
+    let request = exec::ExecRequest {
+        program,
+        args: program_args,
+        cwd: workdir,
+        env: exec::sanitized_env(&[("LUMINA_AGENT", "1")]),
+        timeout: Duration::from_millis(timeout_ms as u64),
+        cancel: ctx.cancel.child_token(),
+        max_output_bytes: 1024 * 1024,
+    };
+
+    let (sender, mut receiver) =
+        tokio::sync::mpsc::unbounded_channel::<(exec::StreamKind, String)>();
+    let emit = ctx.emit.clone();
+    let event_id = ctx.message_id.clone();
+    let progress_task = tokio::spawn(async move {
+        while let Some((stream, delta)) = receiver.recv().await {
+            if let Some(emit) = &emit {
+                emit.emit(crate::events::TurnEvent::ToolProgress {
+                    id: event_id.clone(),
+                    stream: Some(stream.as_str().to_string()),
+                    delta,
+                });
+            }
+        }
+    });
+
+    let output = match exec::run(request, Some(sender)).await {
+        Ok(output) => output,
+        Err(error) => {
+            progress_task.abort();
+            return err(error.code, error.message);
+        }
+    };
+    progress_task.abort();
+
+    let mut content = String::new();
+    match output.exit_code {
+        Some(code) => content.push_str(&format!("[exit code: {code}]\n")),
+        None => content.push_str("[exit code: ?]\n"),
+    }
+    if !output.stdout.is_empty() {
+        content.push_str(&output.stdout);
+        if !output.stdout.ends_with('\n') {
+            content.push('\n');
+        }
+    }
+    if !output.stderr.is_empty() {
+        content.push_str("[stderr]\n");
+        content.push_str(&output.stderr);
+        if !output.stderr.ends_with('\n') {
+            content.push('\n');
+        }
+    }
+    if output.timed_out {
+        content.push_str("[timed out after the configured limit]\n");
+    }
+    if output.cancelled {
+        content.push_str("[stopped by user]\n");
+    }
+    if output.truncated {
+        content.push_str("[truncated: saída excedeu o limite; cauda preservada]\n");
+    }
+    content.push_str(&format!("(duração: {} ms)\n", output.duration_ms));
+    finish(
+        ctx,
+        content,
+        Some(description),
+        Some(json!({ "kind": "output", "exitCode": output.exit_code, "durationMs": output.duration_ms })),
+    )
+}
+
+/* ------------------------------------------------------------------ */
+/* Git somente leitura                                                 */
+/* ------------------------------------------------------------------ */
+
+fn status_code_label(code: &str) -> &'static str {
+    match code {
+        "M" => "modificado",
+        "A" => "adicionado",
+        "D" => "removido",
+        "R" => "renomeado",
+        "C" => "copiado",
+        "U" => "conflito",
+        _ => "alterado",
+    }
+}
+
+async fn git_status(ctx: &ToolCtx, _args: &Value) -> ToolOutcome {
+    let root = match workspace_root(ctx) {
+        Ok(root) => root,
+        Err(outcome) => return outcome,
+    };
+    let status = git::detect(&root).await;
+    if !status.is_repo {
+        return err("GIT_NOT_A_REPO", "o workspace não é um repositório git");
+    }
+    let mut content = String::new();
+    content.push_str(&format!(
+        "branch {} (ahead {}, behind {})\n",
+        status.branch.as_deref().unwrap_or("(detached)"),
+        status.ahead,
+        status.behind
+    ));
+    for file in &status.staged {
+        content.push_str(&format!("{}  {} ({})\n", file.status, file.path, status_code_label(&file.status)));
+    }
+    for file in &status.unstaged {
+        content.push_str(&format!(" {} {} ({})\n", file.status, file.path, status_code_label(&file.status)));
+    }
+    for path in &status.untracked {
+        content.push_str(&format!("?? {path}\n"));
+    }
+    for path in &status.conflicted {
+        content.push_str(&format!("!  {path} (conflito)\n"));
+    }
+    if status.staged.is_empty()
+        && status.unstaged.is_empty()
+        && status.untracked.is_empty()
+        && status.conflicted.is_empty()
+    {
+        content.push_str("(working tree limpo)\n");
+    }
+    let total = status.staged.len() + status.unstaged.len() + status.untracked.len() + status.conflicted.len();
+    finish(
+        ctx,
+        content,
+        Some(format!("git status · {total} alteração(ões)")),
+        Some(json!({ "kind": "output", "files": total })),
+    )
+}
+
+async fn git_diff(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let root = match workspace_root(ctx) {
+        Ok(root) => root,
+        Err(outcome) => return outcome,
+    };
+    let status = git::detect(&root).await;
+    if !status.is_repo {
+        return err("GIT_NOT_A_REPO", "o workspace não é um repositório git");
+    }
+    let mut paths = Vec::new();
+    for requested in opt_string_array(args, "paths") {
+        match resolve_path(ctx, &requested, safe_path::Access::Write) {
+            Ok(path) => paths.push(safe_path::to_relative(&root, &path)),
+            Err(_) => {
+                // Paths que não existem (arquivos removidos) são aceitos relativos.
+                let candidate = requested.replace('\\', "/");
+                if !candidate.contains("..") {
+                    paths.push(candidate);
+                }
+            }
+        }
+    }
+    let staged = opt_bool(args, "staged").unwrap_or(false);
+    let context = opt_u32(args, "context").unwrap_or(3).clamp(0, 10);
+    let diff = match git::diff(&root, &paths, staged, context, 40_000).await {
+        Ok(diff) => diff,
+        Err(error) => return err(error.code, error.message),
+    };
+    let content = if diff.trim().is_empty() {
+        "(sem alterações)\n".to_string()
+    } else {
+        diff
+    };
+    finish(
+        ctx,
+        content,
+        Some("git diff".to_string()),
+        Some(json!({ "kind": "output", "staged": staged })),
+    )
+}
+
+async fn git_log(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let root = match workspace_root(ctx) {
+        Ok(root) => root,
+        Err(outcome) => return outcome,
+    };
+    let status = git::detect(&root).await;
+    if !status.is_repo {
+        return err("GIT_NOT_A_REPO", "o workspace não é um repositório git");
+    }
+    let limit = opt_u32(args, "limit").unwrap_or(20).clamp(1, 50);
+    let commits = match git::log(&root, limit).await {
+        Ok(commits) => commits,
+        Err(error) => return err(error.code, error.message),
+    };
+    let mut content = String::new();
+    for commit in &commits {
+        content.push_str(&format!(
+            "{} {} — {} ({})\n",
+            &commit.hash[..commit.hash.len().min(8)],
+            commit.date,
+            commit.subject,
+            commit.author
+        ));
+    }
+    if content.is_empty() {
+        content.push_str("(nenhum commit ainda)\n");
+    }
+    if let Some(path) = opt_str(args, "path") {
+        content.push_str(&format!(
+            "(filtro por path ainda não suportado pelo helper de git; mostrando o repositório inteiro — pedido: {path})\n"
+        ));
+    }
+    finish(
+        ctx,
+        content,
+        Some(format!("git log · {} commits", commits.len())),
+        Some(json!({ "kind": "output", "commits": commits.len() })),
+    )
+}
+
+/* ------------------------------------------------------------------ */
+/* Planejamento e interação                                            */
+/* ------------------------------------------------------------------ */
+
+async fn todo_write(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let Some(raw) = args.get("todos") else {
+        return err("TOOL_INVALID_ARGS", "`todos` é obrigatório");
+    };
+    let items: Vec<TodoItem> = match serde_json::from_value(raw.clone()) {
+        Ok(items) => items,
+        Err(error) => {
+            return err(
+                "TOOL_INVALID_ARGS",
+                format!("formato inválido de `todos` (content + status): {error}"),
+            )
+        }
+    };
+    if let Err(message) = session::validate_todos(&items, true) {
+        return err("TOOL_INVALID_ARGS", message);
+    }
+    if let Err(error) = session::save_todos(&ctx.db, &ctx.conversation_id, &ctx.turn_id, &items) {
+        return err("SESSION_LOG_FAILED", format!("não foi possível salvar as tarefas: {error}"));
+    }
+    ctx.emit_event(crate::events::TurnEvent::TodosUpdated { todos: items.clone() });
+    let count = |status: crate::domain::TodoStatus| {
+        items.iter().filter(|item| item.status == status).count()
+    };
+    let content = format!(
+        "Lista atualizada: {} pendente(s), {} em andamento, {} concluída(s).\n",
+        count(crate::domain::TodoStatus::Pending),
+        count(crate::domain::TodoStatus::InProgress),
+        count(crate::domain::TodoStatus::Completed)
+    );
+    finish(
+        ctx,
+        content,
+        Some(format!("Tarefas · {} item(ns)", items.len())),
+        Some(json!({ "kind": "todos", "items": items })),
+    )
+}
+
+async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    if !ctx.plan_mode {
+        return err(
+            "PLAN_MODE_INACTIVE",
+            "`submit_plan` só vale no modo Plano; entre com /plan antes de propor um plano",
+        );
+    }
+    let markdown = match arg_str(args, "plan") {
+        Ok(value) => value,
+        Err(outcome) => return outcome,
+    };
+    if markdown.chars().count() > 20_000 {
+        return err("TOOL_INVALID_ARGS", "o plano excede 20 000 caracteres; resuma");
+    }
+    if ctx.approval.is_none() {
+        return err(
+            "APPROVAL_UNAVAILABLE",
+            "não há canal de revisão disponível para o plano; prossiga em prosa ou use /plan off",
+        );
+    }
+    let summary_text: String = markdown.chars().take(600).collect();
+    let request = ApprovalRequest {
+        id: format!("apr-{}", uuid::Uuid::new_v4().simple()),
+        conversation_id: ctx.conversation_id.clone(),
+        tool_call_id: String::new(),
+        tool: "submit_plan".to_string(),
+        title: "Aprovar plano?".to_string(),
+        detail: ApprovalDetail::Other { text: summary_text },
+        risk: RiskClass::Ask,
+        preview: Some(markdown.clone()),
+        options: approval_options(),
+        created_at: now_ms(),
+    };
+    audit_append(
+        ctx,
+        EV_APPROVAL_ASKED,
+        &json!({ "approvalId": request.id, "tool": "submit_plan", "risk": RiskClass::Ask }),
+    );
+    let approval_id = request.id.clone();
+    let outcome = ctx.request_approval(request).await;
+    audit_append(
+        ctx,
+        EV_APPROVAL_DECIDED,
+        &json!({
+            "approvalId": approval_id,
+            "decision": outcome.decision.as_str(),
+            "scope": outcome.scope.map(|scope| scope.as_str()),
+            "feedback": outcome.feedback,
+        }),
+    );
+    match outcome.decision {
+        crate::domain::ApprovalDecision::Approved => {
+            let _ = session::submit_plan(&ctx.db, &ctx.conversation_id, &ctx.turn_id, &markdown);
+            let _ = session::approve_plan(&ctx.db, &ctx.conversation_id, &ctx.turn_id);
+            if let Some(plan) = session::plan_view(&ctx.db, &ctx.conversation_id) {
+                ctx.emit_event(crate::events::TurnEvent::PlanUpdated { plan });
+            }
+            finish(
+                ctx,
+                "Plano aprovado — continue a implementação seguindo o plano.\n".to_string(),
+                Some("Plano aprovado".to_string()),
+                Some(json!({ "kind": "plan", "state": "approved" })),
+            )
+        }
+        crate::domain::ApprovalDecision::Denied => {
+            let feedback = outcome
+                .feedback
+                .unwrap_or_else(|| "sem comentários; ajuste o plano".to_string());
+            finish(
+                ctx,
+                format!(
+                    "Plano não aprovado: {feedback}\nRevise o plano conforme o feedback e reenvie com submit_plan.\n"
+                ),
+                Some("Plano revisado".to_string()),
+                Some(json!({ "kind": "plan", "state": "reviewing", "feedback": feedback })),
+            )
+        }
+        crate::domain::ApprovalDecision::Cancelled => {
+            err("APPROVAL_CANCELLED", "a revisão do plano foi cancelada")
+        }
+        crate::domain::ApprovalDecision::Expired => err(
+            "APPROVAL_TIMEOUT",
+            "o usuário não revisou o plano a tempo; falhando fechado",
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    use serde_json::json;
+
+    use crate::db::Db;
+    use crate::domain::{PermissionMode, Settings, TodoStatus};
+    use crate::harness::code::observed::ObservedFiles;
+    use crate::policy::approval::{ApprovalOutcome, ApprovalRegistry};
+    use crate::tools::registry::{ToolCtx, ToolExec, WorkspaceHandle};
+
+    #[derive(Default)]
+    struct Recorder {
+        events: parking_lot::Mutex<Vec<Value>>,
+    }
+
+    impl crate::harness::EventEmitter for Recorder {
+        fn emit(&self, event: crate::events::TurnEvent) {
+            if let Ok(value) = serde_json::to_value(&event) {
+                self.events.lock().push(value);
+            }
+        }
+    }
+
+    impl Recorder {
+        fn events(&self) -> Vec<Value> {
+            self.events.lock().clone()
+        }
+    }
+
+    struct Fixture {
+        _temp: tempfile::TempDir,
+        root: PathBuf,
+        data_dir: PathBuf,
+        db: Arc<Db>,
+        observed: Arc<ObservedFiles>,
+        approvals: Arc<ApprovalRegistry>,
+        recorder: Arc<Recorder>,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let root = temp.path().join("ws");
+            std::fs::create_dir_all(&root).expect("workspace");
+            let data_dir = temp.path().join("data");
+            std::fs::create_dir_all(&data_dir).expect("data dir");
+            Self {
+                _temp: temp,
+                root,
+                data_dir,
+                db: Arc::new(Db::open_in_memory().expect("db em memória")),
+                observed: Arc::new(ObservedFiles::new()),
+                approvals: Arc::new(ApprovalRegistry::new()),
+                recorder: Arc::new(Recorder::default()),
+            }
+        }
+
+        fn ctx(&self) -> ToolCtx {
+            let emit: Arc<dyn crate::harness::EventEmitter> = self.recorder.clone();
+            ToolCtx {
+                db: self.db.clone(),
+                http: reqwest::Client::new(),
+                conversation_id: "conv-1".into(),
+                message_id: "msg-1".into(),
+                turn_id: "turn-1".into(),
+                workspace: Some(WorkspaceHandle {
+                    root: self.root.clone(),
+                    trusted: true,
+                    permission_mode: PermissionMode::Edit,
+                }),
+                settings: Settings::default(),
+                cancel: tokio_util::sync::CancellationToken::new(),
+                data_dir: self.data_dir.clone(),
+                approval: Some(self.approvals.clone()),
+                observed: Some(self.observed.clone()),
+                emit: Some(emit),
+                rules: Vec::new(),
+                plan_mode: false,
+            }
+        }
+
+        fn write(&self, relative: &str, content: &str) -> PathBuf {
+            let path = self.root.join(relative);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("criar pai");
+            }
+            std::fs::write(&path, content).expect("escrever fixture");
+            path
+        }
+    }
+
+    async fn call(ctx: &ToolCtx, name: &str, args: Value) -> ToolOutcome {
+        let exec = ToolExec::for_tool(name).expect("tool do catálogo");
+        super::run(ctx, exec, args).await
+    }
+
+    fn error_code(outcome: &ToolOutcome) -> String {
+        outcome
+            .content
+            .trim_start_matches("ERROR: ")
+            .split(':')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    }
+
+    fn event_types(recorder: &Recorder) -> Vec<String> {
+        recorder
+            .events()
+            .iter()
+            .filter_map(|event| event.get("type").and_then(Value::as_str).map(str::to_string))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn read_file_reads_a_range_and_records_observation() {
+        let fixture = Fixture::new();
+        let content: Vec<String> = (1..=120).map(|index| format!("linha {index}")).collect();
+        let path = fixture.write("a.txt", &content.join("\n"));
+        let ctx = fixture.ctx();
+
+        let outcome = call(&ctx, "read_file", json!({ "path": "a.txt", "offset": 10, "limit": 5 })).await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("linhas 10-14 de 120"), "{}", outcome.content);
+        assert!(outcome.content.contains("10│ linha 10"), "{}", outcome.content);
+        assert_eq!(outcome.summary.as_deref(), Some("Ler a.txt:10-14"));
+        assert_eq!(
+            fixture.observed.check(&path, &std::fs::read(&path).expect("ler")),
+            ObservationState::Fresh
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_rejects_binary_and_missing_files() {
+        let fixture = Fixture::new();
+        fixture.write("bin.dat", "abc\0def");
+        let ctx = fixture.ctx();
+        let binary = call(&ctx, "read_file", json!({ "path": "bin.dat" })).await;
+        assert_eq!(error_code(&binary), "FS_BINARY");
+        let missing = call(&ctx, "read_file", json!({ "path": "nao-existe.txt" })).await;
+        assert_eq!(error_code(&missing), "FS_NOT_FOUND");
+        let out_of_range = call(&ctx, "read_file", json!({ "path": "bin.dat", "offset": 9 })).await;
+        assert!(out_of_range.is_error);
+    }
+
+    #[tokio::test]
+    async fn secret_files_require_approval_even_for_reads() {
+        let fixture = Fixture::new();
+        fixture.write(".env", "API_KEY=segredo");
+        let mut ctx = fixture.ctx();
+        ctx.approval = None;
+        let outcome = call(&ctx, "read_file", json!({ "path": ".env" })).await;
+        assert_eq!(error_code(&outcome), "APPROVAL_UNAVAILABLE");
+    }
+
+    #[tokio::test]
+    async fn list_dir_skips_ignored_dirs_and_renders_dirs_with_slash() {
+        let fixture = Fixture::new();
+        fixture.write("src/a.ts", "x");
+        fixture.write("src/b.rs", "y");
+        fixture.write("node_modules/pkg/index.js", "z");
+        let ctx = fixture.ctx();
+        let outcome = call(&ctx, "list_dir", json!({ "path": ".", "depth": 3 })).await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("src/"), "{}", outcome.content);
+        assert!(outcome.content.contains("a.ts"), "{}", outcome.content);
+        assert!(!outcome.content.contains("node_modules"), "{}", outcome.content);
+    }
+
+    #[tokio::test]
+    async fn search_files_matches_globs() {
+        let fixture = Fixture::new();
+        fixture.write("src/a.ts", "x");
+        fixture.write("src/b.rs", "y");
+        let ctx = fixture.ctx();
+        let outcome = call(&ctx, "search_files", json!({ "pattern": "**/*.ts" })).await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("src/a.ts"), "{}", outcome.content);
+        assert!(!outcome.content.contains("b.rs"), "{}", outcome.content);
+    }
+
+    #[tokio::test]
+    async fn search_text_supports_regex_and_context() {
+        let fixture = Fixture::new();
+        fixture.write("src/a.ts", "const x = 1;\nfn foo() {\n  return x;\n}\n");
+        let ctx = fixture.ctx();
+        let outcome = call(
+            &ctx,
+            "search_text",
+            json!({ "query": "fn\\s+foo", "is_regex": true, "context_lines": 1 }),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("src/a.ts:2: fn foo()"), "{}", outcome.content);
+        assert!(outcome.content.contains("src/a.ts:1- const x"), "{}", outcome.content);
+    }
+
+    #[tokio::test]
+    async fn write_file_creates_records_journal_and_emits_event() {
+        let fixture = Fixture::new();
+        let ctx = fixture.ctx();
+        let outcome = call(
+            &ctx,
+            "write_file",
+            json!({ "path": "src/novo.ts", "content": "export const a = 1;\n" }),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.starts_with("Created file src/novo.ts"), "{}", outcome.content);
+        assert_eq!(outcome.presentation.as_ref().expect("presentation")["kind"], "file_change");
+        let journal = fixture
+            .db
+            .list_file_journal_for_turn("conv-1", "turn-1")
+            .expect("journal");
+        assert_eq!(journal.len(), 1);
+        assert_eq!(journal[0].path, "src/novo.ts");
+        assert!(event_types(&fixture.recorder).contains(&"file_changed".to_string()));
+        assert!(fixture.root.join("src/novo.ts").exists());
+    }
+
+    #[tokio::test]
+    async fn write_file_requires_observation_and_rejects_stale_files() {
+        let fixture = Fixture::new();
+        fixture.write("a.txt", "original\n");
+        let ctx = fixture.ctx();
+        let unobserved = call(&ctx, "write_file", json!({ "path": "a.txt", "content": "novo\n" })).await;
+        assert_eq!(error_code(&unobserved), "FS_NOT_OBSERVED");
+
+        let _ = call(&ctx, "read_file", json!({ "path": "a.txt" })).await;
+        fixture.write("a.txt", "mudou por fora\n");
+        let stale = call(&ctx, "write_file", json!({ "path": "a.txt", "content": "novo\n" })).await;
+        assert_eq!(error_code(&stale), "FS_STALE_VERSION");
+
+        let _ = call(&ctx, "read_file", json!({ "path": "a.txt" })).await;
+        let ok = call(&ctx, "write_file", json!({ "path": "a.txt", "content": "novo\n" })).await;
+        assert!(!ok.is_error, "{}", ok.content);
+        assert!(ok.content.starts_with("Updated file a.txt"));
+    }
+
+    #[tokio::test]
+    async fn edit_file_replaces_unique_snippet_and_is_ambiguous_otherwise() {
+        let fixture = Fixture::new();
+        fixture.write("a.ts", "const value = 1;\n");
+        let ctx = fixture.ctx();
+        let _ = call(&ctx, "read_file", json!({ "path": "a.ts" })).await;
+        let outcome = call(
+            &ctx,
+            "edit_file",
+            json!({ "path": "a.ts", "old_string": "value = 1", "new_string": "value = 2" }),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.starts_with("Updated file a.ts (+1 −1)"), "{}", outcome.content);
+        assert!(std::fs::read_to_string(fixture.root.join("a.ts")).expect("ler").contains("value = 2"));
+
+        fixture.write("b.ts", "x x\n");
+        let _ = call(&ctx, "read_file", json!({ "path": "b.ts" })).await;
+        let ambiguous = call(
+            &ctx,
+            "edit_file",
+            json!({ "path": "b.ts", "old_string": "x", "new_string": "y" }),
+        )
+        .await;
+        assert_eq!(error_code(&ambiguous), "TOOL_INVALID_ARGS");
+        assert!(ambiguous.content.contains("2 vezes"), "{}", ambiguous.content);
+        let all = call(
+            &ctx,
+            "edit_file",
+            json!({ "path": "b.ts", "old_string": "x", "new_string": "y", "replace_all": true }),
+        )
+        .await;
+        assert!(!all.is_error, "{}", all.content);
+        assert_eq!(std::fs::read_to_string(fixture.root.join("b.ts")).expect("ler"), "y y\n");
+
+        let missing = call(
+            &ctx,
+            "edit_file",
+            json!({ "path": "a.ts", "old_string": "zzz", "new_string": "y" }),
+        )
+        .await;
+        assert_eq!(error_code(&missing), "FS_NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn large_results_spill_and_read_tool_output_pages_them() {
+        let fixture = Fixture::new();
+        let lines: Vec<String> = (0..700)
+            .map(|index| format!("linha {index:03} {}", "x".repeat(80)))
+            .collect();
+        fixture.write("grande.txt", &lines.join("\n"));
+        let ctx = fixture.ctx();
+        let outcome = call(&ctx, "read_file", json!({ "path": "grande.txt" })).await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("spill"), "{}", outcome.content);
+        let id = outcome
+            .presentation
+            .as_ref()
+            .and_then(|value| value.get("spill"))
+            .and_then(Value::as_str)
+            .expect("id do spill")
+            .to_string();
+        let page = call(
+            &ctx,
+            "read_tool_output",
+            json!({ "id": id, "offset": 10, "limit": 50 }),
+        )
+        .await;
+        assert!(!page.is_error, "{}", page.content);
+        assert!(page.content.contains("(spill"), "{}", page.content);
+
+        let invalid = call(&ctx, "read_tool_output", json!({ "id": "curto" })).await;
+        assert_eq!(error_code(&invalid), "SPILL_NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn run_command_returns_output_and_exit_codes_without_erroring() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.workspace.as_mut().expect("workspace").permission_mode = PermissionMode::Autonomous;
+
+        let ok = call(&ctx, "run_command", json!({ "command": "echo ola", "description": "testar echo" })).await;
+        if error_code(&ok) == "EXEC_SPAWN" || error_code(&ok) == "EXEC_FAILED" {
+            eprintln!("shell indisponível neste ambiente: teste pulado");
+            return;
+        }
+        assert!(!ok.is_error, "{}", ok.content);
+        assert!(ok.content.contains("exit code: 0"), "{}", ok.content);
+        assert!(ok.content.contains("ola"), "{}", ok.content);
+
+        let failed = call(&ctx, "run_command", json!({ "command": "exit 3", "description": "sair com 3" })).await;
+        assert!(!failed.is_error, "{}", failed.content);
+        assert!(failed.content.contains("exit code: 3"), "{}", failed.content);
+
+        let background = call(
+            &ctx,
+            "run_command",
+            json!({ "command": "echo x", "description": "bg", "run_in_background": true }),
+        )
+        .await;
+        assert_eq!(error_code(&background), "JOB_UNAVAILABLE");
+    }
+
+    #[tokio::test]
+    async fn run_command_respects_plan_mode_read_only_and_missing_approval() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.plan_mode = true;
+        let plan = call(&ctx, "run_command", json!({ "command": "echo x", "description": "x" })).await;
+        assert_eq!(error_code(&plan), "PLAN_MODE_ACTIVE");
+
+        let mut readonly = fixture.ctx();
+        readonly.workspace.as_mut().expect("ws").permission_mode = PermissionMode::ReadOnly;
+        let denied = call(&readonly, "run_command", json!({ "command": "echo x", "description": "x" })).await;
+        assert_eq!(error_code(&denied), "POLICY_DENIED");
+
+        let mut no_approval = fixture.ctx();
+        no_approval.approval = None;
+        let ask = call(&no_approval, "run_command", json!({ "command": "echo x", "description": "x" })).await;
+        assert_eq!(error_code(&ask), "APPROVAL_UNAVAILABLE");
+    }
+
+    #[tokio::test]
+    async fn readonly_and_untrusted_workspaces_block_writes_but_allow_reads() {
+        let fixture = Fixture::new();
+        fixture.write("a.txt", "conteudo\n");
+        let mut readonly = fixture.ctx();
+        readonly.workspace.as_mut().expect("ws").permission_mode = PermissionMode::ReadOnly;
+        let denied = call(&readonly, "write_file", json!({ "path": "b.txt", "content": "x" })).await;
+        assert_eq!(error_code(&denied), "POLICY_DENIED");
+
+        let mut untrusted = fixture.ctx();
+        untrusted.workspace.as_mut().expect("ws").trusted = false;
+        let blocked = call(&untrusted, "write_file", json!({ "path": "b.txt", "content": "x" })).await;
+        assert_eq!(error_code(&blocked), "FS_UNTRUSTED_WORKSPACE");
+        let read = call(&untrusted, "read_file", json!({ "path": "a.txt" })).await;
+        assert!(!read.is_error, "{}", read.content);
+    }
+
+    #[tokio::test]
+    async fn workspace_tools_fail_cleanly_without_a_workspace() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.workspace = None;
+        let calls = [
+            ("read_file", json!({ "path": "a.txt" })),
+            ("list_dir", json!({})),
+            ("search_files", json!({ "pattern": "*" })),
+            ("search_text", json!({ "query": "x" })),
+            ("git_status", json!({})),
+            ("git_diff", json!({})),
+            ("git_log", json!({})),
+            ("write_file", json!({ "path": "a.txt", "content": "x" })),
+            ("edit_file", json!({ "path": "a.txt", "old_string": "a", "new_string": "b" })),
+            ("run_command", json!({ "command": "echo x", "description": "x" })),
+        ];
+        for (name, args) in calls {
+            let outcome = call(&ctx, name, args).await;
+            assert_eq!(error_code(&outcome), "FS_NO_WORKSPACE", "{name}: {}", outcome.content);
+        }
+    }
+
+    fn git_available() -> bool {
+        std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    fn git(root: &Path, args: &[&str]) -> bool {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn git_tools_report_status_diff_and_log_in_a_temp_repo() {
+        if !git_available() {
+            eprintln!("git indisponível: teste pulado");
+            return;
+        }
+        let fixture = Fixture::new();
+        if !git(&fixture.root, &["init", "-q"]) {
+            eprintln!("git init indisponível: teste pulado");
+            return;
+        }
+        let ctx = fixture.ctx();
+        fixture.write("a.txt", "um\n");
+        let status = call(&ctx, "git_status", json!({})).await;
+        assert!(!status.is_error, "{}", status.content);
+        assert!(status.content.contains("?? a.txt"), "{}", status.content);
+
+        assert!(git(&fixture.root, &["add", "a.txt"]));
+        assert!(git(
+            &fixture.root,
+            &["-c", "user.email=t@t.local", "-c", "user.name=teste", "commit", "-q", "-m", "init"]
+        ));
+        fixture.write("a.txt", "dois\n");
+        let diff = call(&ctx, "git_diff", json!({ "paths": ["a.txt"] })).await;
+        assert!(!diff.is_error, "{}", diff.content);
+        assert!(diff.content.contains("dois"), "{}", diff.content);
+        assert!(diff.content.contains("um"), "{}", diff.content);
+
+        let log = call(&ctx, "git_log", json!({ "limit": 5 })).await;
+        assert!(!log.is_error, "{}", log.content);
+        assert!(log.content.contains("init"), "{}", log.content);
+    }
+
+    #[tokio::test]
+    async fn git_tools_require_a_repository() {
+        let fixture = Fixture::new();
+        let ctx = fixture.ctx();
+        for name in ["git_status", "git_diff", "git_log"] {
+            let outcome = call(&ctx, name, json!({})).await;
+            assert_eq!(error_code(&outcome), "GIT_NOT_A_REPO", "{name}");
+        }
+    }
+
+    #[tokio::test]
+    async fn todo_write_validates_saves_and_emits() {
+        let fixture = Fixture::new();
+        let ctx = fixture.ctx();
+        let outcome = call(
+            &ctx,
+            "todo_write",
+            json!({ "todos": [
+                { "content": "Ler o módulo", "status": "completed" },
+                { "content": "Corrigir o bug", "status": "in_progress" },
+            ]}),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("1 concluída(s)"), "{}", outcome.content);
+        assert_eq!(outcome.presentation.as_ref().expect("presentation")["kind"], "todos");
+        assert_eq!(session::todos(&fixture.db, "conv-1").len(), 2);
+        assert!(event_types(&fixture.recorder).contains(&"todos_updated".to_string()));
+
+        let empty = call(&ctx, "todo_write", json!({ "todos": [] })).await;
+        assert_eq!(error_code(&empty), "TOOL_INVALID_ARGS");
+        let duplicate = call(
+            &ctx,
+            "todo_write",
+            json!({ "todos": [
+                { "content": "A", "status": "pending" },
+                { "content": "a", "status": "pending" },
+            ]}),
+        )
+        .await;
+        assert_eq!(error_code(&duplicate), "TOOL_INVALID_ARGS");
+    }
+
+    async fn answer_next_approval(registry: Arc<ApprovalRegistry>, outcome: ApprovalOutcome) {
+        for _ in 0..800 {
+            if let Some(request) = registry.pending_requests().first() {
+                registry.resolve(&request.id, outcome);
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn submit_plan_requires_plan_mode_and_waits_for_review() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        let inactive = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
+        assert_eq!(error_code(&inactive), "PLAN_MODE_INACTIVE");
+
+        ctx.plan_mode = true;
+        let responder = tokio::spawn(answer_next_approval(
+            fixture.approvals.clone(),
+            ApprovalOutcome::approved(None),
+        ));
+        let approved = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
+        responder.await.expect("responder");
+        assert!(!approved.is_error, "{}", approved.content);
+        assert!(approved.content.contains("Plano aprovado"), "{}", approved.content);
+        let view = session::plan_view(&fixture.db, "conv-1").expect("plano");
+        assert_eq!(view.state, crate::domain::PlanState::Approved);
+        assert!(event_types(&fixture.recorder).contains(&"plan_updated".to_string()));
+
+        let mut denied_ctx = fixture.ctx();
+        denied_ctx.plan_mode = true;
+        let responder = tokio::spawn(answer_next_approval(
+            fixture.approvals.clone(),
+            ApprovalOutcome::denied(Some("faltou contexto".to_string())),
+        ));
+        let denied = call(&denied_ctx, "submit_plan", json!({ "plan": "### Plano\n2. Revisar" })).await;
+        responder.await.expect("responder");
+        assert!(!denied.is_error, "{}", denied.content);
+        assert!(denied.content.contains("Plano não aprovado"), "{}", denied.content);
+        assert!(denied.content.contains("faltou contexto"), "{}", denied.content);
+    }
+
+    #[tokio::test]
+    async fn ask_user_is_documented_as_unavailable_until_the_questions_phase() {
+        let fixture = Fixture::new();
+        let ctx = fixture.ctx();
+        let outcome = call(&ctx, "ask_user", json!({ "questions": [] })).await;
+        assert_eq!(error_code(&outcome), "ASK_USER_UNAVAILABLE");
+        assert!(outcome.content.contains("próxima fase"), "{}", outcome.content);
+    }
+
+    #[tokio::test]
+    async fn todos_and_todo_status_roundtrip_through_the_projection() {
+        let fixture = Fixture::new();
+        let ctx = fixture.ctx();
+        let outcome = call(
+            &ctx,
+            "todo_write",
+            json!({ "todos": [{ "content": "Um item", "status": "pending" }] }),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        let todos = session::todos(&fixture.db, "conv-1");
+        assert_eq!(todos.len(), 1);
+        assert_eq!(todos[0].status, TodoStatus::Pending);
+    }
+}

@@ -155,8 +155,6 @@ export function FileTree({
     );
   }, [allRows, collapsed, normalizedQuery]);
 
-  const collapsedRecord = collapsed;
-
   const setFocused = (path: string | null) => {
     setFocusedPath(path);
     if (path) rowRefs.current.get(path)?.focus();
@@ -219,7 +217,7 @@ export function FileTree({
       case 'ArrowRight': {
         if (!current) return;
         if (current.entry.isDir) {
-          if (collapsedRecord.has(current.entry.path)) toggleDirectory(current.entry.path);
+          if (collapsed.has(current.entry.path)) toggleDirectory(current.entry.path);
           else if (index + 1 < visibleRows.length && visibleRows[index + 1].depth > current.depth) {
             focusRow(index + 1);
           }
@@ -228,7 +226,7 @@ export function FileTree({
       }
       case 'ArrowLeft': {
         if (!current) return;
-        if (current.entry.isDir && !collapsedRecord.has(current.entry.path)) {
+        if (current.entry.isDir && !collapsed.has(current.entry.path)) {
           toggleDirectory(current.entry.path);
         } else if (current.depth > 0) {
           /* Focus the nearest ancestor row. */
@@ -334,7 +332,7 @@ export function FileTree({
         >
           {visibleRows.map((row) => {
             const { entry, depth } = row;
-            const expanded = entry.isDir && !!entry.children?.length && !collapsedRecord.has(entry.path);
+            const expanded = entry.isDir && !!entry.children?.length && !collapsed.has(entry.path);
             const hasChildren = !!entry.children?.length;
             const isSelected = !entry.isDir && selected === entry.path;
             const badge = entry.gitStatus ? GIT_BADGES[entry.gitStatus] : undefined;
