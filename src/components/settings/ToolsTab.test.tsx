@@ -319,3 +319,29 @@ describe('ToolsTab — painel de skills', () => {
     expect(screen.getAllByText('Desativada')).toHaveLength(1);
   });
 });
+
+describe('ToolsTab — workbench de código', () => {
+  it('abre o diff em uma aba do chat por padrão', () => {
+    render(<ToolsTab />);
+
+    const select = screen.getByRole('combobox', { name: 'Onde abrir o diff dos arquivos' }) as HTMLSelectElement;
+    expect(select.value).toBe('tab');
+    expect(screen.getByRole('option', { name: 'Em uma aba do chat (padrão)' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'No painel lateral' })).toBeTruthy();
+  });
+
+  it('salva a preferência de abrir o diff no painel lateral', async () => {
+    render(<ToolsTab />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Onde abrir o diff dos arquivos' }), {
+      target: { value: 'panel' },
+    });
+
+    await waitFor(() => {
+      expect(mocks.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ diffOpenMode: 'panel' }),
+      );
+    });
+    expect(useAppStore.getState().settings.diffOpenMode).toBe('panel');
+  });
+});

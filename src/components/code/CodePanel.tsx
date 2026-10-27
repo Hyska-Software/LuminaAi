@@ -16,6 +16,7 @@ import {
   SIDE_PANEL_WIDTH_DEFAULT,
   SIDE_PANEL_WIDTH_MIN,
   SIDE_PANEL_WIDTH_STEP,
+  useAppStore,
   useChatStore,
   useCodeStore,
   useUiStore,
@@ -71,6 +72,10 @@ export function CodePanel() {
   const tab = useUiStore((state) => state.codePanelTab);
   const setTab = useUiStore((state) => state.setCodePanelTab);
   const setOpen = useUiStore((state) => state.setCodePanelOpen);
+  const openCodeDiff = useUiStore((state) => state.openCodeDiff);
+  // Padrão de fábrica: diff abre como aba do chat; pode ser trocado em
+  // Configurações → Ferramentas (Settings.diffOpenMode).
+  const diffOpenMode = useAppStore((state) => state.settings.diffOpenMode ?? 'tab');
   const sidebarOpen = useUiStore((state) => state.sidebarOpen);
   const sidebarWidth = useUiStore((state) => state.sidebarWidth);
   const persistedWidth = useUiStore((state) => state.sidePanelWidth);
@@ -288,6 +293,19 @@ export function CodePanel() {
                 sessionLoading={false}
                 sessionError={null}
                 onRefresh={refreshAll}
+                onOpenDiffTab={
+                  diffOpenMode === 'panel'
+                    ? null
+                    : (row) => {
+                        if (!workspaceId) return;
+                        openCodeDiff({
+                          workspaceId,
+                          path: row.path,
+                          staged: row.staged,
+                          knownDiff: row.knownDiff ?? null,
+                        });
+                      }
+                }
                 className="min-h-0 flex-1"
               />
             ) : (

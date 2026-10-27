@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
 import type { CodeEnvironmentStatus, InterpreterInfo } from '@/lib/types';
 import { MAX_STEPS_LIMIT, useAppStore, useUiStore } from '@/lib/store';
 import { cn, copyText } from '@/lib/utils';
-import { Badge, Button, IconButton, Slider, Spinner, Switch } from '@/components/ui';
+import { Badge, Button, IconButton, NativeSelect, Slider, Spinner, Switch } from '@/components/ui';
 import { countSkillsByOrigin, skillSourceMeta } from '@/components/skills/sources';
 import { SettingRow, SettingsBlock, SettingsSection } from './shared';
 
@@ -241,6 +241,29 @@ export function ToolsTab() {
             onValueCommit={(value) => void saveSettings({ codeTimeoutSecs: value })}
             aria-label="Tempo limite de execução"
           />
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Workbench de código"
+        description="Como o layout Code mostra as alterações e os diffs do agente."
+      >
+        <SettingRow
+          label="Abrir diff dos arquivos"
+          description="Escolha onde o diff de um arquivo da aba Alterações abre ao clicar."
+        >
+          <NativeSelect
+            value={settings.diffOpenMode ?? 'tab'}
+            onChange={(event) =>
+              void saveSettings({
+                diffOpenMode: event.target.value === 'panel' ? 'panel' : 'tab',
+              })
+            }
+            aria-label="Onde abrir o diff dos arquivos"
+          >
+            <option value="tab">Em uma aba do chat (padrão)</option>
+            <option value="panel">No painel lateral</option>
+          </NativeSelect>
         </SettingRow>
       </SettingsSection>
 

@@ -11,6 +11,9 @@ vi.mock('@/components/chat/ChatView', () => ({
 vi.mock('@/components/code', () => ({
   CodeSessionHeader: () => <div data-testid="code-session-header" />,
   CodeWelcomeScreen: () => <div data-testid="code-welcome" />,
+  CodeDiffView: ({ target }: { target: { path: string } }) => (
+    <div data-testid="code-diff-view">{target.path}</div>
+  ),
 }));
 
 vi.mock('@/components/skills', () => ({
@@ -110,6 +113,28 @@ describe('WorkspaceCenter — modo Code', () => {
     expect(screen.getByTestId('chat-view')).toBeTruthy();
   });
 
+  it('mostra o diff como aba central, mantém header e chat montados', () => {
+    useUiStore.setState({
+      layoutMode: 'code',
+      codeView: 'diff',
+      codeDiffTab: {
+        workspaceId: 'ws-1',
+        path: 'src/app.ts',
+        staged: false,
+        knownDiff: '@@ -1 +1 @@\n-a\n+b',
+      },
+    });
+
+    render(<WorkspaceCenter />);
+
+    expect(screen.getByTestId('code-diff-view').textContent).toContain('src/app.ts');
+    expect(screen.getByTestId('code-session-header')).toBeTruthy();
+    // O chat compartilhado continua montado (estado preservado), só oculto.
+    expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
+    expect(screen.getByTestId('code-session-header').parentElement?.className).not.toContain(
+      'hidden',
+    );
+  });
   it('keeps the same chat instance when switching layouts', () => {
     render(<WorkspaceCenter />);
     const chat = screen.getByTestId('chat-view');

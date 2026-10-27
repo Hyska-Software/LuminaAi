@@ -191,3 +191,9 @@ controlados).
 `tauri.conf.json` (dívida pré-existente; exige validação manual do app empacotado), telas de
 configuração para MCP/servidores e "Verificações" no painel (backend exposto por `mcp_status` e
 `run_checks`), worktrees/LSP/ACP/agendamentos (v2 do PLAN).
+## 13. Ajustes pós-fecho — diff como aba central
+
+- **Diff de arquivo como aba do chat (padrão)**: clicar num arquivo da aba Alterações abre `CodeDiffView` no centro, com uma aba `Diff` na barra de sessões (fechável, teclado, `aria-selected`); o chat compartilhado permanece montado oculto (estado preservado) e o `CodeSessionHeader` continua visível.
+- **Configurável**: `Settings.diffOpenMode` (`tab` padrão | `panel`) normalizado no backend (`config::normalize_settings`) e exposto em Configurações → Ferramentas → Workbench de código; `panel` mantém o detalhe inline anterior.
+- **Sem backend novo**: o alvo vive em `uiStore.codeDiffTab` (workspace/path/staged/knownDiff) e o diff usa `get_file_diff`/journal.
+- Testes: `uiStore` (abrir/fechar/setCodeView), `CodeDiffView` (diff conhecido, API, erro), `ChangesPanel` (delega para a aba), `CodeSessionHeader` (aba `Diff` ativa/fecha), `WorkspaceCenter` (centro + header/chat montados), `ToolsTab` (padrão e troca para painel) e `config`/serialização. Verificação: `cargo test --lib` 711 verdes, `pnpm typecheck`, `pnpm build` e testes afetados (201) verdes.

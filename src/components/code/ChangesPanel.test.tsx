@@ -117,6 +117,27 @@ describe('ChangesPanel', () => {
     await waitFor(() => expect(screen.getByRole('group', { name: 'Diff de novo.ts' })).toBeTruthy());
   });
 
+  it('delega o diff para a aba central quando onOpenDiffTab é fornecido', async () => {
+    const onOpenDiffTab = vi.fn();
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status()}
+        sessionChanges={sessionChanges}
+        onOpenDiffTab={onOpenDiffTab}
+      />,
+    );
+
+    fireEvent.click(rowButton('src/b.ts'));
+
+    expect(onOpenDiffTab).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'src/b.ts', staged: false, knownDiff: expect.any(String) }),
+    );
+    // No modo aba o painel não abre o detalhe inline nem chama a API.
+    expect(screen.queryByRole('group', { name: /Diff de/ })).toBeNull();
+    expect(mocks.getFileDiff).not.toHaveBeenCalled();
+  });
+
   it('stages and unstages files through the api', async () => {
     const onRefresh = vi.fn();
     render(

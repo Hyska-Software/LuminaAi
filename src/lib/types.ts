@@ -869,6 +869,11 @@ export interface Settings {
   codeDefaultPermissionMode?: PermissionMode;
   /** Confia automaticamente em workspaces abertos antes. */
   trustWorkspacesByDefault?: boolean;
+  /**
+   * Onde o diff de um arquivo abre ao clicar em Alterações: `tab` (aba do
+   * chat, padrão de fábrica) ou `panel` (inline no painel direito).
+   */
+  diffOpenMode?: 'tab' | 'panel';
 }
 
 export interface ProviderKeyStatus {

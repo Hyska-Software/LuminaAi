@@ -1218,7 +1218,13 @@ Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested
 - Conteúdo de repositório/páginas é dado não confiável no prompt; instruções de projeto
   (`AGENTS.md`) valem abaixo da política e do pedido direto do usuário.
 
-### 16.6 Hooks do projeto e allowlist de leitura
+### 16.6 Diff de arquivo como aba central
+
+- Clicar num arquivo da aba **Alterações** abre o diff como **aba do chat** (por padrão): a barra de abas da sessão ganha a aba `Diff` (rolável, fechável, teclado incluído), o centro mostra `CodeDiffView` (cabeçalho com path, `+N −M`, copiar patch, recarregar) e o chat compartilhado continua montado oculto (estado preservado).
+- `Settings.diffOpenMode` (`tab` | `panel`, padrão `tab`) é normalizado no backend e configurável em **Configurações → Ferramentas → Workbench de código**; `panel` mantém o detalhe inline antigo do painel.
+- Alvo volátil em `uiStore.codeDiffTab` (não persistido); evento nenhum no backend (usa `get_file_diff`/journal).
+
+### 16.7 Hooks do projeto e allowlist de leitura
 
 - **Hooks** (`<workspace>/.lumina/hooks.json`): `{ "postWrite": ["npm run lint --fix", { "command": "npx prettier --write {path}" }] }`
   roda até 4 comandos após cada escrita/edição bem-sucedida, no diretório do workspace, com env

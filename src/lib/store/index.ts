@@ -27,6 +27,7 @@ export {
 } from './uiStore';
 export type {
   ArtifactPanelView,
+  CodeDiffTab,
   CodePanelTab,
   CodeView,
   LayoutMode,

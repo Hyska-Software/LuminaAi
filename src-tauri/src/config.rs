@@ -149,6 +149,17 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     settings.approval_timeout_secs = settings
         .approval_timeout_secs
         .clamp(APPROVAL_TIMEOUT_MIN_SECS, APPROVAL_TIMEOUT_MAX_SECS);
+    // Diff do arquivo: aba do chat (padrão) ou painel lateral. Qualquer outro
+    // valor cai no padrão para a UI nunca ficar num estado impossível.
+    settings.diff_open_mode = match settings
+        .diff_open_mode
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "panel" => "panel".into(),
+        _ => "tab".into(),
+    };
     settings
 }
 
@@ -1804,6 +1815,19 @@ mod tests {
             crate::domain::PermissionMode::Edit
         );
         assert!(!normalized.trust_workspaces_by_default);
+        assert_eq!(normalized.diff_open_mode, "tab");
+    }
+    #[test]
+    fn diff_open_mode_normalizes_to_tab_or_panel() {
+        let mut settings = Settings::default();
+        settings.diff_open_mode = " PANEL ".into();
+        assert_eq!(normalize_settings(settings).diff_open_mode, "panel");
+        let mut settings = Settings::default();
+        settings.diff_open_mode = "qualquer-coisa".into();
+        assert_eq!(normalize_settings(settings).diff_open_mode, "tab");
+        let mut settings = Settings::default();
+        settings.diff_open_mode = String::new();
+        assert_eq!(normalize_settings(settings).diff_open_mode, "tab");
     }
 
     #[test]
@@ -1835,6 +1859,7 @@ mod tests {
         assert_eq!(value["notificationsEnabled"], true);
         assert_eq!(value["codeDefaultPermissionMode"], "edit");
         assert_eq!(value["trustWorkspacesByDefault"], false);
+        assert_eq!(value["diffOpenMode"], "tab");
         assert!(value.get("code_max_steps").is_none());
 
         // Reler o JSON gravado devolve os mesmos valores (contrato IPC).

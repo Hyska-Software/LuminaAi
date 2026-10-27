@@ -21,9 +21,20 @@ export type LayoutMode = 'chat' | 'code';
 /**
  * Surface shown inside the Code layout's center column. The Code workbench has
  * its own view state so switching layouts never loses the Chat surface's page
- * (Biblioteca/Skills) and vice versa.
+ * (Biblioteca/Skills) and vice versa. `diff` mostra o diff de um arquivo em uma
+ * aba central (WORKBENCH §7.2); o alvo vive em `codeDiffTab`.
  */
-export type CodeView = 'session' | 'skills';
+export type CodeView = 'session' | 'skills' | 'diff';
+
+/** Diff aberto como aba central (alvo é volátil; não persiste entre sessões). */
+export interface CodeDiffTab {
+  workspaceId: string;
+  path: string;
+  /** `true` = diff do index (`git diff --cached`). */
+  staged: boolean;
+  /** Diff já conhecido pelo journal da sessão (evita a chamada de API). */
+  knownDiff?: string | null;
+}
 
 /** Tabs of the Code right panel (Arquivos | Alterações). */
 export type CodePanelTab = 'files' | 'changes' | 'terminal';
@@ -83,6 +94,8 @@ interface UiState {
   layoutMode: LayoutMode;
   /** Center surface inside the Code layout; reset to `session` on demand. */
   codeView: CodeView;
+  /** Diff aberto como aba central (`null` = nenhum; só existe com `codeView: 'diff'`). */
+  codeDiffTab: CodeDiffTab | null;
   /** Whether the Code layout shows its right panel (Arquivos/Alterações). */
   codePanelOpen: boolean;
   /** Active tab of the Code right panel. */
@@ -120,6 +133,10 @@ interface UiState {
   setLayoutMode: (mode: LayoutMode) => void;
   /** Switches the Code center between the agent session and the Skills page. */
   setCodeView: (view: CodeView) => void;
+  /** Abre o diff de um arquivo como aba central (codeView vira diff). */
+  openCodeDiff: (target: CodeDiffTab) => void;
+  /** Fecha a aba de diff e volta para a sessão. */
+  closeCodeDiff: () => void;
   setCodePanelOpen: (open: boolean) => void;
   toggleCodePanel: () => void;
   setCodePanelTab: (tab: CodePanelTab) => void;
@@ -190,6 +207,7 @@ export const useUiStore = create<UiState>()(
       theme: 'system',
       layoutMode: 'chat',
       codeView: 'session',
+      codeDiffTab: null,
       codePanelOpen: true,
       codePanelTab: 'changes',
       activeWorkspaceId: null,
@@ -216,7 +234,12 @@ export const useUiStore = create<UiState>()(
       setLayoutMode: (layoutMode) =>
         set({ layoutMode: layoutMode === 'code' ? 'code' : 'chat' }),
       setCodeView: (codeView) =>
-        set({ codeView: codeView === 'skills' ? 'skills' : 'session' }),
+        set({
+          codeView:
+            codeView === 'skills' ? 'skills' : codeView === 'diff' ? 'diff' : 'session',
+        }),
+      openCodeDiff: (codeDiffTab) => set({ codeDiffTab, codeView: 'diff' }),
+      closeCodeDiff: () => set({ codeDiffTab: null, codeView: 'session' }),
       setCodePanelOpen: (codePanelOpen) => set({ codePanelOpen }),
       toggleCodePanel: () => set((state) => ({ codePanelOpen: !state.codePanelOpen })),
       setCodePanelTab: (codePanelTab) =>

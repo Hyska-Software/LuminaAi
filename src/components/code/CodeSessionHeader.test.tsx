@@ -672,6 +672,34 @@ describe('CodeSessionHeader — sessões separadas por layout', () => {
     );
   });
 
+  it('mostra a aba de diff aberta como aba central e fecha pelo X', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Sessão aberta' })],
+      activeId: 'c-1',
+    });
+
+    render(<CodeSessionHeader />);
+
+    act(() => {
+      useUiStore.getState().openCodeDiff({
+        workspaceId: 'ws-1',
+        path: 'src/app.ts',
+        staged: false,
+        knownDiff: '@@ -1 +1 @@\n-a\n+b',
+      });
+    });
+
+    const diffTab = await screen.findByRole('tab', { name: 'Diff de src/app.ts' });
+    expect(diffTab.getAttribute('aria-selected')).toBe('true');
+    // A aba da sessão deixa de parecer ativa enquanto o diff está aberto.
+    expect(tab('Sessão aberta').getAttribute('aria-selected')).toBe('false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar diff de src/app.ts' }));
+    expect(useUiStore.getState().codeDiffTab).toBeNull();
+    expect(useUiStore.getState().codeView).toBe('session');
+    expect(screen.queryByRole('tab', { name: 'Diff de src/app.ts' })).toBeNull();
+  });
+
   it('ao fechar a última aba, limpa a sessão ativa do layout pelo store', async () => {
     useChatStore.setState({
       conversations: [conversation({ id: 'c-1', title: 'Única sessão' })],

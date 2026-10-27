@@ -733,6 +733,9 @@ pub struct Settings {
     /// Confia automaticamente em workspaces já abertos antes (o usuário pode
     /// revogar por workspace); quando falso, cada pasta nova pede confirmação.
     pub trust_workspaces_by_default: bool,
+    /// Onde o diff de um arquivo abre ao clicar em Alterações: `tab` (aba do
+    /// chat, padrão) ou `panel` (inline no painel direito). Ver WORKBENCH §7.2.
+    pub diff_open_mode: String,
 }
 
 impl Default for Settings {
@@ -769,6 +772,7 @@ impl Default for Settings {
             notifications_enabled: true,
             code_default_permission_mode: PermissionMode::Edit,
             trust_workspaces_by_default: false,
+            diff_open_mode: "tab".into(),
         }
     }
 }

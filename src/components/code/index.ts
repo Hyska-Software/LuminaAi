@@ -16,6 +16,9 @@ export { CodePanel } from './CodePanel';
 
 export { CodeWelcomeScreen } from './CodeWelcomeScreen';
 
+export { CodeDiffView } from './CodeDiffView';
+export type { CodeDiffViewProps } from './CodeDiffView';
+
 export { WorkspaceTrustDialog } from './WorkspaceTrustDialog';
 export type { WorkspaceTrustDialogProps } from './WorkspaceTrustDialog';
 

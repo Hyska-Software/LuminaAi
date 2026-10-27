@@ -1,5 +1,5 @@
 import { ChatView } from '@/components/chat/ChatView';
-import { CodeSessionHeader, CodeWelcomeScreen } from '@/components/code';
+import { CodeSessionHeader, CodeWelcomeScreen, CodeDiffView } from '@/components/code';
 import { LibraryView } from '@/components/library';
 import { SkillsView } from '@/components/skills';
 import { useUiStore } from '@/lib/store';
@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 export function WorkspaceCenter() {
   const layoutMode = useUiStore((state) => state.layoutMode);
   const codeView = useUiStore((state) => state.codeView);
+  const codeDiffTab = useUiStore((state) => state.codeDiffTab);
   const activeView = useUiStore((state) => state.activeView);
   const setActiveView = useUiStore((state) => state.setActiveView);
   const setCodeView = useUiStore((state) => state.setCodeView);
@@ -27,7 +28,8 @@ export function WorkspaceCenter() {
   const isCode = layoutMode === 'code';
   const showSkills = isCode ? codeView === 'skills' : activeView === 'skills';
   const showLibrary = !isCode && activeView === 'library';
-  const showChat = !showSkills && !showLibrary;
+  const showDiff = isCode && codeView === 'diff' && codeDiffTab !== null;
+  const showChat = !showSkills && !showLibrary && !showDiff;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -36,9 +38,9 @@ export function WorkspaceCenter() {
           header stays mounted while the Code Skills page is open so the open
           session tabs are not lost when coming back (PLAN §3.3). */}
       <div
-        className={cn('shrink-0', !(isCode && showChat) && 'hidden')}
-        aria-hidden={isCode && !showChat ? true : undefined}
-        inert={isCode && !showChat ? true : undefined}
+        className={cn('shrink-0', !(isCode && (showChat || showDiff)) && 'hidden')}
+        aria-hidden={isCode && !(showChat || showDiff) ? true : undefined}
+        inert={isCode && !(showChat || showDiff) ? true : undefined}
       >
         {isCode ? <CodeSessionHeader /> : null}
       </div>
@@ -51,6 +53,17 @@ export function WorkspaceCenter() {
       >
         <ChatView welcome={isCode ? <CodeWelcomeScreen /> : undefined} />
       </div>
+
+      {showDiff && codeDiffTab ? (
+        <div
+          id="code-diff-panel"
+          role="region"
+          aria-label={`Diff de ${codeDiffTab.path}`}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <CodeDiffView target={codeDiffTab} className="flex min-h-0 flex-1 flex-col" />
+        </div>
+      ) : null}
 
       {showSkills ? (
         <SkillsView
