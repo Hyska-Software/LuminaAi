@@ -56,12 +56,14 @@ pub async fn run(ctx: &ToolCtx, exec: ToolExec, args: Value) -> ToolOutcome {
         ToolExec::WriteFile => write_file(ctx, &args).await,
         ToolExec::EditFile => edit_file(ctx, &args).await,
         ToolExec::RunCommand => run_command(ctx, &args).await,
+        ToolExec::RunChecks => run_checks(ctx, &args).await,
         ToolExec::JobList => job_list(ctx, &args).await,
         ToolExec::JobOutput => job_output(ctx, &args).await,
         ToolExec::JobKill => job_kill(ctx, &args).await,
         ToolExec::TodoWrite => todo_write(ctx, &args).await,
         ToolExec::SubmitPlan => submit_plan(ctx, &args).await,
         ToolExec::AskUser => ask_user(ctx, &args).await,
+        ToolExec::Task => run_task(ctx, &args).await,
     }
 }
 
@@ -1277,6 +1279,121 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
 /* Shell: run_command                                                  */
 /* ------------------------------------------------------------------ */
 
+/// `task`: delega exploração/revisão a um subagente somente leitura.
+async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let Some(runner) = ctx.subagent.clone() else {
+        return err(
+            "SUBAGENT_UNAVAILABLE",
+            "nenhum runner de subagentes está montado nesta composição",
+        );
+    };
+    if ctx.workspace.is_none() {
+        return err("FS_NO_WORKSPACE", "abra um workspace para delegar exploração");
+    }
+    let description = match arg_str(args, "description") {
+        Ok(value) => value,
+        Err(outcome) => return outcome,
+    };
+    let prompt = match arg_str(args, "prompt") {
+        Ok(value) => value,
+        Err(outcome) => return outcome,
+    };
+    let kind = crate::harness::code::subagent::SubagentKind::from_str(
+        opt_str(args, "subagent_type").as_deref().unwrap_or("explore"),
+    );
+    let request = crate::harness::code::subagent::SubagentRequest {
+        parent_conversation_id: ctx.conversation_id.clone(),
+        workspace_id: None,
+        provider_id: String::new(),
+        model_id: String::new(),
+        description: description.clone(),
+        prompt,
+        kind,
+        depth: 0,
+    };
+    let text = tokio::select! {
+        _ = ctx.cancel.cancelled() => return err("SUBAGENT_CANCELLED", "o turno foi cancelado"),
+        result = tokio::time::timeout(
+            std::time::Duration::from_secs(15 * 60),
+            runner.run(request),
+        ) => match result {
+            Ok(Ok(text)) => text,
+            Ok(Err(error)) => return err("SUBAGENT_FAILED", format!("{error:#}")),
+            Err(_) => return err("SUBAGENT_TIMEOUT", "o subagente excedeu 15 minutos"),
+        },
+    };
+    let short: String = description.chars().take(60).collect();
+    let summary = format!("Subagente {}: {}", kind.as_str(), short);
+    let (inline, _spill) = spill_text(ctx, &format!("Subagente ({}) concluiu:\n\n{text}", kind.as_str()));
+    ToolOutcome {
+        content: inline,
+        summary: Some(summary),
+        presentation: Some(serde_json::json!({
+            "kind": "subagent",
+            "description": description,
+            "subagentType": kind.as_str(),
+        })),
+        ..Default::default()
+    }
+}
+
+/// `run_checks`: roda a verificação detectada do projeto (test/lint/build)
+/// reutilizando o pipeline (e a aprovação) do `run_command`.
+async fn run_checks(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let root = match writable_root(ctx) {
+        Ok(root) => root,
+        Err(outcome) => return outcome,
+    };
+    let profile = crate::workspace::project::detect(&root);
+    if profile.checks.is_empty() {
+        return err(
+            "NO_CHECKS",
+            "o projeto não tem verificações detectadas (test/lint/build); use `run_command` com o comando certo",
+        );
+    }
+    let requested = opt_str(args, "check");
+    let selected = match requested.as_deref() {
+        Some(requested) => profile
+            .checks
+            .iter()
+            .find(|check| check.id == requested || check.command == requested)
+            .cloned(),
+        None => profile.checks.first().cloned(),
+    };
+    let Some(check) = selected else {
+        let available: Vec<String> = profile
+            .checks
+            .iter()
+            .map(|check| format!("{} (`{}`)", check.id, check.command))
+            .collect();
+        return err(
+            "CHECK_NOT_FOUND",
+            format!("verificação desconhecida: `{}` — disponíveis: {}", requested.unwrap_or_default(), available.join(", ")),
+        );
+    };
+    let timeout = args
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(600_000)
+        .clamp(1_000, 600_000);
+    let command_args = json!({
+        "command": check.command,
+        "description": format!("Rodar {}", check.label),
+        "timeout_ms": timeout,
+    });
+    let mut outcome = run_command(ctx, &command_args).await;
+    if !outcome.is_error {
+        let label = check.label.clone();
+        let head = format!("[check: {label}]\n");
+        if outcome.content.chars().count() + head.len() <= MAX_INLINE_CHARS {
+            outcome.content = format!("{head}{}", outcome.content);
+        }
+        if outcome.summary.is_none() {
+            outcome.summary = Some(format!("Verificação: {label}"));
+        }
+    }
+    outcome
+}
 async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let command = match arg_str(args, "command") {
         Ok(value) => value,
@@ -2023,6 +2140,7 @@ mod tests {
                 plan_mode: false,
                 jobs: Some(self.jobs.clone()),
                 questions: None,
+                subagent: None,
             }
         }
 
@@ -2495,6 +2613,81 @@ mod tests {
         assert!(denied.content.contains("faltou contexto"), "{}", denied.content);
     }
 
+    #[tokio::test]
+    async fn run_checks_reports_missing_project_checks_and_plan_mode() {
+        let fixture = Fixture::new();
+        let ctx = fixture.ctx();
+        let missing = call(&ctx, "run_checks", json!({})).await;
+        assert_eq!(error_code(&missing), "NO_CHECKS");
+
+        let mut plan = fixture.ctx();
+        plan.plan_mode = true;
+        fixture.write("package.json", r#"{"name":"demo","scripts":{"test":"node -e \"console.log('ok')\""}}"#);
+        let denied = call(&plan, "run_checks", json!({})).await;
+        assert_eq!(error_code(&denied), "PLAN_MODE_ACTIVE");
+    }
+
+    #[tokio::test]
+    async fn run_checks_runs_the_detected_command_when_shell_is_available() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.workspace.as_mut().expect("ws").permission_mode = PermissionMode::Autonomous;
+        fixture.write(
+            "package.json",
+            r#"{"name":"demo","scripts":{"test":"node -e \"console.log('checks-ok')\""}}"#,
+        );
+        let outcome = call(&ctx, "run_checks", json!({})).await;
+        if error_code(&outcome) == "EXEC_SPAWN" || error_code(&outcome) == "EXEC_FAILED" {
+            eprintln!("shell indisponível neste ambiente: teste pulado");
+            return;
+        }
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("[check:"), "{}", outcome.content);
+        assert!(outcome.content.contains("exit code: 0"), "{}", outcome.content);
+    }
+    #[tokio::test]
+    async fn task_without_runner_is_an_actionable_error() {
+        let fixture = Fixture::new();
+        let ctx = fixture.ctx();
+        let outcome = call(
+            &ctx,
+            "task",
+            json!({ "description": "Explorar", "prompt": "Mapeie src/" }),
+        )
+        .await;
+        assert_eq!(error_code(&outcome), "SUBAGENT_UNAVAILABLE");
+    }
+
+    #[tokio::test]
+    async fn task_returns_the_child_summary_and_presentation() {
+        struct FakeRunner;
+        impl crate::harness::code::subagent::SubagentRunner for FakeRunner {
+            fn run(
+                &self,
+                request: crate::harness::code::subagent::SubagentRequest,
+            ) -> futures_util::future::BoxFuture<'static, anyhow::Result<String>> {
+                Box::pin(async move { Ok(format!("resumo de `{}`", request.description)) })
+            }
+        }
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.subagent = Some(std::sync::Arc::new(FakeRunner));
+        let outcome = call(
+            &ctx,
+            "task",
+            json!({
+                "description": "Explorar o módulo de pagamentos",
+                "prompt": "Liste os arquivos e responda",
+                "subagent_type": "explore"
+            }),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("resumo de `Explorar o módulo de pagamentos`"));
+        let presentation = outcome.presentation.expect("presentation");
+        assert_eq!(presentation["kind"], "subagent");
+        assert_eq!(presentation["subagentType"], "explore");
+    }
     #[tokio::test]
     async fn ask_user_without_a_channel_is_an_actionable_error() {
         let fixture = Fixture::new();

@@ -327,7 +327,47 @@ M  src/app.ts           (staged)
 - **UI**: card com opções (rádio/checkbox), opção recomendada primeira, texto livre opcional.
 - **Política**: `Ask`. **Testes**: single/multi, timeout, cancelamento, resposta custom.
 
-### 2.6 Reaproveitadas do Chat (perfil Code seleciona)
+### 2.6 Projeto, verificação e delegação (v1.2)
+
+#### `run_checks`
+
+```json
+{ "check": "npm:test", "timeout_ms": 600000 }
+```
+
+- Roda a verificação **detectada** do projeto (`workspace::project`): `check` é opcional e usa o
+  primeiro (teste) quando omitido; ids/labels aparecem no contexto do projeto do prompt.
+- Reutiliza o pipeline do `run_command` (política, aprovação, streaming de `ToolProgress`, spill);
+  o resultado é prefixado com `[check: <label>]` e contém exit code/saída.
+- **Política**: `Shell` (aprovada no modo Editar; destrutivo continua pedindo). Sem manifesto
+  detectado → `NO_CHECKS`; id inválido → `CHECK_NOT_FOUND`.
+- **Testes**: sem checks, modo Plano (deny), execução real de `npm run test` (pulado sem shell).
+
+#### `task` (subagente somente leitura)
+
+```json
+{ "description": "Explorar o módulo de pagamentos", "prompt": "Liste os arquivos…", "subagent_type": "explore" }
+```
+
+- Cria uma conversa **efêmera** com o mesmo workspace e permissão `read_only`, roda o perfil Code
+  com orçamento curto (24 passos) e catálogo reduzido a leitura (`read_file`, `list_dir`,
+  `search_*`, `read_tool_output`, `git_status/diff/log`); devolve o resumo final e apaga a conversa.
+- `subagent_type`: `explore` (mapear/responder), `review` (criticar o diff) ou `general`.
+- Profundidade máxima **1**: o filho não recebe `task` e o runner recusa aninhamento
+  (`DELEGATION_DEPTH`). O filho não pode editar nem rodar comandos (política `read_only`).
+- **Política**: `Read` no pai (a delegação em si não muta); eventos do filho são descartados (o card
+  do pai mostra o resumo). Timeout de 15 min; cancelamento do pai aborta o filho.
+- **UI**: card de apresentação “Subagente explore/review: descrição”.
+- **Testes**: kinds/parse, catálogo reduzido, guarda de profundidade, execução de um turno filho
+  real com provider falso (conversa efêmera apagada), runner inexistente/sem workspace.
+
+#### `/test`, `/review`, `/init` (composer)
+
+Comandos do composer preenchem prompts que usam `run_checks` (verificação), `task` (revisão
+delegada) e `write_file` (AGENTS.md), nesta ordem de preferência. O `/init` pede revisão do
+conteúdo antes de gravar.
+
+### 2.7 Reaproveitadas do Chat (perfil Code seleciona)
 
 | Tool | Uso no perfil Code | Política |
 | --- | --- | --- |

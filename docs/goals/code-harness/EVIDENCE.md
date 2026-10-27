@@ -122,3 +122,25 @@ Pesquisa (5 documentos em `docs/research/`, ~190 KB): `dsh-harness-map.md` (DSH 
   `portable-pty 0.8` e `windows 0.62` (features de Job Object).
 - Verificação: `cargo check --all-targets` verde, `pnpm typecheck` verde, `pnpm build` verde,
   `cargo test --lib`/`pnpm test` conferidos no fecho da rodada.
+## 9. Rodada 5 — verificação do projeto e subagentes (F8, parte 1)
+
+- **`run_checks`**: nova tool do perfil Code que roda a verificação detectada do projeto
+  (`workspace::project`) reutilizando o pipeline do `run_command` (política/aprovação, streaming,
+  spill, exit code), com `check` opcional e erros `NO_CHECKS`/`CHECK_NOT_FOUND`. Catálogo Code passou
+  a 19 tools; testes cobrem ausência de checks, modo Plano e execução real (pulado sem shell).
+- **`task` (subagente)**: delegação para um agente filho **somente leitura** (conversa efêmera no
+  mesmo workspace, permissão `read_only`, catálogo reduzido a leitura, 24 passos, eventos
+  descartados, conversa apagada ao final, profundidade máxima 1 com guarda `DELEGATION_DEPTH`).
+  `TurnOptions.delegation_depth` filtra o catálogo do filho e encurta o orçamento; o prompt do
+  filho recebe instruções extras via `system_prompt_override` (agora suportado no perfil Code).
+  Testes: kinds/instruções, catálogo reduzido, guarda de profundidade e um turno filho real com
+  provider falso (verifica o texto final e a exclusão da conversa efêmera). Card de apresentação
+  “Subagente …” na timeline.
+- **Composer**: `/test`, `/review` e `/init` agora preenchem prompts que citam `run_checks`,
+  `task` (revisão delegada) e revisão do AGENTS.md antes de gravar.
+- Docs atualizados (`TOOLS.md` §2.6, `ARCHITECTURE` §8.3, `FILES` §16). Verificação no fecho da
+  rodada (`cargo check --all-targets`, `cargo test --lib`, `pnpm typecheck`, `pnpm test`, `pnpm build`).
+
+Pendências para as próximas rodadas (F8 restante): cliente **MCP** (stdio) com tools dinâmicas,
+hooks de ciclo de vida e a UI de "Verificações" no painel; depois CSP restritiva e allowlist de
+comandos de leitura no modo Editar.

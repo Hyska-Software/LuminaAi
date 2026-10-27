@@ -22,6 +22,40 @@ pub static RUN_COMMAND_SPEC: ToolSpec = ToolSpec {
     guidance: "Use `run_command` para compilar, testar, rodar linters e rodar git de leitura. Prefira os comandos de verificação do projeto; nunca rode comandos destrutivos sem necessidade. Saída longa volta truncada com id de spill.",
 };
 
+pub static RUN_CHECKS_SPEC: ToolSpec = ToolSpec {
+    name: "run_checks",
+    description: "Run the project's detected verification commands (test/lint/build) and return the output. Use it after editing code, before claiming the task is done.",
+    schema: run_checks_schema,
+    parallel: ParallelClass::Exclusive,
+    risk: RiskClass::Shell,
+    mutating: true,
+    requires_workspace: true,
+    profiles: &[TurnProfile::Code],
+    guidance: "Use `run_checks` para rodar a verificação detectada do projeto (test/lint/build). Sem `check`, roda a primeira (teste). Os ids/labels aparecem no contexto do projeto; o resultado traz exit code e saída. Comandos próprios continuam em `run_command`.",
+};
+
+pub fn run_checks_definition() -> ToolDefinition {
+    definition_of(&RUN_CHECKS_SPEC)
+}
+
+fn run_checks_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "check": {
+                "type": "string",
+                "description": "Optional check id from the project profile (e.g. `npm:test`, `cargo:test`, `npm:lint`). Defaults to the first detected check."
+            },
+            "timeout_ms": {
+                "type": "integer",
+                "description": "Timeout in milliseconds. Defaults to 600000, maximum 600000.",
+                "minimum": 1000,
+                "maximum": 600000
+            }
+        },
+        "additionalProperties": false
+    })
+}
 pub fn definition() -> ToolDefinition {
     definition_of(spec())
 }

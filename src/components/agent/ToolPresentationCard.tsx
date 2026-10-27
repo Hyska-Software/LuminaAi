@@ -71,6 +71,20 @@ export function ToolPresentationCard({ presentation, className }: ToolPresentati
           </p>
         </div>
       );
+    case 'subagent':
+      return (
+        <div
+          className={cn(
+            'rounded-lg border border-border bg-surface px-3 py-2 text-[12px]',
+            className,
+          )}
+        >
+          <p className="font-medium text-foreground">
+            Subagente {presentation.subagentType}
+          </p>
+          <p className="mt-0.5 text-foreground-muted">{presentation.description}</p>
+        </div>
+      );
     default:
       return null;
   }

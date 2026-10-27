@@ -705,8 +705,16 @@ pub async fn run_turn(
     options.run_code = options.run_code && settings.code_execution_enabled;
     options.max_steps = match profile {
         // O perfil Code tem orçamento próprio de passos (default 120) e o
-        // usuário o configura em Configurações → Ferramentas.
-        TurnProfile::Code => settings.code_max_steps.clamp(1, MAX_STEPS_LIMIT),
+        // usuário o configura em Configurações → Ferramentas; subagentes têm
+        // orçamento curto por definição (F8).
+        TurnProfile::Code => {
+            let budget = settings.code_max_steps.clamp(1, MAX_STEPS_LIMIT);
+            if options.delegation_depth > 0 {
+                budget.min(24)
+            } else {
+                budget
+            }
+        }
         TurnProfile::Chat => options.max_steps.clamp(1, MAX_STEPS_LIMIT),
     };
 
@@ -829,19 +837,28 @@ pub async fn run_turn(
     let system_prompt = match (profile, code_context.as_ref()) {
         (TurnProfile::Code, Some(code_ctx)) => {
             let prompt_ctx = code_ctx.prompt_context();
-            let tool_prompts = code_tool_prompts(code_ctx, &settings);
-            code::prompt::build_system_prompt(
+            let tool_prompts = code_tool_prompts(code_ctx, &settings, options.delegation_depth);
+            let mut prompt = code::prompt::build_system_prompt(
                 &model,
                 &prompt_ctx,
                 &tool_prompts,
                 std::env::consts::OS,
                 &chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
-            )
+            );
+            // Subagente: o harness do filho recebe instruções extras do pai.
+            if let Some(extra) = options.system_prompt_override.as_deref() {
+                prompt.push_str("\n\n");
+                prompt.push_str(extra.trim());
+                prompt.push('\n');
+            }
+            prompt
         }
         _ => prompt::build_system_prompt(&model, &options, &settings, &skills),
     };
     let tool_definitions = match (profile, code_context.as_ref()) {
-        (TurnProfile::Code, Some(code_ctx)) => code_tool_definitions(code_ctx, &settings),
+        (TurnProfile::Code, Some(code_ctx)) => {
+            code_tool_definitions(code_ctx, &settings, options.delegation_depth)
+        }
         _ => tools::definitions(&options),
     };
     let reasoning = reasoning_request(payload.reasoning.as_ref(), &model);
@@ -880,6 +897,12 @@ pub async fn run_turn(
             plan_mode: code_ctx.plan_mode,
             jobs: deps.jobs.clone(),
             questions: deps.questions.clone(),
+            subagent: Some(code::subagent::runner(
+                &deps,
+                &settings,
+                &conversation,
+                options.delegation_depth,
+            )),
         }),
         _ => None,
     };
@@ -2062,12 +2085,18 @@ fn tool_call_record(call: StreamingToolCall) -> ToolCallRecord {
 fn code_enabled_specs(
     ctx: &code::context::CodeTurnContext,
     settings: &Settings,
+    delegation_depth: u32,
 ) -> Vec<&'static crate::tools::registry::ToolSpec> {
     let has_workspace = ctx.root.is_some();
+    let subagent = delegation_depth > 0;
     crate::tools::registry::code_spec_refs()
         .into_iter()
         .filter(|spec| has_workspace || !spec.requires_workspace)
         .filter(|spec| settings.shell_enabled || spec.name != "run_command")
+        // Subagente: só leitura (sem shell/escrita/plano/perguntas/delegação).
+        .filter(|spec| {
+            !subagent || code::subagent::readonly_tools().contains(&spec.name)
+        })
         .collect()
 }
 
@@ -2075,8 +2104,9 @@ fn code_enabled_specs(
 fn code_tool_definitions(
     ctx: &code::context::CodeTurnContext,
     settings: &Settings,
+    delegation_depth: u32,
 ) -> Vec<crate::providers::ToolDefinition> {
-    code_enabled_specs(ctx, settings)
+    code_enabled_specs(ctx, settings, delegation_depth)
         .into_iter()
         .map(|spec| crate::providers::ToolDefinition {
             name: spec.name.to_string(),
@@ -2090,8 +2120,9 @@ fn code_tool_definitions(
 fn code_tool_prompts(
     ctx: &code::context::CodeTurnContext,
     settings: &Settings,
+    delegation_depth: u32,
 ) -> Vec<code::prompt::ToolPrompt> {
-    code_enabled_specs(ctx, settings)
+    code_enabled_specs(ctx, settings, delegation_depth)
         .into_iter()
         .map(|spec| code::prompt::ToolPrompt {
             name: spec.name,

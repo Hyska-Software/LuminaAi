@@ -16,4 +16,5 @@ pub mod observed;
 pub mod prompt;
 pub mod questions;
 pub mod session;
+pub mod subagent;
 pub mod tools;

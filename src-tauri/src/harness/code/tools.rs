@@ -157,6 +157,7 @@ mod tests {
             observed: None,
             jobs: None,
             questions: None,
+            subagent: None,
             emit: None,
             rules: Vec::new(),
             plan_mode: false,

@@ -350,7 +350,8 @@ Mesmo loop do Chat, com `TurnPayload.profile = "code"` (só em sessão do Code).
    `write_file`, `edit_file`, `run_command`, `job_list`/`job_output`/`job_kill`,
    `git_status`/`git_diff`/`git_log`, `todo_write`, `submit_plan`, `ask_user` (perguntas
 estruturadas com opções e texto livre, respondidas pelo card da timeline via
-`respond_question`).
+`respond_question`), `run_checks` (verificação detectada do projeto) e `task` (subagente somente
+leitura, profundidade 1).
    O modelo **não** recebe commit/push.
 4. **Política e aprovação** (`policy/`): modos `read_only`/`edit`/`autonomous` + overlay Plano
    + regras persistidas. Toda mutação passa por `policy::decide` → `ApprovalRegistry`

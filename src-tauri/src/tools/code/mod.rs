@@ -15,6 +15,7 @@ pub mod fs_write;
 pub mod git_read;
 pub mod jobs;
 pub mod plan;
+pub mod task;
 pub mod shell;
 
 use crate::providers::ToolDefinition;

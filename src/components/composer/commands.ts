@@ -103,7 +103,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     description: 'Insere um pedido para rodar testes/lint e corrigir falhas.',
     group: 'Projeto',
     action: 'fill',
-    fill: 'Rode a verificação do projeto (testes e lint) e corrija o que falhar:\n',
+    fill: 'Rode as verificações do projeto com `run_checks` (test primeiro) e corrija o que falhar. Mostre o exit code e o que mudou:\n',
   },
   {
     id: 'review',
@@ -112,7 +112,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     description: 'Insere um pedido de revisão do diff atual.',
     group: 'Projeto',
     action: 'fill',
-    fill: 'Revise as alterações atuais: aponte bugs, riscos e testes faltantes.\n',
+    fill: 'Revise as alterações atuais (git diff/status): aponte bugs, riscos e testes faltantes. Se fizer sentido, delegue uma revisão com `task` (subagent_type: "review") e consolide o resultado:\n',
   },
   {
     id: 'init',
@@ -121,7 +121,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     description: 'Insere um pedido para documentar o projeto para agentes.',
     group: 'Projeto',
     action: 'fill',
-    fill: 'Analise este projeto e gere/atualize o AGENTS.md com instruções para agentes.\n',
+    fill: 'Analise este projeto e gere/atualize o AGENTS.md com instruções para agentes: comandos de build/test/lint, convenções, armadilhas e mapa de diretórios. Antes de gravar, me mostre o conteúdo proposto:\n',
   },
 ];
 

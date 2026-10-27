@@ -112,6 +112,8 @@ pub struct ToolCtx {
     pub jobs: Option<Arc<crate::jobs::JobRegistry>>,
     /// Perguntas estruturadas ao usuário (`ask_user`).
     pub questions: Option<Arc<crate::harness::code::questions::QuestionRegistry>>,
+    /// Runner de subagentes (	ask; None em testes).
+    pub subagent: Option<Arc<dyn crate::harness::code::subagent::SubagentRunner>>,
 }
 
 impl ToolCtx {
@@ -300,7 +302,7 @@ pub static CHAT_SPECS: [ToolSpec; 9] = [
 /* ------------------------------------------------------------------ */
 
 /// Ordem estável do catálogo Code (a ordem entra no prompt: não reordene).
-static CODE_SPECS: [&ToolSpec; 17] = [
+static CODE_SPECS: [&ToolSpec; 19] = [
     &code::fs_read::READ_FILE_SPEC,
     &code::fs_read::LIST_DIR_SPEC,
     &code::fs_read::SEARCH_FILES_SPEC,
@@ -312,12 +314,14 @@ static CODE_SPECS: [&ToolSpec; 17] = [
     &code::fs_write::WRITE_FILE_SPEC,
     &code::fs_write::EDIT_FILE_SPEC,
     &code::shell::RUN_COMMAND_SPEC,
+    &code::shell::RUN_CHECKS_SPEC,
     &code::jobs::JOB_LIST_SPEC,
     &code::jobs::JOB_OUTPUT_SPEC,
     &code::jobs::JOB_KILL_SPEC,
     &code::plan::TODO_WRITE_SPEC,
     &code::plan::SUBMIT_PLAN_SPEC,
     &code::plan::ASK_USER_SPEC,
+    &code::task::TASK_SPEC,
 ];
 
 /// Cópias do catálogo do Chat (ordem determinística).
@@ -416,12 +420,14 @@ pub enum ToolExec {
     WriteFile,
     EditFile,
     RunCommand,
+    RunChecks,
     JobList,
     JobOutput,
     JobKill,
     TodoWrite,
     SubmitPlan,
     AskUser,
+    Task,
 }
 
 impl ToolExec {
@@ -439,12 +445,14 @@ impl ToolExec {
             "write_file" => Self::WriteFile,
             "edit_file" => Self::EditFile,
             "run_command" => Self::RunCommand,
+            "run_checks" => Self::RunChecks,
             "job_list" => Self::JobList,
             "job_output" => Self::JobOutput,
             "job_kill" => Self::JobKill,
             "todo_write" => Self::TodoWrite,
             "submit_plan" => Self::SubmitPlan,
             "ask_user" => Self::AskUser,
+            "task" => Self::Task,
             _ => return None,
         })
     }
@@ -462,12 +470,14 @@ impl ToolExec {
             Self::WriteFile => "write_file",
             Self::EditFile => "edit_file",
             Self::RunCommand => "run_command",
+            Self::RunChecks => "run_checks",
             Self::JobList => "job_list",
             Self::JobOutput => "job_output",
             Self::JobKill => "job_kill",
             Self::TodoWrite => "todo_write",
             Self::SubmitPlan => "submit_plan",
             Self::AskUser => "ask_user",
+            Self::Task => "task",
         }
     }
 
@@ -505,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn code_catalog_lists_the_seventeen_tools_in_order() {
+    fn code_catalog_lists_the_nineteen_tools_in_order() {
         assert_eq!(
             names(&code_spec_refs()),
             vec![
@@ -520,15 +530,17 @@ mod tests {
                 "write_file",
                 "edit_file",
                 "run_command",
+                "run_checks",
                 "job_list",
                 "job_output",
                 "job_kill",
                 "todo_write",
                 "submit_plan",
                 "ask_user",
+                "task",
             ]
         );
-        assert_eq!(code_specs().len(), 17);
+        assert_eq!(code_specs().len(), 19);
     }
 
     #[test]
@@ -612,7 +624,7 @@ mod tests {
     #[test]
     fn code_definitions_expose_wire_fields_only() {
         let definitions = definitions_for(TurnProfile::Code);
-        assert_eq!(definitions.len(), 17);
+        assert_eq!(definitions.len(), 19);
         for definition in &definitions {
             assert!(!definition.description.is_empty(), "{}", definition.name);
             assert_eq!(definition.parameters["type"], "object", "{}", definition.name);
@@ -674,6 +686,7 @@ mod tests {
             plan_mode: false,
             jobs: None,
             questions: None,
+            subagent: None,
         }
     }
 }

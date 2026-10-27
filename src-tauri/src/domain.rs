@@ -325,6 +325,10 @@ pub struct TurnOptions {
     pub system_prompt_override: Option<String>,
     /// Regenerate the last assistant answer (drops it before running).
     pub regenerate: bool,
+    /// Profundidade de delegação (0 = sessão do usuário; 1 = subagente).
+    /// Subagentes nao recebem a tool `task` (max. 1 nivel).
+    #[serde(default)]
+    pub delegation_depth: u32,
 }
 
 impl Default for TurnOptions {
@@ -337,6 +341,7 @@ impl Default for TurnOptions {
             temperature: None,
             system_prompt_override: None,
             regenerate: false,
+            delegation_depth: 0,
         }
     }
 }
