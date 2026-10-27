@@ -405,9 +405,13 @@ export function CodeSessionHeader() {
       useUiStore.getState().setCodeView('diff');
       return;
     }
-    if (id === NEW_SESSION_ID || id === activeId) return;
+    if (id === NEW_SESSION_ID) return;
+    const isActiveConversation = id === activeId;
+    // Clicar na aba da conversa que JÁ está ativa é no-op… exceto quando o
+    // centro mostra o diff: aí a aba é o caminho de volta para a sessão.
+    if (isActiveConversation && codeView === 'session') return;
     useUiStore.getState().setCodeView('session');
-    void useChatStore.getState().openConversation(id);
+    if (!isActiveConversation) void useChatStore.getState().openConversation(id);
   };
 
   const closeTab = (id: string) => {

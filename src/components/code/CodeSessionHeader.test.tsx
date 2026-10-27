@@ -722,3 +722,32 @@ describe('CodeSessionHeader — sessões separadas por layout', () => {
     expect(tab('Nova sessão').getAttribute('aria-selected')).toBe('true');
   });
 });
+
+describe('CodeSessionHeader — troca de aba com diff aberto', () => {
+  it('clicar na aba da sessão ativa volta do diff para a conversa', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Primeira sessão' })],
+      activeId: 'c-1',
+    });
+
+    render(<CodeSessionHeader />);
+
+    act(() => {
+      useUiStore.getState().openCodeDiff({
+        workspaceId: 'ws-1',
+        path: 'src/app.ts',
+        staged: false,
+        knownDiff: '@@ -1 +1 @@\n-a\n+b',
+      });
+    });
+
+    expect(await screen.findByRole('tab', { name: 'Diff de src/app.ts' })).toBeTruthy();
+    fireEvent.click(tab('Primeira sessão'));
+
+    await waitFor(() => {
+      expect(useUiStore.getState().codeView).toBe('session');
+    });
+    // A aba de diff continua aberta para ser reaberta pelo clique nela.
+    expect(useUiStore.getState().codeDiffTab?.path).toBe('src/app.ts');
+  });
+});
