@@ -345,7 +345,7 @@ Mesmo loop do Chat, com `TurnPayload.profile = "code"` (só em sessão do Code).
 2. **Prompt próprio** (`harness/code/prompt.rs`): identidade de agente de código, ambiente,
    política de permissões, orientações das tools (geradas do registry — fonte única),
    regras de edição/verificação, projeto e formato de resposta.
-3. **Tools do perfil** (`tools/registry.rs` + `tools/code/*`): no máximo ~17 tools —
+3. **Tools do perfil** (`tools/registry.rs` + `tools/code/*`): 23 tools (19 de código + web/skills —
    `read_file`, `list_dir`, `search_files`, `search_text`, `read_tool_output`,
    `write_file`, `edit_file`, `run_command`, `job_list`/`job_output`/`job_kill`,
    `git_status`/`git_diff`/`git_log`, `todo_write`, `submit_plan`, `ask_user` (perguntas

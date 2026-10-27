@@ -127,7 +127,7 @@ Pesquisa (5 documentos em `docs/research/`, ~190 KB): `dsh-harness-map.md` (DSH 
 - **`run_checks`**: nova tool do perfil Code que roda a verificação detectada do projeto
   (`workspace::project`) reutilizando o pipeline do `run_command` (política/aprovação, streaming,
   spill, exit code), com `check` opcional e erros `NO_CHECKS`/`CHECK_NOT_FOUND`. Catálogo Code passou
-  a 19 tools; testes cobrem ausência de checks, modo Plano e execução real (pulado sem shell).
+  a 19 tools (23 com web/skills reaproveitadas); testes cobrem ausência de checks, modo Plano e execução real (pulado sem shell).
 - **`task` (subagente)**: delegação para um agente filho **somente leitura** (conversa efêmera no
   mesmo workspace, permissão `read_only`, catálogo reduzido a leitura, 24 passos, eventos
   descartados, conversa apagada ao final, profundidade máxima 1 com guarda `DELEGATION_DEPTH`).
@@ -183,7 +183,7 @@ plano/tarefas/jobs/respostas/apresentações, painel Arquivos/Alterações real 
 (`ARCHITECTURE` §5/§8.3/§12/§13/§16, `FILES` §14/§16, `DESIGN` §5, `TOOLS` §2.6, `EVIDENCE`).
 
 **Verificação final da branch `feat/code-harness`:** `cargo check --all-targets` verde;
-`cargo test --lib` 707 verdes; `pnpm typecheck` verde; `pnpm test` 97 arquivos/1717 testes verdes;
+`cargo test --lib` 708 verdes; `pnpm typecheck` verde; `pnpm test` 97 arquivos/1717 testes verdes;
 `pnpm build` verde. Nenhum mock/fake em produto (fakes apenas em testes, com provider/streamer
 controlados).
 

@@ -64,6 +64,9 @@ pub async fn run(ctx: &ToolCtx, exec: ToolExec, args: Value) -> ToolOutcome {
         ToolExec::SubmitPlan => submit_plan(ctx, &args).await,
         ToolExec::AskUser => ask_user(ctx, &args).await,
         ToolExec::Task => run_task(ctx, &args).await,
+        ToolExec::WebSearch | ToolExec::FetchUrl | ToolExec::ListSkills | ToolExec::ReadSkill => {
+            bridge_chat_tool(ctx, exec.name(), &args).await
+        }
     }
 }
 
@@ -1554,6 +1557,39 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
 /* Shell: run_command                                                  */
 /* ------------------------------------------------------------------ */
 
+/// Ponte para as tools antigas do Chat (web/skills) reaproveitadas no Code:
+/// monta o `ToolRuntime` equivalente e delega para `tools::execute`.
+async fn bridge_chat_tool(ctx: &ToolCtx, name: &str, args: &Value) -> ToolOutcome {
+    let mut options = crate::domain::TurnOptions::default();
+    options.web_search = true;
+    options.create_files = false;
+    options.run_code = false;
+    options.max_steps = 1;
+    let runtime = crate::tools::ToolRuntime {
+        db: ctx.db.clone(),
+        http: ctx.http.clone(),
+        conversation_id: ctx.conversation_id.clone(),
+        message_id: ctx.message_id.clone(),
+        options,
+        settings: ctx.settings.clone(),
+        cancel: ctx.cancel.clone(),
+        data_dir: ctx.data_dir.clone(),
+        skills_roots: ctx.skills_roots.clone(),
+    };
+    let call = crate::domain::ToolCallRecord {
+        id: ctx.tool_call_id.clone(),
+        name: name.to_string(),
+        arguments: args.to_string(),
+        result: None,
+        status: crate::domain::ToolCallStatus::Running,
+        summary: None,
+        started_at: None,
+        finished_at: None,
+        presentation: None,
+    };
+    crate::tools::execute(&runtime, &call).await
+}
+
 /// `task`: delega exploração/revisão a um subagente somente leitura.
 async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let Some(runner) = ctx.subagent.clone() else {
@@ -2424,6 +2460,7 @@ mod tests {
                 questions: None,
         mcp: None,
                 subagent: None,
+                skills_roots: Vec::new(),
             }
         }
 
@@ -2936,6 +2973,16 @@ mod tests {
         assert!(fixture.root.join("hook.log").exists(), "hook não escreveu o arquivo");
     }
 
+
+
+    #[tokio::test]
+    async fn code_profile_reuses_chat_skills_catalog() {
+        let fixture = Fixture::new();
+        let ctx = fixture.ctx();
+        let outcome = call(&ctx, "list_skills", json!({})).await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(!outcome.content.contains("TOOL_UNKNOWN"), "{}", outcome.content);
+    }
 
     #[tokio::test]
     async fn readonly_shell_command_does_not_need_approval_in_edit_mode() {

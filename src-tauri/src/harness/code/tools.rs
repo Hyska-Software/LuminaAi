@@ -173,6 +173,7 @@ mod tests {
             questions: None,
         mcp: None,
             subagent: None,
+            skills_roots: Vec::new(),
             emit: None,
             rules: Vec::new(),
             plan_mode: false,

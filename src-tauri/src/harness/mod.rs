@@ -942,6 +942,7 @@ pub async fn run_turn(
             jobs: deps.jobs.clone(),
             questions: deps.questions.clone(),
             mcp: deps.mcp.clone(),
+            skills_roots: skills_roots.clone(),
             subagent: Some(code::subagent::runner(
                 &deps,
                 &settings,

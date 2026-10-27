@@ -1165,7 +1165,7 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
   workspace exige aprovação; escrita fora é negada no modo Leitura.
 - Primeira abertura pede "Confiar nesta pasta?" (workspace não confiável não recebe escrita).
 
-### 16.2 Tools do perfil Code (17)
+### 16.2 Tools do perfil Code (23)
 
 | Tool | Papel | Política |
 | --- | --- | --- |
@@ -1182,7 +1182,7 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
 | `git_status`/`git_diff`/`git_log` | git CLI (porcelain v2) somente leitura | leitura livre |
 | `todo_write` | lista de tarefas da sessão (projeção em `code_events`) | Exclusive |
 | `submit_plan` | plano do modo Plano com revisão bloqueante | Ask |
-| `ask_user` | perguntas com opções (single/multi + texto livre); o card da timeline responde via `respond_question` (timeout/cancelamento = pulada) | Ask |`n| `run_checks` | roda a verificação detectada do projeto (test/lint/build) pelo pipeline do shell | ExecuteCommand |`n| `task` | subagente somente leitura (explore/review/general; profundidade 1; conversa efêmera) | Read |`n| `mcp__servidor__tool` | tools dinâmicas de servidores MCP (`<app-data>/mcp.json`, stdio JSON-RPC), descobertas por `tools/list` | Ask (sempre) |
+| `ask_user` | perguntas com opções (single/multi + texto livre); o card da timeline responde via `respond_question` (timeout/cancelamento = pulada) | Ask |`n| `run_checks` | roda a verificação detectada do projeto (test/lint/build) pelo pipeline do shell | ExecuteCommand |`n| `task` | subagente somente leitura (explore/review/general; profundidade 1; conversa efêmera) | Read |`n| `web_search` / `fetch_url` | reaproveitadas do Chat (documentação/erros) | Network (livre) |`n| `list_skills` / `read_skill` | reaproveitadas do Chat (skills instaladas) | Read (livre) |`n| `mcp__servidor__tool` | tools dinâmicas de servidores MCP (`<app-data>/mcp.json`, stdio JSON-RPC), descobertas por `tools/list` | Ask (sempre) |
 
 Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested`, comando
 `respond_approval`, timeout de 10 min, falha fechada). "Sempre permitir" cria
