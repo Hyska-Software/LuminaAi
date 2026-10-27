@@ -36,6 +36,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     sendKey: 'enter',
     showTokenUsage: true,
     reduceMotion: false,
+    thinkingCollapsedByDefault: false,
     fontScale: 1,
     temperature: null,
     includeAttachments: true,

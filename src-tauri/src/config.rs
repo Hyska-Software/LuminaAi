@@ -79,6 +79,9 @@ pub(crate) fn normalize_disabled_skills(names: Vec<String>) -> Vec<String> {
 
 /// Clamp/repair values coming from disk or from the renderer so the UI never
 /// has to deal with out-of-range settings.
+///
+/// Booleanos de preferência (como `thinking_collapsed_by_default`) são
+/// preservados como vieram do disco/renderer: não há transformação a aplicar.
 fn normalize_settings(mut settings: Settings) -> Settings {
     let defaults = Settings::default();
 
@@ -1493,6 +1496,7 @@ mod tests {
             code_python_path: "  C:\\Python313\\python.exe  ".into(),
             code_node_path: "   ".into(),
             skills_panel_enabled: false,
+            thinking_collapsed_by_default: true,
             disabled_skills: vec!["  zeta ".into(), "pdf".into(), "pdf".into(), String::new()],
             ..Settings::default()
         };
@@ -1511,6 +1515,8 @@ mod tests {
         assert_eq!(normalized.code_python_path, "C:\\Python313\\python.exe");
         assert_eq!(normalized.code_node_path, "");
         assert!(!normalized.skills_panel_enabled);
+        // Booleano de preferência não passa por "normalização": preserva o true.
+        assert!(normalized.thinking_collapsed_by_default);
         assert_eq!(normalized.disabled_skills, vec!["pdf", "zeta"]);
     }
 
@@ -1552,6 +1558,9 @@ mod tests {
         assert_eq!(normalized.code_timeout_secs, 120);
         assert_eq!(normalized.code_python_path, "");
         assert_eq!(normalized.code_node_path, "");
+        // Campo novo (raciocínio recolhido) ausente no arquivo antigo: default
+        // false, então o bloco continua abrindo durante o streaming.
+        assert!(!normalized.thinking_collapsed_by_default);
     }
 
     #[test]
@@ -1560,6 +1569,34 @@ mod tests {
         // O item "Skills" da sidebar aparece por padrão.
         assert!(defaults.skills_panel_enabled);
         assert!(defaults.disabled_skills.is_empty());
+    }
+
+    #[test]
+    fn thinking_settings_default_to_safe_values() {
+        // Default: o bloco de raciocínio/passos abre durante o streaming.
+        assert!(!Settings::default().thinking_collapsed_by_default);
+    }
+
+    #[test]
+    fn thinking_setting_round_trips_with_camel_case_key() {
+        // Contrato IPC com o renderer: chave camelCase e booleano sem transformação.
+        let parsed: Settings = serde_json::from_str(r#"{"thinkingCollapsedByDefault":true}"#)
+            .expect("desserializar settings do renderer");
+        assert!(parsed.thinking_collapsed_by_default);
+
+        // normalize_settings não altera o booleano.
+        let normalized = normalize_settings(parsed);
+        assert!(normalized.thinking_collapsed_by_default);
+
+        // save_settings serializa com o nome camelCase consumido pelo renderer.
+        let value = serde_json::to_value(&normalized).expect("serializar settings");
+        assert_eq!(value["thinkingCollapsedByDefault"], true);
+        assert!(value.get("thinking_collapsed_by_default").is_none());
+
+        // load_settings relê o mesmo valor gravado.
+        let reparsed: Settings =
+            serde_json::from_value(value).expect("reler settings serializados");
+        assert!(reparsed.thinking_collapsed_by_default);
     }
 
     #[test]

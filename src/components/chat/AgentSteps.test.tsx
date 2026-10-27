@@ -1,14 +1,29 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ChatMessage, ToolCallRecord } from '@/lib/types';
-import { AgentSteps } from './AgentSteps';
-
-afterEach(() => cleanup());
 
 const openExternalUrl = vi.hoisted(() => vi.fn(async () => true));
 vi.mock('./external', () => ({ openExternalUrl }));
+
+// Imported after the mocks above.
+import { useAppStore } from '@/lib/store';
+import { AgentSteps } from './AgentSteps';
+
+/** Toggles the new "raciocínio recolhido por padrão" setting. */
+function setThinkingCollapsedByDefault(value: boolean): void {
+  useAppStore.setState({
+    settings: { ...useAppStore.getState().settings, thinkingCollapsedByDefault: value },
+  });
+}
+
+beforeEach(() => setThinkingCollapsedByDefault(false));
+
+afterEach(() => {
+  cleanup();
+  setThinkingCollapsedByDefault(false);
+});
 
 function tool(overrides: Partial<ToolCallRecord> & Pick<ToolCallRecord, 'name'>): ToolCallRecord {
   return { id: `tool-${overrides.name}`, arguments: '{}', status: 'done', result: null, ...overrides };
@@ -207,5 +222,98 @@ describe('AgentSteps', () => {
     // run_code → SquareTerminal; list_skills/read_skill → BookOpen.
     expect(container.querySelectorAll('.lucide-square-terminal')).toHaveLength(1);
     expect(container.querySelectorAll('.lucide-book-open')).toHaveLength(2);
+  });
+});
+
+describe('AgentSteps — raciocínio recolhido por padrão', () => {
+  const reasoning = 'Analisando a pergunta.';
+
+  function stepMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
+    return message({
+      reasoning,
+      toolCalls: [],
+      trace: [{ reasoning, toolCalls: 0 }],
+      ...overrides,
+    });
+  }
+
+  it('starts closed even while streaming and does not toggle by itself', async () => {
+    const user = userEvent.setup();
+    setThinkingCollapsedByDefault(true);
+
+    const { rerender } = render(
+      <AgentSteps
+        streaming
+        phase="reasoning"
+        startedAt={Date.now() - 1_000}
+        message={stepMessage({ status: 'streaming' })}
+      />,
+    );
+
+    // Live header is visible, but the timeline starts collapsed.
+    expect(screen.getByRole('button', { name: /Pensando/ })).toBeTruthy();
+    expect(screen.getByRole('button', { expanded: false })).toBeTruthy();
+    expect(screen.queryByText(reasoning)).toBeNull();
+
+    // The end of the stream must not open (nor close) the block.
+    rerender(<AgentSteps streaming={false} phase={null} message={stepMessage()} />);
+    expect(screen.getByRole('button', { expanded: false })).toBeTruthy();
+    expect(screen.queryByText(reasoning)).toBeNull();
+
+    // A manual expansion still works.
+    await user.click(screen.getByRole('button', { expanded: false }));
+    expect(screen.getByRole('button', { expanded: true })).toBeTruthy();
+    expect(screen.getByText(reasoning)).toBeTruthy();
+  });
+
+  it('keeps a manual expansion after the streaming ends', async () => {
+    const user = userEvent.setup();
+    setThinkingCollapsedByDefault(true);
+
+    const { rerender } = render(
+      <AgentSteps
+        streaming
+        phase="reasoning"
+        startedAt={Date.now() - 1_000}
+        message={stepMessage({ status: 'streaming' })}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /Pensando/ }));
+    expect(screen.getByText(reasoning)).toBeTruthy();
+
+    rerender(
+      <AgentSteps
+        streaming={false}
+        phase={null}
+        message={stepMessage({ usage: { durationMs: 4_000 } })}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /Pensou por 4s/, expanded: true })).toBeTruthy();
+    expect(screen.getByText(reasoning)).toBeTruthy();
+  });
+
+  it('keeps the auto-open/auto-collapse behavior when the setting is off (default)', () => {
+    const { rerender } = render(
+      <AgentSteps
+        streaming
+        phase="reasoning"
+        startedAt={Date.now() - 1_000}
+        message={stepMessage({ status: 'streaming' })}
+      />,
+    );
+
+    expect(screen.getByText(reasoning)).toBeTruthy();
+
+    rerender(
+      <AgentSteps
+        streaming={false}
+        phase={null}
+        message={stepMessage({ usage: { durationMs: 4_000 } })}
+      />,
+    );
+
+    expect(screen.queryByText(reasoning)).toBeNull();
   });
 });

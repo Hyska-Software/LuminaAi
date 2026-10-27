@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
-"""Gera um documento Word (.docx) usando somente a biblioteca padrão do Python.
+"""Generate a Word document (.docx) using only the Python standard library.
 
-O .docx é um pacote OOXML (ZIP + XML). Este script monta o pacote completo do
-zero — documento, estilos, numeração, tema, rodapé, propriedades e
-relacionamentos — para não depender de `python-docx`/`pip`.
+A .docx is an OOXML package (ZIP + XML). This script builds the complete package
+from scratch — document, styles, numbering, theme, footer, properties and
+relationships — so it does not depend on `python-docx`/`pip`.
 
-Uso:
-    python make_docx.py --spec spec.json --out relatorio.docx
+Usage:
+    python make_docx.py --spec spec.json --out report.docx
 
-Formato do spec (JSON):
+Spec format (JSON):
     {
-      "title": "Relatório Trimestral",          # opcional
-      "subtitle": "Aurora Analytics — Q3 2026", # opcional
-      "footer": "Aurora Analytics",             # opcional
+      "title": "Quarterly Report",              # optional
+      "subtitle": "Aurora Analytics — Q3 2026", # optional
+      "footer": "Aurora Analytics",             # optional
       "blocks": [
-        {"type": "heading", "level": 1, "text": "Destaques"},
+        {"type": "heading", "level": 1, "text": "Highlights"},
         {"type": "paragraph", "text": "..."},
         {"type": "bullets", "items": ["...", "..."]},
-        {"type": "table", "headers": ["Produto", "Receita"],
-         "rows": [["Plataforma", "2.910.000"]]},
+        {"type": "table", "headers": ["Product", "Revenue"],
+         "rows": [["Platform", "2,910,000"]]},
         {"type": "page_break"}
       ]
     }
 
-Saída: exit code 0 e uma linha `OK <caminho> <bytes>` no stdout em caso de
-sucesso; exit code 1 e a mensagem de erro no stderr em caso de falha.
+Output: exit code 0 and one `OK <path> <bytes>` line on stdout on success;
+exit code 1 and the error message on stderr on failure.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ import sys
 import zipfile
 from datetime import datetime, timezone
 
-# Namespaces OOXML (WordprocessingML / relacionamentos / pacote).
+# OOXML namespaces (WordprocessingML / relationships / package).
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
@@ -49,17 +49,17 @@ DCMITYPE_NS = "http://purl.org/dc/dcmitype/"
 XSI_NS = "http://www.w3.org/2001/XMLSchema-instance"
 EP_NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
 
-# Limites de sanidade do spec (não são limites do app, só evitam pacotes absurdos).
+# Spec sanity limits (not app limits; they only prevent absurd packages).
 MAX_BLOCKS = 5_000
 MAX_TEXT_CHARS = 200_000
 
 
 class SpecError(ValueError):
-    """Spec inválido: a mensagem é mostrada ao agente."""
+    """Invalid spec: the message is shown to the agent."""
 
 
 def escape(value: object) -> str:
-    """Escapa texto para conteúdo/atributo XML."""
+    """Escape text for XML content/attribute values."""
     return (
         str(value)
         .replace("&", "&amp;")
@@ -75,26 +75,26 @@ def as_text(value: object, where: str) -> str:
     if isinstance(value, (str, int, float, bool)):
         text = str(value)
         if len(text) > MAX_TEXT_CHARS:
-            raise SpecError(f"{where}: texto maior que {MAX_TEXT_CHARS} caracteres")
+            raise SpecError(f"{where}: text longer than {MAX_TEXT_CHARS} characters")
         return text
-    raise SpecError(f"{where}: esperado texto, recebido {type(value).__name__}")
+    raise SpecError(f"{where}: expected text, got {type(value).__name__}")
 
 
 def list_of_dicts(value: object, where: str) -> list:
     if value is None:
         return []
     if not isinstance(value, list):
-        raise SpecError(f"{where}: esperada uma lista")
+        raise SpecError(f"{where}: expected a list")
     if len(value) > MAX_BLOCKS:
-        raise SpecError(f"{where}: lista maior que {MAX_BLOCKS} itens")
+        raise SpecError(f"{where}: list longer than {MAX_BLOCKS} items")
     for index, item in enumerate(value):
         if not isinstance(item, dict):
-            raise SpecError(f"{where}[{index}]: esperado um objeto")
+            raise SpecError(f"{where}[{index}]: expected an object")
     return value
 
 
 def run(text: str, *, bold: bool = False, italic: bool = False, underline: bool = False) -> str:
-    """Um `w:r` com formatação opcional."""
+    """A `w:r` run with optional formatting."""
     if text == "":
         return ""
     props = ""
@@ -119,7 +119,7 @@ def paragraph(
     ilvl: int = 0,
     page_break_before: bool = False,
 ) -> str:
-    """Um `w:p` com estilo/numeração opcionais."""
+    """A `w:p` paragraph with optional style/numbering."""
     ppr_parts: list[str] = []
     if style:
         ppr_parts.append(f'<w:pStyle w:val="{style}"/>')
@@ -137,7 +137,7 @@ def paragraph(
 
 
 def bullet_paragraph(text: str, ilvl: int) -> str:
-    """Item de lista com marcador (usa a numeração gerada em numbering.xml)."""
+    """Bulleted list item (uses the numbering generated in numbering.xml)."""
     return paragraph(text, style="ListParagraph", num_id=1, ilvl=ilvl)
 
 
@@ -162,14 +162,14 @@ def table_xml(block: dict, index: int) -> str:
     headers = block.get("headers") or []
     rows = block.get("rows") or []
     if not isinstance(headers, list) or not isinstance(rows, list):
-        raise SpecError(f"blocks[{index}]: 'headers' e 'rows' devem ser listas")
+        raise SpecError(f"blocks[{index}]: 'headers' and 'rows' must be lists")
     if not headers and not rows:
-        raise SpecError(f"blocks[{index}]: tabela sem 'headers' nem 'rows'")
+        raise SpecError(f"blocks[{index}]: table without 'headers' or 'rows'")
 
     normalized_rows: list[list[str]] = []
     for row_index, row in enumerate(rows):
         if not isinstance(row, list):
-            raise SpecError(f"blocks[{index}].rows[{row_index}]: esperada uma lista")
+            raise SpecError(f"blocks[{index}].rows[{row_index}]: expected a list")
         normalized_rows.append(
             [as_text(cell, f"blocks[{index}].rows[{row_index}]") for cell in row]
         )
@@ -179,9 +179,9 @@ def table_xml(block: dict, index: int) -> str:
 
     columns = max([len(header_cells)] + [len(row) for row in normalized_rows])
     if columns == 0:
-        raise SpecError(f"blocks[{index}]: tabela sem colunas")
+        raise SpecError(f"blocks[{index}]: table without columns")
     if columns > 60:
-        raise SpecError(f"blocks[{index}]: tabela com mais de 60 colunas")
+        raise SpecError(f"blocks[{index}]: table with more than 60 columns")
     column_width = max(600, 9_000 // columns)
 
     def pad(cells: list[str]) -> list[str]:
@@ -214,10 +214,10 @@ def table_xml(block: dict, index: int) -> str:
 def build_body(spec: dict) -> str:
     blocks = spec.get("blocks")
     if blocks is not None and not isinstance(blocks, list):
-        raise SpecError("'blocks' deve ser uma lista")
+        raise SpecError("'blocks' must be a list")
     blocks = blocks or []
     if len(blocks) > MAX_BLOCKS:
-        raise SpecError(f"'blocks' tem mais de {MAX_BLOCKS} itens")
+        raise SpecError(f"'blocks' has more than {MAX_BLOCKS} items")
 
     body: list[str] = []
     title = as_text(spec.get("title"), "title")
@@ -227,7 +227,7 @@ def build_body(spec: dict) -> str:
     if subtitle:
         body.append(paragraph(subtitle, style="Subtitle"))
     if title or subtitle:
-        # Respiro entre o cabeçalho do documento e o primeiro bloco.
+        # Breathing room between the document header and the first block.
         body.append(paragraph("", style="Normal"))
 
     for index, block in enumerate(blocks):
@@ -237,16 +237,16 @@ def build_body(spec: dict) -> str:
             try:
                 level = int(level)
             except (TypeError, ValueError):
-                raise SpecError(f"blocks[{index}]: 'level' deve ser inteiro") from None
+                raise SpecError(f"blocks[{index}]: 'level' must be an integer") from None
             body.append(heading_paragraph(level, as_text(block.get("text"), f"blocks[{index}].text")))
         elif block_type == "paragraph":
             body.append(paragraph(as_text(block.get("text"), f"blocks[{index}].text")))
         elif block_type == "bullets":
             items = block.get("items")
             if not isinstance(items, list):
-                raise SpecError(f"blocks[{index}]: 'items' deve ser uma lista")
+                raise SpecError(f"blocks[{index}]: 'items' must be a list")
             if not items:
-                raise SpecError(f"blocks[{index}]: lista de bullets vazia")
+                raise SpecError(f"blocks[{index}]: empty bullets list")
             for item_index, item in enumerate(items):
                 ilvl = 0
                 if isinstance(item, dict):
@@ -268,7 +268,7 @@ def build_body(spec: dict) -> str:
             body.append(paragraph(as_text(block.get("text"), f"blocks[{index}].text"), style="Subtitle"))
         else:
             raise SpecError(
-                f"blocks[{index}]: tipo de bloco desconhecido {block_type!r}; "
+                f"blocks[{index}]: unknown block type {block_type!r}; "
                 "use heading, paragraph, bullets, table, page_break"
             )
 
@@ -297,16 +297,16 @@ def build_body(spec: dict) -> str:
 
 
 def build_footer(text: str) -> str:
-    """Rodapé centralizado: texto opcional + "Página X de Y"."""
+    """Centered footer: optional text + "Page X of Y"."""
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         f'<w:ftr xmlns:w="{W_NS}" xmlns:r="{R_NS}">'
         '<w:p><w:pPr><w:jc w:val="center"/>'
         '<w:pBdr><w:top w:val="single" w:sz="4" w:space="4" w:color="D1D5DB"/></w:pBdr>'
         "</w:pPr>"
-        f'<w:r><w:t xml:space="preserve">{escape(text)}   ·   Página </w:t></w:r>'
+        f'<w:r><w:t xml:space="preserve">{escape(text)}   ·   Page </w:t></w:r>'
         '<w:fldSimple w:instr=" PAGE "><w:r><w:t>1</w:t></w:r></w:fldSimple>'
-        '<w:r><w:t xml:space="preserve"> de </w:t></w:r>'
+        '<w:r><w:t xml:space="preserve"> of </w:t></w:r>'
         '<w:fldSimple w:instr=" NUMPAGES "><w:r><w:t>1</w:t></w:r></w:fldSimple>'
         "</w:p></w:ftr>"
     )
@@ -525,7 +525,7 @@ def build_app() -> str:
 
 def build_document(spec: dict) -> bytes:
     if not isinstance(spec, dict):
-        raise SpecError("o spec deve ser um objeto JSON")
+        raise SpecError("the spec must be a JSON object")
     has_footer = bool(str(spec.get("footer") or "").strip())
     parts: list[tuple[str, str | bytes]] = [
         ("[Content_Types].xml", build_content_types(has_footer)),
@@ -561,18 +561,21 @@ def load_spec(path: str) -> dict:
         with open(path, "r", encoding="utf-8") as handle:
             return json.load(handle)
     except OSError as error:
-        raise SpecError(f"não foi possível ler o spec {path!r}: {error}") from error
+        raise SpecError(f"could not read the spec {path!r}: {error}") from error
     except json.JSONDecodeError as error:
-        raise SpecError(f"spec não é JSON válido: {error}") from error
+        raise SpecError(f"spec is not valid JSON: {error}") from error
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="make_docx.py",
-        description="Gera um .docx (OOXML) a partir de um spec JSON, sem dependências externas.",
+        description=(
+            "Generate a .docx (OOXML) file from a JSON spec, with no external "
+            "dependencies."
+        ),
     )
-    parser.add_argument("--spec", required=True, help="caminho do spec.json")
-    parser.add_argument("--out", required=True, help="caminho do .docx de saída")
+    parser.add_argument("--spec", required=True, help="path to spec.json")
+    parser.add_argument("--out", required=True, help="path to the output .docx")
     args = parser.parse_args(argv)
 
     try:
@@ -587,7 +590,7 @@ def main(argv: list[str]) -> int:
         print(f"OK {out} {len(data)}")
         return 0
     except (SpecError, OSError, ValueError) as error:
-        print(f"ERRO: {error}", file=sys.stderr)
+        print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
 

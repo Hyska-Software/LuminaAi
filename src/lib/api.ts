@@ -17,6 +17,7 @@ import type {
   ProviderValidation,
   Settings,
   SettingsView,
+  SkillContent,
   SkillSummary,
   TurnEvent,
   TurnPayload,
@@ -42,6 +43,7 @@ export const api = {
   setSkillEnabled: (name: string, enabled: boolean) =>
     invoke<SkillSummary[]>('set_skill_enabled', { name, enabled }),
   deleteSkill: (name: string) => invoke<SkillSummary[]>('delete_skill', { name }),
+  getSkillContent: (name: string) => invoke<SkillContent>('get_skill_content', { name }),
 
   /* -------- catalog -------- */
   getCatalog: () => invoke<CatalogView>('get_catalog'),

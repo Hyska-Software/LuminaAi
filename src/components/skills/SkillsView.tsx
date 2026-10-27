@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, BookOpen, FolderOpen, Lock, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, BookOpen, Eye, FolderOpen, Lock, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import type { SkillSummary } from '@/lib/types';
@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { useAppStore, useUiStore } from '@/lib/store';
 import { Badge, Button, IconButton, Spinner, Switch } from '@/components/ui';
 import { groupSkillsBySource, type SkillSourceMeta } from './sources';
+import { SkillPreviewDialog } from './SkillPreviewDialog';
 
 type SkillsState =
   | { status: 'loading' }
@@ -24,6 +25,7 @@ interface GroupProps {
   busySkill: string | null;
   confirming: string | null;
   onToggle: (skill: SkillSummary, enabled: boolean) => void;
+  onPreview: (skill: SkillSummary) => void;
   onRequestDelete: (skill: SkillSummary) => void;
   onCancelDelete: () => void;
   onConfirmDelete: (skill: SkillSummary) => void;
@@ -36,6 +38,7 @@ function SkillGroup({
   busySkill,
   confirming,
   onToggle,
+  onPreview,
   onRequestDelete,
   onCancelDelete,
   onConfirmDelete,
@@ -127,6 +130,14 @@ function SkillGroup({
                       onCheckedChange={(checked) => onToggle(skill, checked)}
                       aria-label={`Ativar skill ${skill.name}`}
                     />
+                    <IconButton
+                      label={`Visualizar skill ${skill.name}`}
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => onPreview(skill)}
+                    >
+                      <Eye className="size-4" />
+                    </IconButton>
                     {skill.deletable ? (
                       <IconButton
                         label={`Excluir skill ${skill.name}`}
@@ -163,6 +174,7 @@ export function SkillsView() {
   const [attempt, setAttempt] = useState(0);
   const [busySkill, setBusySkill] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [previewSkill, setPreviewSkill] = useState<SkillSummary | null>(null);
   const [openingFolder, setOpeningFolder] = useState(false);
   const rawId = useId();
   const idPrefix = rawId.replace(/[^a-zA-Z0-9_-]/g, '');
@@ -335,6 +347,7 @@ export function SkillsView() {
                   busySkill={busySkill}
                   confirming={confirming}
                   onToggle={(skill, enabled) => void toggleSkill(skill, enabled)}
+                  onPreview={setPreviewSkill}
                   onRequestDelete={(skill) => setConfirming(skill.name)}
                   onCancelDelete={() => setConfirming(null)}
                   onConfirmDelete={(skill) => void deleteSkill(skill)}
@@ -354,6 +367,10 @@ export function SkillsView() {
           ) : null}
         </div>
       </div>
+
+      {previewSkill ? (
+        <SkillPreviewDialog skill={previewSkill} onClose={() => setPreviewSkill(null)} />
+      ) : null}
     </section>
   );
 }

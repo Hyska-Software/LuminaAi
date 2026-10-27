@@ -14,7 +14,7 @@ use anyhow::{bail, Context};
 use tauri::AppHandle;
 
 use crate::config;
-use crate::domain::{Settings, SkillSummary};
+use crate::domain::{Settings, SkillContent, SkillSummary};
 #[cfg(test)]
 use crate::tools::skills::ExternalSkillRoot;
 use crate::tools::skills::{self, Skill, SkillSource};
@@ -174,6 +174,23 @@ fn find_skill(data_dir: &Path, name: &str) -> anyhow::Result<Skill> {
     skills::read(data_dir, name)?.with_context(|| format!("skill `{name}` não encontrada"))
 }
 
+/// Monta o [`SkillContent`] da pré-visualização a partir de uma skill já lida.
+///
+/// `content` é **somente o corpo** do `SKILL.md`: o frontmatter (nome/descrição)
+/// não entra no Markdown exibido, porque esses dados vão nos metadados. `dir` é
+/// o diretório absoluto da skill, apenas para exibição. Origens e precedência
+/// (Lumina, repositórios externos e embutidas) em docs/FILES.md §7.2; gestão e
+/// prévia da interface em §7.4.
+fn content_of(skill: &Skill) -> SkillContent {
+    SkillContent {
+        name: skill.name.clone(),
+        description: skill.description.clone(),
+        source: skill.source_str().to_string(),
+        dir: skill.dir.display().to_string(),
+        content: skill.body.clone(),
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Commands                                                            */
 /* ------------------------------------------------------------------ */
@@ -184,6 +201,21 @@ pub fn get_skills(app: AppHandle) -> Result<Vec<SkillSummary>, String> {
     let data_dir = config::data_dir(&app).map_err(to_error)?;
     let settings = config::load_settings(&app);
     collect(&data_dir, &settings).map_err(to_error)
+}
+
+/// Lê o conteúdo de uma skill para a pré-visualização em Markdown da interface.
+///
+/// Resolve o nome no mesmo catálogo da listagem (`find_skill`, incluindo as
+/// skills de repositórios externos em modo somente leitura e as embutidas) e
+/// devolve o corpo do `SKILL.md` **sem o frontmatter** — nome e descrição vão
+/// nos metadados, e a `SkillsView` renderiza só as instruções. Nome vazio ou
+/// desconhecido vira erro amigável. Somente leitura: nada é gravado em disco.
+/// Ver docs/FILES.md §7.2 e §7.4.
+#[tauri::command]
+pub fn get_skill_content(app: AppHandle, name: String) -> Result<SkillContent, String> {
+    let data_dir = config::data_dir(&app).map_err(to_error)?;
+    let skill = find_skill(&data_dir, &name).map_err(to_error)?;
+    Ok(content_of(&skill))
 }
 
 /// Ativa/desativa uma skill e devolve a lista atualizada.
@@ -525,6 +557,124 @@ mod tests {
             source: SkillSource::User,
         };
         assert!(remove_user_skill(&temp.path, &skill).is_err());
+    }
+
+    #[test]
+    fn content_of_maps_user_skill_metadata_and_body() {
+        let temp = TempDir::new();
+        let skill = user_skill(&temp, "alfa", "Skill do usuário.");
+
+        let content = content_of(&skill);
+        assert_eq!(content.name, "alfa");
+        assert_eq!(content.description, "Skill do usuário.");
+        assert_eq!(content.source, "user");
+        assert_eq!(Path::new(&content.dir), skill.dir.as_path());
+        // O corpo vem do Markdown após o frontmatter, sem metadados junto.
+        assert_eq!(content.content, skill.body);
+        assert!(
+            content.content.contains("# Instruções"),
+            "corpo deve trazer o Markdown: {}",
+            content.content
+        );
+        assert!(
+            !content.content.contains("description:"),
+            "frontmatter não entra no content: {}",
+            content.content
+        );
+        assert!(
+            !content.content.starts_with("---"),
+            "content não deve começar com o delimitador do frontmatter"
+        );
+    }
+
+    #[test]
+    fn content_of_keeps_bundled_skill_body() {
+        let temp = TempDir::new();
+        let catalog = skills::catalog_with_roots(&temp.path, &[]).expect("catálogo");
+        let pdf = catalog
+            .iter()
+            .find(|skill| skill.name == "pdf")
+            .expect("skill embutida `pdf`");
+
+        let content = content_of(pdf);
+        assert_eq!(content.name, "pdf");
+        assert_eq!(content.source, "bundled");
+        assert!(
+            !content.description.trim().is_empty(),
+            "descrição da skill embutida"
+        );
+        assert!(
+            !content.content.trim().is_empty(),
+            "corpo da skill embutida não pode ser vazio"
+        );
+        assert_eq!(Path::new(&content.dir), pdf.dir.as_path());
+        assert!(
+            !content.content.contains("description:"),
+            "frontmatter não entra no content"
+        );
+    }
+
+    #[test]
+    fn find_skill_resolves_user_skill_by_name() {
+        let temp = TempDir::new();
+        let written = user_skill(&temp, "alfa", "Skill do usuário.");
+
+        // O nome é resolvido após trim (o frontmatter define o nome canônico).
+        let skill = find_skill(&temp.path, "  alfa  ").expect("skill do usuário");
+        assert_eq!(skill.name, "alfa");
+        assert_eq!(skill.source, SkillSource::User);
+        assert!(written.dir.join("SKILL.md").is_file());
+
+        let content = content_of(&skill);
+        assert!(content.content.contains("# Instruções"));
+        assert_eq!(Path::new(&content.dir), skill.dir.as_path());
+    }
+
+    #[test]
+    fn find_skill_reports_unknown_and_empty_names() {
+        let temp = TempDir::new();
+        std::fs::create_dir_all(temp.path.join("skills")).expect("criar pasta de skills");
+
+        let unknown = find_skill(&temp.path, "nao-existe-xyz").expect_err("nome desconhecido");
+        let message = to_error(unknown);
+        assert!(
+            message.contains("não encontrada"),
+            "erro deve citar skill não encontrada: {message}"
+        );
+
+        for name in ["", "   "] {
+            let empty = find_skill(&temp.path, name).expect_err("nome vazio");
+            let message = to_error(empty);
+            assert!(
+                message.contains("obrigatório"),
+                "erro deve citar nome obrigatório: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn content_of_keeps_external_skill_source() {
+        let temp = TempDir::new();
+        let roots = vec![external_root(
+            &temp,
+            "codex",
+            SkillSource::Codex,
+            &["beta"],
+        )];
+        let skill =
+            find_skill_with_roots(&temp.path, "beta", &roots).expect("skill externa no catálogo");
+        assert_eq!(skill.source, SkillSource::Codex);
+
+        let content = content_of(&skill);
+        assert_eq!(content.name, "beta");
+        assert_eq!(content.source, "codex");
+        assert_eq!(content.description, "Skill externa beta.");
+        assert_eq!(Path::new(&content.dir), skill.dir.as_path());
+        assert!(
+            content.content.contains("# Instruções"),
+            "corpo da skill externa: {}",
+            content.content
+        );
     }
 
     /// Criar symlink no Windows exige privilégio; o teste é pulado quando o SO

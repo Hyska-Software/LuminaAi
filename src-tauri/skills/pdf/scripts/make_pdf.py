@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Gera um PDF A4 usando somente a biblioteca padrão do Python.
+"""Generate an A4 PDF using only the Python standard library.
 
-Escreve os objetos PDF à mão (catálogo, páginas, fontes base-14 Helvetica,
-streams de conteúdo com `/Length` correto e compactação Flate) e codifica o
-texto em latin-1/WinAnsi, então acentos do português aparecem corretamente.
+It writes the PDF objects by hand (catalog, pages, base-14 Helvetica fonts,
+content streams with a correct `/Length` and Flate compression) and encodes the
+text as latin-1/WinAnsi, so accented text is preserved correctly.
 
-Uso:
-    python make_pdf.py --spec spec.json --out relatorio.pdf
+Usage:
+    python make_pdf.py --spec spec.json --out report.pdf
 
-Formato do spec (JSON):
+Spec format (JSON):
     {
-      "title": "Relatório Trimestral",
+      "title": "Quarterly Report",
       "subtitle": "Aurora Analytics — Q3 2026",
-      "footer": "Confidencial",
+      "footer": "Confidential",
       "blocks": [
-        {"type": "heading", "level": 1, "text": "Destaques"},
+        {"type": "heading", "level": 1, "text": "Highlights"},
         {"type": "paragraph", "text": "..."},
         {"type": "bullets", "items": ["...", "..."]},
         {"type": "table", "headers": ["..."], "rows": [["..."]]},
@@ -22,8 +22,8 @@ Formato do spec (JSON):
       ]
     }
 
-Saída: exit code 0 e uma linha `OK <caminho> <bytes>` no stdout em caso de
-sucesso; exit code 1 e a mensagem de erro no stderr em caso de falha.
+Output: exit code 0 and one `OK <path> <bytes>` line on stdout on success;
+exit code 1 and the error message on stderr on failure.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import sys
 import zlib
 from datetime import datetime, timezone
 
-# A4 em pontos PostScript (72 dpi).
+# A4 in PostScript points (72 dpi).
 PAGE_WIDTH = 595.28
 PAGE_HEIGHT = 841.89
 MARGIN_LEFT = 56.7
@@ -54,7 +54,7 @@ MUTED_COLOR = (0.42, 0.45, 0.50)
 MAX_BLOCKS = 5_000
 MAX_TEXT_CHARS = 200_000
 
-# Larguras AFM (milésimos de em) da Helvetica/Helvetica-Bold para ASCII.
+# AFM widths (thousandths of an em) for Helvetica/Helvetica-Bold, ASCII only.
 REGULAR_WIDTHS = {
     " ": 278, "!": 278, '"': 355, "#": 556, "$": 556, "%": 889, "&": 667,
     "'": 191, "(": 333, ")": 333, "*": 389, "+": 584, ",": 278, "-": 333,
@@ -93,25 +93,27 @@ BOLD_WIDTHS = {
     "\u201d": 500, "\u2026": 1000, "\u00a0": 278,
 }
 
-# Acentos do português usam a largura da letra base.
+# Accented letters use the width of their base letter. Accents are written
+# as \uXXXX escapes so this file stays ASCII; the mapping is unchanged.
 ACCENT_BASE = {
-    "á": "a", "à": "a", "â": "a", "ã": "a", "ä": "a", "å": "a",
-    "é": "e", "è": "e", "ê": "e", "ë": "e",
-    "í": "i", "ì": "i", "î": "i", "ï": "i",
-    "ó": "o", "ò": "o", "ô": "o", "õ": "o", "ö": "o", "ø": "o",
-    "ú": "u", "ù": "u", "û": "u", "ü": "u",
-    "ç": "c", "ñ": "n", "ý": "y", "ÿ": "y", "ß": "s", "æ": "a", "œ": "o",
-    "Á": "A", "À": "A", "Â": "A", "Ã": "A", "Ä": "A", "Å": "A",
-    "É": "E", "È": "E", "Ê": "E", "Ë": "E",
-    "Í": "I", "Ì": "I", "Î": "I", "Ï": "I",
-    "Ó": "O", "Ò": "O", "Ô": "O", "Õ": "O", "Ö": "O", "Ø": "O",
-    "Ú": "U", "Ù": "U", "Û": "U", "Ü": "U",
-    "Ç": "C", "Ñ": "N", "Ý": "Y", "Æ": "A", "Œ": "O",
+    "\u00e1": "a", "\u00e0": "a", "\u00e2": "a", "\u00e3": "a", "\u00e4": "a", "\u00e5": "a",
+    "\u00e9": "e", "\u00e8": "e", "\u00ea": "e", "\u00eb": "e",
+    "\u00ed": "i", "\u00ec": "i", "\u00ee": "i", "\u00ef": "i",
+    "\u00f3": "o", "\u00f2": "o", "\u00f4": "o", "\u00f5": "o", "\u00f6": "o", "\u00f8": "o",
+    "\u00fa": "u", "\u00f9": "u", "\u00fb": "u", "\u00fc": "u",
+    "\u00e7": "c", "\u00f1": "n", "\u00fd": "y", "\u00ff": "y", "\u00df": "s",
+    "\u00e6": "a", "\u0153": "o",
+    "\u00c1": "A", "\u00c0": "A", "\u00c2": "A", "\u00c3": "A", "\u00c4": "A", "\u00c5": "A",
+    "\u00c9": "E", "\u00c8": "E", "\u00ca": "E", "\u00cb": "E",
+    "\u00cd": "I", "\u00cc": "I", "\u00ce": "I", "\u00cf": "I",
+    "\u00d3": "O", "\u00d2": "O", "\u00d4": "O", "\u00d5": "O", "\u00d6": "O", "\u00d8": "O",
+    "\u00da": "U", "\u00d9": "U", "\u00db": "U", "\u00dc": "U",
+    "\u00c7": "C", "\u00d1": "N", "\u00dd": "Y", "\u00c6": "A", "\u0152": "O",
 }
 
 
 class SpecError(ValueError):
-    """Spec inválido: a mensagem é mostrada ao agente."""
+    """Invalid spec: the message is shown to the agent."""
 
 
 def as_text(value: object, where: str) -> str:
@@ -120,9 +122,9 @@ def as_text(value: object, where: str) -> str:
     if isinstance(value, (str, int, float, bool)):
         text = str(value)
         if len(text) > MAX_TEXT_CHARS:
-            raise SpecError(f"{where}: texto maior que {MAX_TEXT_CHARS} caracteres")
+            raise SpecError(f"{where}: text longer than {MAX_TEXT_CHARS} characters")
         return text
-    raise SpecError(f"{where}: esperado texto, recebido {type(value).__name__}")
+    raise SpecError(f"{where}: expected text, got {type(value).__name__}")
 
 
 def char_width(char: str, bold: bool) -> int:
@@ -141,7 +143,7 @@ def text_width(text: str, size: float, bold: bool) -> float:
 
 
 def wrap_text(text: str, size: float, bold: bool, width: float) -> list[str]:
-    """Quebra o texto em linhas que cabem na largura informada (palavra a palavra)."""
+    """Wrap the text into lines that fit the given width (word by word)."""
     lines: list[str] = []
     for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         if raw_line.strip() == "":
@@ -156,7 +158,7 @@ def wrap_text(text: str, size: float, bold: bool, width: float) -> list[str]:
                 continue
             if current:
                 lines.append(current)
-            # Palavra sozinha maior que a linha: corta por caractere.
+            # A single word wider than the line: split it by character.
             if text_width(word, size, bold) <= width:
                 current = word
                 continue
@@ -174,7 +176,7 @@ def wrap_text(text: str, size: float, bold: bool, width: float) -> list[str]:
 
 
 def pdf_escape(text: str) -> bytes:
-    """Codifica em latin-1 (WinAnsi) e escapa para string literal PDF."""
+    """Encode as latin-1 (WinAnsi) and escape for a PDF string literal."""
     raw = text.encode("latin-1", errors="replace")
     return (
         raw.replace(b"\\", b"\\\\")
@@ -192,7 +194,7 @@ def color_operator(color: tuple[float, float, float]) -> bytes:
 def text_operator(
     x: float, y: float, text: str, size: float, *, bold: bool = False, color=TEXT_COLOR
 ) -> bytes:
-    """Operadores PDF para desenhar uma linha de texto com origem no topo."""
+    """PDF operators that draw one text line, with the origin at the top."""
     pdf_y = PAGE_HEIGHT - y
     font = FONT_BOLD if bold else FONT_REGULAR
     return (
@@ -304,19 +306,19 @@ def render_blocks(writer: PageWriter, spec: dict) -> None:
 
     blocks = spec.get("blocks") or []
     if not isinstance(blocks, list):
-        raise SpecError("'blocks' deve ser uma lista")
+        raise SpecError("'blocks' must be a list")
     if len(blocks) > MAX_BLOCKS:
-        raise SpecError(f"'blocks' tem mais de {MAX_BLOCKS} itens")
+        raise SpecError(f"'blocks' has more than {MAX_BLOCKS} items")
 
     for index, block in enumerate(blocks):
         if not isinstance(block, dict):
-            raise SpecError(f"blocks[{index}]: esperado um objeto")
+            raise SpecError(f"blocks[{index}]: expected an object")
         block_type = block.get("type")
         if block_type == "heading":
             try:
                 level = int(block.get("level", 1))
             except (TypeError, ValueError):
-                raise SpecError(f"blocks[{index}]: 'level' deve ser inteiro") from None
+                raise SpecError(f"blocks[{index}]: 'level' must be an integer") from None
             level = max(1, min(6, level))
             size = HEADING_SIZES[level]
             text = as_text(block.get("text"), f"blocks[{index}].text")
@@ -336,9 +338,9 @@ def render_blocks(writer: PageWriter, spec: dict) -> None:
         elif block_type == "bullets":
             items = block.get("items")
             if not isinstance(items, list):
-                raise SpecError(f"blocks[{index}]: 'items' deve ser uma lista")
+                raise SpecError(f"blocks[{index}]: 'items' must be a list")
             if not items:
-                raise SpecError(f"blocks[{index}]: lista de bullets vazia")
+                raise SpecError(f"blocks[{index}]: empty bullets list")
             for item_index, item in enumerate(items):
                 level = 0
                 if isinstance(item, dict):
@@ -370,7 +372,7 @@ def render_blocks(writer: PageWriter, spec: dict) -> None:
             writer.paragraph(text, size=size, bold=block_type == "title", extra_before=4)
         else:
             raise SpecError(
-                f"blocks[{index}]: tipo de bloco desconhecido {block_type!r}; "
+                f"blocks[{index}]: unknown block type {block_type!r}; "
                 "use heading, paragraph, bullets, table, page_break"
             )
 
@@ -379,22 +381,22 @@ def render_table(writer: PageWriter, block: dict, index: int) -> None:
     headers = block.get("headers") or []
     rows = block.get("rows") or []
     if not isinstance(headers, list) or not isinstance(rows, list):
-        raise SpecError(f"blocks[{index}]: 'headers' e 'rows' devem ser listas")
+        raise SpecError(f"blocks[{index}]: 'headers' and 'rows' must be lists")
     if not headers and not rows:
-        raise SpecError(f"blocks[{index}]: tabela sem 'headers' nem 'rows'")
+        raise SpecError(f"blocks[{index}]: table without 'headers' or 'rows'")
     normalized: list[list[str]] = []
     for row_index, row in enumerate(rows):
         if not isinstance(row, list):
-            raise SpecError(f"blocks[{index}].rows[{row_index}]: esperada uma lista")
+            raise SpecError(f"blocks[{index}].rows[{row_index}]: expected a list")
         normalized.append(
             [as_text(cell, f"blocks[{index}].rows[{row_index}]") for cell in row]
         )
     header_cells = [as_text(cell, f"blocks[{index}].headers") for cell in headers]
     columns = max([len(header_cells)] + [len(row) for row in normalized])
     if columns == 0:
-        raise SpecError(f"blocks[{index}]: tabela sem colunas")
+        raise SpecError(f"blocks[{index}]: table without columns")
     if columns > 12:
-        raise SpecError(f"blocks[{index}]: tabela com mais de 12 colunas (PDF)")
+        raise SpecError(f"blocks[{index}]: table with more than 12 columns (PDF)")
     column_width = CONTENT_WIDTH / columns
     size = 9.5
     leading = 12.0
@@ -451,7 +453,7 @@ def append_footers(writer: PageWriter) -> None:
                     color=MUTED_COLOR,
                 )
             )
-        label = f"Página {index} de {total}"
+        label = f"Page {index} of {total}"
         width = text_width(label, 8.5, False)
         ops.append(
             text_operator(
@@ -466,7 +468,7 @@ def append_footers(writer: PageWriter) -> None:
 
 def build_pdf(spec: dict) -> bytes:
     if not isinstance(spec, dict):
-        raise SpecError("o spec deve ser um objeto JSON")
+        raise SpecError("the spec must be a JSON object")
     footer_text = as_text(spec.get("footer"), "footer")
     writer = PageWriter(footer_text)
     render_blocks(writer, spec)
@@ -476,11 +478,11 @@ def build_pdf(spec: dict) -> bytes:
     objects: list[bytes] = []
     page_count = len(writer.pages)
 
-    # 1: catálogo
+    # 1: catalog
     objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
-    # 2: árvore de páginas (preenchida depois de saber os ids)
+    # 2: page tree (filled in after the ids are known)
     objects.append(b"")
-    # 3/4: fontes base-14
+    # 3/4: base-14 fonts
     objects.append(
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
         b"/Encoding /WinAnsiEncoding >>"
@@ -550,7 +552,7 @@ def build_pdf(spec: dict) -> bytes:
 
 
 def _pdf_literal(text: str) -> str:
-    """Escapa texto para string literal PDF (documento ASCII)."""
+    """Escape text for a PDF string literal (ASCII document)."""
     return (
         text.replace("\\", "\\\\")
         .replace("(", "\\(")
@@ -565,18 +567,18 @@ def load_spec(path: str) -> dict:
         with open(path, "r", encoding="utf-8") as handle:
             return json.load(handle)
     except OSError as error:
-        raise SpecError(f"não foi possível ler o spec {path!r}: {error}") from error
+        raise SpecError(f"could not read the spec {path!r}: {error}") from error
     except json.JSONDecodeError as error:
-        raise SpecError(f"spec não é JSON válido: {error}") from error
+        raise SpecError(f"spec is not valid JSON: {error}") from error
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="make_pdf.py",
-        description="Gera um PDF A4 a partir de um spec JSON, sem dependências externas.",
+        description="Generate an A4 PDF from a JSON spec, with no external dependencies.",
     )
-    parser.add_argument("--spec", required=True, help="caminho do spec.json")
-    parser.add_argument("--out", required=True, help="caminho do .pdf de saída")
+    parser.add_argument("--spec", required=True, help="path to spec.json")
+    parser.add_argument("--out", required=True, help="path to the output .pdf")
     args = parser.parse_args(argv)
 
     try:
@@ -591,7 +593,7 @@ def main(argv: list[str]) -> int:
         print(f"OK {out} {len(data)}")
         return 0
     except (SpecError, OSError, ValueError) as error:
-        print(f"ERRO: {error}", file=sys.stderr)
+        print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
 

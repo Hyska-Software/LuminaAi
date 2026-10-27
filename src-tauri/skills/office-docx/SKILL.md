@@ -1,49 +1,50 @@
 ---
 name: office-docx
-description: Cria documentos Word (.docx) com título, headings, parágrafos, listas, tabelas e quebra de página usando um helper Python só com stdlib.
+description: Create Word documents (.docx) with a title, headings, paragraphs, lists, tables, and page breaks using a stdlib-only Python helper.
 ---
 
-# Documentos Word (.docx)
+# Word documents (.docx)
 
-Use esta skill quando o usuário pedir um **documento Word**, relatório, contrato,
-proposta ou qualquer arquivo `.docx` para baixar/abrir no Word, LibreOffice ou
+Use this skill when the user asks for a **Word document**, a report, a contract,
+a proposal, or any `.docx` file to download/open in Word, LibreOffice, or
 Google Docs.
 
-## Como funciona
+## How it works
 
-O helper `scripts/make_docx.py` monta o pacote OOXML do zero **somente com a
-biblioteca padrão do Python** (sem `pip install`). Ele gera um `.docx` válido com
-estilos, numeração de listas, tema, rodapé e propriedades. Não é preciso ter
-`python-docx` instalado.
+The `scripts/make_docx.py` helper builds the OOXML package from scratch **using
+only the Python standard library** (no `pip install`). It produces a valid
+`.docx` with styles, list numbering, theme, footer, and properties. No
+`python-docx` installation is required.
 
-## Fluxo recomendado
+## Recommended flow
 
-1. Chame `read_skill("office-docx")` e guarde o `baseDir` devolvido.
-2. Monte o spec JSON (abaixo) e chame `run_code` com Python.
-3. O helper imprime `OK <caminho> <bytes>` no stdout e sai com código 1 em erro.
-4. O arquivo gerado no workspace é coletado automaticamente como artefato e
-   aparece no painel com preview HTML.
+1. Call `read_skill("office-docx")` and keep the returned `baseDir`.
+2. Build the JSON spec (below) and call `run_code` with Python.
+3. The helper prints `OK <path> <bytes>` to stdout and exits with code 1 on
+   error.
+4. The generated file in the workspace is collected automatically as an artifact
+   and appears in the panel with an HTML preview.
 
-Exemplo de `run_code` (Python):
+`run_code` example (Python):
 
 ```python
 import json, os, subprocess, sys
 
-base_dir = r"<baseDir do read_skill>"
+base_dir = r"<baseDir from read_skill>"
 spec = {
-    "title": "Relatório Trimestral — Aurora Analytics",
-    "subtitle": "Resultados do terceiro trimestre de 2026",
-    "footer": "Aurora Analytics · Confidencial",
+    "title": "Quarterly Report — Aurora Analytics",
+    "subtitle": "Third-quarter 2026 results",
+    "footer": "Aurora Analytics · Confidential",
     "blocks": [
-        {"type": "heading", "level": 1, "text": "Destaques"},
-        {"type": "paragraph", "text": "A receita cresceu 18% em relação ao trimestre anterior."},
-        {"type": "bullets", "items": ["Receita: R$ 4,82 milhões", "Novos clientes: 27"]},
+        {"type": "heading", "level": 1, "text": "Highlights"},
+        {"type": "paragraph", "text": "Revenue grew 18% compared with the previous quarter."},
+        {"type": "bullets", "items": ["Revenue: R$ 4.82 million", "New customers: 27"]},
         {"type": "table",
-         "headers": ["Produto", "Receita (R$)"],
-         "rows": [["Plataforma", "2.910.000"], ["Integrações", "1.180.000"]]},
+         "headers": ["Product", "Revenue (R$)"],
+         "rows": [["Platform", "2,910,000"], ["Integrations", "1,180,000"]]},
         {"type": "page_break"},
-        {"type": "heading", "level": 1, "text": "Próximos passos"},
-        {"type": "paragraph", "text": "Manter o investimento em integrações."},
+        {"type": "heading", "level": 1, "text": "Next steps"},
+        {"type": "paragraph", "text": "Keep investing in integrations."},
     ],
 }
 
@@ -52,7 +53,7 @@ with open("spec.json", "w", encoding="utf-8") as handle:
 
 script = os.path.join(base_dir, "scripts", "make_docx.py")
 result = subprocess.run(
-    [sys.executable, script, "--spec", "spec.json", "--out", "relatorio.docx"],
+    [sys.executable, script, "--spec", "spec.json", "--out", "report.docx"],
     capture_output=True, text=True,
 )
 print(result.stdout)
@@ -61,41 +62,42 @@ if result.returncode != 0:
     raise SystemExit(result.returncode)
 ```
 
-## Formato do spec
+## Spec format
 
 ```json
 {
-  "title": "opcional",
-  "subtitle": "opcional",
-  "footer": "opcional — vira o rodapé com numeração de páginas",
+  "title": "optional",
+  "subtitle": "optional",
+  "footer": "optional — becomes the footer with page numbers",
   "blocks": [
-    {"type": "heading", "level": 1, "text": "Título de seção (level 1..6)"},
-    {"type": "paragraph", "text": "Texto corrido."},
+    {"type": "heading", "level": 1, "text": "Section title (level 1..6)"},
+    {"type": "paragraph", "text": "Body text."},
     {"type": "bullets", "items": ["item", "item"]},
-    {"type": "table", "headers": ["Coluna A"], "rows": [["valor"]]},
+    {"type": "table", "headers": ["Column A"], "rows": [["value"]]},
     {"type": "page_break"}
   ]
 }
 ```
 
-- `blocks` é obrigatório ser lista, mas pode vir vazio (documento só com título).
-- `bullets` aceita `{"text": "...", "level": 1}` para aninhar níveis.
-- `table`: `headers` é opcional; `rows` é uma lista de listas de células.
-- Não invente tipos de bloco: `heading`, `paragraph`, `bullets`, `table` e
-  `page_break`. Outro tipo gera erro explicativo no stderr.
+- `blocks` must be a list but may come empty (a document with only a title).
+- `bullets` accepts `{"text": "...", "level": 1}` to nest levels.
+- `table`: `headers` is optional; `rows` is a list of lists of cells.
+- Do not invent block types: `heading`, `paragraph`, `bullets`, `table`, and
+  `page_break`. Any other type produces an explanatory error on stderr.
 
-## Quando usar bibliotecas instaladas
+## When to use installed libraries
 
-O helper cobre o caso comum e sempre funciona. Use `python-docx` (se estiver
-instalado — confira antes com `import docx`) apenas se precisar de recursos que o
-helper não tem, como imagens embutidas, cabeçalho rico, colunas, sumário
-automático ou formatação inline por trecho. Nesse caso:
-`subprocess.run([sys.executable, "-c", "...", ...])` também funciona, mas não
-presuma que a biblioteca existe: teste o import antes e caia no helper se faltar.
+The helper covers the common case and always works. Use `python-docx` (if
+installed — check first with `import docx`) only if you need features the helper
+does not have, such as embedded images, a rich header, columns, an automatic
+table of contents, or per-run inline formatting. In that case:
+`subprocess.run([sys.executable, "-c", "...", ...])` also works, but do not
+assume the library is there: test the import first and fall back to the helper
+if it is missing.
 
-## Validação
+## Validation
 
-- Confira que o stdout termina com uma linha `OK ...` e que o arquivo existe e
-  tem tamanho > 0.
-- Se o helper retornar erro, corrija o spec e execute de novo; não edite o
-  script da skill.
+- Check that stdout ends with an `OK ...` line and that the file exists and has
+  size > 0.
+- If the helper returns an error, fix the spec and run it again; do not edit the
+  skill script.

@@ -404,6 +404,23 @@ export interface SkillSummary {
   deletable: boolean;
 }
 
+/**
+ * Conteúdo de uma skill para a pré-visualização em Markdown na gestão de skills:
+ * o corpo do `SKILL.md` (Markdown após o frontmatter) e os metadados que o modal
+ * exibe no cabeçalho. O diretório vem absoluto apenas para referência (a interface
+ * nunca escreve nele).
+ */
+export interface SkillContent {
+  name: string;
+  description: string;
+  /** bundled | user | agents | codex | claude | opencode */
+  source: string;
+  /** Caminho absoluto do diretório da skill (contém o `SKILL.md`). */
+  dir: string;
+  /** Corpo do `SKILL.md` (Markdown, sem o frontmatter). */
+  content: string;
+}
+
 export interface CodeEnvironmentStatus {
   enabled: boolean;
   python?: InterpreterInfo | null;
@@ -432,6 +449,12 @@ export interface Settings {
   sendKey: 'enter' | 'ctrl+enter';
   showTokenUsage: boolean;
   reduceMotion: boolean;
+  /**
+   * Mantém o bloco de raciocínio/passos (`AgentSteps`) recolhido por padrão:
+   * ele começa fechado e não abre sozinho durante o streaming. O usuário ainda
+   * pode expandi-lo manualmente a qualquer momento.
+   */
+  thinkingCollapsedByDefault: boolean;
   fontScale: number;
   temperature?: number | null;
   includeAttachments: boolean;

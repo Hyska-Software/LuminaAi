@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Gera uma planilha Excel (.xlsx) usando somente a biblioteca padrão do Python.
+"""Generate an Excel spreadsheet (.xlsx) using only the Python standard library.
 
-O .xlsx é um pacote OOXML (ZIP + XML). Este script monta o pacote completo do
-zero — workbook, planilhas, estilos, tema, propriedades e relacionamentos — sem
-depender de `openpyxl`/`pip`.
+A .xlsx is an OOXML package (ZIP + XML). This script builds the complete package
+from scratch — workbook, worksheets, styles, theme, properties and
+relationships — without depending on `openpyxl`/`pip`.
 
-Uso:
-    python make_xlsx.py --spec spec.json --out vendas.xlsx
+Usage:
+    python make_xlsx.py --spec spec.json --out sales.xlsx
 
-Formato do spec (JSON):
+Spec format (JSON):
     {
       "sheets": [
         {
-          "name": "Vendas",
+          "name": "Sales",
           "rows": [
-            ["Mês", "Receita"],
-            ["Julho", 1410000],
+            ["Month", "Revenue"],
+            ["July", 1410000],
             ["Total", "=SUM(B2:B3)"]
           ],
           "formats": {"B2": "#,##0", "B3": "#,##0"}
@@ -23,15 +23,15 @@ Formato do spec (JSON):
       ]
     }
 
-- `rows`: lista de linhas; cada célula pode ser texto, número, booleano ou uma
-  fórmula (string começando com `=`).
-- A primeira linha de cada planilha é tratada como cabeçalho (negrito).
-- `formats` (opcional): mapa de célula → código de formato numérico
+- `rows`: list of rows; each cell can be text, number, boolean or a formula
+  (a string starting with `=`).
+- The first row of every worksheet is treated as a header (bold).
+- `formats` (optional): map of cell → number format code
   (`"#,##0"`, `"0.00"`, `"0%。"`, `"dd/mm/yyyy"`, ...).
-- `widths` (opcional): lista de larguras de coluna ou mapa `{"A": 20}`.
+- `widths` (optional): list of column widths or a `{"A": 20}` map.
 
-Saída: exit code 0 e uma linha `OK <caminho> <bytes>` no stdout em caso de
-sucesso; exit code 1 e a mensagem de erro no stderr em caso de falha.
+Output: exit code 0 and one `OK <path> <bytes>` line on stdout on success;
+exit code 1 and the error message on stderr on failure.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ MAX_ROWS = 50_000
 MAX_COLUMNS = 200
 MAX_CELL_TEXT = 32_767
 
-# Códigos de formato numérico embutidos no Excel (evita entradas custom).
+# Number format codes built into Excel (avoids custom entries).
 BUILTIN_FORMATS = {
     "General": None,
     "0": 1,
@@ -86,7 +86,7 @@ BUILTIN_FORMATS = {
 
 
 class SpecError(ValueError):
-    """Spec inválido: a mensagem é mostrada ao agente."""
+    """Invalid spec: the message is shown to the agent."""
 
 
 def escape(value: object) -> str:
@@ -124,14 +124,16 @@ def parse_ref(ref: str) -> tuple[int, int] | None:
 
 def as_text_cell(value: object, where: str) -> str:
     if isinstance(value, bool):
+        # Boolean display labels; only used to estimate column widths, so they are
+        # kept as-is to keep the generated files identical.
         return "VERDADEIRO" if value else "FALSO"
     if isinstance(value, (int, float)):
         return repr(value)
     if isinstance(value, str):
         if len(value) > MAX_CELL_TEXT:
-            raise SpecError(f"{where}: texto maior que {MAX_CELL_TEXT} caracteres")
+            raise SpecError(f"{where}: text longer than {MAX_CELL_TEXT} characters")
         return value
-    raise SpecError(f"{where}: tipo de célula não suportado ({type(value).__name__})")
+    raise SpecError(f"{where}: unsupported cell type ({type(value).__name__})")
 
 
 def is_number(value: object) -> bool:
@@ -162,8 +164,8 @@ def unique_sheet_names(names: list[str]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Fórmulas: avaliação de valores em cache (opcional; a fórmula sempre é
-# preservada no arquivo). Só cobre o subconjunto simples usado nos relatórios.
+# Formulas: evaluation of cached values (optional; the formula is always kept in
+# the file). Covers only the simple subset used in reports.
 # ---------------------------------------------------------------------------
 
 FUNC_RE = re.compile(r"^([A-Za-zÀ-ÿ_][A-Za-z0-9À-ÿ_.]*)\((.*)\)$")
@@ -180,7 +182,7 @@ class FormulaEvaluator:
         top, bottom = min(row1, row2), max(row1, row2)
         left, right = min(col1, col2), max(col1, col2)
         if (bottom - top + 1) * (right - left + 1) > 1_000_000:
-            raise ValueError("intervalo grande demais")
+            raise ValueError("range too large")
         values: list[float] = []
         for row in range(top, bottom + 1):
             for col in range(left, right + 1):
@@ -197,7 +199,7 @@ class FormulaEvaluator:
             start_ref = parse_ref(start)
             end_ref = parse_ref(end)
             if not start_ref or not end_ref:
-                raise ValueError(f"intervalo inválido: {argument}")
+                raise ValueError(f"invalid range: {argument}")
             return self._range_values(start_ref, end_ref)
         reference = parse_ref(argument)
         if reference:
@@ -207,10 +209,10 @@ class FormulaEvaluator:
         try:
             return [float(argument.replace(",", "."))]
         except ValueError as error:
-            raise ValueError(f"argumento inválido: {argument}") from error
+            raise ValueError(f"invalid argument: {argument}") from error
 
     def evaluate(self, formula: str) -> float | None:
-        """Devolve o valor numérico em cache, ou None se não der para calcular."""
+        """Return the cached numeric value, or None when it cannot be computed."""
         expression = formula[1:] if formula.startswith("=") else formula
         expression = expression.strip().rstrip(";")
         if not expression:
@@ -223,15 +225,17 @@ class FormulaEvaluator:
                     part for part in re.split(r"[,;]", match.group(2)) if part.strip()
                 ]
                 values = [value for argument in arguments for value in self._argument_values(argument)]
+                # pt-BR function aliases are kept for compatibility with existing
+                # formulas; accented names are escaped so this source stays ASCII.
                 if function in {"SUM", "SOMA"}:
                     return float(sum(values))
-                if function in {"AVERAGE", "MEDIA", "MÉDIA"}:
+                if function in {"AVERAGE", "MEDIA", "M\u00c9DIA"}:
                     return float(sum(values) / len(values)) if values else None
-                if function in {"MIN", "MÍNIMO", "MINIMO"}:
+                if function in {"MIN", "M\u00cdNIMO", "MINIMO"}:
                     return min(values) if values else None
-                if function in {"MAX", "MÁXIMO", "MAXIMO"}:
+                if function in {"MAX", "M\u00c1XIMO", "MAXIMO"}:
                     return max(values) if values else None
-                if function in {"COUNT", "CONTAR", "CONT.NÚM", "CONT.NUM"}:
+                if function in {"COUNT", "CONTAR", "CONT.N\u00daM", "CONT.NUM"}:
                     return float(len(values))
                 return self._eval_arithmetic(expression)
             return self._eval_arithmetic(expression)
@@ -259,21 +263,21 @@ class FormulaEvaluator:
             if isinstance(node, ast.Name) and isinstance(node.id, str):
                 reference = parse_ref(node.id)
                 if reference is None:
-                    raise ValueError(f"referência inválida: {node.id}")
+                    raise ValueError(f"invalid reference: {node.id}")
                 if reference not in self.values:
-                    raise ValueError(f"célula vazia: {node.id}")
+                    raise ValueError(f"empty cell: {node.id}")
                 return self.values[reference]
             if isinstance(node, ast.BinOp) and type(node.op) in operations:
                 return operations[type(node.op)](walk(node.left), walk(node.right))
             if isinstance(node, ast.UnaryOp) and type(node.op) in operations:
                 return operations[type(node.op)](walk(node.operand))
-            raise ValueError("expressão não suportada para valor em cache")
+            raise ValueError("expression not supported for a cached value")
 
         return float(walk(tree))
 
 
 def compute_cached_values(rows: list[list[object]]) -> dict[tuple[int, int], float]:
-    """Calcula valores em cache de fórmulas simples, em ordem de leitura."""
+    """Compute cached values for simple formulas, in reading order."""
     evaluator = FormulaEvaluator()
     cached: dict[tuple[int, int], float] = {}
     for row_index, row in enumerate(rows, start=1):
@@ -289,7 +293,7 @@ def compute_cached_values(rows: list[list[object]]) -> dict[tuple[int, int], flo
 
 
 # ---------------------------------------------------------------------------
-# Modelo das planilhas
+# Worksheet model
 # ---------------------------------------------------------------------------
 
 
@@ -326,63 +330,63 @@ class SheetModel:
             if column_index - 1 < len(row):
                 value = row[column_index - 1]
                 if value not in (None, ""):
-                    length = max(length, len(as_text_cell(value, "célula")) + 2)
+                    length = max(length, len(as_text_cell(value, "cell")) + 2)
         return float(max(8, min(60, length)))
 
 
 def load_sheets(spec: dict) -> list[SheetModel]:
     if not isinstance(spec, dict):
-        raise SpecError("o spec deve ser um objeto JSON")
+        raise SpecError("the spec must be a JSON object")
     raw_sheets = spec.get("sheets")
     if not isinstance(raw_sheets, list) or not raw_sheets:
-        raise SpecError("'sheets' deve ser uma lista não vazia")
+        raise SpecError("'sheets' must be a non-empty list")
     if len(raw_sheets) > MAX_SHEETS:
-        raise SpecError(f"'sheets' tem mais de {MAX_SHEETS} planilhas")
+        raise SpecError(f"'sheets' has more than {MAX_SHEETS} worksheets")
 
     names: list[str] = []
     for index, raw in enumerate(raw_sheets):
         if not isinstance(raw, dict):
-            raise SpecError(f"sheets[{index}]: esperado um objeto")
-        names.append(sanitize_sheet_name(raw.get("name"), f"Planilha {index + 1}"))
+            raise SpecError(f"sheets[{index}]: expected an object")
+        names.append(sanitize_sheet_name(raw.get("name"), f"Sheet {index + 1}"))
     names = unique_sheet_names(names)
 
     sheets: list[SheetModel] = []
     for index, (raw, name) in enumerate(zip(raw_sheets, names)):
         rows_raw = raw.get("rows")
         if not isinstance(rows_raw, list):
-            raise SpecError(f"sheets[{index}].rows: esperada uma lista de linhas")
+            raise SpecError(f"sheets[{index}].rows: expected a list of rows")
         if len(rows_raw) > MAX_ROWS:
-            raise SpecError(f"sheets[{index}].rows: mais de {MAX_ROWS} linhas")
+            raise SpecError(f"sheets[{index}].rows: more than {MAX_ROWS} rows")
         rows: list[list[object]] = []
         for row_index, row_raw in enumerate(rows_raw):
             if not isinstance(row_raw, list):
-                raise SpecError(f"sheets[{index}].rows[{row_index}]: esperada uma lista")
+                raise SpecError(f"sheets[{index}].rows[{row_index}]: expected a list")
             if len(row_raw) > MAX_COLUMNS:
                 raise SpecError(
-                    f"sheets[{index}].rows[{row_index}]: mais de {MAX_COLUMNS} colunas"
+                    f"sheets[{index}].rows[{row_index}]: more than {MAX_COLUMNS} columns"
                 )
             for column_index, value in enumerate(row_raw):
                 if value is not None and not isinstance(value, (str, int, float, bool)):
                     raise SpecError(
                         f"sheets[{index}].rows[{row_index}][{column_index}]: "
-                        "use texto, número, booleano ou fórmula"
+                        "use text, number, boolean or formula"
                     )
             rows.append(list(row_raw))
 
         formats_raw = raw.get("formats") or {}
         if not isinstance(formats_raw, dict):
-            raise SpecError(f"sheets[{index}].formats: esperado um objeto")
+            raise SpecError(f"sheets[{index}].formats: expected an object")
         formats: dict[str, str] = {}
         for reference, code in formats_raw.items():
             parsed = parse_ref(str(reference))
             if parsed is None:
                 raise SpecError(
-                    f"sheets[{index}].formats: referência inválida {reference!r} "
-                    "(use algo como \"B2\")"
+                    f"sheets[{index}].formats: invalid reference {reference!r} "
+                    "(use something like \"B2\")"
                 )
             if not isinstance(code, str) or not code.strip():
                 raise SpecError(
-                    f"sheets[{index}].formats[{reference!r}]: formato deve ser texto"
+                    f"sheets[{index}].formats[{reference!r}]: format must be text"
                 )
             formats[f"{parsed[0]},{parsed[1]}"] = code.strip()
 
@@ -395,7 +399,7 @@ def load_sheets(spec: dict) -> list[SheetModel]:
                     widths.append(float(width))
                 except (TypeError, ValueError):
                     raise SpecError(
-                        f"sheets[{index}].widths: larguras devem ser números"
+                        f"sheets[{index}].widths: widths must be numbers"
                     ) from None
         elif isinstance(widths_raw, dict):
             widths = []
@@ -403,7 +407,7 @@ def load_sheets(spec: dict) -> list[SheetModel]:
                 column = parse_ref(f"{reference}1")
                 if column is None:
                     raise SpecError(
-                        f"sheets[{index}].widths: coluna inválida {reference!r}"
+                        f"sheets[{index}].widths: invalid column {reference!r}"
                     )
                 while len(widths) < column[1]:
                     widths.append(8.0)
@@ -411,17 +415,17 @@ def load_sheets(spec: dict) -> list[SheetModel]:
                     widths[column[1] - 1] = float(width)
                 except (TypeError, ValueError):
                     raise SpecError(
-                        f"sheets[{index}].widths[{reference!r}]: largura deve ser número"
+                        f"sheets[{index}].widths[{reference!r}]: width must be a number"
                     ) from None
         elif widths_raw is not None:
-            raise SpecError(f"sheets[{index}].widths: use lista ou objeto")
+            raise SpecError(f"sheets[{index}].widths: use a list or an object")
 
         sheets.append(SheetModel(name, rows, formats, widths))
     return sheets
 
 
 # ---------------------------------------------------------------------------
-# Estilos
+# Styles
 # ---------------------------------------------------------------------------
 
 
@@ -430,7 +434,7 @@ class StyleBook:
         self.num_formats: list[str] = []
         self.xfs: list[dict[str, object]] = []
         self._xf_index: dict[tuple[bool, str | None], int] = {}
-        # XF 0: padrão.
+        # XF 0: default.
         self.xfs.append({"bold": False, "numfmt": None, "header": False})
         used: set[tuple[bool, str | None]] = set()
         for sheet in sheets:
@@ -460,8 +464,8 @@ class StyleBook:
         return 164 + self.num_formats.index(code)
 
     def build(self) -> str:
-        # Resolve primeiro todos os numFmtIds (a lista de formatos custom é
-        # preenchida sob demanda), depois gera o XML.
+        # Resolve every numFmtId first (the custom format list is filled on
+        # demand), then generate the XML.
         resolved: list[tuple[int, int, int, dict[str, object]]] = []
         for xf in self.xfs:
             numfmt = self.numfmt_id(xf["numfmt"])  # type: ignore[arg-type]
@@ -530,7 +534,7 @@ class StyleBook:
 
 
 # ---------------------------------------------------------------------------
-# XML das planilhas
+# Worksheet XML
 # ---------------------------------------------------------------------------
 
 
@@ -611,7 +615,7 @@ def sheet_xml(sheet: SheetModel, styles: StyleBook, selected: bool) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Demais partes do pacote
+# Remaining package parts
 # ---------------------------------------------------------------------------
 
 
@@ -759,7 +763,7 @@ def build_app(sheets: list[SheetModel]) -> str:
         "<Application>Lumina</Application><DocSecurity>0</DocSecurity>"
         "<ScaleCrop>false</ScaleCrop>"
         f'<HeadingPairs><vt:vector size="2" baseType="variant">'
-        "<vt:variant><vt:lpstr>Planilhas</vt:lpstr></vt:variant>"
+        "<vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant>"
         f'<vt:variant><vt:i4>{len(sheets)}</vt:i4></vt:variant>'
         "</vt:vector></HeadingPairs>"
         f'<TitlesOfParts><vt:vector size="{len(sheets)}" baseType="lpstr">{titles}</vt:vector></TitlesOfParts>'
@@ -772,7 +776,7 @@ def build_app(sheets: list[SheetModel]) -> str:
 def build_package(spec: dict) -> bytes:
     sheets = load_sheets(spec)
     styles = StyleBook(sheets)
-    title = str(spec.get("title") or (sheets[0].name if sheets else "Planilha"))
+    title = str(spec.get("title") or (sheets[0].name if sheets else "Sheet"))
     has_theme = True
 
     parts: list[tuple[str, str | bytes]] = [
@@ -810,18 +814,21 @@ def load_spec(path: str) -> dict:
         with open(path, "r", encoding="utf-8") as handle:
             return json.load(handle)
     except OSError as error:
-        raise SpecError(f"não foi possível ler o spec {path!r}: {error}") from error
+        raise SpecError(f"could not read the spec {path!r}: {error}") from error
     except json.JSONDecodeError as error:
-        raise SpecError(f"spec não é JSON válido: {error}") from error
+        raise SpecError(f"spec is not valid JSON: {error}") from error
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="make_xlsx.py",
-        description="Gera um .xlsx (OOXML) a partir de um spec JSON, sem dependências externas.",
+        description=(
+            "Generate a .xlsx (OOXML) file from a JSON spec, with no external "
+            "dependencies."
+        ),
     )
-    parser.add_argument("--spec", required=True, help="caminho do spec.json")
-    parser.add_argument("--out", required=True, help="caminho do .xlsx de saída")
+    parser.add_argument("--spec", required=True, help="path to spec.json")
+    parser.add_argument("--out", required=True, help="path to the output .xlsx")
     args = parser.parse_args(argv)
 
     try:
@@ -836,7 +843,7 @@ def main(argv: list[str]) -> int:
         print(f"OK {out} {len(data)}")
         return 0
     except (SpecError, OSError, ValueError) as error:
-        print(f"ERRO: {error}", file=sys.stderr)
+        print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
 

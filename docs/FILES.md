@@ -236,6 +236,7 @@ open_skills_dir()        -> ()                        // storage-dev; cria <data
 get_skills()             -> Vec<SkillSummary>         // gestão de skills (todas, com enabled/deletable)
 set_skill_enabled(name, enabled) -> Vec<SkillSummary> // persiste em Settings.disabled_skills
 delete_skill(name)       -> Vec<SkillSummary>         // só skills do usuário (remove a pasta)
+get_skill_content(name)  -> SkillContent              // corpo do SKILL.md (Markdown) para a prévia na UI
 ```
 
 Registro em `lib.rs` é do Lead (feito na integração, para não quebrar o build
@@ -259,7 +260,9 @@ Espelham §6.1: `ArtifactKind` ganha `'pptx'` (v1) e, na v1.5,
 `'audio' | 'video' | 'archive'`; `Settings` ganha `codeExecutionEnabled`,
 `codeTimeoutSecs`, `codePythonPath`, `codeNodePath`; `TurnOptions` ganha
 `runCode`; novos `CodeEnvironmentStatus`, `InterpreterInfo`,
-`CodePackageStatus`, `SkillSummary`, `ArtifactPreview`, `SheetPreview`,
+`CodePackageStatus`, `SkillSummary`, `SkillContent` (nome/descrição/origem/
+diretório + corpo do `SKILL.md` para a prévia),
+`ArtifactPreview`, `SheetPreview`,
 `SlidePreview`, `ArchiveEntryPreview`. Na v1.5, `ArtifactPreview` ganha as
 variantes `image` (mime/width/height/dataBase64 opcional), `archive`
 (format/entries/totalEntries/truncated) e `binary`
@@ -337,6 +340,12 @@ Regras:
 | `pdf` | `scripts/make_pdf.py` | A4, título, headings, parágrafos com quebra de linha, bullets, rodapé/paginação |
 | `imagens` | — | SVG via `create_file`; PNG/JPG com Pillow quando instalado |
 
+> O conteúdo das skills embutidas (`SKILL.md`, `README.md` e helpers) é escrito
+> em **inglês** (instruções para o agente e mensagens dos helpers); os `name`/ids
+> (`office-docx`, `office-xlsx`, `office-pptx`, `pdf`, `imagens`) são estáveis e
+> não foram traduzidos. A documentação e a UI do app continuam em pt-BR. Helpers
+> mantêm o protocolo: stdout `OK <path> <bytes>`, stderr `ERROR: …`, exit 0/1.
+
 CLI comum dos helpers (stdlib apenas, sem `pip install`):
 
 ```
@@ -388,7 +397,8 @@ Regras:
   (Lumina, Agentes, Codex, Claude, OpenCode, Embutidas) com badge, switch por
   skill e ação de excluir somente para as do Lumina; as externas levam a nota
   “somente leitura” (desativar é permitido).
-- UI: item “Skills” logo **abaixo de “Novo chat”** na sidebar (oculto quando `skillsPanelEnabled = false`) e o botão “Gerenciar skills” em Configurações → Ferramentas levam à **`SkillsView`**, uma view principal que **substitui a coluna do chat** (sem modal: o chat continua montado e volta intacto pelo botão “Voltar ao chat”, pelo “Novo chat” ou ao abrir uma conversa).
+- UI: item “Skills” logo **abaixo de “Novo chat”** na sidebar (oculto quando `skillsPanelEnabled = false`) e o botão “Gerenciar skills” em Configurações → Ferramentas levam à **`SkillsView`**, uma view principal que **substitui a coluna do chat** (o chat continua montado e volta intacto pelo botão “Voltar ao chat”, pelo “Novo chat” ou ao abrir uma conversa); o único modal da gestão é o de prévia do conteúdo de uma skill (abaixo).
+- **Prévia em Markdown**: cada linha tem o botão **“Visualizar skill &lt;nome&gt;”** (ícone de olho), disponível para todas as origens — inclusive skills externas e desativadas. Ele abre um **dialog** que busca o conteúdo no backend (`get_skill_content`, somente leitura, resolve o nome no mesmo catálogo da listagem) e renderiza o corpo do `SKILL.md` com o **mesmo pipeline do chat** (GFM + KaTeX + `.lumina-prose`), com alternância **Documento | Código** (fonte Markdown crua em `CodeBlock`), estados de carregando/erro com “Tentar novamente” e fechamento por X/Esc. O frontmatter do `SKILL.md` não é exibido.
 
 ## 8. Execução de código (`run_code`)
 
@@ -547,7 +557,7 @@ Chat (ui-core): ícones e rótulos no timeline para `run_code`,
 | `tools::artifacts` | grava bytes → artefato + DB + path; MIME por magic/extensão; kind `Pptx`/`Image`; nome saneado; extensão inferida; 10 MB+ |
 | `tools::code_exec` | resolve interpretador (settings/PATH/erro); executa python e coleta arquivo; exit ≠ 0 mantém artefatos e `is_error`; timeout mata e reporta; cancelamento; inputFiles; nome de arquivo perigoso; sem interpretador; teto de saída; (testes condicionais: pulam se não houver Python/Node, como o teste `#[ignore]` de rede) |
 | `tools::skills` | frontmatter válido/inválido; nome/description; **block scalar** (`>`/`|`) e descrição longa (~900 chars) lidos corretamente; corpo ~100 KB aceito; scan e precedência user > bundled; materialização das embutidas; `list_skills`/`read_skill`; catálogo no prompt com descrição truncada; skill com scripts lista arquivos; **filtro de desativadas** (`catalog_enabled`, `summaries` com `enabled`/`deletable`, `run_list`/`run_read`); **repositórios padrão externos** (roots com home/env, precedência, diretórios ocultos ignorados, `deletable=false`) |
-| `commands::skills` | `get_skills`/`set_skill_enabled`/`delete_skill` com helpers puros + temp dirs; ativar/desativar persiste em `disabled_skills` (inclusive externas); excluir só `source == user` e valida caminho/symlink; bundled e externas → erro; nome some de `disabled_skills` ao excluir |
+| `commands::skills` | `get_skills`/`set_skill_enabled`/`delete_skill` com helpers puros + temp dirs; ativar/desativar persiste em `disabled_skills` (inclusive externas); excluir só `source == user` e valida caminho/symlink; bundled e externas → erro; nome some de `disabled_skills` ao excluir; `get_skill_content` devolve corpo do `SKILL.md` sem frontmatter + metadados (inclusive embutida/externa) e erro para nome desconhecido/vazio |
 | `harness::prompt` | seção de skills, regra run_code×create_file, ausência quando desabilitado; skill desativada fora do prompt |
 | `documents::preview` | fixtures reais `testdata/`: docx (heading/tabela/lista), xlsx (2 abas/valores/truncamento), pptx (títulos/textos/notas); corrompidos → Err; limites |
 | `documents::preview` (v1.5) | imagem: PNG/JPEG pass-through com dimensões, TIFF→PNG (assinatura do payload, ≤2560 px), HEIC→Unsupported, corrompido→Err; ZIP: entradas/total/ordem/truncamento (400), não-ZIP→Unsupported, corrompido→Err; binário: formato detectado e preview de exatamente 4096 bytes; vazio não panica |
@@ -577,7 +587,7 @@ prova o ciclo criação→preview sem UI.
 | `PanelResizer.test.tsx` | divisor genérico (`side="start"`/`"end"`): aria/bounds/valuetext/hint, setas e arrasto invertidos no lado `end`, Home/End, clamp e passo custom, commit único em pointerup/pointercancel/lostpointercapture, duplo clique opcional; linha no início/fim e accent durante o arrasto |
 | `SourcesPanel.test.tsx` (painel direito) | largura persistida (`sidePanelWidth`) aplicada ao painel e ao aria do divisor; preview do arrasto não persiste até o pointerup; teclado (←/→/Home/End) persiste; duplo clique restaura 480 px; modo fixo (classe `relative`, sem translate, `hidden` fechado), fallback responsivo e botão de modo |
 | `ArtifactPanel.test.tsx` (painel direito) | largura persistida aplicada ao `aside`/aria do divisor com o handle na borda esquerda; preview do arrasto não persiste até o pointerup; teclado persiste; duplo clique restaura 480 px; arrasto interrompido pelo fechamento descarta o preview; modo fixo, limite responsivo (janela − sidebar − 480) e botão de modo |
-| `SkillsView.test.tsx` | lista agrupada por origem (incluindo Codex/OpenCode/Claude/Agentes); switch chama `setSkillEnabled`; exclusão confirmada chama `deleteSkill`; embutida/externa sem excluir e nota de somente leitura; vazio/erro/retry; “Voltar ao chat” muda `activeView` para `chat` |
+| `SkillsView.test.tsx` | lista agrupada por origem (incluindo Codex/OpenCode/Claude/Agentes); switch chama `setSkillEnabled`; exclusão confirmada chama `deleteSkill`; embutida/externa sem excluir e nota de somente leitura; vazio/erro/retry; “Voltar ao chat” muda `activeView` para `chat`; botão “Visualizar skill” em todas as origens; dialog busca `getSkillContent`, renderiza o Markdown, alterna Documento/Código, carregando/erro+retry e fecha |
 | `ToolsTab.test.tsx` | switch do painel salva setting; “Gerenciar skills” navega para a view e fecha as configurações; contagem/labels de skills externas; skills desativadas marcadas |
 | `ImagePreview.test.tsx` | web-safe usa base64 do conteúdo; TIFF usa payload convertido da prévia; zoom/ajuste/tamanho real; dimensões; `unsupported`/sem dados → cartão; SVG sanitizado |
 | `AudioPreview/VideoPreview.test.tsx` | player com data URI e metadados; sem payload (>24 MiB) → cartão; `onError` do media → cartão |

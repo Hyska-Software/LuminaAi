@@ -1,12 +1,13 @@
-# Skills embutidas do Lumina
+# Bundled Lumina skills
 
-Cada subpasta é uma skill: `SKILL.md` com frontmatter (`name`, `description`) e
-instruções para o agente. Pastas podem conter `scripts/` com helpers prontos.
+Each subfolder is a skill: a `SKILL.md` with frontmatter (`name`, `description`)
+and instructions for the agent. Folders may contain `scripts/` with ready-made
+helpers.
 
-- Contrato e catálogo: `docs/FILES.md` §7.
-- As skills são embutidas no binário em tempo de compilação (`include_dir!`) e
-  materializadas em `<app-data>/skills-bundled/` na primeira leitura.
-- Skills do usuário ficam em `<app-data>/skills/` e vencem as embutidas quando
-  têm o mesmo nome.
-- Scripts devem usar **somente a biblioteca padrão do Python** (sem pip) e
-  seguir a CLI `--spec <arquivo.json> --out <arquivo>`.
+- Contract and catalog: `docs/FILES.md` §7.
+- Skills are embedded in the binary at compile time (`include_dir!`) and
+  materialized into `<app-data>/skills-bundled/` on first read.
+- User skills live in `<app-data>/skills/` and take precedence over bundled
+  ones with the same name.
+- Scripts must use **only the Python standard library** (no pip) and follow
+  the `--spec <file.json> --out <file>` CLI.

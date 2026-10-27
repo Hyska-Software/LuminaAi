@@ -107,6 +107,19 @@ export function GeneralTab() {
             aria-label="Mostrar uso de tokens"
           />
         </SettingRow>
+
+        <SettingRow
+          label="Raciocínio recolhido por padrão"
+          description="O bloco de raciocínio e passos do agente começa fechado e não abre sozinho durante o streaming. Você pode expandi-lo a qualquer momento."
+        >
+          <Switch
+            checked={settings.thinkingCollapsedByDefault}
+            onCheckedChange={(checked) =>
+              void saveSettings({ thinkingCollapsedByDefault: checked })
+            }
+            aria-label="Raciocínio recolhido por padrão"
+          />
+        </SettingRow>
       </SettingsSection>
     </div>
   );

@@ -79,6 +79,7 @@ pub fn run() {
             commands::skills::get_skills,
             commands::skills::set_skill_enabled,
             commands::skills::delete_skill,
+            commands::skills::get_skill_content,
             commands::attachments::import_attachments,
             commands::attachments::get_attachment,
             commands::attachments::delete_attachment,

@@ -1,30 +1,30 @@
 ---
 name: imagens
-description: Cria imagens SVG (via create_file) e PNG/JPG (Pillow ou matplotlib quando instalados) para gráficos, ícones e ilustrações.
+description: Create SVG images (via create_file) and PNG/JPG images (with Pillow or matplotlib when installed) for charts, icons, and illustrations.
 ---
 
-# Imagens: SVG, PNG e JPG
+# Images: SVG, PNG, and JPG
 
-Use esta skill quando o usuário pedir uma **imagem**, ícone, logotipo simples,
-gráfico, diagrama ou ilustração para um documento/relatório.
+Use this skill when the user asks for an **image**, an icon, a simple logo, a
+chart, a diagram, or an illustration for a document/report.
 
-## Regra de ouro
+## Golden rule
 
-1. **SVG primeiro** quando der: é texto puro, sempre funciona, abre no painel de
-   artefatos (iframe sandbox) e pode ser embutido em HTML/relatórios. Crie com a
-   ferramenta `create_file` (nome `algo.svg`, conteúdo XML do SVG).
-2. **PNG/JPG** apenas quando o formato raster for necessário (foto, textura,
-   gráfico com muitos detalhes). Use `run_code` com **Pillow** ou
-   **matplotlib**; se nenhum dos dois estiver instalado, caia no SVG.
+1. **SVG first** whenever possible: it is plain text, always works, opens in the
+   artifacts panel (sandboxed iframe), and can be embedded in HTML/reports.
+   Create it with the `create_file` tool (name `something.svg`, SVG XML content).
+2. **PNG/JPG** only when a raster format is required (photo, texture, chart with
+   fine detail). Use `run_code` with **Pillow** or **matplotlib**; if neither is
+   installed, fall back to SVG.
 
 ## SVG via `create_file`
 
-Exemplo de conteúdo para `create_file(name="receita-q3.svg", content=..., mime="image/svg+xml")`:
+Example content for `create_file(name="revenue-q3.svg", content=..., mime="image/svg+xml")`:
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Receita por trimestre">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Quarterly revenue">
   <rect width="640" height="360" fill="#ffffff"/>
-  <text x="24" y="36" font-family="sans-serif" font-size="20" fill="#111827">Receita por trimestre</text>
+  <text x="24" y="36" font-family="sans-serif" font-size="20" fill="#111827">Quarterly revenue</text>
   <g fill="#2563eb">
     <rect x="60" y="220" width="70" height="90"/>
     <rect x="180" y="170" width="70" height="140"/>
@@ -38,79 +38,79 @@ Exemplo de conteúdo para `create_file(name="receita-q3.svg", content=..., mime=
 </svg>
 ```
 
-Regras do SVG:
+SVG rules:
 
-- Sempre `xmlns="http://www.w3.org/2000/svg"` e um `viewBox` (não dependa de
-  largura/altura fixas).
-- Nada de `<script>`, `foreignObject`, `onclick`, fontes externas ou
-  `href` remoto: o preview sanitiza e remove/ignora.
-- Prefira formas e `path`; para texto use `font-family="sans-serif"` (fonte do
-  sistema).
-- Use as cores do design (`#2563eb`, `#111827`, `#6b7280`, `#e5e7eb`, ...).
+- Always include `xmlns="http://www.w3.org/2000/svg"` and a `viewBox` (do not
+  rely on fixed width/height).
+- No `<script>`, `foreignObject`, `onclick`, external fonts, or remote `href`:
+  the preview sanitizes and removes/ignores them.
+- Prefer shapes and `path`; for text use `font-family="sans-serif"` (the system
+  font).
+- Use the design colors (`#2563eb`, `#111827`, `#6b7280`, `#e5e7eb`, ...).
 
 ## PNG/JPG via `run_code` (Pillow)
 
-Só use se Pillow estiver instalado (o helper testa antes):
+Only use it if Pillow is installed (check the import first):
 
 ```python
 try:
     from PIL import Image, ImageDraw, ImageFont
 except ImportError:
-    raise SystemExit("Pillow não instalado: gere um SVG com create_file")
+    raise SystemExit("Pillow not installed: generate an SVG with create_file")
 
 img = Image.new("RGB", (960, 540), "#ffffff")
 draw = ImageDraw.Draw(img)
 font = ImageFont.load_default()
-draw.text((24, 24), "Receita por trimestre", fill="#111827", font=font)
-valores = [90, 140, 200, 250]
-for i, valor in enumerate(valores):
+draw.text((24, 24), "Quarterly revenue", fill="#111827", font=font)
+values = [90, 140, 200, 250]
+for i, value in enumerate(values):
     x = 60 + i * 120
-    draw.rectangle([x, 480 - valor, x + 70, 480], fill="#2563eb")
+    draw.rectangle([x, 480 - value, x + 70, 480], fill="#2563eb")
     draw.text((x + 12, 484), f"Q{i + 1}", fill="#374151", font=font)
-img.save("receita-q3.png")
-print("OK receita-q3.png")
+img.save("revenue-q3.png")
+print("OK revenue-q3.png")
 ```
 
-- `run_code` roda no workspace e o arquivo novo é coletado como artefato;
-  o painel mostra a imagem direto.
-- Use `ImageFont.truetype(...)` só se tiver certeza do caminho da fonte;
-  `ImageFont.load_default()` sempre funciona.
-- Se `import PIL` falhar, **não** tente instalar: gere um SVG equivalente com
-  `create_file` e avise o usuário.
+- `run_code` runs in the workspace and the new file is collected as an artifact;
+  the panel shows the image directly.
+- Use `ImageFont.truetype(...)` only if you are sure of the font path;
+  `ImageFont.load_default()` always works.
+- If `import PIL` fails, do **not** try to install it: generate an equivalent SVG
+  with `create_file` and tell the user.
 
-## Gráficos com matplotlib (opcional)
+## Charts with matplotlib (optional)
 
-Se o usuário pedir um gráfico mais elaborado e `matplotlib` estiver instalado,
-use `run_code`:
+If the user asks for a more elaborate chart and `matplotlib` is installed, use
+`run_code`:
 
 ```python
 import matplotlib
-matplotlib.use("Agg")          # sem display, ambiente de terminal
+matplotlib.use("Agg")          # no display, terminal environment
 import matplotlib.pyplot as plt
 
 fig, ax = plt.subplots(figsize=(8, 4.5), dpi=120)
 ax.bar(["Q1", "Q2", "Q3", "Q4"], [90, 140, 200, 250], color="#2563eb")
-ax.set_title("Receita por trimestre")
+ax.set_title("Quarterly revenue")
 ax.spines[["top", "right"]].set_visible(False)
 fig.tight_layout()
-fig.savefig("receita-q3.png")
-print("OK receita-q3.png")
+fig.savefig("revenue-q3.png")
+print("OK revenue-q3.png")
 ```
 
-Antes de usar, teste `import matplotlib`; se falhar, use Pillow ou SVG.
+Before using it, test `import matplotlib`; if it fails, use Pillow or SVG.
 
-## Quando usar cada formato
+## When to use each format
 
-| Necessidade | Formato |
+| Need | Format |
 | --- | --- |
-| Ícone, diagrama, gráfico simples, imagem para HTML/Markdown | SVG (`create_file`) |
-| Foto/ilustração raster, gráfico com Pillow/matplotlib | PNG (`run_code`) |
-| Imagem com fundo transparente | PNG com `RGBA` |
-| Sem Pillow e sem matplotlib | SVG (sempre funciona) |
+| Icon, diagram, simple chart, image for HTML/Markdown | SVG (`create_file`) |
+| Raster photo/illustration, chart with Pillow/matplotlib | PNG (`run_code`) |
+| Image with a transparent background | PNG with `RGBA` |
+| No Pillow and no matplotlib | SVG (always works) |
 
-## Validação
+## Validation
 
-- SVG: o arquivo começa com `<svg` e o conteúdo é XML bem formado.
-- PNG/JPG: o arquivo tem tamanho > 0 e o `run_code` terminou com exit 0.
-- Confira o resultado no painel de artefatos; imagens aparecem direto, SVG
-  aparece no iframe sanitizado.
+- SVG: the file starts with `<svg` and the content is well-formed XML.
+- PNG/JPG: the file size is > 0 and `run_code` exited 0.
+- Check the result in the artifacts panel; images appear directly, SVG appears in
+  the sanitized iframe.

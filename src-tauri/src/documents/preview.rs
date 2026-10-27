@@ -2584,7 +2584,7 @@ mod tests {
             "texto extraído: {text}"
         );
         assert!(
-            text.contains("Página 1 de 2") && text.contains("Página 2 de 2"),
+            text.contains("Page 1 of 2") && text.contains("Page 2 of 2"),
             "paginação ausente: {text}"
         );
 

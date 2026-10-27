@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { Settings, SkillSummary } from '@/lib/types';
+import type { Settings, SkillContent, SkillSummary } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
   getSkills: vi.fn(),
   setSkillEnabled: vi.fn(),
   deleteSkill: vi.fn(),
+  getSkillContent: vi.fn(),
   openSkillsDir: vi.fn(),
   getSettings: vi.fn(),
 }));
@@ -16,6 +17,7 @@ vi.mock('@/lib/api', () => ({
     getSkills: mocks.getSkills,
     setSkillEnabled: mocks.setSkillEnabled,
     deleteSkill: mocks.deleteSkill,
+    getSkillContent: mocks.getSkillContent,
     openSkillsDir: mocks.openSkillsDir,
     getSettings: mocks.getSettings,
   },
@@ -41,6 +43,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     sendKey: 'enter',
     showTokenUsage: true,
     reduceMotion: false,
+    thinkingCollapsedByDefault: false,
     fontScale: 1,
     temperature: null,
     includeAttachments: true,
@@ -62,6 +65,18 @@ function skill(overrides: Partial<SkillSummary> = {}): SkillSummary {
     source: 'bundled',
     enabled: true,
     deletable: false,
+    ...overrides,
+  };
+}
+
+function skillContent(overrides: Partial<SkillContent> = {}): SkillContent {
+  return {
+    name: 'office-docx',
+    description: 'Criar documentos Word (.docx) com script Python stdlib.',
+    source: 'bundled',
+    dir: 'C:\\lumina\\skills-bundled\\office-docx',
+    content:
+      '# Office DOCX\n\nUse o script `make_docx.py` para gerar o documento.\n\n- passo um\n- passo dois',
     ...overrides,
   };
 }
@@ -135,6 +150,7 @@ beforeEach(() => {
     return skillList().filter((entry) => entry.name !== name);
   });
   mocks.openSkillsDir.mockResolvedValue(undefined);
+  mocks.getSkillContent.mockResolvedValue(skillContent());
   useAppStore.setState({ settings: settings() });
   useUiStore.setState({ activeView: 'skills', settingsOpen: false });
 });
@@ -343,5 +359,148 @@ describe('SkillsView — navegação e pasta', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Abrir pasta de skills' }));
 
     await waitFor(() => expect(mocks.openSkillsDir).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('SkillsView — prévia em Markdown', () => {
+  it('oferece "Visualizar skill" para skills de todas as origens', async () => {
+    renderView();
+    await screen.findByRole('region', { name: 'Lumina' });
+
+    for (const name of [
+      'relatorios',
+      'git-helper',
+      'codex-review',
+      'claude-notes',
+      'opencode-plan',
+      'office-docx',
+    ]) {
+      expect(screen.getByRole('button', { name: `Visualizar skill ${name}` })).toBeTruthy();
+    }
+    // A prévia só busca o conteúdo quando o modal é aberto.
+    expect(mocks.getSkillContent).not.toHaveBeenCalled();
+  });
+
+  it('mantém a prévia disponível para skill desativada', async () => {
+    mocks.getSkills.mockResolvedValue(
+      skillList().map((entry) =>
+        entry.name === 'git-helper' ? { ...entry, enabled: false } : entry,
+      ),
+    );
+
+    renderView();
+    fireEvent.click(await screen.findByRole('button', { name: 'Visualizar skill git-helper' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'git-helper' });
+    expect(within(dialog).getByText('Agentes')).toBeTruthy();
+    expect(within(dialog).getByText('Desativada')).toBeTruthy();
+  });
+
+  it('mostra o carregamento enquanto o conteúdo está pendente', async () => {
+    mocks.getSkillContent.mockReturnValue(new Promise(() => undefined));
+
+    renderView();
+    fireEvent.click(await screen.findByRole('button', { name: 'Visualizar skill office-docx' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'office-docx' });
+    expect(within(dialog).getByText('Carregando conteúdo da skill…')).toBeTruthy();
+    expect(within(dialog).queryByRole('radiogroup')).toBeNull();
+  });
+
+  it('busca o conteúdo e renderiza o Markdown com o pipeline do chat', async () => {
+    renderView();
+    fireEvent.click(await screen.findByRole('button', { name: 'Visualizar skill office-docx' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'office-docx' });
+    expect(mocks.getSkillContent).toHaveBeenCalledWith('office-docx');
+
+    expect(
+      await within(dialog).findByRole('heading', { level: 1, name: 'Office DOCX' }),
+    ).toBeTruthy();
+    expect(within(dialog).getByText('make_docx.py')).toBeTruthy();
+    expect(dialog.querySelector('.lumina-prose')).toBeTruthy();
+    expect(
+      within(dialog).getByRole('region', { name: 'Conteúdo da skill office-docx' }),
+    ).toBeTruthy();
+    // Cabeçalho: origem, descrição e alternância Documento | Código.
+    expect(within(dialog).getByText('Embutida')).toBeTruthy();
+    expect(
+      within(dialog).getByText('Criar documentos Word (.docx) com script Python stdlib.'),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByRole('radiogroup', { name: 'Modo de visualização da skill' }),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByRole('radio', { name: 'Documento' }).getAttribute('aria-checked'),
+    ).toBe('true');
+  });
+
+  it('mostra o erro e refaz a busca em "Tentar novamente"', async () => {
+    mocks.getSkillContent
+      .mockRejectedValueOnce(new Error('SKILL.md ausente'))
+      .mockResolvedValueOnce(
+        skillContent({ content: '## Recuperado\n\nConteúdo após a nova tentativa.' }),
+      );
+
+    renderView();
+    fireEvent.click(await screen.findByRole('button', { name: 'Visualizar skill relatorios' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'relatorios' });
+    expect(
+      await within(dialog).findByText('Não foi possível carregar o conteúdo da skill'),
+    ).toBeTruthy();
+    expect(within(dialog).getByText('SKILL.md ausente')).toBeTruthy();
+    expect(within(dialog).queryByRole('radiogroup')).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Tentar novamente' }));
+
+    expect(
+      await within(dialog).findByRole('heading', { level: 2, name: 'Recuperado' }),
+    ).toBeTruthy();
+    expect(mocks.getSkillContent).toHaveBeenCalledTimes(2);
+    expect(mocks.getSkillContent).toHaveBeenLastCalledWith('relatorios');
+  });
+
+  it('alterna entre Documento e Código com o Markdown cru', async () => {
+    renderView();
+    fireEvent.click(await screen.findByRole('button', { name: 'Visualizar skill office-docx' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'office-docx' });
+    expect(
+      await within(dialog).findByRole('heading', { level: 1, name: 'Office DOCX' }),
+    ).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Código' }));
+
+    expect(within(dialog).queryByRole('heading', { level: 1, name: 'Office DOCX' })).toBeNull();
+    expect(within(dialog).getByText('SKILL.md')).toBeTruthy();
+    expect(dialog.querySelector('pre')?.textContent).toContain('# Office DOCX');
+    expect(dialog.querySelector('.lumina-prose')).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Documento' }));
+
+    expect(within(dialog).getByRole('heading', { level: 1, name: 'Office DOCX' })).toBeTruthy();
+  });
+
+  it('mostra o estado vazio quando a skill não tem instruções', async () => {
+    mocks.getSkillContent.mockResolvedValue(skillContent({ content: '  \n\t' }));
+
+    renderView();
+    fireEvent.click(await screen.findByRole('button', { name: 'Visualizar skill office-docx' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'office-docx' });
+    expect(await within(dialog).findByText('Esta skill não tem instruções.')).toBeTruthy();
+    expect(within(dialog).queryByRole('radiogroup')).toBeNull();
+  });
+
+  it('fecha pelo botão "Fechar" e remove o dialog', async () => {
+    renderView();
+    fireEvent.click(await screen.findByRole('button', { name: 'Visualizar skill office-docx' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'office-docx' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Fechar' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByRole('button', { name: 'Visualizar skill office-docx' })).toBeTruthy();
   });
 });

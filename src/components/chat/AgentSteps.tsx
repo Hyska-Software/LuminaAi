@@ -23,6 +23,7 @@ import {
   type PageLink,
   type ToolGroup,
 } from '@/lib/agentTrace';
+import { useAppStore } from '@/lib/store';
 import type { ChatMessage } from '@/lib/types';
 import { cn, formatDuration, formatThinkingDuration, truncate } from '@/lib/utils';
 import { openExternalUrl } from './external';
@@ -94,13 +95,20 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
 
   // Auto-open while the agent works and collapse once the answer is ready
   // (same behavior as the previous reasoning block; the user can reopen).
-  const [open, setOpen] = useState(streaming);
+  // When "raciocínio recolhido por padrão" is enabled the block starts closed
+  // and never toggles by itself: a manual expansion wins, even after the stream
+  // ends. Keeping `setOpen` out of the effect in that mode avoids races with
+  // the user's own expansion.
+  const collapsedByDefault = useAppStore((state) => state.settings.thinkingCollapsedByDefault);
+  const [open, setOpen] = useState(() => (collapsedByDefault ? false : streaming));
   const wasStreaming = useRef(streaming);
   useEffect(() => {
-    if (streaming) setOpen(true);
-    else if (wasStreaming.current) setOpen(false);
+    const was = wasStreaming.current;
     wasStreaming.current = streaming;
-  }, [streaming]);
+    if (collapsedByDefault) return;
+    if (streaming) setOpen(true);
+    else if (was) setOpen(false);
+  }, [streaming, collapsedByDefault]);
 
   const visible = entries.length > 0 || (streaming && phase !== 'text');
   if (!visible) return null;

@@ -483,6 +483,22 @@ pub struct SkillSummary {
     pub deletable: bool,
 }
 
+/// Conteúdo de uma skill para a pré-visualização em Markdown na interface de
+/// gestão: o corpo do `SKILL.md` (Markdown após o frontmatter) e os metadados do
+/// cabeçalho. `dir` é o diretório absoluto da skill, só para exibição.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SkillContent {
+    pub name: String,
+    pub description: String,
+    /// bundled | user | agents | codex | claude | opencode
+    pub source: String,
+    /// Diretório absoluto da skill (contém o `SKILL.md`).
+    pub dir: String,
+    /// Corpo do `SKILL.md` (Markdown sem o frontmatter).
+    pub content: String,
+}
+
 /// Status do ambiente de código exibido em Configurações → Ferramentas.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -594,6 +610,9 @@ pub struct Settings {
     pub send_key: String,
     pub show_token_usage: bool,
     pub reduce_motion: bool,
+    /// Mantém o bloco de raciocínio/passos do assistente recolhido por padrão
+    /// (não abre sozinho durante o streaming; o usuário pode expandir).
+    pub thinking_collapsed_by_default: bool,
     pub font_scale: f32,
     pub temperature: Option<f32>,
     pub include_attachments: bool,
@@ -628,6 +647,7 @@ impl Default for Settings {
             send_key: "enter".into(),
             show_token_usage: true,
             reduce_motion: false,
+            thinking_collapsed_by_default: false,
             font_scale: 1.0,
             temperature: None,
             include_attachments: true,

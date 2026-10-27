@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-"""Gera uma apresentação PowerPoint (.pptx) usando somente a biblioteca padrão.
+"""Generate a PowerPoint presentation (.pptx) using only the standard library.
 
-O .pptx é um pacote OOXML (ZIP + XML). Este script monta um pacote mínimo
-válido do zero — apresentação, slide master, dois layouts, tema, slides, slides
-de notas, notes master, relacionamentos, tipos de conteúdo e propriedades —
-sem depender de `python-pptx`/`pip`.
+A .pptx is an OOXML package (ZIP + XML). This script builds a minimal valid
+package from scratch — presentation, slide master, two layouts, theme, slides,
+notes slides, notes master, relationships, content types and properties —
+without depending on `python-pptx`/`pip`.
 
-Uso:
-    python make_pptx.py --spec spec.json --out apresentacao.pptx
+Usage:
+    python make_pptx.py --spec spec.json --out presentation.pptx
 
-Formato do spec (JSON):
+Spec format (JSON):
     {
-      "title": "Resultados Q3 2026",
-      "subtitle": "Apresentação executiva",
+      "title": "Q3 2026 Results",
+      "subtitle": "Executive presentation",
       "slides": [
-        {"title": "Principais números",
-         "bullets": ["Receita: R$ 4,82 mi (+18% QoQ)", "Novos clientes: 27"],
-         "notes": "Mencionar a margem bruta no fim."}
+        {"title": "Key figures",
+         "bullets": ["Revenue: $4.82M (+18% QoQ)", "New customers: 27"],
+         "notes": "Mention the gross margin at the end."}
       ]
     }
 
-- A capa é gerada a partir de `title`/`subtitle` (se presentes).
-- Cada item de `slides` vira um slide de título + bullets.
-- `notes` (opcional) vira o slide de notas do apresentador.
-- Bullets também aceitam `{"text": "...", "level": 1}` para níveis aninhados.
+- The cover slide is generated from `title`/`subtitle` (when present).
+- Every entry in `slides` becomes a title + bullets slide.
+- `notes` (optional) becomes the speaker notes slide.
+- Bullets also accept `{"text": "...", "level": 1}` for nested levels.
 
-Saída: exit code 0 e uma linha `OK <caminho> <bytes>` no stdout em caso de
-sucesso; exit code 1 e a mensagem de erro no stderr em caso de falha.
+Output: exit code 0 and one `OK <path> <bytes>` line on stdout on success;
+exit code 1 and the error message on stderr on failure.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ DCMITYPE_NS = "http://purl.org/dc/dcmitype/"
 XSI_NS = "http://www.w3.org/2001/XMLSchema-instance"
 EP_NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
 
-SLIDE_CX = 12_192_000  # 16:9, 13,333 x 7,5 in em EMU
+SLIDE_CX = 12_192_000  # 16:9, 13.333 x 7.5 in, in EMU
 SLIDE_CY = 6_858_000
 MAX_SLIDES = 200
 MAX_TEXT_CHARS = 100_000
@@ -71,7 +71,7 @@ CLR_MAP = (
 
 
 class SpecError(ValueError):
-    """Spec inválido: a mensagem é mostrada ao agente."""
+    """Invalid spec: the message is shown to the agent."""
 
 
 def escape(value: object) -> str:
@@ -90,9 +90,9 @@ def as_text(value: object, where: str) -> str:
     if isinstance(value, (str, int, float, bool)):
         text = str(value)
         if len(text) > MAX_TEXT_CHARS:
-            raise SpecError(f"{where}: texto maior que {MAX_TEXT_CHARS} caracteres")
+            raise SpecError(f"{where}: text longer than {MAX_TEXT_CHARS} characters")
         return text
-    raise SpecError(f"{where}: esperado texto, recebido {type(value).__name__}")
+    raise SpecError(f"{where}: expected text, got {type(value).__name__}")
 
 
 def text_run(text: str) -> str:
@@ -146,7 +146,7 @@ def slide_tree(shapes: str) -> str:
 
 
 def multiline_paragraphs(text: str) -> str:
-    """Uma `<a:p>` por linha (títulos/subtítulos podem vir com `\\n`)."""
+    """One `<a:p>` per line (titles/subtitles may contain `\\n`)."""
     lines = [line for line in text.splitlines() if line.strip()] or ([text] if text else [""])
     return "".join(plain_paragraph(line) for line in lines)
 
@@ -255,7 +255,7 @@ def notes_slide_xml(lines: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Master, layouts, tema e notes master
+# Master, layouts, theme and notes master
 # ---------------------------------------------------------------------------
 
 
@@ -268,7 +268,7 @@ def build_slide_master() -> str:
         365_125,
         10_515_600,
         1_325_563,
-        plain_paragraph("Título do slide"),
+        plain_paragraph("Slide title"),
     )
     body_shape = placeholder_shape(
         3,
@@ -278,7 +278,7 @@ def build_slide_master() -> str:
         1_825_625,
         10_515_600,
         4_351_338,
-        plain_paragraph("Texto do slide"),
+        plain_paragraph("Slide text"),
         placeholder_attrs=' idx="1"',
     )
     tx_styles = (
@@ -321,7 +321,7 @@ def build_title_layout() -> str:
             2_134_425,
             10_515_600,
             1_470_025,
-            plain_paragraph("Título da capa"),
+            plain_paragraph("Cover title"),
         )
         + placeholder_shape(
             3,
@@ -331,7 +331,7 @@ def build_title_layout() -> str:
             3_886_200,
             9_448_800,
             1_752_600,
-            plain_paragraph("Subtítulo da capa"),
+            plain_paragraph("Cover subtitle"),
             placeholder_attrs=' idx="1"',
         )
     )
@@ -339,7 +339,7 @@ def build_title_layout() -> str:
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         f'<p:sldLayout xmlns:a="{A_NS}" xmlns:r="{R_NS}" xmlns:p="{P_NS}" '
         'type="title" preserve="1">'
-        f'<p:cSld name="Capa">{slide_tree(shapes)}</p:cSld>'
+        f'<p:cSld name="Cover">{slide_tree(shapes)}</p:cSld>'
         "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>"
     )
 
@@ -354,7 +354,7 @@ def build_content_layout() -> str:
             365_125,
             10_515_600,
             1_325_563,
-            plain_paragraph("Título do slide"),
+            plain_paragraph("Slide title"),
         )
         + placeholder_shape(
             3,
@@ -364,7 +364,7 @@ def build_content_layout() -> str:
             1_825_625,
             10_515_600,
             4_351_338,
-            plain_paragraph("Conteúdo do slide"),
+            plain_paragraph("Slide content"),
             placeholder_attrs=' idx="1"',
         )
     )
@@ -372,7 +372,7 @@ def build_content_layout() -> str:
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         f'<p:sldLayout xmlns:a="{A_NS}" xmlns:r="{R_NS}" xmlns:p="{P_NS}" '
         'type="obj" preserve="1">'
-        f'<p:cSld name="Título e Conteúdo">{slide_tree(shapes)}</p:cSld>'
+        f'<p:cSld name="Title and Content">{slide_tree(shapes)}</p:cSld>'
         "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>"
     )
 
@@ -393,7 +393,7 @@ def build_notes_master() -> str:
         '<a:ext cx="5486400" cy="3600450"/></a:xfrm>'
         '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
         '<p:txBody><a:bodyPr/><a:lstStyle/>'
-        f"{plain_paragraph('Notas do apresentador')}</p:txBody></p:sp>"
+        f"{plain_paragraph('Speaker notes')}</p:txBody></p:sp>"
     )
     notes_style = (
         '<p:notesStyle><a:lvl1pPr marL="0" algn="l" defTabSz="914400" rtl="0" '
@@ -454,12 +454,12 @@ def build_theme() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Relacionamentos e partes do pacote
+# Relationships and package parts
 # ---------------------------------------------------------------------------
 
 
 def rels(items: list[tuple[str, str, str]]) -> str:
-    """`items` = [(rId, tipo, alvo)]."""
+    """`items` = [(rId, type, target)]."""
     body = "".join(
         f'<Relationship Id="{identifier}" Type="{rel_type}" Target="{target}"/>'
         for identifier, rel_type, target in items
@@ -583,29 +583,29 @@ def build_app(slide_count: int, notes_count: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Montagem do spec
+# Spec assembly
 # ---------------------------------------------------------------------------
 
 
 def load_deck(spec: dict) -> tuple[str, str, list[dict]]:
     if not isinstance(spec, dict):
-        raise SpecError("o spec deve ser um objeto JSON")
+        raise SpecError("the spec must be a JSON object")
     title = as_text(spec.get("title"), "title")
     subtitle = as_text(spec.get("subtitle"), "subtitle")
     slides_raw = spec.get("slides") or []
     if not isinstance(slides_raw, list):
-        raise SpecError("'slides' deve ser uma lista")
+        raise SpecError("'slides' must be a list")
     if len(slides_raw) > MAX_SLIDES:
-        raise SpecError(f"'slides' tem mais de {MAX_SLIDES} itens")
+        raise SpecError(f"'slides' has more than {MAX_SLIDES} items")
 
     slides: list[dict] = []
     for index, raw in enumerate(slides_raw):
         if not isinstance(raw, dict):
-            raise SpecError(f"slides[{index}]: esperado um objeto")
+            raise SpecError(f"slides[{index}]: expected an object")
         slide_title = as_text(raw.get("title"), f"slides[{index}].title")
         bullets_raw = raw.get("bullets") or []
         if not isinstance(bullets_raw, list):
-            raise SpecError(f"slides[{index}].bullets: esperada uma lista")
+            raise SpecError(f"slides[{index}].bullets: expected a list")
         bullets: list[tuple[str, int]] = []
         for bullet_index, bullet in enumerate(bullets_raw):
             if isinstance(bullet, dict):
@@ -616,7 +616,7 @@ def load_deck(spec: dict) -> tuple[str, str, list[dict]]:
                     level = int(bullet.get("level", 0) or 0)
                 except (TypeError, ValueError):
                     raise SpecError(
-                        f"slides[{index}].bullets[{bullet_index}].level: deve ser inteiro"
+                        f"slides[{index}].bullets[{bullet_index}].level: must be an integer"
                     ) from None
             else:
                 bullet_text = as_text(
@@ -630,9 +630,9 @@ def load_deck(spec: dict) -> tuple[str, str, list[dict]]:
         slides.append({"title": slide_title, "bullets": bullets, "notes": notes})
 
     if not title and not subtitle and not slides:
-        raise SpecError("spec vazio: informe 'title'/'subtitle' ou ao menos um slide")
+        raise SpecError("empty spec: provide 'title'/'subtitle' or at least one slide")
     if len(slides) > MAX_SLIDES - 1:
-        raise SpecError(f"apresentação com mais de {MAX_SLIDES} slides (contando a capa)")
+        raise SpecError(f"presentation with more than {MAX_SLIDES} slides (counting the cover)")
     return title, subtitle, slides
 
 
@@ -705,8 +705,8 @@ def build_package(spec: dict) -> bytes:
             )
         )
         if slide["notes"]:
-            # O arquivo de notas usa o número do slide (notesSlideN ↔ slideN),
-            # que é a convenção lida pela prévia do app.
+            # The notes file uses the slide number (notesSlideN ↔ slideN), which
+            # is the convention read by the app preview.
             notes_numbers.append(slide_number)
             note_lines = [
                 line for line in slide["notes"].splitlines() if line.strip()
@@ -762,18 +762,21 @@ def load_spec(path: str) -> dict:
         with open(path, "r", encoding="utf-8") as handle:
             return json.load(handle)
     except OSError as error:
-        raise SpecError(f"não foi possível ler o spec {path!r}: {error}") from error
+        raise SpecError(f"could not read the spec {path!r}: {error}") from error
     except json.JSONDecodeError as error:
-        raise SpecError(f"spec não é JSON válido: {error}") from error
+        raise SpecError(f"spec is not valid JSON: {error}") from error
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="make_pptx.py",
-        description="Gera um .pptx (OOXML) a partir de um spec JSON, sem dependências externas.",
+        description=(
+            "Generate a .pptx (OOXML) file from a JSON spec, with no external "
+            "dependencies."
+        ),
     )
-    parser.add_argument("--spec", required=True, help="caminho do spec.json")
-    parser.add_argument("--out", required=True, help="caminho do .pptx de saída")
+    parser.add_argument("--spec", required=True, help="path to spec.json")
+    parser.add_argument("--out", required=True, help="path to the output .pptx")
     args = parser.parse_args(argv)
 
     try:
@@ -788,7 +791,7 @@ def main(argv: list[str]) -> int:
         print(f"OK {out} {len(data)}")
         return 0
     except (SpecError, OSError, ValueError) as error:
-        print(f"ERRO: {error}", file=sys.stderr)
+        print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
 

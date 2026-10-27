@@ -1,5 +1,8 @@
 export { SkillsView } from './SkillsView';
 
+export { SkillPreviewDialog } from './SkillPreviewDialog';
+export type { SkillPreviewDialogProps } from './SkillPreviewDialog';
+
 export {
   SKILL_SOURCES,
   countSkillsByOrigin,
