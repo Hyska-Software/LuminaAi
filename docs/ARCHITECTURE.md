@@ -73,10 +73,18 @@ messages(id PK, conversation_id, role, content, reasoning, status, tool_calls JS
          citations JSON, attachments JSON, model_id, provider_id, usage JSON,
          provider_state JSON, created_at, seq, trace JSON)
 attachments(id PK, name, mime_type, size, kind, text, page_count, width, height, file_path, created_at)
-artifacts(id PK, conversation_id, message_id, name, mime_type, kind, language, size, created_at, path)
+artifacts(id PK, conversation_id NULL, message_id, name, mime_type, kind, language, size,
+         created_at, path, favorite)
 usage_log(id, conversation_id, message_id, provider_id, model_id, tokens..., cost, created_at)
 meta(key PK, value)
 ```
+
+`artifacts.conversation_id` é **nulo** para arquivos enviados pelo usuário
+direto à página **Biblioteca** (sem conversa); artefatos criados pelo agente
+continuam sempre associados a uma conversa. `favorite` é uma marcação do
+usuário na Biblioteca e não influencia o agente. Bancos antigos são migrados na
+abertura (a coluna passa a aceitar `NULL` e ganha `favorite`, preservando as
+linhas existentes) — ver `docs/FILES.md` §14 (v1.8).
 
 `provider_state` guarda o replay do turno do agente no formato **v2** (JSON opaco, só no backend — não trafega no IPC): `{"version":2,"steps":[{"state":<payload bruto do passo ou null>,"text":"<texto do passo>","toolCallIds":["id1", …]}]}`. Há um passo por resposta do provedor — um por passo com ferramentas e um para a resposta final (a resposta final forçada é o último) — e `toolCallIds` referencia `tool_calls` em ordem cronológica. No turno seguinte o harness reconstrói o turno multi-step no histórico (um assistant por passo + os tool results daquele passo), exatamente como o loop em memória faz, para que o provedor aceite os outputs das ferramentas. Bancos antigos (payload bruto de um único passo) continuam funcionando: o estado só é replayado quando a mensagem não tem tool calls e o modelo/provedor conferem; caso contrário é descartado e o histórico cai no fallback neutro (texto + tool calls + tool results).
 
@@ -222,10 +230,20 @@ Fatos descobertos por sondagem (ver `docs/MODELS.md`):
 | `create_file` | cria artefato (md, html, csv, json, código, svg) no disco e registra no DB | confirmação + id do artefato |
 | `run_code` | executa um script Python/Node num workspace isolado (`code-runs/`), com timeout, limites e cancelamento; os arquivos gerados viram artefatos | resumo + exit code + cauda de stdout/stderr + ids dos artefatos |
 | `list_skills` / `read_skill` | lista as skills locais (embutidas + usuário) e carrega instruções/scripts de uma skill | JSON com descrição, `baseDir` e arquivos |
+| `list_artifacts` | lista/pesquisa a biblioteca de artefatos **do usuário (todas as conversas)** por nome, título da conversa e conteúdo textual (sem acentos), com filtro de tipo, limite, trechos com número de linha e a conversa de origem de cada arquivo | JSON compacto (id, nome, tipo, tamanho, data, `conversationTitle`/`currentConversation` e trechos) |
+| `read_artifact` | carrega o conteúdo de **qualquer artefato do usuário (de qualquer conversa)** como contexto: texto raw, texto extraído de PDF/DOCX/XLSX/PPTX, metadados/estrutura de imagem/ZIP/mídia/binário; paginação por caracteres e conversa de origem no cabeçalho | texto com cabeçalho, faixa e próximo `offset` |
 | `validate_ui` | valida um bloco ` ```ui ` (JSON declarativo) contra o contrato: normaliza, valida e roda o lint de design | `{ ok, errors, warnings, normalized }` |
 
 `validate_ui`, `list_skills` e `read_skill` estão sempre disponíveis e não contam
-no orçamento de ferramentas de dados. `run_code` é **opt-in**:
+no orçamento de ferramentas de dados. `list_artifacts` e `read_artifact` também
+estão sempre disponíveis (leitura local e somente leitura), mas **contam** no
+orçamento de 6 chamadas de ferramentas de dados; a biblioteca é **do usuário**:
+`list_artifacts` lista todas as conversas (mais recentes primeiro, com título da
+conversa de origem) e `read_artifact` lê qualquer artefato pelo id — a leitura é
+escopada ao usuário, não à conversa atual (decisão §16 #15). `read_artifact`
+devolve páginas de até 20 mil caracteres (o resultado total, com cabeçalho e
+rodapé, fica abaixo do limite de 24 mil caracteres de resultado de ferramenta do
+harness). `run_code` é **opt-in**:
 `Settings::code_execution_enabled` (default `false`) e o harness aplica o gate
 em `TurnOptions::run_code`; sem ele a ferramenta não entra na definição enviada
 ao modelo.
@@ -400,6 +418,16 @@ por tipo, com navegação e ações "Salvar como…" (dialog nativo) e "Abrir". 
 writer é compartilhado com `run_code` (`tools::artifacts`), que aceita **bytes**
 — permitindo artefatos binários (PDF/DOCX/XLSX/PPTX/imagens).
 
+O agente consulta a biblioteca de artefatos **do usuário (todas as conversas)**
+com as tools `list_artifacts` (lista/pesquisa por nome, título da conversa e
+conteúdo textual, com trechos e a conversa de origem) e `read_artifact` (traz o
+conteúdo ao contexto; extrai texto de PDF/DOCX/XLSX/PPTX, mostra
+metadados/estrutura de imagem, ZIP, áudio, vídeo e binário, e pagina o texto).
+O escopo é o usuário, não a conversa (decisão §16 #15): qualquer artefato pode
+ser lido, mas a biblioteca expõe apenas artefatos e metadados — nunca mensagens
+de outras conversas — e o conteúdo entra no contexto como **dado não confiável**
+(nunca como instrução).
+
 **Detecção/reconciliação**: o renderer aplica `artifact_created` em ordem
 canônica (`created_at, id` — a mesma de `db::list_artifacts`) e só para a
 conversa ativa (eventos de um turno em segundo plano não vazam para outra
@@ -438,6 +466,33 @@ HTML do documento sem sanitização (DOCX vira HTML allowlist dentro de iframe
 web-safe, áudio/vídeo ≤24 MiB); Office/ZIP/binário são lidos pelo backend na
 prévia. Formatos e limites: `docs/FILES.md` §9.
 
+### 11.1 Página Biblioteca (v1.8)
+
+A página **Biblioteca** (`src/components/library`, view `activeView: 'library'`)
+dá ao usuário uma visão única de **todos os artefatos do usuário** — criados
+pelo agente em qualquer conversa **e** enviados por ele — com busca (nome, tipo
+e título da conversa de origem), filtros por categoria
+(Tudo/Favoritos/Imagens/Documentos/Código/Mídia/Outros), ordenação, grade/lista
+e prévia por tipo (reaproveitando `ArtifactPreview`). A página fica no lugar da
+coluna do chat (mesmo padrão da SkillsView) e é aberta pelo item **Biblioteca**
+da sidebar, acima de **Skills**.
+
+- **Envio**: “Enviar arquivos…” (seletor nativo múltiplo; drag & drop com a
+  página aberta) importa os arquivos para `artifacts/<id>/` com
+  `conversation_id = NULL` e metadados no SQLite. Os limites e a sanitização de
+  nome são os mesmos do writer compartilhado (`tools::artifacts`); arquivos
+  enviados são **dados do usuário** como qualquer artefato.
+- **Gestão**: favoritar/desfavoritar, renomear (arquivo + metadados), “Salvar
+  como…”, “Abrir” e excluir com confirmação; miniaturas de imagem são geradas
+  no backend (`get_artifact_thumbnail`, PNG ≤512 px) e caem no ícone do tipo
+  quando indisponíveis.
+- **Agente**: os arquivos enviados entram em `db::list_all_artifacts` e,
+  portanto, em `list_artifacts`/`read_artifact` com `conversationId` e
+  `conversationTitle` nulos; o prompt documenta a origem “Biblioteca (enviado
+  pelo usuário)”. Nenhuma tool nova é necessária.
+- **Contrato**: `docs/FILES.md` §14 (v1.8) e
+  `docs/goals/library-page/PLAN.md` (plano/evidências).
+
 ## 12. IPC
 
 Comandos (todos camelCase no JS):
@@ -450,7 +505,9 @@ openai_login_cancel, openai_sign_out, openai_auth_status,
 list_conversations, create_conversation, get_conversation, rename_conversation,
 delete_conversation, set_conversation_pinned, search_conversations,
 truncate_conversation, export_conversation, import_attachments, get_attachment,
-delete_attachment, list_artifacts, get_artifact_content, get_artifact_preview,
+delete_attachment, list_artifacts, list_library_artifacts, import_library_files,
+rename_artifact, set_artifact_favorite, get_artifact_thumbnail,
+get_artifact_content, get_artifact_preview,
 save_artifact, open_artifact, delete_artifact, get_code_environment,
 open_skills_dir, get_skills, set_skill_enabled, delete_skill, get_skill_content,
 run_turn, cancel_turn
@@ -499,8 +556,12 @@ pnpm app:dev            # dev com HMR
 
 A verificação é feita por testes automatizados — unitários e de integração — e por build:
 
-1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo), a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`, incluindo a opção de raciocínio recolhido por padrão), o **renderer de Markdown** (matriz CommonMark/GFM, math, notas de rodapé, alertas, HTML sanitizado e vetores de segurança), as **prévias de artefatos** (PDF via pdf.js mockado, DOCX/XLSX/PPTX por JSON/HTML, imagem e fallback binário; e, na v1.5, imagem com zoom/transparência/TIFF-convertido, áudio/vídeo, ZIP, hexdump, Markdown renderizado, árvore JSON, CSV/TSV com delimitador detectado e código com syntax highlight via Prism estendido — `src/lib/highlight`), a **UI de artefatos** (cards compactos, lista e modos lista↔prévia do painel, botão "+" do chat) e a **detecção/reconciliação de artefatos no store** (eventos filtrados pela conversa ativa, sync autoritativo ao fim do turno/ao reabrir, ordem canônica e proteção contra respostas fora de ordem) e as **fontes/citações** (chips até 8, painel lateral de fontes da conversa, dedupe por URL e abertura no navegador).
-2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui`, o system prompt gerado do contrato, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), **prévias DOCX→HTML/XLSX/PPTX**, **prévias v1.5 de imagem (TIFF→PNG real), ZIP (fixtures e truncamento) e binário (hexdump de 4096 bytes)**, SQLite (conversas/mensagens/anexos/artefatos/usage/`trace` + migração de bancos antigos, incluindo os kinds `audio`/`video`/`archive`), settings/segredos, exportação, **execução de código (interpretador, timeout, cancelamento, coleta de artefatos, sem interpretador)**, **skills embutidas/usuário (frontmatter, precedência, scripts→preview)** e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor, cancelamento e o trace por passo.
+1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo), a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`, incluindo a opção de raciocínio recolhido por padrão), o **renderer de Markdown** (matriz CommonMark/GFM, math, notas de rodapé, alertas, HTML sanitizado e vetores de segurança), as **prévias de artefatos** (PDF via pdf.js mockado, DOCX/XLSX/PPTX por JSON/HTML, imagem e fallback binário; e, na v1.5, imagem com zoom/transparência/TIFF-convertido, áudio/vídeo, ZIP, hexdump, Markdown renderizado, árvore JSON, CSV/TSV com delimitador detectado e código com syntax highlight via Prism estendido — `src/lib/highlight`), a **UI de artefatos** (cards compactos, lista e modos lista↔prévia do painel, botão "+" do chat), a **página Biblioteca** (grade/lista, busca, filtros, ordenação, upload, favoritos, rename/exclusão e prévia) e a **detecção/reconciliação de artefatos no store** (eventos filtrados pela conversa ativa, sync autoritativo ao fim do turno/ao reabrir, ordem canônica e proteção contra respostas fora de ordem) e as **fontes/citações** (chips até 8, painel lateral de fontes da conversa, dedupe por URL e abertura no navegador).
+2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui`, o system prompt gerado do contrato, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), **prévias DOCX→HTML/XLSX/PPTX**, **prévias v1.5 de imagem (TIFF→PNG real), ZIP (fixtures e truncamento) e binário (hexdump de 4096 bytes)**, SQLite (conversas/mensagens/anexos/artefatos/usage/`trace` + migração de bancos antigos, incluindo os kinds `audio`/`video`/`archive` e, na v1.8, a migração de `artifacts` com `conversation_id` nulo e `favorite`), settings/segredos, exportação, **execução de código (interpretador, timeout, cancelamento, coleta de artefatos, sem interpretador)**, **skills embutidas/usuário (frontmatter, precedência, scripts→preview)** e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor, cancelamento e o trace por passo — incluindo as tools
+`list_artifacts`/`read_artifact` (busca/leitura com fixtures reais, biblioteca
+global entre conversas — artefatos de outras conversas são listados/lidos com
+`conversationTitle`/`currentConversation` — e o teste de loop que prova que o
+texto de um artefato de outra conversa chega ao modelo).
 3. **Integração com o gateway real** (testes `#[ignore]`, executados sob demanda): streaming nos 4 protocolos, tool call + replay de `provider_state`, fallback de protocolo, mapeamento de 401, cancelamento e o caso canônico **DeepSeek V4.1 Flash com esforço máximo**.
 4. **Build**: `pnpm typecheck`, `pnpm build` e `pnpm tauri build --no-bundle` (artefato em `src-tauri/target/release/lumina.exe`).
 5. **Manual (release)**: abrir o app e validar visualmente os fluxos principais.
@@ -523,3 +584,5 @@ A verificação é feita por testes automatizados — unitários e de integraç�
 | 12 | OpenAI via "Sign in with ChatGPT" (plano) + API key, endpoints/perfis no catálogo | OAuth interno do Codex CLI/`backend-api` | caminho documentado para apps OSS, sem headers/tokens internos; o backend `backend-api` não é autorizado a terceiros (ver `docs/research/openai-oauth.md`) |
 | 13 | Instância única do app + refresh OAuth single-flight | múltiplas instâncias com refresh rotativo concorrente | refresh token é rotativo; duas instâncias poderiam invalidar a sessão uma da outra |
 | 14 | Anthropic via API oficial só com API key (Bearer) + `anthropic-version` como header estático do catálogo | OAuth/assinatura do Claude Code; `x-api-key` embutido no transporte | a Anthropic não tem programa público de login/plano para apps de terceiros (proibido sem aprovação); Bearer é o formato documentado atual e o header versionado é configurável sem código (ver `docs/goals/anthropic-api-provider/PLAN.md`) |
+| 15 | Biblioteca de artefatos com **escopo de usuário** (todas as conversas) | escopo por conversa (v1 inicial) | pedido do produto: o usuário precisa reaproveitar arquivos criados em outras conversas como contexto; a exposição é limitada a artefatos/metadados (mensagens de outras conversas continuam privadas) e a leitura é local/read-only |
+| 16 | **Página Biblioteca** no lugar do chat (como Skills) + upload do usuário para a biblioteca (`conversation_id NULL` no mesmo `artifacts`) + favoritos/rename | página separada de "arquivos enviados" com tabela própria; pastas/coleções | o usuário precisa de uma visão única dos seus arquivos e o agente precisa do mesmo caminho de leitura; usar a tabela existente evita segunda fonte de verdade, e `Option<conversation_id>` preserva a proveniência sem inventar conversa sintética. Pastas/edição de conteúdo ficam para v2 (pedido não as exige) |

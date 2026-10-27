@@ -6,7 +6,9 @@ import {
   Brain,
   ChevronDown,
   FilePlus,
+  FileSearch,
   FileText,
+  Library,
   Search,
   ShieldCheck,
   SquareTerminal,
@@ -49,6 +51,8 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   run_code: SquareTerminal,
   list_skills: BookOpen,
   read_skill: BookOpen,
+  list_artifacts: Library,
+  read_artifact: FileSearch,
 };
 
 const MAX_DOMAINS = 5;

@@ -312,7 +312,8 @@ export type ArtifactKind =
 
 export interface Artifact {
   id: string;
-  conversationId: string;
+  /** `null` = arquivo enviado pelo usuário direto à Biblioteca (sem conversa). */
+  conversationId: string | null;
   messageId?: string | null;
   name: string;
   mimeType: string;
@@ -320,6 +321,28 @@ export interface Artifact {
   language?: string | null;
   size: number;
   createdAt: number;
+  /**
+   * Marcado pelo usuário na página Biblioteca. Opcional no contrato para que
+   * payloads/fixtures antigos continuem tipando (o backend sempre envia).
+   */
+  favorite?: boolean;
+}
+
+/**
+ * Artefato + origem, como devolvido por `list_library_artifacts`: os campos de
+ * `Artifact` ficam no topo (`serde(flatten)`) e `conversationTitle` é `null`
+ * para arquivos enviados direto à biblioteca (sem conversa).
+ */
+export interface LibraryArtifact extends Artifact {
+  conversationTitle?: string | null;
+}
+
+/** Miniatura PNG gerada no backend para os cards de imagem da Biblioteca. */
+export interface ArtifactThumbnail {
+  mime: string;
+  dataBase64: string;
+  width: number;
+  height: number;
 }
 
 export interface ArtifactContent {

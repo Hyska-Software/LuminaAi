@@ -4187,6 +4187,436 @@ mod agent_loop_tests {
     }
 
     /* ---------------------------------------------------------------- */
+    /* Biblioteca de artefatos: processa o loop real do harness          */
+    /* ---------------------------------------------------------------- */
+
+    /// Prova de aceite da biblioteca de artefatos: um arquivo de um turno
+    /// anterior vira contexto. O 1º passo pede `read_artifact` com
+    /// `maxChars = 20.000` de um arquivo **maior que 24k**; o 2º passo recebe no
+    /// histórico o texto lido **sem corte do harness**, incluindo o marcador
+    /// único do fim da página e o rodapé de paginação.
+    #[tokio::test]
+    async fn read_artifact_feeds_the_model_with_the_previous_turn_file() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        let data_dir = test_data_dir();
+        std::fs::create_dir_all(&data_dir).expect("criar diretório de dados");
+
+        // Arquivo "de um turno anterior", com mais de 24.000 chars: a página de
+        // 20.000 chars do read precisa caber inteira no histórico do modelo.
+        let marker = "MARCADOR-FIM-DA-PAGINA-Q3";
+        let content = format!("{}{}{}", "A".repeat(19_900), marker, "B".repeat(10_000));
+        assert!(content.chars().count() > MAX_MODEL_TOOL_RESULT_CHARS);
+        let artifact = tools::artifacts::write_artifact(
+            temp.db.as_ref(),
+            &data_dir,
+            Some(&conversation.id),
+            Some("msg-anterior"),
+            "grande.txt",
+            content.as_bytes(),
+            None,
+        )
+        .expect("gravar artefato do turno anterior");
+
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            let artifact_id = artifact.id.clone();
+            Arc::new(move |request, sink| {
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let arguments = serde_json::json!({
+                    "id": artifact_id,
+                    "maxChars": 20_000,
+                })
+                .to_string();
+                Box::pin(async move {
+                    if current == 0 {
+                        // 1º passo: o modelo pede o arquivo antigo da biblioteca.
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallStart {
+                                index: 0,
+                                id: "call-read".to_string(),
+                                name: "read_artifact".to_string(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallArgsDelta {
+                                index: 0,
+                                delta: arguments.clone(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallDone {
+                                index: 0,
+                                arguments,
+                            },
+                        );
+                        emit(&sink, ProviderEvent::Done);
+                    } else {
+                        // 2º passo: responde com base no conteúdo já lido.
+                        text_stream(&sink, "O arquivo antigo foi lido como contexto.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.data_dir = Some(data_dir);
+        let (channel, _events) = channel();
+        let result = run_turn(
+            harness,
+            payload(&conversation, 4),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno completo com a biblioteca de artefatos");
+
+        // 1º passo pediu a tool; 2º recebeu o resultado e respondeu texto.
+        let requests = requests.lock().expect("requests lock").clone();
+        assert_eq!(requests.len(), 2, "um request por passo do loop");
+
+        let tool_message = requests[1]
+            .history
+            .iter()
+            .rev()
+            .find(|message| {
+                message.role == HistoryRole::Tool
+                    && message.tool_name.as_deref() == Some("read_artifact")
+            })
+            .expect("resultado da tool no histórico enviado ao modelo");
+        assert!(
+            tool_message.text.contains(marker),
+            "o fim da página lida precisa chegar ao modelo ({} chars no resultado)",
+            tool_message.text.chars().count()
+        );
+        assert!(
+            tool_message.text.chars().count() < MAX_MODEL_TOOL_RESULT_CHARS,
+            "resultado com {} chars foi cortado no orçamento de 24k",
+            tool_message.text.chars().count()
+        );
+        assert!(
+            tool_message.text.contains("continue com offset=20000"),
+            "rodapé de paginação com o próximo offset ausente"
+        );
+        // A prova forte de "sem corte" é o marcador + o rodapé de paginação +
+        // o resultado < 24k acima; o `truncate_chars` do harness não adiciona
+        // marcador próprio, então não há um sinal textual extra a checar aqui.
+
+        let call = &result.assistant_message.tool_calls[0];
+        assert_eq!(call.name, "read_artifact");
+        assert_eq!(call.status, ToolCallStatus::Done);
+        assert!(
+            call.summary
+                .as_deref()
+                .unwrap_or_default()
+                .contains("caracteres"),
+            "summary do read: {:?}",
+            call.summary
+        );
+        assert_eq!(
+            result.assistant_message.content,
+            "O arquivo antigo foi lido como contexto."
+        );
+    }
+
+    /// Segundo caso de aceite: artefato **Office real** (DOCX) de um turno
+    /// anterior vira contexto pela extração de texto de `read_artifact`.
+    #[tokio::test]
+    async fn read_artifact_extracts_a_real_docx_into_the_model_history() {
+        const DOCX: &[u8] = include_bytes!("../documents/testdata/relatorio-trimestral.docx");
+
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let data_dir = test_data_dir();
+        std::fs::create_dir_all(&data_dir).expect("criar diretório de dados");
+
+        let artifact = tools::artifacts::write_artifact(
+            temp.db.as_ref(),
+            &data_dir,
+            Some(&conversation.id),
+            Some("msg-anterior"),
+            "relatorio-trimestral.docx",
+            DOCX,
+            None,
+        )
+        .expect("gravar DOCX do turno anterior");
+        assert_eq!(
+            artifact.kind,
+            crate::domain::ArtifactKind::Docx,
+            "a fixture precisa ser reconhecida como DOCX"
+        );
+
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            let artifact_id = artifact.id.clone();
+            Arc::new(move |request, sink| {
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let arguments = serde_json::json!({ "id": artifact_id }).to_string();
+                Box::pin(async move {
+                    if current == 0 {
+                        // 1º passo: o modelo pede o DOCX antigo pelo id.
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallStart {
+                                index: 0,
+                                id: "call-docx".to_string(),
+                                name: "read_artifact".to_string(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallArgsDelta {
+                                index: 0,
+                                delta: arguments.clone(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallDone {
+                                index: 0,
+                                arguments,
+                            },
+                        );
+                        emit(&sink, ProviderEvent::Done);
+                    } else {
+                        text_stream(&sink, "O relatório trimestral foi usado como contexto.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.data_dir = Some(data_dir);
+        let (channel, _events) = channel();
+        let result = run_turn(
+            harness,
+            payload(&conversation, 4),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno completo lendo o DOCX da biblioteca");
+
+        let requests = requests.lock().expect("requests lock").clone();
+        assert_eq!(requests.len(), 2, "um request por passo do loop");
+        let tool_message = requests[1]
+            .history
+            .iter()
+            .rev()
+            .find(|message| {
+                message.role == HistoryRole::Tool
+                    && message.tool_name.as_deref() == Some("read_artifact")
+            })
+            .expect("resultado da tool no histórico enviado ao modelo");
+
+        // O texto EXTRAÍDO do DOCX (título, item de lista e linha de tabela)
+        // precisa chegar ao modelo no 2º request.
+        for expected in [
+            "Relatório Trimestral — Aurora Analytics",
+            "Receita total: R$ 4,82 milhões (+18% QoQ)",
+            "Plataforma | 2.910.000 | +22%",
+        ] {
+            assert!(
+                tool_message.text.contains(expected),
+                "trecho extraído do DOCX ausente no histórico: `{expected}`"
+            );
+        }
+        assert!(
+            tool_message.text.contains("Artefato: relatorio-trimestral.docx"),
+            "cabeçalho do artefato ausente no resultado"
+        );
+        assert!(
+            tool_message.text.contains("Tipo: docx"),
+            "tipo DOCX ausente no cabeçalho"
+        );
+        assert!(
+            tool_message.text.chars().count() < MAX_MODEL_TOOL_RESULT_CHARS,
+            "resultado de {} chars foi cortado no orçamento de 24k",
+            tool_message.text.chars().count()
+        );
+
+        let call = &result.assistant_message.tool_calls[0];
+        assert_eq!(call.name, "read_artifact");
+        assert_eq!(call.status, ToolCallStatus::Done);
+        let summary = call.summary.as_deref().unwrap_or_default();
+        assert!(
+            summary.contains("relatorio-trimestral.docx") && summary.contains("caracteres"),
+            "summary do DOCX: {:?}",
+            call.summary
+        );
+        assert_eq!(
+            result.assistant_message.content,
+            "O relatório trimestral foi usado como contexto."
+        );
+    }
+
+    /// Terceiro caso de aceite (escopo de usuário): um artefato criado em
+    /// **outra conversa** é lido durante um turno desta conversa e vira contexto
+    /// no histórico enviado ao modelo.
+    #[tokio::test]
+    async fn read_artifact_reads_from_another_conversation_during_a_turn() {
+        let temp = TempDb::new();
+        let current = temp
+            .db
+            .create_conversation("Conversa do turno", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let other = temp
+            .db
+            .create_conversation("Projeto Aurora", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        assert_ne!(current.id, other.id);
+
+        let data_dir = test_data_dir();
+        std::fs::create_dir_all(&data_dir).expect("criar diretório de dados");
+        let marker = "CONTEUDO-DA-CONVERSA-AURORA";
+        let content = format!(
+            "# Resumo do projeto\n{marker}\nReceita: R$ 4,82 milhões\n"
+        );
+        let artifact = tools::artifacts::write_artifact(
+            temp.db.as_ref(),
+            &data_dir,
+            Some(&other.id),
+            Some("msg-outra-conversa"),
+            "resumo-aurora.md",
+            content.as_bytes(),
+            None,
+        )
+        .expect("gravar artefato de outra conversa");
+
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            let artifact_id = artifact.id.clone();
+            Arc::new(move |request, sink| {
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let arguments = serde_json::json!({ "id": artifact_id }).to_string();
+                Box::pin(async move {
+                    if current == 0 {
+                        // 1º passo: o modelo pede o artefato de outra conversa.
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallStart {
+                                index: 0,
+                                id: "call-other".to_string(),
+                                name: "read_artifact".to_string(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallArgsDelta {
+                                index: 0,
+                                delta: arguments.clone(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallDone {
+                                index: 0,
+                                arguments,
+                            },
+                        );
+                        emit(&sink, ProviderEvent::Done);
+                    } else {
+                        text_stream(&sink, "Usei o resumo do projeto Aurora como contexto.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.data_dir = Some(data_dir);
+        let (channel, _events) = channel();
+        let result = run_turn(
+            harness,
+            payload(&current, 4),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno lendo artefato de outra conversa");
+
+        let requests = requests.lock().expect("requests lock").clone();
+        assert_eq!(requests.len(), 2, "um request por passo do loop");
+        let tool_message = requests[1]
+            .history
+            .iter()
+            .rev()
+            .find(|message| {
+                message.role == HistoryRole::Tool
+                    && message.tool_name.as_deref() == Some("read_artifact")
+            })
+            .expect("resultado da tool no histórico enviado ao modelo");
+        assert!(
+            tool_message.text.contains(marker),
+            "o conteúdo do artefato de outra conversa precisa chegar ao modelo"
+        );
+        assert!(
+            tool_message.text.contains("# Resumo do projeto"),
+            "o texto do artefato de outra conversa precisa chegar inteiro"
+        );
+        assert!(
+            tool_message.text.contains("Conversa: Projeto Aurora (outra conversa)"),
+            "o cabeçalho precisa citar a conversa de origem: {}",
+            tool_message.text.lines().take(4).collect::<Vec<_>>().join(" | ")
+        );
+        assert!(
+            tool_message.text.chars().count() < MAX_MODEL_TOOL_RESULT_CHARS,
+            "resultado de {} chars foi cortado no orçamento de 24k",
+            tool_message.text.chars().count()
+        );
+
+        let call = &result.assistant_message.tool_calls[0];
+        assert_eq!(call.name, "read_artifact");
+        assert_eq!(call.status, ToolCallStatus::Done);
+        let summary = call.summary.as_deref().unwrap_or_default();
+        assert!(
+            summary.contains("resumo-aurora.md") && summary.contains("caracteres"),
+            "summary do artefato de outra conversa: {:?}",
+            call.summary
+        );
+        assert_eq!(
+            result.assistant_message.content,
+            "Usei o resumo do projeto Aurora como contexto."
+        );
+    }
+
+    /* ---------------------------------------------------------------- */
     /* T3.4b ModelSource                                                 */
     /* ---------------------------------------------------------------- */
 

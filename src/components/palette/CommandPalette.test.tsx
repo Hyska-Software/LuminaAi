@@ -559,6 +559,48 @@ describe('CommandPalette — comandos contextuais e deep-links', () => {
   });
 });
 
+describe('CommandPalette — biblioteca', () => {
+  it('abre a biblioteca pela paleta e fecha o overlay', async () => {
+    renderPalette();
+    typeQuery('abrir biblioteca');
+
+    fireEvent.click(await screen.findByRole('option', { name: 'Abrir biblioteca' }));
+
+    await waitFor(() => expect(useUiStore.getState().activeView).toBe('library'));
+    expect(useUiStore.getState().commandPaletteOpen).toBe(false);
+  });
+
+  it('abre a biblioteca e aciona o seletor de arquivos pelo evento', async () => {
+    const listener = vi.fn();
+    window.addEventListener('lumina:library-import', listener);
+
+    renderPalette();
+    typeQuery('enviar arquivos para a biblioteca');
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Enviar arquivos para a biblioteca' }),
+    );
+
+    await waitFor(() => expect(useUiStore.getState().activeView).toBe('library'));
+    await waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
+    window.removeEventListener('lumina:library-import', listener);
+  });
+
+  it('só oferece “Voltar ao chat” fora do chat (skills e biblioteca)', async () => {
+    renderPalette();
+    typeQuery('voltar ao chat');
+    expect(screen.queryByRole('option', { name: 'Voltar ao chat' })).toBeNull();
+
+    act(() => {
+      useUiStore.getState().setActiveView('library');
+    });
+
+    const option = await screen.findByRole('option', { name: 'Voltar ao chat' });
+    fireEvent.click(option);
+
+    await waitFor(() => expect(useUiStore.getState().activeView).toBe('chat'));
+  });
+});
+
 describe('CommandPalette — recentes e reabertura', () => {
   it('orders the suggestions by recent usage', () => {
     window.localStorage.setItem(PALETTE_RECENTS_KEY, JSON.stringify(['alternar-tema', 'nova-conversa']));

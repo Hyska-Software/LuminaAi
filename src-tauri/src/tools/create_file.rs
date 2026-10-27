@@ -64,8 +64,8 @@ pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
     match artifacts::write_artifact(
         &rt.db,
         &rt.data_dir,
-        &rt.conversation_id,
-        &rt.message_id,
+        Some(&rt.conversation_id),
+        Some(&rt.message_id),
         &raw_name,
         content.as_bytes(),
         mime_hint.as_deref(),

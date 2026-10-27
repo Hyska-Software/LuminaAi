@@ -67,7 +67,7 @@ describe('resolveHotkey', () => {
     expect(resolveHotkey(event({ key: ',', metaKey: true }), snapshot())).toBe('open-settings');
   });
 
-  it('resolves Escape in priority order: overlays, skills, streaming', () => {
+  it('resolves Escape in priority order: overlays, views, streaming', () => {
     expect(resolveHotkey(event({ key: 'Escape' }), snapshot({ settingsOpen: true }))).toBe(
       'close-overlays',
     );
@@ -77,8 +77,14 @@ describe('resolveHotkey', () => {
     expect(resolveHotkey(event({ key: 'Escape' }), snapshot({ skillsView: true }))).toBe(
       'return-to-chat',
     );
+    expect(resolveHotkey(event({ key: 'Escape' }), snapshot({ libraryView: true }))).toBe(
+      'return-to-chat',
+    );
     expect(
       resolveHotkey(event({ key: 'Escape' }), snapshot({ skillsView: true, streaming: true })),
+    ).toBe('return-to-chat');
+    expect(
+      resolveHotkey(event({ key: 'Escape' }), snapshot({ libraryView: true, streaming: true })),
     ).toBe('return-to-chat');
     expect(resolveHotkey(event({ key: 'Escape' }), snapshot({ streaming: true }))).toBe(
       'stop-streaming',

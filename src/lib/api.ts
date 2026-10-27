@@ -7,11 +7,13 @@ import type {
   Artifact,
   ArtifactContent,
   ArtifactPreview,
+  ArtifactThumbnail,
   AttachmentInfo,
   CatalogView,
   CodeEnvironmentStatus,
   Conversation,
   ConversationDetail,
+  LibraryArtifact,
   LoginChallenge,
   ProviderAuthStatus,
   ProviderValidation,
@@ -94,6 +96,19 @@ export const api = {
   /* -------- artifacts -------- */
   listArtifacts: (conversationId: string) =>
     invoke<Artifact[]>('list_artifacts', { conversationId }),
+  /** Biblioteca do usuário: todos os artefatos (todas as conversas + enviados). */
+  listLibraryArtifacts: () => invoke<LibraryArtifact[]>('list_library_artifacts'),
+  /** Importa arquivos do disco para a biblioteca (sem conversa associada). */
+  importLibraryFiles: (paths: string[]) =>
+    invoke<Artifact[]>('import_library_files', { paths }),
+  /** Renomeia o arquivo no disco + metadados; devolve o artefato atualizado. */
+  renameArtifact: (id: string, name: string) =>
+    invoke<Artifact>('rename_artifact', { id, name }),
+  setArtifactFavorite: (id: string, favorite: boolean) =>
+    invoke<Artifact>('set_artifact_favorite', { id, favorite }),
+  /** Miniatura PNG (≤512 px) para os cards de imagem; `null` se não houver. */
+  getArtifactThumbnail: (id: string) =>
+    invoke<ArtifactThumbnail | null>('get_artifact_thumbnail', { id }),
   getArtifactContent: (id: string) =>
     invoke<ArtifactContent | null>('get_artifact_content', { id }),
   getArtifactPreview: (id: string) =>

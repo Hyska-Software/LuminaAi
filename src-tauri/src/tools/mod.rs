@@ -10,6 +10,7 @@ use crate::db::Db;
 use crate::domain::{Artifact, Citation, Settings, ToolCallRecord, TurnOptions};
 use crate::providers::ToolDefinition;
 
+pub mod artifact_library;
 pub mod artifacts;
 pub mod code_exec;
 pub mod create_file;
@@ -79,6 +80,13 @@ pub fn definitions(options: &TurnOptions) -> Vec<ToolDefinition> {
     // dados e o agente precisa poder lê-las antes de gerar arquivos.
     tools.push(skills::list_definition());
     tools.push(skills::read_definition());
+    // Sempre disponíveis: a biblioteca de artefatos do USUÁRIO (todas as
+    // conversas) é somente leitura e resolve o caso de arquivos de turnos e
+    // conversas anteriores (o histórico não carrega o conteúdo deles). Elas
+    // contam no orçamento de ferramentas de dados, mas nunca são escondidas
+    // pelas flags do turno.
+    tools.push(artifact_library::list_definition());
+    tools.push(artifact_library::read_definition());
     // Sempre disponível: o agente valida o JSON do bloco `ui` antes de emitir.
     tools.push(genui::definition());
     tools
@@ -108,6 +116,10 @@ pub async fn execute(rt: &ToolRuntime, call: &ToolCallRecord) -> ToolOutcome {
         // Skills: sempre disponíveis, independentes das flags do turno.
         "list_skills" => skills::run_list(rt),
         "read_skill" => skills::run_read(rt, &arguments),
+        // Biblioteca de artefatos do usuário (todas as conversas), somente
+        // leitura; não depende das flags do turno.
+        "list_artifacts" => artifact_library::run_list(rt, &arguments).await,
+        "read_artifact" => artifact_library::run_read(rt, &arguments).await,
         // Validação local do bloco `ui`; não depende de flags do turno.
         "validate_ui" => genui::run(&arguments),
         other => ToolOutcome::error(format!("ferramenta desconhecida: {other}")),
@@ -232,6 +244,8 @@ mod tests {
                 "run_code",
                 "list_skills",
                 "read_skill",
+                "list_artifacts",
+                "read_artifact",
                 "validate_ui"
             ]
         );
@@ -240,12 +254,59 @@ mod tests {
         options.create_files = false;
         options.run_code = false;
         let names: Vec<String> = definitions(&options).into_iter().map(|tool| tool.name).collect();
-        // `list_skills`, `read_skill` e `validate_ui` são sempre expostas; elas
-        // não entram no orçamento de ferramentas de dados.
+        // `list_skills`, `read_skill`, `list_artifacts`, `read_artifact` e
+        // `validate_ui` são sempre expostas; apenas as duas primeiras e a
+        // validação de UI não entram no orçamento de ferramentas de dados.
         assert_eq!(
             names,
-            vec!["fetch_url", "list_skills", "read_skill", "validate_ui"]
+            vec![
+                "fetch_url",
+                "list_skills",
+                "read_skill",
+                "list_artifacts",
+                "read_artifact",
+                "validate_ui"
+            ]
         );
+    }
+
+    #[tokio::test]
+    async fn artifact_library_tools_are_dispatched_without_turn_flags() {
+        // As duas tools são somente leitura: nenhuma flag do turno as desativa.
+        let mut options = TurnOptions::default();
+        options.web_search = false;
+        options.create_files = false;
+        options.run_code = false;
+        let names: Vec<String> = definitions(&options).into_iter().map(|tool| tool.name).collect();
+        for name in ["list_artifacts", "read_artifact"] {
+            assert!(names.contains(&name.to_string()), "tool `{name}` ausente");
+        }
+
+        let runtime = ToolRuntime {
+            db: std::sync::Arc::new(Db::open_in_memory().expect("banco em memória")),
+            http: reqwest::Client::new(),
+            conversation_id: "conv-1".to_string(),
+            message_id: "msg-1".to_string(),
+            options,
+            settings: Settings::default(),
+            cancel: tokio_util::sync::CancellationToken::new(),
+            data_dir: std::env::temp_dir().join(format!(
+                "lumina-tools-dispatch-{}",
+                uuid::Uuid::new_v4()
+            )),
+            skills_roots: Vec::new(),
+        };
+        let mut list_call = ToolCallRecord::running("call-1", "list_artifacts");
+        list_call.arguments = "{}".to_string();
+        let list = execute(&runtime, &list_call).await;
+        assert!(!list.is_error, "erro inesperado: {}", list.content);
+        assert_eq!(list.summary.as_deref(), Some("nenhum artefato"));
+
+        let mut read_call = ToolCallRecord::running("call-2", "read_artifact");
+        read_call.arguments = "{}".to_string();
+        let read = execute(&runtime, &read_call).await;
+        assert!(read.is_error, "sem id/nome deve ser erro orientativo");
+        assert!(read.content.contains("`id`"));
     }
 
     #[test]

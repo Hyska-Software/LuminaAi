@@ -223,6 +223,39 @@ describe('AgentSteps', () => {
     expect(container.querySelectorAll('.lucide-square-terminal')).toHaveLength(1);
     expect(container.querySelectorAll('.lucide-book-open')).toHaveLength(2);
   });
+
+  it('renders artifact library rows with their tool icons and file chips', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <AgentSteps
+        streaming={false}
+        phase={null}
+        message={message({
+          reasoning: null,
+          toolCalls: [
+            tool({ name: 'list_artifacts', summary: '3 de 10 artefatos' }),
+            tool({
+              name: 'read_artifact',
+              summary: 'relatorio-trimestral.docx · 1.200 caracteres',
+            }),
+          ],
+          trace: [
+            { reasoning: null, toolCalls: 1 },
+            { reasoning: null, toolCalls: 1 },
+          ],
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /2 passos/ }));
+    expect(screen.getByText('Encontrou 3 artefatos')).toBeTruthy();
+    expect(screen.getByText('Leu o artefato relatorio-trimestral.docx')).toBeTruthy();
+    // The read artifact name also appears as a file chip.
+    expect(screen.getByText('relatorio-trimestral.docx')).toBeTruthy();
+    // list_artifacts → Library; read_artifact → FileSearch.
+    expect(container.querySelectorAll('.lucide-library')).toHaveLength(1);
+    expect(container.querySelectorAll('.lucide-file-search')).toHaveLength(1);
+  });
 });
 
 describe('AgentSteps — raciocínio recolhido por padrão', () => {

@@ -249,10 +249,19 @@ dos outros enquanto os comandos não existem).
 | `run_code` | `language: "python"\|"javascript"`, `code: string`, `timeoutMs?: u32`, `inputFiles?: [{name, content}]` | só com `options.run_code` (gate: settings) |
 | `list_skills` | — | sim (não conta no orçamento de 6) |
 | `read_skill` | `name: string` | sim (não conta no orçamento de 6) |
+| `list_artifacts` | `query?: string`, `kind?: string`, `limit?: integer` | sim (conta no orçamento de 6) |
+| `read_artifact` | `id?: string`, `name?: string`, `offset?: integer`, `maxChars?: integer` | sim (conta no orçamento de 6) |
 
 `run_code` devolve texto + artefatos; `list_skills` devolve JSON
 `[{name, description, source}]`; `read_skill` devolve
 `{name, description, baseDir, files: string[], instructions}`.
+`list_artifacts` devolve JSON `{query,total,returned,snippetsTruncated,artifacts[],note}`
+(busca por nome, título da conversa e conteúdo textual, sem acentos, com trechos,
+número de linha e `conversationId`/`conversationTitle`/`currentConversation`) e
+`read_artifact` devolve texto paginado (12 mil chars por padrão, 20 mil no
+máximo) ou metadados de mídia/ZIP/binário; ambos têm **escopo de usuário**
+(todas as conversas, `db::list_all_artifacts`) — qualquer artefato é listado e
+legível, mas nunca mensagens/contexto de outras conversas.
 
 ### 6.4 Tipos do renderer (`types.ts`)
 
@@ -563,6 +572,9 @@ Chat (ui-core): ícones e rótulos no timeline para `run_code`,
 | `documents::preview` (v1.5) | imagem: PNG/JPEG pass-through com dimensões, TIFF→PNG (assinatura do payload, ≤2560 px), HEIC→Unsupported, corrompido→Err; ZIP: entradas/total/ordem/truncamento (400), não-ZIP→Unsupported, corrompido→Err; binário: formato detectado e preview de exatamente 4096 bytes; vazio não panica |
 | `commands::artifacts` (v1.5) | `preview_for` dos novos kinds; payload de `get_artifact_content` por kind/mime/tamanho (texto, PDF, imagem web-safe vs TIFF, Office/ZIP/binário sem payload, áudio/vídeo ≤24 MiB) |
 | `tools::artifacts` (v1.5) | kind de áudio/vídeo/zip/imagens variadas; `CODE_EXTENSIONS`/`language_for` por extensão e nome completo (Dockerfile/Makefile/CMakeLists/.gitignore); `extension_for_mime` de mídia/zip/tiff/ico |
+| `db` (v1.7) | `list_all_artifacts` (biblioteca do usuário): ordem canônica entre conversas, vazio sem artefatos, metadados/path round-trip |
+| `tools::artifact_library` (v1.7, escopo de usuário) | `list_artifacts`: vazio, biblioteca global com 2 conversas (títulos, `currentConversation`, mais recentes primeiro), busca por nome/conteúdo sem acentos e por **título da conversa** (rank 45), snippets com linha, filtro `kind`, clamp de `limit`, ranking determinístico (exato por nome sem extensão > prefixo > termos), JSON/summary; `read_artifact`: texto raw, paginação/`offset` além do fim, resolução por id/nome **em qualquer conversa** (exato, sem extensão, ambíguo com proveniência, inexistente), cabeçalho `Conversa: … (esta/outra conversa)`, PDF/DOCX/XLSX/PPTX reais de `testdata/` extraídos, metadados de imagem/ZIP/binário/mídia, arquivo ausente, teto de leitura |
+| `harness` (v1.7) | loops com provedor falso pedindo `read_artifact` provam: página de >24k sem corte, DOCX real extraído e artefato **de outra conversa** entrando no histórico enviado ao modelo |
 | `db` (v1.5) | round-trip `Audio`/`Video`/`Archive` (string ↔ enum) e fallback desconhecido→`Binary` |
 | `config` | normalização dos novos campos (clamp timeout, trim paths, defaults) |
 
@@ -629,6 +641,9 @@ Rust (`cargo test` cobre; ver §11).
 | `disabled_skills` sobrescrito por save do renderer | comandos persistem no backend e o renderer chama `reloadSettings()` após mutações |
 | Timeout/processos órfãos no Windows | `taskkill /T /F` na árvore; teste de timeout |
 | Conflito de arquivos entre áreas | write scopes no task board; Lead revisa diff e roda a suíte completa |
+| Ferramenta ler arquivo gigante e estourar o contexto/cortar o resultado | `read_artifact` pagina o texto (12 mil chars por padrão, 20 mil no máximo) e checa o tamanho por `metadata` antes de ler; `list_artifacts` varre no máximo 1 MB por arquivo e 16 MB por chamada e orça o JSON em ~20 mil chars |
+| Artefato exposto entre conversas (decisão de produto) | o escopo é o **usuário** (todas as conversas) por pedido explícito; a biblioteca expõe apenas artefatos/metadados — mensagens/contexto de outras conversas continuam privados e o prompt proíbe revelá-los; teste de prompt |
+| Vazamento de mensagens/conteúdo de outras conversas | a tool só lê a tabela de artefatos + título da conversa de origem; nunca carrega mensagens; `read_artifact` valida id contra a biblioteca de artefatos |
 
 ## 13. Divisão de trabalho (write scopes)
 
@@ -901,6 +916,164 @@ Auditoria completa e contrato: `docs/COMMAND_PALETTE.md`; plano e evidências:
   SettingsDialog 3, uiStore +7); `pnpm build` OK. Sem mudanças de backend
   (`cargo` não alterado).
 
+### v1.7 — biblioteca de artefatos do agente (tools de contexto)
+
+Pedido: “uma Tool que pega a biblioteca de artefatos e pesquisa nela para usar o
+arquivo como contexto para a conversa”. Antes, o agente só conhecia ids de
+artefatos criados no próprio turno; conteúdo de turnos anteriores (e de arquivos
+binários gerados por `run_code`) ficava inacessível.
+
+- **Tools novas** (sempre disponíveis; **contam** no orçamento de 6 chamadas de
+  dados). **Escopo do usuário**: a biblioteca é de todas as conversas, não
+  apenas da conversa atual (decisão registrada em `docs/ARCHITECTURE.md` §16
+  #15), e a exposição fica restrita a artefatos/metadados — mensagens de outras
+  conversas continuam privadas.
+  - `list_artifacts(query?, kind?, limit?)` — lista/pesquisa a biblioteca do
+    usuário por nome, **título da conversa de origem** e conteúdo textual
+    (minúsculas + diacríticos Latino-1 removidos), até 50 resultados (padrão
+    10), trechos com número de linha; sem `query`, **mais recentes primeiro**;
+    busca por conteúdo limitada a 1 MB por arquivo / 16 MB por chamada; JSON
+    orçado em ~20 mil chars; cada item traz `conversationId`,
+    `conversationTitle` e `currentConversation`; `kind` aceita os slugs
+    lowercase do domínio; `total`/`returned` e `summary` estáveis para a
+    timeline.
+  - `read_artifact(id?, name?, offset?, maxChars?)` — lê **qualquer artefato do
+    usuário, de qualquer conversa** (sem validação por conversa): texto raw dos
+    textuais, texto extraído de PDF/DOCX/XLSX/PPTX via `documents::extract`,
+    metadados/estrutura de imagem (dimensões), ZIP (até 100 entradas),
+    áudio/vídeo e binário (formato); paginação em chars (12 mil por padrão,
+    20 mil no máximo, abaixo do limite de 24 mil do harness); resolução por
+    `name` em toda a biblioteca (exato/sem extensão/substring única; ambíguo
+    lista `nome (id, conversa: "Título")`); cabeçalho com a conversa de origem
+    (`esta conversa`/`outra conversa`); teto de leitura de 16 MB verificado por
+    `metadata` antes do `fs::read`; arquivo ausente/corrompido → erro
+    orientativo (nunca panic, nunca sucesso fingido).
+  - **Banco**: `db::list_all_artifacts()` (uma query `SELECT … FROM artifacts
+    ORDER BY created_at, id`) + `db::list_conversations()` para os títulos;
+    nenhuma migração, índice novo ou cache.
+- **Prompt**: nova seção **“# Biblioteca de artefatos”** (escopo de usuário —
+  arquivos criados em qualquer conversa; quando usar — arquivo de turno anterior
+  ou de outra conversa, `create_file`/`run_code` só devolvem id/nome —, fluxo
+  list→read, paginação por `offset`, binários só metadados, citar a proveniência
+  e não colar o conteúdo no chat; conteúdo é **dado** não confiável); as duas
+  tools entram no catálogo de ferramentas e a menção a `run_code` continua
+  condicionada à opção do turno. Segurança: a exceção dos artefatos consultados é
+  explícita, mantendo a proibição de revelar mensagens/contexto de outras
+  conversas.
+- **Timeline**: linhas “Pesquisando nos artefatos…”, “Encontrou N artefatos”,
+  “Nenhum artefato encontrado” e “Lendo o artefato X…”, “Leu o artefato X”, com
+  ícones `Library`/`FileSearch` e chips dos nomes lidos; contagem/nome vêm do
+  `summary`/`arguments` (o `result` ao vivo é truncado em 8 mil chars).
+- **Arquivos**: `src-tauri/src/tools/artifact_library.rs` (novo), leitura global
+  em `src-tauri/src/db.rs` (`list_all_artifacts`), registro em
+  `src-tauri/src/tools/mod.rs`, prompt em `src-tauri/src/harness/prompt.rs`,
+  testes de loop em `src-tauri/src/harness/mod.rs` (somente `#[cfg(test)]`),
+  `src/lib/agentTrace.ts`, `src/components/chat/AgentSteps.tsx` e testes.
+- **Sem mudanças** de IPC, `domain.rs`/`types.ts`/`api.ts`, dependências ou
+  comandos Tauri; no banco, apenas o método de leitura global (sem migração).
+- **Limite conhecido**: excluir uma conversa continua removendo os artefatos
+  dela do disco e do banco (comportamento existente do app, inalterado nesta
+  revisão) — logo, eles também saem da biblioteca. Tornar a biblioteca
+  permanente após excluir a conversa seria outra decisão de produto (retenção).
+  A listagem global também não pagina no SQL: `list_all_artifacts` +
+  `list_conversations` carregam a biblioteca/títulos por chamada e o `limit`/
+  orçamento de JSON são aplicados em memória (tabela pequena no uso real).
+- **Evidências**: `cargo test --lib` **476 passed / 0 failed / 10 ignored**
+  (3 execuções consecutivas; +8 nesta revisão sobre o baseline 468: 3 em `db`,
+  4 em `tools::artifact_library` — incluindo o determinismo de ranking — e 1 de
+  loop cross-conversation no harness) — incluindo os aceites
+  `harness::agent_loop_tests::read_artifact_feeds_the_model_with_the_previous_turn_file`
+  (arquivo de texto de 29.925 chars lido com `maxChars=20000`; marcador do fim da
+  página e rodapé `offset=20000` chegam no histórico do 2º request, < 24.000
+  chars), `harness::agent_loop_tests::read_artifact_extracts_a_real_docx_into_the_model_history`
+  (DOCX real com texto extraído no histórico do modelo) e
+  `harness::agent_loop_tests::read_artifact_reads_from_another_conversation_during_a_turn`
+  (artefato da conversa “Projeto Aurora” vira contexto num turno de outra
+  conversa, com o cabeçalho de proveniência); `cargo test --lib read_artifact_`
+  → 3 passed; `cargo test --lib artifact_library` → 34 passed; `cargo test --lib
+  db` → 17 passed; `cargo check --lib --tests` OK; `pnpm typecheck` OK; `pnpm test` **68 arquivos
+  / 1363 testes**; `pnpm build` OK. Detalhes em
+  `docs/goals/artifact-library-tool/EVIDENCE.md`.
+
+### v1.8 — página Biblioteca (arquivos do usuário + upload + gestão)
+
+Pedido: “uma nova página (como a de skills) que mostra todos os artefatos do
+usuário de forma organizada e com filtros, acima do botão Skills na sidebar,
+seguindo o conceito de layout da imagem; o usuário pode enviar arquivos para a
+biblioteca, acessíveis ao agente pela tool de buscar artefatos; visualizar e
+gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
+`docs/goals/library-page/{PLAN,EVIDENCE}.md`; layout em
+`docs/goals/library-page/REFERENCE.png`; decisão em `docs/ARCHITECTURE.md` §16
+#16.
+
+- **Página** (`src/components/library/**`, `activeView: 'library'`, no lugar da
+  coluna do chat): header com “Voltar ao chat”, título **Biblioteca**, busca
+  (nome/tipo/título da conversa, sem acentos), ordenação (Recentes, Mais
+  antigos, Nome, Tamanho), alternância **grade/lista**, botão **Enviar
+  arquivos** e filtros em pills **Tudo · Favoritos · Imagens · Documentos ·
+  Código · Mídia · Outros** (contadores). Cards na grade (`auto-fill`, mínimo
+  180px) e linhas na lista: tile/ícone do tipo nas cores do design system,
+  miniatura real para imagens (`get_artifact_thumbnail`, PNG ≤512 px), nome,
+  estrela de favorito, menu de ações e origem (`Biblioteca` ou título da
+  conversa). Prévia em dialog com os mesmos renderizadores do painel de
+  artefatos, navegação anterior/próximo, favoritar, renomear inline, “Salvar
+  como…”, “Abrir” e excluir com confirmação; estados de carregamento, erro com
+  retry, biblioteca vazia (CTA) e filtro sem resultados.
+- **Sidebar**: item **Biblioteca** sempre visível, imediatamente **acima** de
+  Skills; Esc na página volta ao chat; paleta de comandos ganha “Abrir
+  biblioteca” e “Enviar arquivos para a biblioteca”.
+- **Upload** (`import_library_files(paths)`): o renderer usa o seletor nativo
+  do `@tauri-apps/plugin-dialog` (`open({ multiple: true })`) ou recebe os
+  paths do drag & drop da janela; o backend copia cada arquivo para
+  `artifacts/<id>/<nome>` com `conversation_id = NULL`, nome sanitizado,
+  MIME/kind/language do writer compartilhado (`tools::artifacts::
+  write_artifact_file`) e metadados no SQLite. Limites: 100 arquivos por
+  chamada e 256 MiB por arquivo; best-effort com erro só quando nada importou.
+- **Banco/migração**: `artifacts.conversation_id` passa a ser **nullable**
+  (upload não pertence a conversa) e a tabela ganha `favorite INTEGER NOT NULL
+  DEFAULT 0`. Bancos antigos são migrados na abertura: adiciona `favorite` e,
+  quando a coluna antiga é `NOT NULL`, reconstrói a tabela em transação
+  copiando todas as linhas (nenhum artefato é perdido; `favorite = 0`).
+  `db::insert_artifact` aceita `Option`; novos métodos
+  `list_library_artifacts` (LEFT JOIN `conversations`, `created_at DESC, id
+  DESC`, título de origem), `set_artifact_favorite` e
+  `update_artifact_rename` (metadados + path no mesmo UPDATE, usado pelo
+  comando de rename; `update_artifact_metadata` cobre a API somente-metadados
+  nos testes). `delete_conversation` continua apagando somente os artefatos da
+  conversa; uploads sobrevivem.
+- **Comandos novos** (registrados em `lib.rs`): `list_library_artifacts`,
+  `import_library_files`, `rename_artifact`, `set_artifact_favorite`,
+  `get_artifact_thumbnail`. `list_artifacts(conversationId)`,
+  `get_artifact_content`, `get_artifact_preview`, `save_artifact`,
+  `open_artifact` e `delete_artifact` não mudam e funcionam para uploads.
+- **Contratos**: `Artifact.conversation_id: Option<String>` + `favorite: bool`
+  (`domain.rs`/`types.ts`), `LibraryArtifact` (`#[serde(flatten)]` +
+  `conversationTitle`) e `ArtifactThumbnail` (`mime`/`dataBase64`/`width`/
+  `height`); `api.listLibraryArtifacts/importLibraryFiles/renameArtifact/
+  setArtifactFavorite/getArtifactThumbnail`. `MainView` ganha `'library'`;
+  `HotkeySnapshot.libraryView` faz Esc voltar ao chat; drag & drop com a
+  Biblioteca aberta emite `lumina:library-drop` (o App não adiciona anexos ao
+  composer nesse caso).
+- **Agente**: `list_artifacts` lista também uploads (`conversationId` e
+  `conversationTitle` nulos, `currentConversation: false`) e `read_artifact`
+  mostra a origem “Biblioteca (enviado pelo usuário)”; o prompt documenta a
+  nova origem e mantém a regra de conteúdo não confiável. Nenhuma tool nova.
+- **Testes**: `db` (migração de banco antigo preservando linhas, ordenação e
+  título da biblioteca, favorito, metadados); `commands::artifacts` (import de
+  arquivos reais, caps, diretório/ausente, rename com recálculo de
+  MIME/kind/linguagem, favorito, miniatura PNG/TIFF/não-imagem, delete de
+  upload); `tools::artifacts` (`write_artifact(None)`, `write_artifact_file`);
+  `tools::artifact_library` (upload sem conversa listado/lido, proveniência,
+  busca); `harness::prompt`; renderer com `LibraryView.test.tsx` (busca,
+  filtros, sort, grade/lista, upload, favoritar, prévia, rename, delete, drag &
+  drop, voltar ao chat), `Sidebar.test.tsx` (item acima de Skills) e
+  `hotkeys.test.ts` (Esc na biblioteca).
+- **Evidências**: `cargo check` OK; `cargo test --lib` **515 passed / 0 failed
+  / 10 ignored** (baseline 476; +39); `pnpm typecheck` OK; `pnpm test`
+  **70 arquivos / 1431 testes** (baseline 68/1363); `pnpm build` OK. Detalhes,
+  nomes dos testes de aceite e roteiro de QA manual em
+  `docs/goals/library-page/EVIDENCE.md`.
+
 ## 15. Critérios de aceite
 
 1. `run_code` habilitado gera DOCX, XLSX, PPTX e PDF via scripts das skills, e
@@ -937,3 +1110,23 @@ Auditoria completa e contrato: `docs/COMMAND_PALETTE.md`; plano e evidências:
 12. `pnpm test`/`pnpm build`/`cargo test --lib` verdes com os novos testes de
     prévia (imagem/áudio/vídeo/ZIP/hexdump/markdown/JSON/código/CSV) e sem
     payloads gigantes no IPC (caps documentados em §9.2).
+13. **v1.7 — biblioteca de artefatos**: em um turno novo o agente lista e
+    pesquisa **todos os artefatos do usuário (qualquer conversa)** com
+    `list_artifacts` (nome, título da conversa e conteúdo; mais recentes
+    primeiro) e traz o conteúdo de qualquer um deles ao contexto com
+    `read_artifact` (inclusive de outra conversa, sem validação por conversa),
+    incluindo texto extraído de PDF/DOCX/XLSX/PPTX, com paginação que não é
+    cortada pelo limite de 24 mil chars; o resultado informa a conversa de
+    origem; a timeline mostra “Encontrou N artefatos”/“Leu o artefato …”;
+    prompt, definições e testes (`cargo test --lib`, `pnpm test`, `pnpm build`)
+    refletem a entrega.
+14. **v1.8 — página Biblioteca**: o item Biblioteca aparece **acima** de
+    Skills na sidebar e abre uma página (no lugar do chat) com **todos** os
+    artefatos do usuário, busca, filtros por categoria/favoritos, ordenação,
+    grade/lista e estados vazios; o usuário **envia arquivos** pelo seletor
+    nativo (e drag & drop), vê miniaturas de imagem, abre a prévia por tipo,
+    **favorita, renomeia, salva como, abre e exclui**; os arquivos enviados
+    (`conversation_id NULL`) aparecem para o agente em `list_artifacts`
+    (`conversationTitle: null`) e são lidos por `read_artifact`; um banco
+    antigo migra sem perder artefatos; `cargo test --lib`, `pnpm typecheck`,
+    `pnpm test` e `pnpm build` verdes.

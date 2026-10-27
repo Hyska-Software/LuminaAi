@@ -4,10 +4,11 @@ import { DEFAULT_SETTINGS_TAB, isSettingsTabId, type SettingsTabId } from '../se
 import type { Artifact, ThemeMode } from '../types';
 
 /**
- * Main content surface. `skills` replaces the chat column (the sidebar stays
- * visible), so skill management never opens as a modal — docs/FILES.md §7.4.
+ * Main content surface. `skills` and `library` replace the chat column (the
+ * sidebar stays visible), so their management never opens as a modal —
+ * docs/FILES.md §7.4 and docs/goals/library-page/PLAN.md.
  */
-export type MainView = 'chat' | 'skills';
+export type MainView = 'chat' | 'skills' | 'library';
 
 /**
  * Surface shown by the artifact side panel: the generated-artifact list (the

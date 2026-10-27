@@ -426,7 +426,11 @@ impl ArtifactKind {
 #[serde(rename_all = "camelCase")]
 pub struct Artifact {
     pub id: String,
-    pub conversation_id: String,
+    /// `None` = arquivo enviado pelo usuário direto à Biblioteca (sem conversa).
+    /// Os artefatos criados pelo agente continuam sempre associados a uma
+    /// conversa.
+    #[serde(default)]
+    pub conversation_id: Option<String>,
     #[serde(default)]
     pub message_id: Option<String>,
     pub name: String,
@@ -436,6 +440,34 @@ pub struct Artifact {
     pub language: Option<String>,
     pub size: i64,
     pub created_at: i64,
+    /// Marcado pelo usuário na Biblioteca; não influencia o agente.
+    #[serde(default)]
+    pub favorite: bool,
+}
+
+/// Artefato + título da conversa de origem, usado pela página Biblioteca.
+///
+/// `conversation_title == None` identifica os arquivos enviados direto à
+/// biblioteca (sem conversa). `#[serde(flatten)]` mantém o JSON achatado: os
+/// campos de [`Artifact`] aparecem no topo, seguidos de `conversationTitle`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryArtifact {
+    #[serde(flatten)]
+    pub artifact: Artifact,
+    #[serde(default)]
+    pub conversation_title: Option<String>,
+}
+
+/// Miniatura PNG gerada no backend para os cards de imagem da Biblioteca.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactThumbnail {
+    /// Sempre `image/png` (a miniatura é reencodada).
+    pub mime: String,
+    pub data_base64: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -926,5 +958,67 @@ mod tests {
         .expect("serialize binary preview");
         assert_eq!(binary["kind"], "binary");
         assert_eq!(binary["previewBytes"], 3);
+    }
+
+    /// Contrato da página Biblioteca (`list_library_artifacts`): o
+    /// `serde(flatten)` precisa manter os campos de `Artifact` no topo, em
+    /// camelCase, junto de `conversationTitle` — o renderer tipa o retorno como
+    /// `LibraryArtifact extends Artifact`.
+    #[test]
+    fn library_artifact_serializes_flattened_with_camel_case() {
+        let generated = LibraryArtifact {
+            artifact: Artifact {
+                id: "art-1".into(),
+                conversation_id: Some("conv-1".into()),
+                message_id: Some("msg-1".into()),
+                name: "relatorio.md".into(),
+                mime_type: "text/markdown".into(),
+                kind: ArtifactKind::Markdown,
+                language: Some("markdown".into()),
+                size: 42,
+                created_at: 1_700_000_000_000,
+                favorite: true,
+            },
+            conversation_title: Some("Planejamento".into()),
+        };
+        let json = serde_json::to_value(&generated).expect("serialize library artifact");
+        assert_eq!(json["id"], "art-1");
+        assert_eq!(json["conversationId"], "conv-1");
+        assert_eq!(json["messageId"], "msg-1");
+        assert_eq!(json["mimeType"], "text/markdown");
+        assert_eq!(json["createdAt"], 1_700_000_000_000_i64);
+        assert_eq!(json["favorite"], true);
+        assert_eq!(json["conversationTitle"], "Planejamento");
+        // Achatado: nada de subobjeto `artifact` vazando no IPC.
+        assert!(json.get("artifact").is_none());
+
+        let upload = LibraryArtifact {
+            artifact: Artifact {
+                conversation_id: None,
+                message_id: None,
+                favorite: false,
+                ..generated.artifact
+            },
+            conversation_title: None,
+        };
+        let json = serde_json::to_value(&upload).expect("serialize upload");
+        assert!(json["conversationId"].is_null(), "upload não tem conversa");
+        assert!(json["conversationTitle"].is_null());
+        assert_eq!(json["favorite"], false);
+    }
+
+    #[test]
+    fn artifact_thumbnail_uses_camel_case_for_the_ipc_payload() {
+        let thumbnail = ArtifactThumbnail {
+            mime: "image/png".into(),
+            data_base64: "iVBOR".into(),
+            width: 512,
+            height: 288,
+        };
+        let json = serde_json::to_value(&thumbnail).expect("serialize thumbnail");
+        assert_eq!(json["mime"], "image/png");
+        assert_eq!(json["dataBase64"], "iVBOR");
+        assert_eq!(json["width"], 512);
+        assert_eq!(json["height"], 288);
     }
 }

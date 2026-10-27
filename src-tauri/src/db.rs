@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use crate::domain::{
     now_ms, Artifact, ArtifactKind, AttachmentInfo, ChatMessage, Conversation, ConversationDetail,
-    MessageRole, MessageStatus, UsageInfo,
+    LibraryArtifact, MessageRole, MessageStatus, UsageInfo,
 };
 
 /* ------------------------------------------------------------------ */
@@ -32,7 +32,13 @@ const ATTACHMENT_COLUMNS: &str = "id, name, mime_type, size, kind, text, page_co
      width, height, file_path, created_at";
 
 const ARTIFACT_COLUMNS: &str = "id, conversation_id, message_id, name, mime_type, kind, \
-     language, size, created_at";
+     language, size, created_at, favorite";
+
+/// Mesmas colunas de [`ARTIFACT_COLUMNS`], qualificadas para a query com
+/// `LEFT JOIN conversations` de [`Db::list_library_artifacts`]. Um teste garante
+/// que as duas listas continuam na mesma ordem (o mapper lê por posição).
+const ARTIFACT_JOIN_COLUMNS: &str = "a.id, a.conversation_id, a.message_id, a.name, \
+     a.mime_type, a.kind, a.language, a.size, a.created_at, a.favorite";
 
 /* ------------------------------------------------------------------ */
 /* Schema                                                              */
@@ -91,7 +97,8 @@ CREATE TABLE IF NOT EXISTS attachments (
 
 CREATE TABLE IF NOT EXISTS artifacts (
   id              TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL,
+  -- NULL = arquivo enviado pelo usuário direto à Biblioteca (sem conversa).
+  conversation_id TEXT,
   message_id      TEXT,
   name            TEXT NOT NULL,
   mime_type       TEXT NOT NULL,
@@ -99,7 +106,8 @@ CREATE TABLE IF NOT EXISTS artifacts (
   language        TEXT,
   size            INTEGER NOT NULL,
   created_at      INTEGER NOT NULL,
-  path            TEXT NOT NULL
+  path            TEXT NOT NULL,
+  favorite        INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS usage_log (
@@ -212,6 +220,80 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, ddl: &str) -> Res
         conn.execute(ddl, [])
             .with_context(|| format!("falha ao adicionar a coluna {column} em {table}"))?;
     }
+    Ok(())
+}
+
+/// Leh `(nome, notnull)` de cada coluna da tabela (ordem do `PRAGMA table_info`).
+fn table_columns(conn: &Connection, table: &str) -> Result<Vec<(String, bool)>> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .with_context(|| format!("falha ao inspecionar a tabela {table}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            let name: String = row.get(1)?;
+            let not_null: i64 = row.get(3)?;
+            Ok((name, not_null != 0))
+        })
+        .with_context(|| format!("falha ao listar colunas de {table}"))?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .with_context(|| format!("falha ao ler colunas de {table}"))
+}
+
+/// Migração aditiva e idempotente da tabela `artifacts`:
+///
+/// 1. bancos anteriores à Biblioteca ganham `favorite INTEGER NOT NULL DEFAULT 0`;
+/// 2. bancos em que `conversation_id` ainda é `NOT NULL` são reconstruídos (a
+///    coluna passa a aceitar `NULL`, que identifica um arquivo enviado pelo
+///    usuário direto à biblioteca). A reconstrução roda em transação e copia
+///    todas as linhas — nenhum artefato é perdido e os antigos ficam
+///    `favorite = 0`.
+fn migrate_artifacts_schema(conn: &Connection) -> Result<()> {
+    ensure_column(
+        conn,
+        "artifacts",
+        "favorite",
+        "ALTER TABLE artifacts ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0",
+    )?;
+
+    let conversation_id_is_required = table_columns(conn, "artifacts")?
+        .iter()
+        .any(|(name, not_null)| name == "conversation_id" && *not_null);
+    if !conversation_id_is_required {
+        return Ok(());
+    }
+
+    let tx = conn
+        .unchecked_transaction()
+        .context("falha ao abrir a transação de migração da tabela artifacts")?;
+    // `artifacts_new` só existiria se uma migração anterior tivesse sido
+    // interrompida fora da transação; o DROP defensivo mantém a migração
+    // idempotente sem arriscar a tabela atual (que só cai depois da cópia).
+    tx.execute_batch(
+        "DROP TABLE IF EXISTS artifacts_new;
+         CREATE TABLE artifacts_new (
+           id              TEXT PRIMARY KEY,
+           conversation_id TEXT,
+           message_id      TEXT,
+           name            TEXT NOT NULL,
+           mime_type       TEXT NOT NULL,
+           kind            TEXT NOT NULL,
+           language        TEXT,
+           size            INTEGER NOT NULL,
+           created_at      INTEGER NOT NULL,
+           path            TEXT NOT NULL,
+           favorite        INTEGER NOT NULL DEFAULT 0
+         );
+         INSERT INTO artifacts_new (id, conversation_id, message_id, name, mime_type, kind,
+                                    language, size, created_at, path, favorite)
+           SELECT id, conversation_id, message_id, name, mime_type, kind, language, size,
+                  created_at, path, favorite
+           FROM artifacts;
+         DROP TABLE artifacts;
+         ALTER TABLE artifacts_new RENAME TO artifacts;",
+    )
+    .context("falha ao reconstruir a tabela artifacts para aceitar uploads da biblioteca")?;
+    tx.commit()
+        .context("falha ao confirmar a migração da tabela artifacts")?;
     Ok(())
 }
 
@@ -393,7 +475,17 @@ fn artifact_from_row(row: &Row<'_>) -> rusqlite::Result<Artifact> {
         language: row.get(6)?,
         size: row.get(7)?,
         created_at: row.get(8)?,
+        favorite: row.get::<_, i64>(9)? != 0,
     })
+}
+
+/// Lê um artefato pela PK com a conexão já travada (usado pelos updates que
+/// devolvem o registro atualizado).
+fn artifact_by_id(conn: &Connection, id: &str) -> anyhow::Result<Option<Artifact>> {
+    let sql = format!("SELECT {ARTIFACT_COLUMNS} FROM artifacts WHERE id = ?1");
+    conn.query_row(&sql, [id], |row| artifact_from_row(row))
+        .optional()
+        .context("falha ao ler artefato")
 }
 
 /* ------------------------------------------------------------------ */
@@ -578,6 +670,8 @@ impl Db {
             "trace",
             "ALTER TABLE messages ADD COLUMN trace TEXT NOT NULL DEFAULT '[]'",
         )?;
+        // Biblioteca: `favorite` + `conversation_id` nullable (uploads do usuário).
+        migrate_artifacts_schema(conn)?;
         Ok(())
     }
 
@@ -868,8 +962,8 @@ impl Db {
         let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO artifacts (id, conversation_id, message_id, name, mime_type, kind, \
-             language, size, created_at, path) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             language, size, created_at, path, favorite) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 &artifact.artifact.id,
                 &artifact.artifact.conversation_id,
@@ -881,6 +975,7 @@ impl Db {
                 artifact.artifact.size,
                 artifact.artifact.created_at,
                 &artifact.path,
+                artifact.artifact.favorite as i64,
             ],
         )
         .with_context(|| format!("falha ao inserir artefato {}", artifact.artifact.id))?;
@@ -899,13 +994,47 @@ impl Db {
             .context("falha ao listar artefatos")
     }
 
+    /// Todos os artefatos do usuário (todas as conversas), na ordem canônica de
+    /// criação (`created_at, id`). É a fonte de verdade da biblioteca global do
+    /// agente; o recorte por conversa continua em [`Db::list_artifacts`].
+    pub fn list_all_artifacts(&self) -> anyhow::Result<Vec<Artifact>> {
+        let conn = self.conn.lock();
+        let sql = format!("SELECT {ARTIFACT_COLUMNS} FROM artifacts ORDER BY created_at, id");
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([], |row| artifact_from_row(row))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar os artefatos")
+    }
+
+    /// Biblioteca do usuário: todos os artefatos (gerados em qualquer conversa
+    /// **e** os enviados direto à biblioteca, `conversation_id IS NULL`), mais
+    /// recentes primeiro, com o título da conversa de origem (`None` para
+    /// uploads). Uma única query com `LEFT JOIN`.
+    pub fn list_library_artifacts(&self) -> anyhow::Result<Vec<LibraryArtifact>> {
+        let conn = self.conn.lock();
+        let sql = format!(
+            "SELECT {ARTIFACT_JOIN_COLUMNS}, c.title \
+             FROM artifacts a LEFT JOIN conversations c ON c.id = a.conversation_id \
+             ORDER BY a.created_at DESC, a.id DESC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([], |row| {
+            Ok(LibraryArtifact {
+                artifact: artifact_from_row(row)?,
+                conversation_title: row.get(10)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar a biblioteca de artefatos")
+    }
+
     pub fn get_artifact(&self, id: &str) -> anyhow::Result<Option<StoredArtifact>> {
         let conn = self.conn.lock();
         let sql = format!("SELECT {ARTIFACT_COLUMNS}, path FROM artifacts WHERE id = ?1");
         conn.query_row(&sql, [id], |row| {
             Ok(StoredArtifact {
                 artifact: artifact_from_row(row)?,
-                path: row.get(9)?,
+                path: row.get(10)?,
             })
         })
         .optional()
@@ -917,6 +1046,81 @@ impl Db {
         conn.execute("DELETE FROM artifacts WHERE id = ?1", [id])
             .context("falha ao remover artefato")?;
         Ok(())
+    }
+
+    /// Marca/desmarca o favorito na Biblioteca e devolve o artefato atualizado.
+    /// `None` quando o id não existe (o comando transforma em erro).
+    pub fn set_artifact_favorite(
+        &self,
+        id: &str,
+        favorite: bool,
+    ) -> anyhow::Result<Option<Artifact>> {
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE artifacts SET favorite = ?2 WHERE id = ?1",
+                params![id, if favorite { 1i64 } else { 0i64 }],
+            )
+            .context("falha ao atualizar o favorito do artefato")?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        artifact_by_id(&conn, id)
+    }
+
+    /// Atualiza os metadados de um artefato renomeado (o arquivo em disco é
+    /// renomeado pelo comando). O `path` da linha é atualizado em
+    /// [`Db::update_artifact_rename`], no mesmo UPDATE do rename — por isso o
+    /// comando de produção usa o método combinado; este fica coberto pelos
+    /// testes da API do banco.
+    /// `None` quando o id não existe.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn update_artifact_metadata(
+        &self,
+        id: &str,
+        name: &str,
+        mime_type: &str,
+        kind: ArtifactKind,
+        language: Option<&str>,
+    ) -> anyhow::Result<Option<Artifact>> {
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE artifacts SET name = ?2, mime_type = ?3, kind = ?4, language = ?5 \
+                 WHERE id = ?1",
+                params![id, name, mime_type, artifact_kind_to_str(&kind), language],
+            )
+            .context("falha ao atualizar os metadados do artefato")?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        artifact_by_id(&conn, id)
+    }
+
+    /// Rename: grava metadados **e** o novo caminho do arquivo em um único
+    /// UPDATE (evita linha com path/metadados divergentes). `None` quando o id
+    /// não existe.
+    pub fn update_artifact_rename(
+        &self,
+        id: &str,
+        name: &str,
+        mime_type: &str,
+        kind: ArtifactKind,
+        language: Option<&str>,
+        path: &str,
+    ) -> anyhow::Result<Option<Artifact>> {
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE artifacts SET name = ?2, mime_type = ?3, kind = ?4, language = ?5, \
+                 path = ?6 WHERE id = ?1",
+                params![id, name, mime_type, artifact_kind_to_str(&kind), language, path],
+            )
+            .context("falha ao renomear o artefato no banco")?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        artifact_by_id(&conn, id)
     }
 
     /* ---------------- usage ---------------- */
@@ -1104,7 +1308,7 @@ mod tests {
         StoredArtifact {
             artifact: Artifact {
                 id: id.to_string(),
-                conversation_id: conversation_id.to_string(),
+                conversation_id: Some(conversation_id.to_string()),
                 message_id: None,
                 name: "resumo.md".to_string(),
                 mime_type: "text/markdown".to_string(),
@@ -1112,12 +1316,38 @@ mod tests {
                 language: None,
                 size: 12,
                 created_at: 1_700_000_000_000,
+                favorite: false,
             },
             path: std::env::temp_dir()
                 .join("lumina-db-tests")
                 .join("artifacts")
                 .join(id)
                 .join("resumo.md")
+                .to_string_lossy()
+                .to_string(),
+        }
+    }
+
+    /// Artefato enviado pelo usuário direto à Biblioteca: não tem conversa.
+    fn library_artifact(id: &str, name: &str, created_at: i64) -> StoredArtifact {
+        StoredArtifact {
+            artifact: Artifact {
+                id: id.to_string(),
+                conversation_id: None,
+                message_id: None,
+                name: name.to_string(),
+                mime_type: "application/pdf".to_string(),
+                kind: ArtifactKind::Pdf,
+                language: None,
+                size: 4_096,
+                created_at,
+                favorite: false,
+            },
+            path: std::env::temp_dir()
+                .join("lumina-db-tests")
+                .join("artifacts")
+                .join(id)
+                .join(name)
                 .to_string_lossy()
                 .to_string(),
         }
@@ -1413,6 +1643,104 @@ mod tests {
         assert!(db.get_artifact("art-7").expect("get").is_none());
     }
 
+    #[test]
+    fn list_all_artifacts_orders_by_creation_across_conversations() {
+        let db = test_db();
+        let first = db
+            .create_conversation("Primeira", "opencode-go", "glm-5.3-flash")
+            .expect("create first");
+        let second = db
+            .create_conversation("Segunda", "opencode-go", "glm-5.3-flash")
+            .expect("create second");
+
+        // Inserção fora de ordem de propósito: a ordenação vem do SQL, não da
+        // sequência de inserts. Dois artefatos empatam em `created_at` para
+        // exercitar o desempate por `id`.
+        let mut newest = stored_artifact("art-3", &first.id);
+        newest.artifact.created_at = 3_000;
+        let mut middle = stored_artifact("art-2", &second.id);
+        middle.artifact.created_at = 2_000;
+        let mut tied = stored_artifact("art-9", &first.id);
+        tied.artifact.created_at = 1_000;
+        let mut oldest = stored_artifact("art-1", &second.id);
+        oldest.artifact.created_at = 1_000;
+        for artifact in [&newest, &middle, &tied, &oldest] {
+            db.insert_artifact(artifact).expect("insert artifact");
+        }
+
+        let all = db.list_all_artifacts().expect("list all");
+        let ids: Vec<&str> = all.iter().map(|artifact| artifact.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["art-1", "art-9", "art-2", "art-3"],
+            "ordem canônica created_at, id"
+        );
+        assert_eq!(
+            all[0].conversation_id.as_deref(),
+            Some(second.id.as_str()),
+            "artefato da segunda conversa entra na biblioteca do usuário"
+        );
+        assert_eq!(all[1].conversation_id.as_deref(), Some(first.id.as_str()));
+        assert_eq!(all[2].conversation_id.as_deref(), Some(second.id.as_str()));
+        assert_eq!(all[3].conversation_id.as_deref(), Some(first.id.as_str()));
+    }
+
+    #[test]
+    fn list_all_artifacts_is_empty_without_artifacts() {
+        let db = test_db();
+        assert!(
+            db.list_all_artifacts().expect("list all").is_empty(),
+            "sem artefatos a biblioteca do usuário é vazia"
+        );
+
+        // Uma conversa sem artefatos não inventa linhas na biblioteca global.
+        db.create_conversation("Vazia", "opencode-go", "glm-5.3-flash")
+            .expect("create");
+        assert!(db.list_all_artifacts().expect("list all").is_empty());
+    }
+
+    #[test]
+    fn list_all_artifacts_keeps_metadata_of_every_conversation() {
+        let db = test_db();
+        let first = db
+            .create_conversation("Primeira", "opencode-go", "glm-5.3-flash")
+            .expect("create first");
+        let second = db
+            .create_conversation("Segunda", "opencode-go", "glm-5.3-flash")
+            .expect("create second");
+
+        db.insert_artifact(&stored_artifact("art-first", &first.id))
+            .expect("insert first");
+        let mut artifact = stored_artifact("art-second", &second.id);
+        artifact.artifact.name = "relatorio-q3.md".to_string();
+        artifact.artifact.language = Some("markdown".to_string());
+        db.insert_artifact(&artifact).expect("insert second");
+
+        let all = db.list_all_artifacts().expect("list all");
+        assert_eq!(all.len(), 2, "artefatos das duas conversas");
+        let listed = all
+            .iter()
+            .find(|row| row.id == "art-second")
+            .expect("artefato da segunda conversa listado");
+        assert_eq!(listed.conversation_id.as_deref(), Some(second.id.as_str()));
+        assert_eq!(listed.name, "relatorio-q3.md");
+        assert_eq!(listed.kind, ArtifactKind::Markdown);
+
+        // `get_artifact` continua sendo a fonte do path e dos metadados.
+        let stored = db
+            .get_artifact("art-second")
+            .expect("get")
+            .expect("artefato presente");
+        assert_eq!(
+            stored.artifact.conversation_id.as_deref(),
+            Some(second.id.as_str())
+        );
+        assert_eq!(stored.artifact.name, "relatorio-q3.md");
+        assert_eq!(stored.artifact.kind, ArtifactKind::Markdown);
+        assert_eq!(stored.artifact.language.as_deref(), Some("markdown"));
+        assert_eq!(stored.path, artifact.path, "path round-trip");
+    }
+
     /// Todos os variants do contrato. A lista é mantida à mão de propósito: um
     /// kind novo em `domain.rs` quebra `artifact_kind_to_str` (match exaustivo)
     /// e deve ser adicionado aqui para o round-trip continuar completo.
@@ -1592,5 +1920,385 @@ mod tests {
             .expect("get")
             .expect("present");
         assert!(stored.pinned);
+    }
+
+    /* -------------------------------------------------------------- */
+    /* Biblioteca: uploads sem conversa, favoritos e migração          */
+    /* -------------------------------------------------------------- */
+
+    struct TempDir {
+        path: std::path::PathBuf,
+    }
+
+    impl TempDir {
+        fn new(prefix: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "{prefix}-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&path).expect("criar diretório temporário");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// Banco no schema anterior à Biblioteca: `conversation_id NOT NULL` e sem
+    /// a coluna `favorite`.
+    fn create_legacy_database(path: &Path) {
+        let conn = Connection::open(path).expect("abrir banco legado");
+        conn.execute_batch(
+            "CREATE TABLE artifacts (
+               id              TEXT PRIMARY KEY,
+               conversation_id TEXT NOT NULL,
+               message_id      TEXT,
+               name            TEXT NOT NULL,
+               mime_type       TEXT NOT NULL,
+               kind            TEXT NOT NULL,
+               language        TEXT,
+               size            INTEGER NOT NULL,
+               created_at      INTEGER NOT NULL,
+               path            TEXT NOT NULL
+             );
+             INSERT INTO artifacts (id, conversation_id, message_id, name, mime_type, kind,
+                                    language, size, created_at, path)
+               VALUES ('art-legacy', 'conv-1', 'msg-1', 'antigo.md', 'text/markdown',
+                       'markdown', NULL, 12, 1000,
+                       'C:\\dados\\artifacts\\art-legacy\\antigo.md');
+             INSERT INTO artifacts (id, conversation_id, message_id, name, mime_type, kind,
+                                    language, size, created_at, path)
+               VALUES ('art-legacy-2', 'conv-1', NULL, 'relatorio.pdf', 'application/pdf',
+                       'pdf', NULL, 2048, 2000,
+                       'C:\\dados\\artifacts\\art-legacy-2\\relatorio.pdf');",
+        )
+        .expect("criar schema legado com dados");
+    }
+
+    #[test]
+    fn joined_artifact_columns_stay_in_sync_with_the_row_mapper() {
+        let plain: Vec<&str> = ARTIFACT_COLUMNS.split(',').map(str::trim).collect();
+        let prefixed: Vec<&str> = ARTIFACT_JOIN_COLUMNS
+            .split(',')
+            .map(|column| column.trim().strip_prefix("a.").unwrap_or_else(|| column.trim()))
+            .collect();
+        assert_eq!(
+            prefixed, plain,
+            "a query com JOIN precisa listar as colunas na mesma ordem do mapper"
+        );
+        assert_eq!(plain.len(), 10);
+        assert_eq!(plain[9], "favorite", "favorite é a última coluna do mapper");
+    }
+
+    #[test]
+    fn insert_artifact_roundtrips_a_library_upload_without_conversation() {
+        let db = test_db();
+        db.insert_artifact(&library_artifact("art-upload", "contrato.pdf", 1_000))
+            .expect("inserir upload");
+
+        let stored = db
+            .get_artifact("art-upload")
+            .expect("ler upload")
+            .expect("upload presente");
+        assert!(stored.artifact.conversation_id.is_none());
+        assert!(!stored.artifact.favorite);
+        assert_eq!(stored.artifact.name, "contrato.pdf");
+        assert_eq!(stored.artifact.kind, ArtifactKind::Pdf);
+
+        // Aparece na listagem global do agente (todas as origens).
+        let all = db.list_all_artifacts().expect("list all");
+        assert_eq!(all.len(), 1);
+        assert!(all[0].conversation_id.is_none());
+    }
+
+    #[test]
+    fn list_library_artifacts_orders_desc_and_joins_conversation_titles() {
+        let db = test_db();
+        let first = db
+            .create_conversation("Receitas de bolo", "opencode-go", "glm-5.3-flash")
+            .expect("create first");
+        let second = db
+            .create_conversation("Segunda conversa", "opencode-go", "glm-5.3-flash")
+            .expect("create second");
+
+        let mut oldest = stored_artifact("art-a", &first.id);
+        oldest.artifact.created_at = 1_000;
+        db.insert_artifact(&oldest).expect("insert old");
+        // Upload e artefato gerado empatam em `created_at`: o desempate é por
+        // `id DESC` (art-c antes de art-b).
+        db.insert_artifact(&library_artifact("art-b", "contrato.pdf", 2_000))
+            .expect("insert upload");
+        let mut generated = stored_artifact("art-c", &second.id);
+        generated.artifact.created_at = 2_000;
+        generated.artifact.favorite = true;
+        db.insert_artifact(&generated).expect("insert generated");
+
+        let library = db.list_library_artifacts().expect("listar biblioteca");
+        let ids: Vec<&str> = library
+            .iter()
+            .map(|row| row.artifact.id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            ["art-c", "art-b", "art-a"],
+            "mais recentes primeiro, id DESC no empate"
+        );
+
+        let upload = &library[1];
+        assert!(upload.artifact.conversation_id.is_none());
+        assert!(
+            upload.conversation_title.is_none(),
+            "upload não tem conversa de origem"
+        );
+        assert_eq!(upload.artifact.name, "contrato.pdf");
+
+        assert_eq!(
+            library[0].conversation_title.as_deref(),
+            Some("Segunda conversa")
+        );
+        assert!(library[0].artifact.favorite);
+        assert_eq!(
+            library[2].conversation_title.as_deref(),
+            Some("Receitas de bolo")
+        );
+        assert!(!library[2].artifact.favorite);
+    }
+
+    #[test]
+    fn set_artifact_favorite_persists_and_returns_the_updated_artifact() {
+        let db = test_db();
+        let conversation = db
+            .create_conversation("Chat", "opencode-go", "glm-5.3-flash")
+            .expect("create");
+        db.insert_artifact(&stored_artifact("art-fav", &conversation.id))
+            .expect("insert");
+
+        let favorited = db
+            .set_artifact_favorite("art-fav", true)
+            .expect("favoritar")
+            .expect("artefato presente");
+        assert!(favorited.favorite);
+        assert_eq!(favorited.id, "art-fav");
+        // O recorte por conversa também vê o favorito.
+        let listed = db.list_artifacts(&conversation.id).expect("list");
+        assert!(listed[0].favorite);
+
+        let unfavorited = db
+            .set_artifact_favorite("art-fav", false)
+            .expect("desfavoritar")
+            .expect("artefato presente");
+        assert!(!unfavorited.favorite);
+
+        assert!(
+            db.set_artifact_favorite("inexistente", true)
+                .expect("id desconhecido não é erro de SQL")
+                .is_none(),
+            "id inexistente devolve None para o comando virar erro"
+        );
+    }
+
+    #[test]
+    fn update_artifact_metadata_changes_name_mime_kind_and_language() {
+        let db = test_db();
+        let conversation = db
+            .create_conversation("Chat", "opencode-go", "glm-5.3-flash")
+            .expect("create");
+        db.insert_artifact(&stored_artifact("art-meta", &conversation.id))
+            .expect("insert");
+
+        let updated = db
+            .update_artifact_metadata(
+                "art-meta",
+                "renomeado.pdf",
+                "application/pdf",
+                ArtifactKind::Pdf,
+                None,
+            )
+            .expect("atualizar metadados")
+            .expect("artefato presente");
+        assert_eq!(updated.name, "renomeado.pdf");
+        assert_eq!(updated.mime_type, "application/pdf");
+        assert_eq!(updated.kind, ArtifactKind::Pdf);
+        assert!(updated.language.is_none());
+        // O path continua o mesmo: o arquivo em disco é movido pelo comando.
+        let stored = db
+            .get_artifact("art-meta")
+            .expect("get")
+            .expect("presente");
+        assert_eq!(
+            stored.path,
+            std::env::temp_dir()
+                .join("lumina-db-tests")
+                .join("artifacts")
+                .join("art-meta")
+                .join("resumo.md")
+                .to_string_lossy()
+                .to_string()
+        );
+
+        assert!(
+            db.update_artifact_metadata(
+                "inexistente",
+                "x.txt",
+                "text/plain",
+                ArtifactKind::Text,
+                Some("text")
+            )
+            .expect("id desconhecido não é erro de SQL")
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn update_artifact_rename_saves_metadata_and_path_together() {
+        let db = test_db();
+        db.insert_artifact(&library_artifact("art-rename", "antigo.pdf", 1_000))
+            .expect("insert");
+
+        let new_path = std::env::temp_dir()
+            .join("lumina-db-tests")
+            .join("artifacts")
+            .join("art-rename")
+            .join("contrato-final.pdf")
+            .to_string_lossy()
+            .to_string();
+        let renamed = db
+            .update_artifact_rename(
+                "art-rename",
+                "contrato-final.pdf",
+                "application/pdf",
+                ArtifactKind::Pdf,
+                None,
+                &new_path,
+            )
+            .expect("renomear")
+            .expect("artefato presente");
+        assert_eq!(renamed.name, "contrato-final.pdf");
+
+        let stored = db
+            .get_artifact("art-rename")
+            .expect("get")
+            .expect("presente");
+        assert_eq!(stored.path, new_path, "path do rename gravado no mesmo UPDATE");
+        assert_eq!(stored.artifact.name, "contrato-final.pdf");
+    }
+
+    #[test]
+    fn delete_conversation_keeps_library_uploads() {
+        let db = test_db();
+        let conversation = db
+            .create_conversation("Chat", "opencode-go", "glm-5.3-flash")
+            .expect("create");
+        db.insert_artifact(&stored_artifact("art-conv", &conversation.id))
+            .expect("insert generated");
+        db.insert_artifact(&library_artifact("art-upload", "contrato.pdf", 1_000))
+            .expect("insert upload");
+
+        db.delete_conversation(&conversation.id).expect("delete");
+
+        let library = db.list_library_artifacts().expect("listar");
+        assert_eq!(library.len(), 1, "upload sem conversa sobrevive");
+        assert_eq!(library[0].artifact.id, "art-upload");
+    }
+
+    #[test]
+    fn migrates_legacy_artifacts_table_preserving_rows_and_allowing_uploads() {
+        let temp = TempDir::new("lumina-db-migrate");
+        let path = temp.path.join("lumina.db");
+        create_legacy_database(&path);
+
+        // `Db::open` roda o schema novo (idempotente) e a migração.
+        let db = Db::open(&path).expect("abrir e migrar banco legado");
+        let legacy = db
+            .get_artifact("art-legacy")
+            .expect("ler artefato legado")
+            .expect("nenhum artefato antigo pode ser perdido");
+        assert_eq!(legacy.artifact.name, "antigo.md");
+        assert_eq!(legacy.artifact.conversation_id.as_deref(), Some("conv-1"));
+        assert_eq!(legacy.artifact.created_at, 1_000);
+        assert!(
+            !legacy.artifact.favorite,
+            "linha antiga entra com favorite = 0"
+        );
+        assert_eq!(
+            legacy.path,
+            "C:\\dados\\artifacts\\art-legacy\\antigo.md",
+            "path original preservado"
+        );
+        assert_eq!(db.list_all_artifacts().expect("listar").len(), 2);
+
+        // A coluna `conversation_id` agora aceita NULL (upload da Biblioteca),
+        // e `favorite` funciona nas linhas antigas e novas.
+        db.insert_artifact(&library_artifact("art-upload", "contrato.pdf", 3_000))
+            .expect("upload sem conversa depois da migração");
+        db.set_artifact_favorite("art-upload", true)
+            .expect("favoritar upload")
+            .expect("upload presente");
+        let upload = db
+            .get_artifact("art-upload")
+            .expect("ler upload")
+            .expect("presente");
+        assert!(upload.artifact.conversation_id.is_none());
+        assert!(upload.artifact.favorite);
+        drop(db);
+
+        // Reabrir (migração idempotente) mantém tudo.
+        let reopened = Db::open(&path).expect("reabrir banco migrado");
+        assert!(reopened.get_artifact("art-legacy").expect("legado").is_some());
+        let upload = reopened
+            .get_artifact("art-upload")
+            .expect("upload")
+            .expect("presente");
+        assert!(upload.artifact.favorite);
+        assert_eq!(reopened.list_all_artifacts().expect("listar").len(), 3);
+    }
+
+    #[test]
+    fn migration_is_idempotent_when_favorite_already_exists() {
+        // Estado intermediário: `favorite` já foi adicionada, mas a tabela ainda
+        // tem `conversation_id NOT NULL` (uma migração anterior foi interrompida
+        // entre os dois passos). O rebuild precisa copiar a coluna existente.
+        let temp = TempDir::new("lumina-db-migrate-partial");
+        let path = temp.path.join("lumina.db");
+        create_legacy_database(&path);
+        {
+            let conn = Connection::open(&path).expect("abrir legado");
+            conn.execute_batch(
+                "ALTER TABLE artifacts ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+                 UPDATE artifacts SET favorite = 1 WHERE id = 'art-legacy';",
+            )
+            .expect("adicionar favorite manualmente");
+        }
+
+        let db = Db::open(&path).expect("abrir e terminar a migração");
+        let legacy = db
+            .get_artifact("art-legacy")
+            .expect("get")
+            .expect("presente");
+        assert!(
+            legacy.artifact.favorite,
+            "o rebuild preserva o favorite já gravado"
+        );
+        assert_eq!(legacy.artifact.name, "antigo.md");
+        db.insert_artifact(&library_artifact("art-upload", "contrato.pdf", 3_000))
+            .expect("upload depois da migração");
+        drop(db);
+
+        // E segue idempotente na terceira abertura.
+        let reopened = Db::open(&path).expect("reabrir");
+        assert_eq!(reopened.list_all_artifacts().expect("listar").len(), 3);
+    }
+
+    #[test]
+    fn reset_clears_library_uploads_too() {
+        let db = test_db();
+        db.insert_artifact(&library_artifact("art-upload", "contrato.pdf", 1_000))
+            .expect("insert upload");
+        db.reset().expect("reset");
+        assert!(db.list_library_artifacts().expect("biblioteca").is_empty());
+        assert!(db.list_all_artifacts().expect("artefatos").is_empty());
     }
 }

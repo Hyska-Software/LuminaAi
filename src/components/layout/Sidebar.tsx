@@ -1,6 +1,19 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { Download, Ellipsis, Pencil, Pin, PinOff, Search, Settings, Sparkles, SquarePen, Trash, X } from 'lucide-react';
+import {
+  Download,
+  Ellipsis,
+  Library,
+  Pencil,
+  Pin,
+  PinOff,
+  Search,
+  Settings,
+  Sparkles,
+  SquarePen,
+  Trash,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
@@ -46,6 +59,37 @@ function MenuEntry({ icon, children, danger, onSelect }: MenuEntryProps) {
       <span className={cn('shrink-0', danger ? 'text-danger' : 'text-foreground-subtle')}>{icon}</span>
       {children}
     </DropdownMenu.Item>
+  );
+}
+
+interface NavViewItemProps {
+  icon: ReactNode;
+  label: string;
+  ariaLabel: string;
+  active: boolean;
+  onSelect: () => void;
+}
+
+/** Sidebar entry that replaces the chat column (Skills, Biblioteca) — DESIGN §5. */
+function NavViewItem({ icon, label, ariaLabel, active, onSelect }: NavViewItemProps) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-label={ariaLabel}
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'mx-3 mt-1 flex h-8 items-center gap-2 rounded-lg px-2 text-[13px]',
+        'transition-colors duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+        active
+          ? 'bg-surface-active text-foreground'
+          : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+      )}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
   );
 }
 
@@ -203,6 +247,11 @@ export function Sidebar({ className, onClose }: SidebarProps) {
     if (isCompact) onClose?.();
   };
 
+  const handleOpenLibrary = () => {
+    useUiStore.getState().setActiveView('library');
+    if (isCompact) onClose?.();
+  };
+
   const handleSelect = (id: string) => {
     void useChatStore.getState().openConversation(id);
     if (isCompact) onClose?.();
@@ -276,24 +325,24 @@ export function Sidebar({ className, onClose }: SidebarProps) {
         ) : null}
       </div>
 
+      {/* Ordem (PLAN §4.1): Novo chat → Biblioteca → Skills → Buscar conversas.
+          A Biblioteca é sempre visível; Skills depende do painel habilitado. */}
+      <NavViewItem
+        icon={<Library className="size-4" />}
+        label="Biblioteca"
+        ariaLabel="Abrir biblioteca"
+        active={activeView === 'library'}
+        onSelect={handleOpenLibrary}
+      />
+
       {skillsPanelEnabled ? (
-        <button
-          type="button"
-          onClick={handleOpenSkills}
-          aria-label="Gerenciar skills"
-          aria-current={activeView === 'skills' ? 'page' : undefined}
-          className={cn(
-            'mx-3 mt-1 flex h-8 items-center gap-2 rounded-lg px-2 text-[13px]',
-            'transition-colors duration-150',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-            activeView === 'skills'
-              ? 'bg-surface-active text-foreground'
-              : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
-          )}
-        >
-          <Sparkles className="size-4" />
-          <span>Skills</span>
-        </button>
+        <NavViewItem
+          icon={<Sparkles className="size-4" />}
+          label="Skills"
+          ariaLabel="Gerenciar skills"
+          active={activeView === 'skills'}
+          onSelect={handleOpenSkills}
+        />
       ) : null}
 
       <button

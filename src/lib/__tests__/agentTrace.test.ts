@@ -320,6 +320,170 @@ describe('buildAgentTrace', () => {
     expect(toolGroups(failed)[0].label).toBe('Não foi possível ler a skill');
     expect(toolGroups(failed)[0].errors).toEqual(['skill não encontrada']);
   });
+
+  it('describes artifact library searches with and without results', () => {
+    const running = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [tool({ name: 'list_artifacts', status: 'running' })],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(running)[0].label).toBe('Pesquisando nos artefatos…');
+
+    const found = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [tool({ name: 'list_artifacts', summary: '3 artefatos' })],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(found)[0].label).toBe('Encontrou 3 artefatos');
+    expect(toolGroups(found)[0].total).toBe(3);
+    expect(toolGroups(found)[0].files).toEqual([]);
+
+    // "3 de 10 artefatos": only the returned count belongs in the label.
+    const partial = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [tool({ name: 'list_artifacts', summary: '3 de 10 artefatos' })],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(partial)[0].label).toBe('Encontrou 3 artefatos');
+
+    const empty = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({ name: 'list_artifacts', summary: 'nenhum artefato' }),
+        tool({ name: 'list_artifacts', summary: '0 artefatos' }),
+      ],
+      trace: [{ reasoning: null, toolCalls: 2 }],
+    });
+    expect(toolGroups(empty)[0].label).toBe('Nenhum artefato encontrado');
+
+    const withoutSummary = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [tool({ name: 'list_artifacts', summary: 'ok' })],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(withoutSummary)[0].label).toBe('Consultou os artefatos');
+
+    // Adjacent searches stay in one row and their counts add up.
+    const multiple = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({ name: 'list_artifacts', summary: '2 artefatos' }),
+        tool({ name: 'list_artifacts', summary: '1 artefato' }),
+      ],
+      trace: [{ reasoning: null, toolCalls: 2 }],
+    });
+    expect(toolGroups(multiple)[0].tools).toHaveLength(2);
+    expect(toolGroups(multiple)[0].label).toBe('Encontrou 3 artefatos');
+
+    const failed = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({
+          name: 'list_artifacts',
+          status: 'error',
+          result: 'ERROR: falha ao consultar a biblioteca',
+        }),
+      ],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(failed)[0].label).toBe('A pesquisa nos artefatos falhou');
+    expect(toolGroups(failed)[0].errors).toEqual(['falha ao consultar a biblioteca']);
+  });
+
+  it('describes artifact reads using the summary name and the arguments fallback', () => {
+    const running = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({
+          name: 'read_artifact',
+          status: 'running',
+          summary: 'relatorio.docx · 1.200 caracteres',
+        }),
+      ],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(running)[0].label).toBe('Lendo o artefato relatorio.docx…');
+    expect(toolGroups(running)[0].files).toEqual(['relatorio.docx']);
+
+    const anonymous = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [tool({ name: 'read_artifact', status: 'running' })],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(anonymous)[0].label).toBe('Lendo um artefato…');
+
+    const read = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [tool({ name: 'read_artifact', summary: 'relatorio.docx · 1.200 caracteres' })],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(read)[0].label).toBe('Leu o artefato relatorio.docx');
+    expect(toolGroups(read)[0].files).toEqual(['relatorio.docx']);
+
+    // `read_artifact` may be called by id only: the name then comes from arguments.
+    const byNameArg = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [tool({ name: 'read_artifact', arguments: '{"name":"dados.csv"}' })],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(byNameArg)[0].label).toBe('Leu o artefato dados.csv');
+
+    const multiple = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({ name: 'read_artifact', summary: 'relatorio.docx · 1.200 caracteres' }),
+        tool({ name: 'read_artifact', arguments: '{"name":"dados.csv"}' }),
+      ],
+      trace: [{ reasoning: null, toolCalls: 2 }],
+    });
+    expect(toolGroups(multiple)[0].label).toBe('Leu 2 artefatos');
+    expect(toolGroups(multiple)[0].files).toEqual(['relatorio.docx', 'dados.csv']);
+
+    const repeated = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({ name: 'read_artifact', arguments: '{"name":"notas.md"}' }),
+        tool({ name: 'read_artifact', arguments: '{"name":"notas.md"}' }),
+      ],
+      trace: [{ reasoning: null, toolCalls: 2 }],
+    });
+    expect(toolGroups(repeated)[0].label).toBe('Leu o artefato notas.md');
+    expect(toolGroups(repeated)[0].files).toEqual(['notas.md']);
+
+    const failed = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({ name: 'read_artifact', status: 'error', result: 'ERROR: arquivo não encontrado' }),
+      ],
+      trace: [{ reasoning: null, toolCalls: 1 }],
+    });
+    expect(toolGroups(failed)[0].label).toBe('Não foi possível ler o artefato');
+    expect(toolGroups(failed)[0].errors).toEqual(['arquivo não encontrado']);
+    expect(toolGroups(failed)[0].files).toEqual([]);
+  });
+
+  it('falls back to generic artifact-read copy when the name is missing or invalid', () => {
+    const cases: Array<{ arguments: string; status: ToolCallRecord['status']; label: string }> = [
+      { arguments: '{}', status: 'done', label: 'Leu um artefato' },
+      { arguments: '{oops', status: 'done', label: 'Leu um artefato' },
+      { arguments: 'null', status: 'done', label: 'Leu um artefato' },
+      { arguments: '"relatorio.docx"', status: 'done', label: 'Leu um artefato' },
+      { arguments: '{"name":42}', status: 'running', label: 'Lendo um artefato…' },
+      { arguments: '{"name":"   "}', status: 'done', label: 'Leu um artefato' },
+      { arguments: '{"name":"dados.csv"}', status: 'running', label: 'Lendo o artefato dados.csv…' },
+    ];
+
+    for (const testCase of cases) {
+      const entries = buildAgentTrace({
+        reasoning: null,
+        toolCalls: [
+          tool({ name: 'read_artifact', arguments: testCase.arguments, status: testCase.status }),
+        ],
+        trace: [{ reasoning: null, toolCalls: 1 }],
+      });
+      expect(toolGroups(entries)[0].label).toBe(testCase.label);
+    }
+  });
 });
 
 describe('splitReasoning', () => {

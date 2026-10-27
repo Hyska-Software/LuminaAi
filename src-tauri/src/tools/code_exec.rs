@@ -894,8 +894,8 @@ fn collect_artifacts(
         match write_artifact(
             &rt.db,
             &rt.data_dir,
-            &rt.conversation_id,
-            &rt.message_id,
+            Some(&rt.conversation_id),
+            Some(&rt.message_id),
             &relative,
             &bytes,
             None,

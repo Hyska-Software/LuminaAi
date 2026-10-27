@@ -5,6 +5,12 @@
 //! the [`ArtifactKind`] are inferred (explicit hint → extension → magic bytes),
 //! the bytes are written to `<app-data>/artifacts/<id>/<name>` and the metadata
 //! is persisted in SQLite.
+//!
+//! [`write_artifact_file`] reuses that same classification/persistence for a
+//! file that already exists on disk (the user's upload into the library): the
+//! name is taken from the file, the content is copied by the OS and a failed
+//! INSERT removes the copy — there is only one implementation of sanitization
+//! and MIME/kind inference.
 
 use std::path::Path;
 
@@ -16,6 +22,10 @@ use crate::domain::{now_ms, Artifact, ArtifactKind};
 use super::clean_inline;
 
 const MAX_NAME_CHARS: usize = 120;
+/// How many leading bytes are read from an uploaded file to classify it. Magic
+/// detection only looks at the header; the file itself is copied by the OS and
+/// never loaded into memory.
+const CLASSIFY_PREFIX_BYTES: usize = 16 * 1024;
 
 /// Extensions rendered with syntax highlighting / treated as source code.
 ///
@@ -36,18 +46,47 @@ pub(crate) const CODE_EXTENSIONS: &[&str] = &[
     "proto", "http", "nginx", "dockerfile",
 ];
 
-/// Writes `bytes` as a new artifact, registers it in the database and returns
-/// the persisted [`Artifact`] (whose `name` may have been sanitized/extended).
-pub fn write_artifact(
-    db: &Db,
-    data_dir: &Path,
-    conversation_id: &str,
-    message_id: &str,
+/// Final name/MIME/kind/language of an artifact, resolved from the requested
+/// name, the optional MIME hint and the leading bytes of the content.
+struct Classified {
+    name: String,
+    mime: String,
+    kind: ArtifactKind,
+    language: Option<String>,
+}
+
+/// Classifies a name + the leading bytes (`head`) **without writing anything**:
+/// the same hint → extension → magic-bytes heuristic the writers use.
+///
+/// The library `rename_artifact` command calls this to recompute the metadata
+/// from the new name/file content, so sanitization and MIME/kind/language
+/// inference never get a second implementation.
+///
+/// Returns `(name, mime_type, kind, language)` where `name` is the sanitized
+/// name with an extension inferred/added when it had none (callers that manage
+/// the extension themselves — e.g. rename preserving the original one — can
+/// simply ignore it).
+pub(crate) fn classify_file(
     name: &str,
-    bytes: &[u8],
-    mime_hint: Option<&str>,
-) -> anyhow::Result<Artifact> {
-    let mut name = sanitize_filename(name);
+    head: &[u8],
+) -> (String, String, ArtifactKind, Option<String>) {
+    let classified = classify(name, None, head);
+    (
+        classified.name,
+        classified.mime,
+        classified.kind,
+        classified.language,
+    )
+}
+
+/// Sanitizes `raw_name`, appends an inferred extension when the name has none
+/// and resolves MIME type, [`ArtifactKind`] and language.
+///
+/// `head` is only inspected by `infer` (magic bytes live in the header), so
+/// callers may pass just the prefix of the content instead of loading a whole
+/// file into memory.
+fn classify(raw_name: &str, mime_hint: Option<&str>, head: &[u8]) -> Classified {
+    let mut name = sanitize_filename(raw_name);
     let hint = clean_mime(mime_hint.unwrap_or_default());
 
     // Toolchain/config full names (`Dockerfile`, `Makefile`, `.gitignore`,
@@ -55,13 +94,13 @@ pub fn write_artifact(
     // name the syntax/language detection relies on.
     if !has_extension(&name) && full_name_language(&name).is_none() {
         let extension = extension_for_mime(&hint)
-            .or_else(|| infer::get(bytes).map(|kind| kind.extension().to_string()))
+            .or_else(|| infer::get(head).map(|kind| kind.extension().to_string()))
             .unwrap_or_else(|| "txt".to_string());
         name.push('.');
         name.push_str(&extension);
     }
 
-    let mut mime = resolve_mime(&name, &hint, bytes);
+    let mut mime = resolve_mime(&name, &hint, head);
     // Extensionless toolchain/config files have no MIME-database entry and are
     // plain text; without this they would be typed as opaque binaries.
     if is_generic_mime(&mime) && full_name_language(&name).is_some() {
@@ -80,6 +119,34 @@ pub fn write_artifact(
     } else {
         None
     };
+    Classified {
+        name,
+        mime,
+        kind,
+        language,
+    }
+}
+
+/// Writes `bytes` as a new artifact, registers it in the database and returns
+/// the persisted [`Artifact`] (whose `name` may have been sanitized/extended).
+///
+/// `conversation_id = None` registers an artifact without a conversation (a
+/// user upload); agent-created artifacts always pass `Some`.
+pub fn write_artifact(
+    db: &Db,
+    data_dir: &Path,
+    conversation_id: Option<&str>,
+    message_id: Option<&str>,
+    name: &str,
+    bytes: &[u8],
+    mime_hint: Option<&str>,
+) -> anyhow::Result<Artifact> {
+    let Classified {
+        name,
+        mime,
+        kind,
+        language,
+    } = classify(name, mime_hint, bytes);
 
     let artifact_id = uuid::Uuid::new_v4().to_string();
     let directory = data_dir.join("artifacts").join(&artifact_id);
@@ -95,14 +162,17 @@ pub fn write_artifact(
 
     let artifact = Artifact {
         id: artifact_id,
-        conversation_id: conversation_id.to_string(),
-        message_id: (!message_id.is_empty()).then(|| message_id.to_string()),
+        conversation_id: conversation_id.map(str::to_string),
+        message_id: message_id
+            .filter(|message_id| !message_id.is_empty())
+            .map(str::to_string),
         name,
         mime_type: mime,
         kind,
         language,
         size: bytes.len() as i64,
         created_at: now_ms(),
+        favorite: false,
     };
     db.insert_artifact(&StoredArtifact {
         artifact: artifact.clone(),
@@ -115,6 +185,120 @@ pub fn write_artifact(
         )
     })?;
     Ok(artifact)
+}
+
+/// Copies an existing file into the artifact store and registers it.
+///
+/// The user's upload into the library goes through here (the Tauri command
+/// `import_library_files` calls it): the file keeps its sanitized name, an
+/// extension is inferred/added only when missing, MIME/kind/language reuse
+/// [`classify`] and the bytes are copied with `fs::copy` — the file is never
+/// loaded into memory. `conversation_id = None` marks the file as a library
+/// upload (not created by the agent in a conversation).
+pub fn write_artifact_file(
+    db: &Db,
+    data_dir: &Path,
+    conversation_id: Option<&str>,
+    source: &Path,
+) -> anyhow::Result<Artifact> {
+    write_artifact_file_with(data_dir, conversation_id, source, |stored| {
+        db.insert_artifact(stored)
+    })
+}
+
+/// [`write_artifact_file`] with an injectable persistence step. The indirection
+/// exists so the tests can prove, deterministically, that a failed INSERT
+/// removes the copied file (a real SQLite failure is not easy to force).
+fn write_artifact_file_with(
+    data_dir: &Path,
+    conversation_id: Option<&str>,
+    source: &Path,
+    insert: impl FnOnce(&StoredArtifact) -> anyhow::Result<()>,
+) -> anyhow::Result<Artifact> {
+    let metadata = std::fs::metadata(source)
+        .with_context(|| format!("não foi possível inspecionar `{}`", source.display()))?;
+    if !metadata.is_file() {
+        return Err(anyhow::anyhow!(
+            "`{}` não é um arquivo regular e não pode ser enviado à biblioteca",
+            source.display()
+        ));
+    }
+    let raw_name = source
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    // Only the header is read: enough for magic-byte detection and MIME
+    // guessing, never the whole (possibly huge) upload.
+    let head = read_prefix(source, CLASSIFY_PREFIX_BYTES)?;
+    let Classified {
+        name,
+        mime,
+        kind,
+        language,
+    } = classify(&raw_name, None, &head);
+
+    let artifact_id = uuid::Uuid::new_v4().to_string();
+    let directory = data_dir.join("artifacts").join(&artifact_id);
+    std::fs::create_dir_all(&directory).with_context(|| {
+        format!(
+            "não foi possível criar o diretório do artefato: {}",
+            directory.display()
+        )
+    })?;
+    let path = directory.join(&name);
+    std::fs::copy(source, &path).with_context(|| {
+        format!(
+            "não foi possível copiar `{}` para {}",
+            source.display(),
+            path.display()
+        )
+    })?;
+
+    let size = std::fs::metadata(&path)
+        .map(|copied| copied.len())
+        .unwrap_or_else(|_| metadata.len());
+    let artifact = Artifact {
+        id: artifact_id,
+        conversation_id: conversation_id.map(str::to_string),
+        message_id: None,
+        name,
+        mime_type: mime,
+        kind,
+        language,
+        size: i64::try_from(size)
+            .context("o arquivo é grande demais para ser registrado como artefato")?,
+        created_at: now_ms(),
+        favorite: false,
+    };
+    if let Err(error) = insert(&StoredArtifact {
+        artifact: artifact.clone(),
+        path: path.to_string_lossy().into_owned(),
+    }) {
+        // No orphan copy in `artifacts/<id>/`: the library must never show a
+        // file that is not in SQLite.
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&directory);
+        return Err(error).with_context(|| {
+            format!(
+                "o arquivo `{}` foi copiado, mas o registro do artefato falhou; a cópia foi removida",
+                artifact.name
+            )
+        });
+    }
+    Ok(artifact)
+}
+
+/// First `limit` bytes of `path` (never loads the whole file into memory).
+fn read_prefix(path: &Path, limit: usize) -> anyhow::Result<Vec<u8>> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("não foi possível abrir `{}`", path.display()))?;
+    let mut buffer = Vec::new();
+    file.take(limit as u64)
+        .read_to_end(&mut buffer)
+        .with_context(|| format!("não foi possível ler `{}`", path.display()))?;
+    Ok(buffer)
 }
 
 /// Explicit hint wins; otherwise the extension is authoritative and magic
@@ -426,6 +610,33 @@ mod tests {
         Db::open_in_memory().expect("abrir banco em memória")
     }
 
+    /// Creates a real file `name` inside `directory` (an upload source).
+    fn write_source(directory: &Path, name: &str, bytes: &[u8]) -> PathBuf {
+        let path = directory.join(name);
+        std::fs::write(&path, bytes).expect("gravar arquivo de origem");
+        path
+    }
+
+    /// Files left under `<data_dir>/artifacts/` (directory tree flattened).
+    fn artifact_files(data_dir: &Path) -> Vec<PathBuf> {
+        let root = data_dir.join("artifacts");
+        let mut files = Vec::new();
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            return files;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Ok(inner) = std::fs::read_dir(&path) {
+                    files.extend(inner.flatten().map(|entry| entry.path()));
+                }
+            } else {
+                files.push(path);
+            }
+        }
+        files
+    }
+
     /// Minimal but valid magic headers used to exercise `infer`.
     fn png_bytes() -> Vec<u8> {
         let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
@@ -450,8 +661,8 @@ mod tests {
         let artifact = write_artifact(
             &db,
             &temp.path,
-            "conv-1",
-            "msg-1",
+            Some("conv-1"),
+            Some("msg-1"),
             "grafico",
             &png_bytes(),
             None,
@@ -463,8 +674,9 @@ mod tests {
         assert_eq!(artifact.kind, ArtifactKind::Image);
         assert_eq!(artifact.size, png_bytes().len() as i64);
         assert!(artifact.language.is_none());
-        assert_eq!(artifact.conversation_id, "conv-1");
+        assert_eq!(artifact.conversation_id.as_deref(), Some("conv-1"));
         assert_eq!(artifact.message_id.as_deref(), Some("msg-1"));
+        assert!(!artifact.favorite, "artefato novo não é favorito");
 
         let path = temp
             .path
@@ -487,8 +699,8 @@ mod tests {
         let artifact = write_artifact(
             &db,
             &temp.path,
-            "conv",
-            "msg",
+            Some("conv"),
+            Some("msg"),
             "arquivo.dat",
             &pdf_bytes(),
             None,
@@ -506,8 +718,8 @@ mod tests {
         let artifact = write_artifact(
             &db,
             &temp.path,
-            "conv",
-            "msg",
+            Some("conv"),
+            Some("msg"),
             "relatorio",
             b"# Titulo\n",
             Some("text/markdown"),
@@ -527,8 +739,8 @@ mod tests {
         let pptx = write_artifact(
             &db,
             &temp.path,
-            "conv",
-            "msg",
+            Some("conv"),
+            Some("msg"),
             "apresentacao.pptx",
             &pptx_bytes(),
             None,
@@ -543,8 +755,8 @@ mod tests {
         let image = write_artifact(
             &db,
             &temp.path,
-            "conv",
-            "msg",
+            Some("conv"),
+            Some("msg"),
             "foto.PNG",
             &png_bytes(),
             None,
@@ -561,8 +773,8 @@ mod tests {
         let artifact = write_artifact(
             &db,
             &temp.path,
-            "conv",
-            "msg",
+            Some("conv"),
+            Some("msg"),
             "../../evil.md",
             b"# x",
             None,
@@ -587,8 +799,8 @@ mod tests {
         let artifact = write_artifact(
             &db,
             &temp.path,
-            "conv",
-            "msg",
+            Some("conv"),
+            Some("msg"),
             "app.ts",
             b"export const x = 1;\n",
             None,
@@ -607,8 +819,8 @@ mod tests {
         let artifact = write_artifact(
             &db,
             &temp.path,
-            "conv",
-            "msg",
+            Some("conv"),
+            Some("msg"),
             "grande.txt",
             &bytes,
             None,
@@ -624,6 +836,178 @@ mod tests {
         )
         .expect("metadata do arquivo");
         assert_eq!(written.len(), bytes.len() as u64);
+    }
+
+    #[test]
+    fn write_without_conversation_registers_a_library_upload() {
+        let temp = TempDir::new();
+        let db = test_db();
+        let artifact = write_artifact(
+            &db,
+            &temp.path,
+            None,
+            None,
+            "nota",
+            b"# Nota\n",
+            Some("text/markdown"),
+        )
+        .expect("gravar artefato sem conversa");
+        assert_eq!(artifact.name, "nota.md");
+        assert_eq!(artifact.conversation_id, None, "upload não tem conversa");
+        assert_eq!(artifact.message_id, None, "upload não tem mensagem");
+        assert!(!artifact.favorite);
+        // Round-trip: a biblioteca do usuário enxerga o artefato sem conversa e
+        // o recorte por conversa (painel do chat) não o inclui.
+        let all = db.list_all_artifacts().expect("listar biblioteca");
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, artifact.id);
+        assert_eq!(all[0].conversation_id, None);
+        assert!(!all[0].favorite);
+        assert!(
+            db.list_artifacts("conv-1").expect("lista da conversa").is_empty(),
+            "upload não aparece no painel de uma conversa"
+        );
+    }
+
+    #[test]
+    fn write_artifact_file_copies_bytes_and_infers_metadata() {
+        let temp = TempDir::new();
+        let db = test_db();
+
+        // Sem extensão: a extensão é inferida dos magic bytes e adicionada.
+        let pdf_source = write_source(&temp.path, "contrato Trimestral", &pdf_bytes());
+        let pdf = write_artifact_file(&db, &temp.path, None, &pdf_source)
+            .expect("importar contrato sem extensão");
+        assert_eq!(pdf.name, "contrato Trimestral.pdf");
+        assert_eq!(pdf.mime_type, "application/pdf");
+        assert_eq!(pdf.kind, ArtifactKind::Pdf);
+        assert_eq!(pdf.size, pdf_bytes().len() as i64);
+        assert_eq!(pdf.conversation_id, None);
+        assert_eq!(pdf.message_id, None);
+        assert!(!pdf.favorite);
+        assert!(pdf.language.is_none());
+
+        // Com extensão: o nome é preservado e a classificação é a mesma dos
+        // artefatos gerados pelo agente (código → linguagem + text/plain).
+        let code_source = write_source(&temp.path, "app.ts", b"export const x = 1;\n");
+        let code = write_artifact_file(&db, &temp.path, Some("conv-1"), &code_source)
+            .expect("importar código");
+        assert_eq!(code.name, "app.ts");
+        assert_eq!(code.kind, ArtifactKind::Code);
+        assert_eq!(code.mime_type, "text/plain");
+        assert_eq!(code.language.as_deref(), Some("typescript"));
+        assert_eq!(code.conversation_id.as_deref(), Some("conv-1"));
+
+        // Cópia real no diretório do artefato, byte a byte.
+        let stored = db
+            .get_artifact(&pdf.id)
+            .expect("consultar")
+            .expect("artefato registrado");
+        let path = PathBuf::from(&stored.path);
+        assert!(path.starts_with(temp.path.join("artifacts")));
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some(pdf.name.as_str())
+        );
+        assert_eq!(std::fs::read(&path).expect("ler cópia"), pdf_bytes());
+        // O arquivo de origem continua onde estava.
+        assert!(pdf_source.is_file());
+    }
+
+    #[test]
+    fn write_artifact_file_never_loads_the_whole_file_for_classification() {
+        let temp = TempDir::new();
+        let db = test_db();
+        let bytes = vec![b'a'; 12 * 1024 * 1024 + 1];
+        let source = write_source(&temp.path, "grande.txt", &bytes);
+
+        // Só o prefixo é lido para classificar (magic bytes): nada de carregar
+        // 12 MB em memória para descobrir o tipo.
+        let head = read_prefix(&source, CLASSIFY_PREFIX_BYTES).expect("ler prefixo");
+        assert_eq!(head.len(), CLASSIFY_PREFIX_BYTES);
+        assert!(head.len() < bytes.len());
+
+        let artifact =
+            write_artifact_file(&db, &temp.path, None, &source).expect("importar arquivo grande");
+        assert_eq!(artifact.size, bytes.len() as i64);
+        assert_eq!(artifact.kind, ArtifactKind::Text);
+        let stored = db
+            .get_artifact(&artifact.id)
+            .expect("consultar")
+            .expect("artefato registrado");
+        let copied = std::fs::metadata(&stored.path).expect("metadata da cópia");
+        assert_eq!(copied.len(), bytes.len() as u64);
+    }
+
+    #[test]
+    fn write_artifact_file_removes_the_copy_when_the_insert_fails() {
+        let temp = TempDir::new();
+        let source = write_source(&temp.path, "contrato.pdf", &pdf_bytes());
+
+        let error = write_artifact_file_with(&temp.path, None, &source, |_stored| {
+            anyhow::bail!("falha simulada no INSERT")
+        })
+        .expect_err("INSERT com falha deve propagar o erro");
+        let message = format!("{error:#}");
+        assert!(message.contains("a cópia foi removida"), "erro: {message}");
+        assert!(
+            artifact_files(&temp.path).is_empty(),
+            "sobrou arquivo órfão: {:?}",
+            artifact_files(&temp.path)
+        );
+        assert!(source.is_file(), "o arquivo de origem não pode ser removido");
+    }
+
+    #[test]
+    fn write_artifact_file_rejects_non_regular_sources() {
+        let temp = TempDir::new();
+        let db = test_db();
+        let directory = temp.path.join("pasta");
+        std::fs::create_dir_all(&directory).expect("criar diretório");
+        let error = write_artifact_file(&db, &temp.path, None, &directory)
+            .expect_err("diretório não é um arquivo");
+        assert!(
+            format!("{error:#}").contains("não é um arquivo regular"),
+            "erro: {error:#}"
+        );
+
+        let missing = temp.path.join("nao-existe.pdf");
+        let error = write_artifact_file(&db, &temp.path, None, &missing)
+            .expect_err("arquivo inexistente");
+        assert!(format!("{error:#}").contains("inspecionar"));
+        assert!(
+            db.list_all_artifacts().expect("biblioteca").is_empty(),
+            "nada é registrado quando a origem é inválida"
+        );
+    }
+
+    #[test]
+    fn classify_file_matches_the_writer_metadata() {
+        // Código: mesma resolução do writer (`text/plain` + linguagem).
+        let (name, mime, kind, language) = classify_file("app.ts", b"export const x = 1;");
+        assert_eq!(name, "app.ts");
+        assert_eq!(mime, "text/plain");
+        assert_eq!(kind, ArtifactKind::Code);
+        assert_eq!(language.as_deref(), Some("typescript"));
+
+        // Nome sem extensão: a extensão inferida pelos magic bytes aparece no
+        // nome retornado (é o nome que o writer usaria em disco).
+        let (name, mime, kind, language) = classify_file("foto", &png_bytes());
+        assert_eq!(name, "foto.png");
+        assert_eq!(mime, "image/png");
+        assert_eq!(kind, ArtifactKind::Image);
+        assert_eq!(language, None);
+
+        // Nome completo de toolchain: `.txt` não é adicionado.
+        let (name, mime, kind, language) = classify_file("Dockerfile", b"FROM node:20\n");
+        assert_eq!(name, "Dockerfile");
+        assert_eq!(mime, "text/plain");
+        assert_eq!(kind, ArtifactKind::Code);
+        assert_eq!(language.as_deref(), Some("docker"));
+
+        // Sanitização de caminho perigoso vale também para o rename.
+        let (name, ..) = classify_file("../../evil.md", b"# x");
+        assert_eq!(name, "evil.md");
     }
 
     #[test]
@@ -695,7 +1079,15 @@ mod tests {
             ),
         ];
         for (name, bytes, expected) in cases {
-            let artifact = write_artifact(&db, &temp.path, "conv", "msg", name, &bytes, None)
+            let artifact = write_artifact(
+                &db,
+                &temp.path,
+                Some("conv"),
+                Some("msg"),
+                name,
+                &bytes,
+                None,
+            )
                 .unwrap_or_else(|error| panic!("gravar `{name}`: {error:#}"));
             assert_eq!(artifact.kind, expected, "kind de `{name}`");
             assert_eq!(artifact.name, name);
@@ -802,8 +1194,8 @@ mod tests {
         let dockerfile = write_artifact(
             &db,
             &temp.path,
-            "conv",
-            "msg",
+            Some("conv"),
+            Some("msg"),
             "Dockerfile",
             b"FROM node:20\nWORKDIR /app\n",
             None,
@@ -817,8 +1209,8 @@ mod tests {
         let makefile = write_artifact(
             &db,
             &temp.path,
-            "conv",
-            "msg",
+            Some("conv"),
+            Some("msg"),
             "Makefile",
             b"all:\n\t@echo ok\n",
             None,
@@ -831,8 +1223,8 @@ mod tests {
         let gitignore = write_artifact(
             &db,
             &temp.path,
-            "conv",
-            "msg",
+            Some("conv"),
+            Some("msg"),
             ".gitignore",
             b"node_modules/\n",
             None,

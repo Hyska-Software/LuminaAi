@@ -8,6 +8,7 @@ import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
 import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
 import { SourcesPanel } from '@/components/chat/SourcesPanel';
 import { SkillsView } from '@/components/skills';
+import { LibraryView } from '@/components/library';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { TooltipProvider } from '@/components/ui';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
@@ -137,6 +138,7 @@ export default function App() {
         artifactPanelOpen: ui.artifactPanelOpen,
         sourcesPanelOpen: ui.sourcesPanelOpen,
         skillsView: ui.activeView === 'skills',
+        libraryView: ui.activeView === 'library',
         streaming: useChatStore.getState().streaming !== null,
       });
       if (command) runHotkey(command, event);
@@ -145,15 +147,37 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // Native file drag & drop -> attachments.
+  // Native file drag & drop -> attachments (chat) or library upload.
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | null = null;
+    const dispatchLibraryDrag = (active: boolean) => {
+      window.dispatchEvent(new CustomEvent('lumina:library-drag', { detail: { active } }));
+    };
     try {
       const webview = getCurrentWebview();
       void webview
         .onDragDropEvent((event) => {
           if (disposed) return;
+          // The Biblioteca page replaces the chat column: a drop there imports
+          // files into the user library instead of attaching them to the
+          // composer (library-page PLAN §2.6). The view owns the import.
+          if (useUiStore.getState().activeView === 'library') {
+            if (event.payload.type === 'drop') {
+              dispatchLibraryDrag(false);
+              const paths = event.payload.paths ?? [];
+              if (paths.length) {
+                window.dispatchEvent(
+                  new CustomEvent('lumina:library-drop', { detail: { paths } }),
+                );
+              }
+            } else if (event.payload.type === 'enter' || event.payload.type === 'over') {
+              dispatchLibraryDrag(true);
+            } else if (event.payload.type === 'leave') {
+              dispatchLibraryDrag(false);
+            }
+            return;
+          }
           if (event.payload.type === 'drop') {
             const paths = event.payload.paths ?? [];
             if (paths.length) {
@@ -192,7 +216,8 @@ export default function App() {
             </>
           }
         >
-          {/* Chat stays mounted (draft/scroll preserved) while Skills replaces it. */}
+          {/* Chat stays mounted (draft/scroll preserved) while Skills or the
+              Biblioteca replace it. */}
           <div
             className={cn(
               'min-h-0 flex-1 flex-col',
@@ -202,6 +227,7 @@ export default function App() {
             <ChatView />
           </div>
           {activeView === 'skills' ? <SkillsView /> : null}
+          {activeView === 'library' ? <LibraryView /> : null}
         </AppShell>
         <SettingsDialog />
         <ModelPickerDialog />

@@ -157,6 +157,10 @@ function buildToolGroup(tools: ToolCallRecord[]): ToolGroup {
       return skillsListGroup(tools, status, errors);
     case 'read_skill':
       return readSkillGroup(tools, status, errors);
+    case 'list_artifacts':
+      return artifactsListGroup(tools, status, errors);
+    case 'read_artifact':
+      return readArtifactGroup(tools, status, errors);
     default:
       return {
         name,
@@ -320,6 +324,99 @@ function readSkillGroup(
   if (names.length === 1) return { ...base, label: `Leu a skill ${names[0]}` };
   if (names.length > 1) return { ...base, label: `Leu ${names.length} skills` };
   return { ...base, label: 'Leu uma skill' };
+}
+
+/**
+ * `list_artifacts` rows: the harness summary is "{returned} artefatos" or
+ * "{returned} de {total} artefatos" ("nenhum artefato" when the library is
+ * empty). Only the returned count belongs in the label.
+ */
+function artifactsListGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const counts = tools.map((tool) => summaryArtifactCount(tool.summary));
+  const parsed = counts.filter((count): count is number => count !== null);
+  const total = parsed.length > 0 ? parsed.reduce((sum, count) => sum + count, 0) : tools.length;
+  const base = {
+    name: 'list_artifacts',
+    tools,
+    status,
+    total,
+    domains: [],
+    pages: [],
+    files: [],
+    errors,
+  };
+  if (status === 'running') return { ...base, label: 'Pesquisando nos artefatos…' };
+  if (status === 'error') return { ...base, label: 'A pesquisa nos artefatos falhou' };
+  if (parsed.length === 0) return { ...base, label: 'Consultou os artefatos' };
+  if (total === 0) return { ...base, label: 'Nenhum artefato encontrado' };
+  return { ...base, label: `Encontrou ${total} ${plural(total, 'artefato', 'artefatos')}` };
+}
+
+/**
+ * `read_artifact` rows: the summary is "{nome} · {total} caracteres" (or
+ * "{nome} · binário"), so the file name is its first segment. Calls by id carry
+ * no name in the summary path, so `arguments.name` is the fallback. File chips
+ * list only the artifacts that were actually read.
+ */
+function readArtifactGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const names = uniqueStrings(
+    tools
+      .filter((tool) => tool.status !== 'error')
+      .map(readArtifactName)
+      .filter((name): name is string => name !== null),
+  );
+  const base = {
+    name: 'read_artifact',
+    tools,
+    status,
+    total: names.length || tools.length,
+    domains: [],
+    pages: [],
+    files: names,
+    errors,
+  };
+  if (status === 'error') return { ...base, label: 'Não foi possível ler o artefato' };
+  if (status === 'running') {
+    if (names.length === 1) return { ...base, label: `Lendo o artefato ${names[0]}…` };
+    if (names.length > 1) return { ...base, label: `Lendo ${names.length} artefatos…` };
+    return { ...base, label: 'Lendo um artefato…' };
+  }
+  if (names.length === 1) return { ...base, label: `Leu o artefato ${names[0]}` };
+  if (names.length > 1) return { ...base, label: `Leu ${names.length} artefatos` };
+  return { ...base, label: 'Leu um artefato' };
+}
+
+/**
+ * Returned artifact count of a `list_artifacts` summary, e.g. "3 artefatos",
+ * "3 de 10 artefatos" (the total after "de" is ignored) or "nenhum artefato".
+ */
+function summaryArtifactCount(summary?: string | null): number | null {
+  const raw = summary?.trim();
+  if (!raw) return null;
+  if (/^nenhum\b/i.test(raw)) return 0;
+  const match = raw.match(/^(\d+)/);
+  return match ? Number(match[1]) : null;
+}
+
+function readArtifactName(tool: ToolCallRecord): string | null {
+  const raw = tool.summary?.trim();
+  if (raw) {
+    const [first, ...rest] = raw.split(' · ');
+    const name = first?.trim() ?? '';
+    if (rest.length > 0 && name.length > 0) return truncate(name, 80);
+  }
+  const args = safeJsonParse<{ name?: unknown } | null>(tool.arguments, null);
+  if (!args || typeof args !== 'object' || typeof args.name !== 'string') return null;
+  const name = args.name.trim();
+  return name ? truncate(name, 80) : null;
 }
 
 /** Short detail of a `run_code` summary: drops the duration segment. */

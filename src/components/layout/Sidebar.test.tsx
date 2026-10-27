@@ -78,6 +78,10 @@ function skillsButton(): HTMLElement | null {
   return screen.queryByRole('button', { name: 'Gerenciar skills' });
 }
 
+function libraryButton(): HTMLElement | null {
+  return screen.queryByRole('button', { name: 'Abrir biblioteca' });
+}
+
 beforeEach(() => {
   window.matchMedia = matchMediaReturning(false);
   mocks.createConversation.mockResolvedValue(conversation());
@@ -189,5 +193,102 @@ describe('Sidebar — item Skills', () => {
     expect(mocks.createConversation).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(useUiStore.getState().activeView).toBe('chat'));
     expect(skillsButton()?.getAttribute('aria-current')).toBeNull();
+  });
+});
+
+describe('Sidebar — item Biblioteca', () => {
+  it('renders Biblioteca above Skills and opens the library view', () => {
+    const onClose = vi.fn();
+    render(<Sidebar onClose={onClose} />);
+
+    const newChat = screen.getByRole('button', { name: /Novo chat/ });
+    const library = libraryButton();
+    const skills = skillsButton();
+    const search = screen.getByRole('button', { name: /Buscar conversas/ });
+
+    expect(library).not.toBeNull();
+    expect(library?.textContent).toContain('Biblioteca');
+    // Ordering (PLAN §4.1): Novo chat → Biblioteca → Skills → Buscar conversas.
+    expect(
+      newChat.compareDocumentPosition(library as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      (library as Node).compareDocumentPosition(skills as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      (skills as Node).compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // Same visual language as the other sidebar entries: lucide icon at size-4.
+    expect(library?.querySelector('svg')?.getAttribute('class')).toContain('size-4');
+
+    // Chat is the active surface: the item is not marked as current yet.
+    expect(library?.getAttribute('aria-current')).toBeNull();
+    expect(useUiStore.getState().activeView).toBe('chat');
+
+    fireEvent.click(library as HTMLElement);
+
+    expect(useUiStore.getState().activeView).toBe('library');
+    expect(libraryButton()?.getAttribute('aria-current')).toBe('page');
+    expect(skillsButton()?.getAttribute('aria-current')).toBeNull();
+    // Desktop sidebar stays open.
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('stays visible when the skills panel is disabled', () => {
+    useAppStore.setState({ settings: settings({ skillsPanelEnabled: false }) });
+    render(<Sidebar />);
+
+    expect(skillsButton()).toBeNull();
+    expect(screen.queryByText('Skills')).toBeNull();
+
+    const library = libraryButton();
+    expect(library).not.toBeNull();
+    expect(
+      (library as Node).compareDocumentPosition(screen.getByRole('button', { name: /Buscar conversas/ })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    fireEvent.click(library as HTMLElement);
+    expect(useUiStore.getState().activeView).toBe('library');
+  });
+
+  it('marks Biblioteca as the current page when the library view is active', () => {
+    useUiStore.setState({ activeView: 'library' });
+    render(<Sidebar />);
+
+    const library = libraryButton();
+    expect(library?.getAttribute('aria-current')).toBe('page');
+    expect(library?.className).toContain('bg-surface-active');
+
+    // Neither the chat entry nor Skills is the current page.
+    expect(
+      screen.getByRole('button', { name: /Novo chat/ }).getAttribute('aria-current'),
+    ).toBeNull();
+    expect(skillsButton()?.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('closes the compact drawer after opening the library view', () => {
+    window.matchMedia = matchMediaReturning(true);
+    const onClose = vi.fn();
+    render(<Sidebar onClose={onClose} />);
+
+    fireEvent.click(libraryButton() as HTMLElement);
+
+    expect(useUiStore.getState().activeView).toBe('library');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns to the chat view from Novo chat while the library is open (regression)', async () => {
+    useUiStore.setState({ activeView: 'library' });
+    render(<Sidebar />);
+
+    expect(libraryButton()?.getAttribute('aria-current')).toBe('page');
+
+    fireEvent.click(screen.getByRole('button', { name: /Novo chat/ }));
+
+    expect(mocks.createConversation).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(useUiStore.getState().activeView).toBe('chat'));
+    expect(libraryButton()?.getAttribute('aria-current')).toBeNull();
   });
 });

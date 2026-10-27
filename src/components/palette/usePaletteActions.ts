@@ -13,6 +13,7 @@ import {
   FileText,
   FolderOpen,
   Globe,
+  Library,
   Lock,
   MessageSquarePlus,
   Monitor,
@@ -28,6 +29,7 @@ import {
   Terminal,
   TextCursorInput,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -134,6 +136,23 @@ function openArtifacts(): void {
     return;
   }
   ui.openArtifactList();
+}
+
+/**
+ * Biblioteca commands (PLAN §4.3): the view replaces the chat column, so the
+ * palette closes, the view mounts and only then is the native picker requested
+ * through the `lumina:library-import` event (one tick later, when the listener
+ * is already attached).
+ */
+function openLibrary(): void {
+  useUiStore.getState().setActiveView('library');
+}
+
+function importFilesToLibrary(): void {
+  useUiStore.getState().setActiveView('library');
+  window.setTimeout(() => {
+    window.dispatchEvent(new CustomEvent('lumina:library-import'));
+  }, 0);
 }
 
 function openSources(): void {
@@ -355,6 +374,25 @@ export function usePaletteActions(): PaletteAction[] {
     run: openSources,
   });
 
+  actions.push({
+    id: 'abrir-biblioteca',
+    group: 'navegacao',
+    label: 'Abrir biblioteca',
+    description: 'Todos os arquivos das conversas e os enviados por você',
+    icon: Library,
+    keywords: 'biblioteca library arquivos favoritos upload enviados documentos',
+    run: openLibrary,
+  });
+  actions.push({
+    id: 'enviar-arquivos-biblioteca',
+    group: 'navegacao',
+    label: 'Enviar arquivos para a biblioteca',
+    description: 'Importar arquivos do computador para usar no chat',
+    icon: Upload,
+    keywords: 'upload importar enviar arquivos biblioteca library anexar',
+    run: importFilesToLibrary,
+  });
+
   if (settings.skillsPanelEnabled) {
     actions.push({
       id: 'gerenciar-skills',
@@ -376,12 +414,12 @@ export function usePaletteActions(): PaletteAction[] {
     });
   }
 
-  if (activeView === 'skills') {
+  if (activeView === 'skills' || activeView === 'library') {
     actions.push({
       id: 'voltar-ao-chat',
       group: 'navegacao',
       label: 'Voltar ao chat',
-      description: 'Sair da gestão de skills',
+      description: activeView === 'library' ? 'Sair da biblioteca' : 'Sair da gestão de skills',
       icon: ArrowLeft,
       keywords: 'chat conversa voltar',
       run: () => useUiStore.getState().setActiveView('chat'),
