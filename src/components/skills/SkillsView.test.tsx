@@ -360,6 +360,17 @@ describe('SkillsView — navegação e pasta', () => {
 
     await waitFor(() => expect(mocks.openSkillsDir).toHaveBeenCalledTimes(1));
   });
+
+  it('uses the onBack/backLabel overrides of the Code layout', async () => {
+    const onBack = vi.fn();
+    render(<SkillsView onBack={onBack} backLabel="Voltar à sessão" />);
+    await screen.findByRole('region', { name: 'Lumina' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Voltar à sessão' }));
+
+    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(useUiStore.getState().activeView).not.toBe('chat');
+  });
 });
 
 describe('SkillsView — prévia em Markdown', () => {

@@ -14,8 +14,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::domain::{
-    now_ms, Artifact, ArtifactKind, AttachmentInfo, ChatMessage, Conversation, ConversationDetail,
-    LibraryArtifact, MessageRole, MessageStatus, UsageInfo,
+    conversation_mode_or_default, now_ms, Artifact, ArtifactKind, AttachmentInfo, ChatMessage,
+    Conversation, ConversationDetail, LibraryArtifact, MessageRole, MessageStatus, UsageInfo,
+    CONVERSATION_MODE_CHAT,
 };
 
 /* ------------------------------------------------------------------ */
@@ -23,7 +24,7 @@ use crate::domain::{
 /* ------------------------------------------------------------------ */
 
 const CONVERSATION_COLUMNS: &str = "id, title, created_at, updated_at, pinned, \
-     provider_id, model_id, message_count, preview";
+     provider_id, model_id, message_count, preview, mode, code_linked";
 
 const MESSAGE_COLUMNS: &str = "id, conversation_id, role, content, reasoning, status, \
      tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, created_at, trace";
@@ -60,7 +61,11 @@ CREATE TABLE IF NOT EXISTS conversations (
   provider_id   TEXT NOT NULL,
   model_id      TEXT NOT NULL,
   message_count INTEGER NOT NULL DEFAULT 0,
-  preview       TEXT
+  preview       TEXT,
+  -- Layout onde a sessão nasceu ('chat' | 'code'); bancos legados viram 'chat'.
+  mode          TEXT NOT NULL DEFAULT 'chat',
+  -- Sessão do Chat adicionada ao Code (compartilhada nos dois layouts).
+  code_linked   INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -297,6 +302,25 @@ fn migrate_artifacts_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Migração aditiva e idempotente da separação Chat/Code: bancos criados antes
+/// dos dois layouts ganham `mode` (`'chat'` em todas as linhas existentes) e
+/// `code_linked` (`0`, nenhuma sessão compartilhada). Nenhuma linha é perdida.
+fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
+    ensure_column(
+        conn,
+        "conversations",
+        "mode",
+        "ALTER TABLE conversations ADD COLUMN mode TEXT NOT NULL DEFAULT 'chat'",
+    )?;
+    ensure_column(
+        conn,
+        "conversations",
+        "code_linked",
+        "ALTER TABLE conversations ADD COLUMN code_linked INTEGER NOT NULL DEFAULT 0",
+    )?;
+    Ok(())
+}
+
 /* ------------------------------------------------------------------ */
 /* Enum <-> TEXT helpers                                               */
 /* ------------------------------------------------------------------ */
@@ -419,6 +443,8 @@ fn conversation_from_row(row: &Row<'_>) -> rusqlite::Result<Conversation> {
         model_id: row.get(6)?,
         message_count: row.get(7)?,
         preview: row.get(8)?,
+        mode: row.get(9)?,
+        code_linked: row.get::<_, i64>(10)? != 0,
     })
 }
 
@@ -670,6 +696,8 @@ impl Db {
             "trace",
             "ALTER TABLE messages ADD COLUMN trace TEXT NOT NULL DEFAULT '[]'",
         )?;
+        // Separação Chat/Code: conversas antigas viram mode='chat', sem vínculo.
+        migrate_conversations_schema(conn)?;
         // Biblioteca: `favorite` + `conversation_id` nullable (uploads do usuário).
         migrate_artifacts_schema(conn)?;
         Ok(())
@@ -698,12 +726,29 @@ impl Db {
             .context("falha ao listar conversas")
     }
 
+    /// Cria uma conversa no layout padrão (Chat). Mantido como wrapper para os
+    /// chamadores existentes (harness, tools e testes) — o modo explícito usa
+    /// [`Db::create_conversation_with_mode`].
     pub fn create_conversation(
         &self,
         title: &str,
         provider_id: &str,
         model_id: &str,
     ) -> anyhow::Result<Conversation> {
+        self.create_conversation_with_mode(title, provider_id, model_id, CONVERSATION_MODE_CHAT)
+    }
+
+    /// Cria uma conversa no layout `mode` (`"chat"` | `"code"`; qualquer outro
+    /// valor, inclusive vazio, cai em `"chat"`). Sessões novas nunca nascem
+    /// compartilhadas com o outro layout (`code_linked = 0`).
+    pub fn create_conversation_with_mode(
+        &self,
+        title: &str,
+        provider_id: &str,
+        model_id: &str,
+        mode: &str,
+    ) -> anyhow::Result<Conversation> {
+        let mode = conversation_mode_or_default(Some(mode));
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_ms();
         let title = title.trim();
@@ -716,14 +761,42 @@ impl Db {
             let conn = self.conn.lock();
             conn.execute(
                 "INSERT INTO conversations (id, title, created_at, updated_at, pinned, \
-                 provider_id, model_id, message_count, preview) \
-                 VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, 0, NULL)",
-                params![&id, title, now, now, provider_id, model_id],
+                 provider_id, model_id, message_count, preview, mode, code_linked) \
+                 VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, 0, NULL, ?7, 0)",
+                params![&id, title, now, now, provider_id, model_id, &mode],
             )
             .context("falha ao criar conversa")?;
         }
         self.get_conversation(&id)?
             .ok_or_else(|| anyhow::anyhow!("conversa recém-criada não encontrada"))
+    }
+
+    /// Compartilha (`linked = true`) ou remove o vínculo de uma sessão do Chat
+    /// com o layout Code. Só sessões `mode == "chat"` podem ser compartilhadas:
+    /// uma conversa criada no Code pertence somente ao Code.
+    pub fn set_conversation_code_linked(
+        &self,
+        id: &str,
+        linked: bool,
+    ) -> anyhow::Result<Conversation> {
+        let conversation = self
+            .get_conversation(id)?
+            .ok_or_else(|| anyhow::anyhow!("conversa não encontrada: {id}"))?;
+        if conversation.mode != CONVERSATION_MODE_CHAT {
+            return Err(anyhow::anyhow!(
+                "somente sessões do Chat podem ser compartilhadas com o Code"
+            ));
+        }
+        {
+            let conn = self.conn.lock();
+            conn.execute(
+                "UPDATE conversations SET code_linked = ?2 WHERE id = ?1",
+                params![id, if linked { 1i64 } else { 0i64 }],
+            )
+            .context("falha ao atualizar o vínculo da conversa com o Code")?;
+        }
+        self.get_conversation(id)?
+            .ok_or_else(|| anyhow::anyhow!("conversa não encontrada: {id}"))
     }
 
     pub fn get_conversation(&self, id: &str) -> anyhow::Result<Option<Conversation>> {
@@ -802,7 +875,7 @@ impl Db {
         let conn = self.conn.lock();
         let sql = format!(
             "SELECT DISTINCT c.id, c.title, c.created_at, c.updated_at, c.pinned, \
-             c.provider_id, c.model_id, c.message_count, c.preview \
+             c.provider_id, c.model_id, c.message_count, c.preview, c.mode, c.code_linked \
              FROM conversations c \
              LEFT JOIN messages m ON m.conversation_id = c.id \
              WHERE c.title LIKE ?1 ESCAPE '\\' OR m.content LIKE ?1 ESCAPE '\\' \
@@ -1502,6 +1575,186 @@ mod tests {
 
         // Opening the same database again is a no-op.
         Db::init_connection(&conn).expect("idempotent migration");
+    }
+
+    /// Banco legado (anterior à separação Chat/Code): a tabela `conversations`
+    /// não tem `mode` nem `code_linked`.
+    fn legacy_conversations_table(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE conversations (
+               id            TEXT PRIMARY KEY,
+               title         TEXT NOT NULL,
+               created_at    INTEGER NOT NULL,
+               updated_at    INTEGER NOT NULL,
+               pinned        INTEGER NOT NULL DEFAULT 0,
+               provider_id   TEXT NOT NULL,
+               model_id      TEXT NOT NULL,
+               message_count INTEGER NOT NULL DEFAULT 0,
+               preview       TEXT
+             );
+             INSERT INTO conversations
+               (id, title, created_at, updated_at, pinned, provider_id, model_id,
+                message_count, preview)
+               VALUES ('legacy-1', 'Conversa antiga', 10, 20, 1, 'opencode-go',
+                       'glm-5.3-flash', 0, NULL);",
+        )
+        .expect("legacy conversations schema");
+    }
+
+    #[test]
+    fn migrates_legacy_conversations_to_chat_mode_preserving_rows() {
+        let conn = Connection::open_in_memory().expect("in-memory connection");
+        legacy_conversations_table(&conn);
+
+        Db::init_connection(&conn).expect("migration");
+        // Migração aditiva é idempotente: reabrir o banco não recria nada.
+        Db::init_connection(&conn).expect("idempotent migration");
+
+        let columns = table_columns(&conn, "conversations").expect("columns");
+        assert!(columns.iter().any(|(name, _)| name == "mode"));
+        assert!(columns.iter().any(|(name, _)| name == "code_linked"));
+
+        let raw: (String, i64) = conn
+            .query_row(
+                "SELECT mode, code_linked FROM conversations WHERE id = 'legacy-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("legacy row migrated");
+        assert_eq!(raw, ("chat".to_string(), 0));
+
+        // O mapper e o `Conversation` devolvido ao renderer refletem a migração.
+        let db = Db {
+            conn: parking_lot::Mutex::new(conn),
+        };
+        let conversation = db
+            .get_conversation("legacy-1")
+            .expect("get legacy")
+            .expect("legacy row preserved");
+        assert_eq!(conversation.title, "Conversa antiga");
+        assert!(conversation.pinned);
+        assert_eq!(conversation.mode, "chat");
+        assert!(!conversation.code_linked);
+
+        let listed = db.list_conversations().expect("list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].mode, "chat");
+    }
+
+    #[test]
+    fn create_conversation_defaults_to_chat_mode() {
+        let db = test_db();
+        let conversation = db
+            .create_conversation("Chat", "opencode-go", "glm-5.3-flash")
+            .expect("create");
+        assert_eq!(conversation.mode, "chat");
+        assert!(!conversation.code_linked);
+
+        let listed = db.list_conversations().expect("list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].mode, "chat");
+        assert!(!listed[0].code_linked);
+    }
+
+    #[test]
+    fn creates_conversations_with_code_mode_and_normalizes_invalid_modes() {
+        let db = test_db();
+        let code = db
+            .create_conversation_with_mode("Projeto Aurora", "opencode-go", "glm-5.3-flash", "code")
+            .expect("create code");
+        assert_eq!(code.mode, "code");
+        assert!(!code.code_linked, "sessão nova não nasce compartilhada");
+
+        let fallback = db
+            .create_conversation_with_mode("Banana", "opencode-go", "glm-5.3-flash", "banana")
+            .expect("create fallback");
+        assert_eq!(fallback.mode, "chat");
+        let empty = db
+            .create_conversation_with_mode("Vazio", "opencode-go", "glm-5.3-flash", "")
+            .expect("create empty");
+        assert_eq!(empty.mode, "chat");
+
+        let listed = db.list_conversations().expect("list");
+        assert_eq!(listed.len(), 3);
+        let listed_code = listed
+            .iter()
+            .find(|conversation| conversation.id == code.id)
+            .expect("code conversation listed");
+        assert_eq!(listed_code.mode, "code");
+        let listed_chat = listed
+            .iter()
+            .find(|conversation| conversation.id == fallback.id)
+            .expect("chat conversation listed");
+        assert_eq!(listed_chat.mode, "chat");
+
+        // A busca também devolve o modo (colunas qualificadas do JOIN).
+        let found = db.search_conversations("Projeto").expect("search code");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].mode, "code");
+    }
+
+    #[test]
+    fn links_and_unlinks_a_chat_conversation_to_code() {
+        let db = test_db();
+        let conversation = db
+            .create_conversation("Chat", "opencode-go", "glm-5.3-flash")
+            .expect("create");
+
+        let linked = db
+            .set_conversation_code_linked(&conversation.id, true)
+            .expect("link");
+        assert!(linked.code_linked);
+        assert_eq!(linked.mode, "chat");
+        assert!(db
+            .get_conversation(&conversation.id)
+            .expect("get")
+            .expect("present")
+            .code_linked);
+
+        let unlinked = db
+            .set_conversation_code_linked(&conversation.id, false)
+            .expect("unlink");
+        assert!(!unlinked.code_linked);
+        assert!(!db.list_conversations().expect("list")[0].code_linked);
+    }
+
+    #[test]
+    fn code_conversations_cannot_be_shared_with_the_code_layout() {
+        let db = test_db();
+        let conversation = db
+            .create_conversation_with_mode("Projeto", "opencode-go", "glm-5.3-flash", "code")
+            .expect("create code");
+
+        let error = db
+            .set_conversation_code_linked(&conversation.id, true)
+            .expect_err("linking a code conversation must fail");
+        assert!(
+            format!("{error:#}").contains("somente sessões do Chat"),
+            "mensagem clara em pt-BR: {error:#}"
+        );
+
+        // Desvincular também só faz sentido para sessões do Chat.
+        let unlink_error = db
+            .set_conversation_code_linked(&conversation.id, false)
+            .expect_err("unlinking a code conversation must fail");
+        assert!(format!("{unlink_error:#}").contains("somente sessões do Chat"));
+        assert!(!db
+            .get_conversation(&conversation.id)
+            .expect("get")
+            .expect("present")
+            .code_linked);
+    }
+
+    #[test]
+    fn linking_an_unknown_conversation_returns_a_clear_error() {
+        let db = test_db();
+        let error = db
+            .set_conversation_code_linked("inexistente", true)
+            .expect_err("unknown conversation must fail");
+        assert!(
+            format!("{error:#}").contains("conversa não encontrada"),
+            "mensagem clara em pt-BR: {error:#}"
+        );
     }
 
     #[test]

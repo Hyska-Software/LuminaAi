@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
     renameConversation: vi.fn(),
     deleteConversation: vi.fn(),
     setConversationPinned: vi.fn(),
+    setConversationCodeLinked: vi.fn(),
     searchConversations: vi.fn(),
     truncateConversation: vi.fn(),
     importAttachments: vi.fn(),
@@ -107,13 +108,14 @@ function resetStores(): void {
     conversations: [],
     conversationsLoading: false,
     activeId: null,
+    activeIdByLayout: { chat: null, code: null },
     messagesByConversation: {},
     loadingConversationId: null,
     streaming: null,
     pendingAttachments: [],
     error: null,
   });
-  useUiStore.setState({ artifacts: [] });
+  useUiStore.setState({ artifacts: [], layoutMode: 'chat' });
   useAppStore.setState({
     selection: {
       providerId: 'opencode-go',
@@ -800,5 +802,208 @@ describe('model lock', () => {
       providerId: 'opencode-go',
       modelId: 'deepseek-v4.1-flash',
     });
+  });
+});
+
+describe('chatStore — sessões separadas Chat/Code', () => {
+  it('init opens the first session visible in the persisted layout', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    mocks.api.listConversations.mockResolvedValue([
+      conversation({ id: 'chat-1', mode: 'chat' }),
+      conversation({ id: 'code-1', mode: 'code' }),
+    ]);
+    mocks.api.getConversation.mockResolvedValue({
+      conversation: conversation({ id: 'code-1', mode: 'code' }),
+      messages: [],
+    });
+
+    await useChatStore.getState().init();
+
+    expect(mocks.api.getConversation).toHaveBeenCalledWith('code-1');
+    expect(useChatStore.getState().activeId).toBe('code-1');
+  });
+
+  it('enterLayout restores each layout session and never leaks the other one', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'chat-1', mode: 'chat' })],
+      activeId: 'chat-1',
+      activeIdByLayout: { chat: 'chat-1', code: null },
+      messagesByConversation: { 'chat-1': [] },
+    });
+
+    useUiStore.setState({ layoutMode: 'code' });
+    await useChatStore.getState().enterLayout('code');
+
+    expect(useChatStore.getState().activeId).toBeNull();
+    expect(useChatStore.getState().activeIdByLayout).toEqual({ chat: 'chat-1', code: null });
+
+    useUiStore.setState({ layoutMode: 'chat' });
+    await useChatStore.getState().enterLayout('chat');
+
+    expect(useChatStore.getState().activeId).toBe('chat-1');
+  });
+
+  it('enterLayout can share a Chat session that was added to Code', async () => {
+    const shared = conversation({ id: 'shared-1', mode: 'chat', codeLinked: true });
+    useChatStore.setState({
+      conversations: [shared],
+      activeId: null,
+      activeIdByLayout: { chat: null, code: 'shared-1' },
+      messagesByConversation: { 'shared-1': [] },
+    });
+    mocks.api.getConversation.mockResolvedValue({ conversation: shared, messages: [] });
+
+    useUiStore.setState({ layoutMode: 'code' });
+    await useChatStore.getState().enterLayout('code');
+
+    expect(useChatStore.getState().activeId).toBe('shared-1');
+  });
+
+  it('startNewConversation creates the session in the requested mode', async () => {
+    mocks.api.createConversation.mockResolvedValue(conversation({ id: 'code-new', mode: 'code' }));
+
+    await useChatStore.getState().startNewConversation('code');
+
+    expect(mocks.api.createConversation).toHaveBeenCalledWith(
+      'Nova conversa',
+      'opencode-go',
+      'deepseek-v4.1-flash',
+      'code',
+    );
+    expect(useChatStore.getState().activeId).toBe('code-new');
+    expect(useChatStore.getState().activeIdByLayout.code).toBe('code-new');
+  });
+
+  it('sending without an active session creates it in the current layout mode', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    mocks.api.createConversation.mockResolvedValue(conversation({ id: 'code-send', mode: 'code' }));
+    mocks.api.runTurn.mockImplementation(
+      async (_payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage({ id: 'assistant-2' }),
+          usage: null,
+          error: null,
+          conversation: conversation({ id: 'code-send', mode: 'code' }),
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    await useChatStore.getState().send('inicia no Code');
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+
+    expect(mocks.api.createConversation).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      'code',
+    );
+  });
+
+  it('enterLayout restores the session without closing the current layout page', async () => {
+    const chat = conversation({ id: 'chat-1', mode: 'chat' });
+    const code = conversation({ id: 'code-1', mode: 'code' });
+    useChatStore.setState({
+      conversations: [chat, code],
+      activeId: 'code-1',
+      activeIdByLayout: { chat: 'chat-1', code: 'code-1' },
+      messagesByConversation: { 'chat-1': [], 'code-1': [] },
+    });
+    useUiStore.setState({ layoutMode: 'chat', activeView: 'library', codeView: 'session' });
+    mocks.api.getConversation.mockResolvedValue({ conversation: chat, messages: [] });
+
+    await useChatStore.getState().enterLayout('chat');
+
+    expect(useChatStore.getState().activeId).toBe('chat-1');
+    // Switching layouts must not close the Biblioteca/Skills page (R1).
+    expect(useUiStore.getState().activeView).toBe('library');
+  });
+
+  it('enterLayout preserves the Code Skills page while restoring its session', async () => {
+    const chat = conversation({ id: 'chat-1', mode: 'chat' });
+    const code = conversation({ id: 'code-1', mode: 'code' });
+    useChatStore.setState({
+      conversations: [chat, code],
+      activeId: 'chat-1',
+      activeIdByLayout: { chat: 'chat-1', code: 'code-1' },
+      messagesByConversation: { 'chat-1': [], 'code-1': [] },
+    });
+    useUiStore.setState({ layoutMode: 'code', codeView: 'skills', activeView: 'chat' });
+    mocks.api.getConversation.mockResolvedValue({ conversation: code, messages: [] });
+
+    await useChatStore.getState().enterLayout('code');
+
+    expect(useChatStore.getState().activeId).toBe('code-1');
+    expect(useUiStore.getState().codeView).toBe('skills');
+  });
+
+  it('enterLayout records the shared session in the layout memory even without reloading it', async () => {
+    const shared = conversation({ id: 'shared-1', mode: 'chat', codeLinked: true });
+    useChatStore.setState({
+      conversations: [shared],
+      activeId: 'shared-1',
+      activeIdByLayout: { chat: null, code: null },
+      messagesByConversation: { 'shared-1': [] },
+    });
+    useUiStore.setState({ layoutMode: 'code' });
+
+    await useChatStore.getState().enterLayout('code');
+
+    expect(useChatStore.getState().activeId).toBe('shared-1');
+    expect(useChatStore.getState().activeIdByLayout.code).toBe('shared-1');
+  });
+
+  it('setConversationCodeLinked updates the conversation and returns false on failure', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'chat-1', mode: 'chat', codeLinked: false })],
+    });
+    mocks.api.setConversationCodeLinked.mockResolvedValue(
+      conversation({ id: 'chat-1', mode: 'chat', codeLinked: true }),
+    );
+
+    await expect(
+      useChatStore.getState().setConversationCodeLinked('chat-1', true),
+    ).resolves.toBe(true);
+    expect(useChatStore.getState().conversations[0]?.codeLinked).toBe(true);
+
+    mocks.api.setConversationCodeLinked.mockRejectedValue(new Error('falhou'));
+    await expect(
+      useChatStore.getState().setConversationCodeLinked('chat-1', false),
+    ).resolves.toBe(false);
+  });
+
+  it('clearActiveConversation clears the current layout session only', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState({
+      activeId: 'code-1',
+      activeIdByLayout: { chat: 'chat-1', code: 'code-1' },
+    });
+
+    useChatStore.getState().clearActiveConversation();
+
+    expect(useChatStore.getState().activeId).toBeNull();
+    expect(useChatStore.getState().activeIdByLayout).toEqual({ chat: 'chat-1', code: null });
+  });
+
+  it('deleteConversation falls back to a session visible in the current layout', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState({
+      conversations: [
+        conversation({ id: 'code-1', mode: 'code' }),
+        conversation({ id: 'chat-1', mode: 'chat' }),
+      ],
+      activeId: 'code-1',
+      messagesByConversation: { 'code-1': [] },
+    });
+    mocks.api.deleteConversation.mockResolvedValue(undefined);
+
+    await useChatStore.getState().deleteConversation('code-1');
+
+    // There is no other Code session: the Code layout goes back to its welcome
+    // instead of opening the Chat session.
+    expect(useChatStore.getState().activeId).toBeNull();
+    expect(useChatStore.getState().conversations.map((entry) => entry.id)).toEqual(['chat-1']);
   });
 });

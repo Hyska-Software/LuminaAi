@@ -29,6 +29,7 @@ Observação: `cargo` usa um target dir compartilhado. Se aparecer `Blocking wai
 | Skills embutidas | `src-tauri/skills/**` | formats-dev |
 | Persistência/config/commands | `src-tauri/src/db.rs`, `src-tauri/src/config.rs`, `src-tauri/src/commands/{conversations,settings,attachments,artifacts}.rs` | storage-dev |
 | UI núcleo | `src/components/layout/**`, `src/components/chat/**`, `src/components/composer/**` | ui-core |
+| Code workbench | `src/components/code/**` | ui-code |
 | UI sistemas | `src/components/ui/**`, `src/components/models/**`, `src/components/settings/**`, `src/components/artifacts/**`, `src/components/skills/**`, `src/components/genui/**`, `src/components/palette/**` | ui-systems |
 
 **Never edite arquivos de outra área.** Se precisar de uma mudança de contrato, envie uma mensagem ao Lead com a assinatura exata desejada.

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown } from 'lucide-react';
 import { Composer } from '@/components/composer/Composer';
 import { useReduceMotion } from '@/components/layout/hooks';
 import { providerSupportsPlan } from '@/lib/catalog';
+import { isConversationVisibleIn } from '@/lib/conversations';
 import { selectActiveMessages, useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import type { ChatMessage } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -14,6 +15,9 @@ import { WelcomeScreen } from './WelcomeScreen';
 
 /** Distance from the bottom (px) still considered "reading the latest message". */
 const BOTTOM_THRESHOLD = 96;
+
+/** Stable empty list for the hidden/stale-session guard (avoids new arrays). */
+const NO_MESSAGES: ChatMessage[] = [];
 
 /** True when the turn that produced the last assistant message ended in error. */
 function lastAssistantFailed(messages: ChatMessage[]): boolean {
@@ -28,15 +32,33 @@ function lastAssistantFailed(messages: ChatMessage[]): boolean {
 /**
  * Chat column: scrollable conversation with smart auto-scroll, the welcome
  * screen for empty conversations and the composer pinned to the bottom.
+ *
+ * The Code layout renders this same instance in its center column and only
+ * swaps the empty state (`welcome`), so the composer draft and the scroll
+ * position survive switching layouts (PLAN §3.3).
  */
-export function ChatView() {
-  const messages = useChatStore(selectActiveMessages);
+export function ChatView({ welcome }: { welcome?: ReactNode } = {}) {
+  const activeMessages = useChatStore(selectActiveMessages);
   const activeId = useChatStore((state) => state.activeId);
+  const conversations = useChatStore((state) => state.conversations);
+  const layoutMode = useUiStore((state) => state.layoutMode);
   const streaming = useChatStore((state) => state.streaming);
   const loadingConversationId = useChatStore((state) => state.loadingConversationId);
   // T4.4a: classified turn errors drive the banner above the composer.
   const errorCode = useChatStore((state) => state.errorCode);
   const errorHint = useChatStore((state) => state.errorHint);
+  // Defense in depth: the store keeps one active session per layout and
+  // `enterLayout` switches it before paint. If a stale `activeId` still points
+  // to a session of the other layout (devtools, future action, race), the chat
+  // must show the welcome state instead of leaking the other layout's transcript.
+  const activeConversation = activeId
+    ? conversations.find((conversation) => conversation.id === activeId)
+    : undefined;
+  const activeVisible =
+    activeId === null ||
+    activeConversation === undefined ||
+    isConversationVisibleIn(activeConversation, layoutMode);
+  const messages = activeVisible ? activeMessages : NO_MESSAGES;
   const selectedProvider = useAppStore((state) =>
     state.providers.find((provider) => provider.id === state.selection.providerId),
   );
@@ -107,7 +129,7 @@ export function ChatView() {
           <LoadingSkeleton />
         ) : messages.length === 0 ? (
           <div className="flex min-h-full items-center justify-center">
-            <WelcomeScreen />
+            {welcome ?? <WelcomeScreen />}
           </div>
         ) : (
           <div className="mx-auto w-full max-w-3xl px-6 pb-10 pt-6">

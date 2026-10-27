@@ -6,9 +6,13 @@ import type { Conversation, Settings } from '@/lib/types';
 const mocks = vi.hoisted(() => ({
   createConversation: vi.fn(),
   exportConversation: vi.fn(),
+  setConversationCodeLinked: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+}));
 
 // Imported after the API mock.
 import { Sidebar } from './Sidebar';
@@ -86,9 +90,12 @@ beforeEach(() => {
   window.matchMedia = matchMediaReturning(false);
   mocks.createConversation.mockResolvedValue(conversation());
   mocks.exportConversation.mockResolvedValue(null);
+  mocks.setConversationCodeLinked.mockImplementation(async (id: string) =>
+    conversation({ id, codeLinked: true }),
+  );
   useAppStore.setState({ settings: settings() });
   useChatStore.setState({ conversations: [], conversationsLoading: false, activeId: null });
-  useUiStore.setState({ activeView: 'chat' });
+  useUiStore.setState({ activeView: 'chat', layoutMode: 'chat' });
 });
 
 afterEach(() => {
@@ -290,5 +297,62 @@ describe('Sidebar — item Biblioteca', () => {
     expect(mocks.createConversation).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(useUiStore.getState().activeView).toBe('chat'));
     expect(libraryButton()?.getAttribute('aria-current')).toBeNull();
+  });
+});
+
+describe('Sidebar — sessões separadas Chat/Code', () => {
+  it('lists Chat sessions only (Code sessions stay out of the Chat sidebar)', () => {
+    useChatStore.setState({
+      conversations: [
+        conversation({ id: 'chat-1', title: 'Sessão do Chat' }),
+        conversation({ id: 'code-1', title: 'Sessão do Code', mode: 'code' }),
+        conversation({ id: 'shared-1', title: 'Sessão compartilhada', codeLinked: true }),
+      ],
+      activeId: 'chat-1',
+    });
+    render(<Sidebar />);
+
+    expect(screen.getByText('Sessão do Chat')).toBeTruthy();
+    expect(screen.getByText('Sessão compartilhada')).toBeTruthy();
+    expect(screen.queryByText('Sessão do Code')).toBeNull();
+  });
+
+  it('adds a Chat session to the Code layout from the conversation menu', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'chat-1', title: 'Sessão do Chat' })],
+      activeId: 'chat-1',
+    });
+    render(<Sidebar />);
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Opções da conversa' }), {
+      button: 0,
+      pointerType: 'mouse',
+    });
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Usar no Code/ }));
+
+    await waitFor(() =>
+      expect(mocks.setConversationCodeLinked).toHaveBeenCalledWith('chat-1', true),
+    );
+  });
+
+  it('offers removing the link when the session is already shared', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'shared-1', title: 'Compartilhada', codeLinked: true })],
+      activeId: 'shared-1',
+    });
+    mocks.setConversationCodeLinked.mockImplementation(async (id: string) =>
+      conversation({ id, codeLinked: false }),
+    );
+    render(<Sidebar />);
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Opções da conversa' }), {
+      button: 0,
+      pointerType: 'mouse',
+    });
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Remover do Code/ }));
+
+    await waitFor(() =>
+      expect(mocks.setConversationCodeLinked).toHaveBeenCalledWith('shared-1', false),
+    );
   });
 });

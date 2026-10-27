@@ -26,7 +26,8 @@ Lumina é um aplicativo desktop de conversação com LLMs, construído em **Taur
 
 ```
 ┌──────────────────────── WebView (React) ────────────────────────┐
-│ AppShell → Sidebar │ ChatView │ Composer │ Dialogs │ ArtifactUI  │
+│ AppShell → Sidebar/CodeSidebar │ WorkspaceCenter (ChatView)      │
+│            │ Composer │ CodePanel │ Dialogs │ ArtifactUI         │
 │        Zustand stores: appStore · chatStore · uiStore            │
 │                 src/lib/api.ts  (invoke + Channel)                │
 └───────────────▲──────────────────────────────┬──────────────────┘
@@ -40,6 +41,15 @@ Lumina é um aplicativo desktop de conversação com LLMs, construído em **Taur
 │      └── db.rs (SQLite) · config.rs (settings/segredos)          │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+O renderer tem dois layouts (`uiStore.layoutMode`): **Chat** (sidebar de conversas, Biblioteca,
+Skills, painéis de artefatos/fontes) e **Code** (sidebar de sessões, cabeçalho/abas de agente,
+painel Arquivos/Alterações; sem Biblioteca). Os dois compartilham a mesma instância de `ChatView`
+e o mesmo `TitleBar` com o seletor Chat/Code. **As sessões são separadas por layout** (`conversations.mode`):
+uma sessão do Chat nunca aparece no Code e vice-versa; uma sessão do Chat pode ser marcada como
+compartilhada com o Code (`code_linked`), passando a aparecer nos dois e sendo a mesma conversa. O
+harness de código ainda não existe nesta fase: docs/goals/chat-code-layout/PLAN.md e
+docs/goals/chat-code-sessions/PLAN.md.
 
 ## 4. Fluxo de um turno
 
@@ -68,7 +78,8 @@ Eventos (`TurnEvent`): `turn_started`, `step_started`, `reasoning_delta`, `reaso
 ### SQLite (`%APPDATA%/app.lumina.chat/lumina.db`)
 
 ```sql
-conversations(id PK, title, created_at, updated_at, pinned, provider_id, model_id, message_count, preview)
+conversations(id PK, title, created_at, updated_at, pinned, provider_id, model_id, message_count, preview,
+              mode, code_linked)
 messages(id PK, conversation_id, role, content, reasoning, status, tool_calls JSON,
          citations JSON, attachments JSON, model_id, provider_id, usage JSON,
          provider_state JSON, created_at, seq, trace JSON)
@@ -85,6 +96,15 @@ continuam sempre associados a uma conversa. `favorite` é uma marcação do
 usuário na Biblioteca e não influencia o agente. Bancos antigos são migrados na
 abertura (a coluna passa a aceitar `NULL` e ganha `favorite`, preservando as
 linhas existentes) — ver `docs/FILES.md` §14 (v1.8).
+
+`conversations.mode` (`chat` | `code`) guarda o layout de origem da sessão e é
+imutável após a criação; `code_linked` marca uma sessão do Chat que foi
+adicionada ao Code (compartilhada — aparece nos dois layouts e é a mesma
+conversa). Bancos antigos ganham as duas colunas na abertura via migração
+aditiva, com `mode='chat'` e `code_linked=0` (logo o Code começa vazio para
+quem já usava o app). O renderer filtra as listas por layout em
+`src/lib/conversations.ts`; `list_conversations`/`search_conversations`
+continuam devolvendo todas as sessões com os dois campos.
 
 `provider_state` guarda o replay do turno do agente no formato **v2** (JSON opaco, só no backend — não trafega no IPC): `{"version":2,"steps":[{"state":<payload bruto do passo ou null>,"text":"<texto do passo>","toolCallIds":["id1", …]}]}`. Há um passo por resposta do provedor — um por passo com ferramentas e um para a resposta final (a resposta final forçada é o último) — e `toolCallIds` referencia `tool_calls` em ordem cronológica. No turno seguinte o harness reconstrói o turno multi-step no histórico (um assistant por passo + os tool results daquele passo), exatamente como o loop em memória faz, para que o provedor aceite os outputs das ferramentas. Bancos antigos (payload bruto de um único passo) continuam funcionando: o estado só é replayado quando a mensagem não tem tool calls e o modelo/provedor conferem; caso contrário é descartado e o histórico cai no fallback neutro (texto + tool calls + tool results).
 
@@ -502,8 +522,9 @@ app_info, get_settings, save_settings, set_provider_key, validate_provider,
 open_data_dir, reset_app_data, get_catalog, refresh_catalog, list_remote_models,
 refresh_provider_models, openai_login_start, openai_login_wait,
 openai_login_cancel, openai_sign_out, openai_auth_status,
-list_conversations, create_conversation, get_conversation, rename_conversation,
-delete_conversation, set_conversation_pinned, search_conversations,
+list_conversations, create_conversation (mode: chat|code), get_conversation,
+rename_conversation, delete_conversation, set_conversation_pinned,
+set_conversation_code_linked (Chat session → Code), search_conversations,
 truncate_conversation, export_conversation, import_attachments, get_attachment,
 delete_attachment, list_artifacts, list_library_artifacts, import_library_files,
 rename_artifact, set_artifact_favorite, get_artifact_thumbnail,
@@ -586,3 +607,4 @@ texto de um artefato de outra conversa chega ao modelo).
 | 14 | Anthropic via API oficial só com API key (Bearer) + `anthropic-version` como header estático do catálogo | OAuth/assinatura do Claude Code; `x-api-key` embutido no transporte | a Anthropic não tem programa público de login/plano para apps de terceiros (proibido sem aprovação); Bearer é o formato documentado atual e o header versionado é configurável sem código (ver `docs/goals/anthropic-api-provider/PLAN.md`) |
 | 15 | Biblioteca de artefatos com **escopo de usuário** (todas as conversas) | escopo por conversa (v1 inicial) | pedido do produto: o usuário precisa reaproveitar arquivos criados em outras conversas como contexto; a exposição é limitada a artefatos/metadados (mensagens de outras conversas continuam privadas) e a leitura é local/read-only |
 | 16 | **Página Biblioteca** no lugar do chat (como Skills) + upload do usuário para a biblioteca (`conversation_id NULL` no mesmo `artifacts`) + favoritos/rename | página separada de "arquivos enviados" com tabela própria; pastas/coleções | o usuário precisa de uma visão única dos seus arquivos e o agente precisa do mesmo caminho de leitura; usar a tabela existente evita segunda fonte de verdade, e `Option<conversation_id>` preserva a proveniência sem inventar conversa sintética. Pastas/edição de conteúdo ficam para v2 (pedido não as exige) |
+| 17 | **Sessões separadas por layout** (`conversations.mode`) + vínculo explicitamente compartilhado (`code_linked`) | uma única lista de conversas filtrada por “origem” no renderer sem coluna nova / workspace tables | os modos são produto distintos: o Chat não deve ver sessões do Code e vice-versa, mas o usuário precisa poder promover uma sessão do Chat ao Code compartilhando a **mesma** conversa; duas colunas aditivas guardam a intenção sem duplicar mensagens/artefatos e a migração deixa todo o histórico existente no Chat (docs/goals/chat-code-sessions/PLAN.md) |

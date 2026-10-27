@@ -147,6 +147,10 @@ function baseState() {
     artifactPanelOpen: false,
     sourcesPanelOpen: false,
     activeView: 'chat',
+    layoutMode: 'chat',
+    codeView: 'session',
+    codePanelOpen: true,
+    codePanelTab: 'changes',
     artifacts: [],
     theme: 'light',
   });
@@ -682,5 +686,130 @@ describe('CommandPalette — recentes e reabertura', () => {
     // A trailing space produces the same results; the selection must survive.
     typeQuery('tema ');
     expect(paletteInput().getAttribute('aria-activedescendant')).toBe(before);
+  });
+});
+
+describe('CommandPalette — layouts Chat e Code', () => {
+  it('switches to the Code layout from the palette and closes', async () => {
+    renderPalette();
+    typeQuery('ir para o modo code');
+    fireEvent.click(await screen.findByRole('option', { name: 'Ir para o modo Code' }));
+
+    await waitFor(() => expect(useUiStore.getState().layoutMode).toBe('code'));
+    expect(useUiStore.getState().commandPaletteOpen).toBe(false);
+  });
+
+  it('hides the Chat-only surfaces while in the Code layout', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    renderPalette();
+
+    expect(await screen.findByRole('option', { name: 'Ir para o modo Chat' })).toBeTruthy();
+    typeQuery('biblioteca');
+    expect(screen.queryByRole('option', { name: 'Abrir biblioteca' })).toBeNull();
+    expect(screen.queryByRole('option', { name: 'Enviar arquivos para a biblioteca' })).toBeNull();
+
+    typeQuery('painel de artefatos');
+    expect(screen.queryByRole('option', { name: 'Abrir painel de artefatos' })).toBeNull();
+  });
+
+  it('opens the Skills page inside the Code center', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    renderPalette();
+    typeQuery('gerenciar skills');
+
+    fireEvent.click(await screen.findByRole('option', { name: 'Gerenciar skills' }));
+
+    await waitFor(() => expect(useUiStore.getState().codeView).toBe('skills'));
+    expect(useUiStore.getState().layoutMode).toBe('code');
+    expect(useUiStore.getState().activeView).not.toBe('skills');
+  });
+
+  it('returns from the Code Skills page to the agent session', async () => {
+    useUiStore.setState({ layoutMode: 'code', codeView: 'skills' });
+    renderPalette();
+    typeQuery('voltar à sessão');
+
+    const option = await screen.findByRole('option', { name: 'Voltar à sessão' });
+    fireEvent.click(option);
+
+    await waitFor(() => expect(useUiStore.getState().codeView).toBe('session'));
+  });
+
+  it('focuses the composer from the Code Skills page by returning to the session', async () => {
+    useUiStore.setState({ layoutMode: 'code', codeView: 'skills' });
+    const listener = vi.fn();
+    window.addEventListener('lumina:focus-composer', listener);
+
+    renderPalette();
+    typeQuery('focar campo de mensagem');
+    fireEvent.click(await screen.findByRole('option', { name: /Focar campo de mensagem/ }));
+
+    await waitFor(() => expect(listener).toHaveBeenCalled());
+    expect(useUiStore.getState().codeView).toBe('session');
+    window.removeEventListener('lumina:focus-composer', listener);
+  });
+});
+
+describe('CommandPalette — sessões separadas Chat/Code', () => {
+  it('does not list Code sessions in the Chat layout', async () => {
+    useChatStore.setState((state) => ({
+      conversations: [
+        ...state.conversations,
+        conversation({ id: 'code-1', title: 'Sessão exclusiva do Code', mode: 'code' }),
+      ],
+    }));
+    renderPalette();
+
+    expect(screen.queryByText('Sessão exclusiva do Code')).toBeNull();
+
+    typeQuery('sessao exclusiva');
+    await waitFor(() => expect(mocks.searchConversations).toHaveBeenCalled());
+    expect(screen.queryByRole('option', { name: /Sessão exclusiva do Code/ })).toBeNull();
+  });
+
+  it('filters out Code sessions returned by the backend while in the Chat layout', async () => {
+    mocks.searchConversations.mockResolvedValue([
+      conversation({ id: 'code-1', title: 'Sessão Code escondida', mode: 'code' }),
+    ]);
+    renderPalette();
+    typeQuery('escondida');
+
+    await waitFor(() => expect(mocks.searchConversations).toHaveBeenCalledWith('escondida'));
+    await waitFor(() =>
+      expect(screen.queryByRole('option', { name: /Sessão Code escondida/ })).toBeNull(),
+    );
+  });
+
+  it('searches only Code sessions while in the Code layout', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState((state) => ({
+      conversations: [
+        ...state.conversations.map((entry) => ({ ...entry, mode: 'chat' as const })),
+        conversation({ id: 'code-1', title: 'Sessão do Code', mode: 'code' }),
+      ],
+    }));
+    renderPalette();
+    typeQuery('#sessao');
+
+    expect(await screen.findByRole('option', { name: /Sessão do Code/ })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: /Planejamento do projeto/ })).toBeNull();
+    expect(screen.queryByRole('option', { name: /Reunião de segunda/ })).toBeNull();
+  });
+
+  it('creates a Code session from "Novo agente" while in the Code layout', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    renderPalette();
+    typeQuery('novo agente');
+
+    fireEvent.click(await screen.findByRole('option', { name: 'Novo agente' }));
+
+    await waitFor(() =>
+      expect(mocks.createConversation).toHaveBeenCalledWith(
+        'Nova conversa',
+        expect.any(String),
+        expect.any(String),
+        'code',
+      ),
+    );
   });
 });

@@ -9,6 +9,24 @@ use serde_json::Value;
 /* Conversations & messages                                            */
 /* ------------------------------------------------------------------ */
 
+/// Layout onde a sessão nasceu: o Chat ou o Code.
+pub const CONVERSATION_MODE_CHAT: &str = "chat";
+pub const CONVERSATION_MODE_CODE: &str = "code";
+
+fn default_conversation_mode() -> String {
+    CONVERSATION_MODE_CHAT.to_string()
+}
+
+/// Normaliza o `mode` recebido do renderer (IPC/SQLite): só `"code"` é aceito
+/// como alternativa; ausente, vazio ou desconhecido cai em `"chat"` — o layout
+/// padrão do app e o modo de todas as conversas dos bancos legados.
+pub fn conversation_mode_or_default(mode: Option<&str>) -> String {
+    match mode.map(str::trim) {
+        Some(value) if value == CONVERSATION_MODE_CODE => CONVERSATION_MODE_CODE.to_string(),
+        _ => CONVERSATION_MODE_CHAT.to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Conversation {
@@ -24,6 +42,14 @@ pub struct Conversation {
     pub message_count: i64,
     #[serde(default)]
     pub preview: Option<String>,
+    /// Layout onde a sessão nasceu (`"chat"` | `"code"`): conversas do Chat só
+    /// aparecem no Chat, conversas do Code só no Code.
+    #[serde(default = "default_conversation_mode")]
+    pub mode: String,
+    /// Sessão do Chat explicitamente adicionada ao Code: passa a aparecer nos
+    /// dois layouts. Só existe para `mode == "chat"`.
+    #[serde(default)]
+    pub code_linked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1020,5 +1046,86 @@ mod tests {
         assert_eq!(json["dataBase64"], "iVBOR");
         assert_eq!(json["width"], 512);
         assert_eq!(json["height"], 288);
+    }
+
+    /// Contrato da separação Chat/Code: o renderer lê `mode` e `codeLinked` no
+    /// IPC (camelCase) e precisa receber `mode` mesmo em conversas antigas.
+    #[test]
+    fn conversation_serializes_mode_and_code_linked_in_camel_case() {
+        let conversation = Conversation {
+            id: "conv-1".into(),
+            title: "Projeto Aurora".into(),
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_001_000,
+            pinned: false,
+            provider_id: "opencode-go".into(),
+            model_id: "glm-5.3-flash".into(),
+            message_count: 3,
+            preview: Some("primeira pergunta".into()),
+            mode: CONVERSATION_MODE_CODE.to_string(),
+            code_linked: true,
+        };
+        let json = serde_json::to_value(&conversation).expect("serialize conversation");
+        assert_eq!(json["mode"], "code");
+        assert_eq!(json["codeLinked"], true);
+        assert!(
+            json.get("code_linked").is_none(),
+            "o IPC usa camelCase: {json}"
+        );
+        // Sessão criada no Code nunca nasce compartilhada; o campo é lido como
+        // enviado (a regra de vínculo é do `Db`).
+        assert_eq!(conversation.mode, CONVERSATION_MODE_CODE);
+        assert!(conversation.code_linked);
+
+        // Payloads antigos (sem os campos novos) continuam desserializáveis e
+        // caem no modo Chat, sem vínculo.
+        let legacy = serde_json::json!({
+            "id": "conv-2",
+            "title": "Conversa antiga",
+            "createdAt": 10,
+            "updatedAt": 20,
+            "pinned": false,
+            "providerId": "opencode-go",
+            "modelId": "glm-5.3-flash",
+            "messageCount": 0,
+            "preview": null,
+        });
+        let parsed: Conversation =
+            serde_json::from_value(legacy).expect("deserialize legacy conversation");
+        assert_eq!(parsed.mode, CONVERSATION_MODE_CHAT);
+        assert!(!parsed.code_linked);
+    }
+
+    #[test]
+    fn normalizes_unknown_conversation_modes_to_chat() {
+        assert_eq!(conversation_mode_or_default(None), CONVERSATION_MODE_CHAT);
+        assert_eq!(
+            conversation_mode_or_default(Some("")),
+            CONVERSATION_MODE_CHAT
+        );
+        assert_eq!(
+            conversation_mode_or_default(Some("   ")),
+            CONVERSATION_MODE_CHAT
+        );
+        assert_eq!(
+            conversation_mode_or_default(Some("chat")),
+            CONVERSATION_MODE_CHAT
+        );
+        assert_eq!(
+            conversation_mode_or_default(Some("code")),
+            CONVERSATION_MODE_CODE
+        );
+        assert_eq!(
+            conversation_mode_or_default(Some(" code ")),
+            CONVERSATION_MODE_CODE,
+            "espaços em volta do modo são tolerados"
+        );
+        for invalid in ["Chat", "CODE", "codex", "workspace", "projeto"] {
+            assert_eq!(
+                conversation_mode_or_default(Some(invalid)),
+                CONVERSATION_MODE_CHAT,
+                "{invalid:?} não é um modo válido"
+            );
+        }
     }
 }

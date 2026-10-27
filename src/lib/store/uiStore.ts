@@ -11,6 +11,24 @@ import type { Artifact, ThemeMode } from '../types';
 export type MainView = 'chat' | 'skills' | 'library';
 
 /**
+ * Application layout mode. `chat` is the classic conversation app; `code` is
+ * the coding-agent workbench (Paseo-inspired) introduced by
+ * docs/goals/chat-code-layout/PLAN.md. The mode is persisted and switched from
+ * the title bar.
+ */
+export type LayoutMode = 'chat' | 'code';
+
+/**
+ * Surface shown inside the Code layout's center column. The Code workbench has
+ * its own view state so switching layouts never loses the Chat surface's page
+ * (Biblioteca/Skills) and vice versa.
+ */
+export type CodeView = 'session' | 'skills';
+
+/** Tabs of the Code right panel (Arquivos | Alterações). */
+export type CodePanelTab = 'files' | 'changes';
+
+/**
  * Surface shown by the artifact side panel: the generated-artifact list (the
  * "+" affordance in the chat and the command palette) or a single preview
  * (clicking an artifact card).
@@ -61,6 +79,14 @@ export function clampSidePanelWidth(width: number): number {
 
 interface UiState {
   theme: ThemeMode;
+  /** Active application layout (Chat | Code) — persisted (PLAN §2). */
+  layoutMode: LayoutMode;
+  /** Center surface inside the Code layout; reset to `session` on demand. */
+  codeView: CodeView;
+  /** Whether the Code layout shows its right panel (Arquivos/Alterações). */
+  codePanelOpen: boolean;
+  /** Active tab of the Code right panel. */
+  codePanelTab: CodePanelTab;
   sidebarOpen: boolean;
   /** Persisted width of the desktop sidebar, in px (docs/DESIGN.md §5). */
   sidebarWidth: number;
@@ -82,6 +108,13 @@ interface UiState {
   artifacts: Artifact[];
 
   setTheme: (theme: ThemeMode) => void;
+  /** Switches the whole application between the Chat and Code layouts. */
+  setLayoutMode: (mode: LayoutMode) => void;
+  /** Switches the Code center between the agent session and the Skills page. */
+  setCodeView: (view: CodeView) => void;
+  setCodePanelOpen: (open: boolean) => void;
+  toggleCodePanel: () => void;
+  setCodePanelTab: (tab: CodePanelTab) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   /** Clamps to `SIDEBAR_WIDTH_MIN`…`SIDEBAR_WIDTH_MAX` and persists the width. */
@@ -139,6 +172,10 @@ export const useUiStore = create<UiState>()(
   persist(
     (set, get) => ({
       theme: 'system',
+      layoutMode: 'chat',
+      codeView: 'session',
+      codePanelOpen: true,
+      codePanelTab: 'changes',
       sidebarOpen: true,
       sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
       settingsOpen: false,
@@ -158,6 +195,14 @@ export const useUiStore = create<UiState>()(
         set({ theme });
         get().applyTheme();
       },
+      setLayoutMode: (layoutMode) =>
+        set({ layoutMode: layoutMode === 'code' ? 'code' : 'chat' }),
+      setCodeView: (codeView) =>
+        set({ codeView: codeView === 'skills' ? 'skills' : 'session' }),
+      setCodePanelOpen: (codePanelOpen) => set({ codePanelOpen }),
+      toggleCodePanel: () => set((state) => ({ codePanelOpen: !state.codePanelOpen })),
+      setCodePanelTab: (codePanelTab) =>
+        set({ codePanelTab: codePanelTab === 'files' ? 'files' : 'changes' }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
       setSidebarWidth: (sidebarWidth) => set({ sidebarWidth: clampSidebarWidth(sidebarWidth) }),
@@ -241,6 +286,8 @@ export const useUiStore = create<UiState>()(
       name: 'lumina.ui',
       partialize: (state) => ({
         theme: state.theme,
+        layoutMode: state.layoutMode,
+        codePanelOpen: state.codePanelOpen,
         sidebarOpen: state.sidebarOpen,
         sidebarWidth: state.sidebarWidth,
         sidePanelWidth: state.sidePanelWidth,
@@ -256,6 +303,9 @@ export const useUiStore = create<UiState>()(
         return {
           ...current,
           ...stored,
+          layoutMode: stored.layoutMode === 'code' ? 'code' : 'chat',
+          codePanelOpen:
+            typeof stored.codePanelOpen === 'boolean' ? stored.codePanelOpen : current.codePanelOpen,
           sidebarWidth: clampSidebarWidth(stored.sidebarWidth ?? current.sidebarWidth),
           sidePanelWidth: clampSidePanelWidth(stored.sidePanelWidth ?? current.sidePanelWidth),
           sidePanelMode: stored.sidePanelMode === 'docked' ? 'docked' : 'overlay',

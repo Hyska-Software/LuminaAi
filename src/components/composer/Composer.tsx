@@ -43,6 +43,9 @@ export function Composer() {
   const providerReady = useAppStore((state) => state.providerReady(state.selection.providerId));
   const setModelPickerOpen = useUiStore((state) => state.setModelPickerOpen);
   const openSettings = useUiStore((state) => state.openSettings);
+  // Only the copy changes in the Code layout; sending/attachments/streaming are shared.
+  const layoutMode = useUiStore((state) => state.layoutMode);
+  const isCodeLayout = layoutMode === 'code';
 
   const isStreaming = streaming !== null;
   const providerBlocked = selectedProvider !== undefined && !providerReady;
@@ -186,8 +189,10 @@ export function Composer() {
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder="Pergunte alguma coisa…"
-            aria-label="Mensagem para o Lumina"
+            placeholder={
+              isCodeLayout ? 'Descreva a tarefa para o agente…' : 'Pergunte alguma coisa…'
+            }
+            aria-label={isCodeLayout ? 'Tarefa para o agente' : 'Mensagem para o Lumina'}
             aria-describedby={providerBlocked ? 'composer-credential-notice' : undefined}
             className={cn(
               'block max-h-[220px] w-full resize-none bg-transparent px-1.5 py-0.5',

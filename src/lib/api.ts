@@ -13,6 +13,7 @@ import type {
   CodeEnvironmentStatus,
   Conversation,
   ConversationDetail,
+  ConversationMode,
   LibraryArtifact,
   LoginChallenge,
   ProviderAuthStatus,
@@ -68,11 +69,17 @@ export const api = {
 
   /* -------- conversations -------- */
   listConversations: () => invoke<Conversation[]>('list_conversations'),
-  createConversation: (title?: string, providerId?: string, modelId?: string) =>
+  createConversation: (
+    title?: string,
+    providerId?: string,
+    modelId?: string,
+    mode?: ConversationMode,
+  ) =>
     invoke<Conversation>('create_conversation', {
       title: title ?? null,
       providerId: providerId ?? null,
       modelId: modelId ?? null,
+      mode: mode ?? null,
     }),
   getConversation: (id: string) =>
     invoke<ConversationDetail | null>('get_conversation', { id }),
@@ -81,6 +88,9 @@ export const api = {
   deleteConversation: (id: string) => invoke<void>('delete_conversation', { id }),
   setConversationPinned: (id: string, pinned: boolean) =>
     invoke<void>('set_conversation_pinned', { id, pinned }),
+  /** Compartilha uma sessão do Chat com o layout Code (ou remove o vínculo). */
+  setConversationCodeLinked: (id: string, linked: boolean) =>
+    invoke<Conversation>('set_conversation_code_linked', { id, linked }),
   searchConversations: (query: string) =>
     invoke<Conversation[]>('search_conversations', { query }),
   truncateConversation: (conversationId: string, fromMessageId: string) =>

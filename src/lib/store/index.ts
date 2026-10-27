@@ -23,4 +23,11 @@ export {
   SIDE_PANEL_WIDTH_DEFAULT,
   SIDE_PANEL_WIDTH_STEP,
 } from './uiStore';
-export type { ArtifactPanelView, MainView, SidePanelMode } from './uiStore';
+export type {
+  ArtifactPanelView,
+  CodePanelTab,
+  CodeView,
+  LayoutMode,
+  MainView,
+  SidePanelMode,
+} from './uiStore';

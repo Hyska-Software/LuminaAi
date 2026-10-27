@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ProviderAuthStatus, ProviderInfo, ProviderKeyStatus } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
@@ -102,7 +102,7 @@ beforeEach(() => {
     errorCode: null,
     errorHint: null,
   });
-  useUiStore.setState({ settingsOpen: false });
+  useUiStore.setState({ settingsOpen: false, layoutMode: 'chat' });
   seedApp({ auth: signedIn() });
 });
 
@@ -155,6 +155,36 @@ describe('Composer — gate de envio (D9)', () => {
     render(<Composer />);
 
     typeMessage();
+    expect(sendButton().disabled).toBe(false);
+  });
+});
+
+describe('Composer — variant por layoutMode (Chat | Code)', () => {
+  it('no modo Chat mantém placeholder e rótulo atuais', () => {
+    render(<Composer />);
+
+    const textarea = screen.getByRole('textbox', { name: 'Mensagem para o Lumina' });
+    expect(textarea.getAttribute('placeholder')).toBe('Pergunte alguma coisa…');
+  });
+
+  it('no modo Code usa a copy de tarefa para o agente', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    render(<Composer />);
+
+    const textarea = screen.getByRole('textbox', { name: 'Tarefa para o agente' });
+    expect(textarea.getAttribute('placeholder')).toBe('Descreva a tarefa para o agente…');
+    expect(screen.queryByRole('textbox', { name: 'Mensagem para o Lumina' })).toBeNull();
+  });
+
+  it('troca a copy ao alternar o modo sem perder o rascunho nem o envio', () => {
+    render(<Composer />);
+    typeMessage('Corrigir o build');
+    expect(sendButton().disabled).toBe(false);
+
+    act(() => useUiStore.getState().setLayoutMode('code'));
+
+    const textarea = screen.getByRole('textbox', { name: 'Tarefa para o agente' }) as HTMLTextAreaElement;
+    expect(textarea.value).toBe('Corrigir o build');
     expect(sendButton().disabled).toBe(false);
   });
 });

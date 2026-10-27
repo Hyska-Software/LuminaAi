@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
+import { filterConversationsForLayout, isConversationVisibleIn } from '@/lib/conversations';
 import { mergeConversationResults, rankConversations } from '@/lib/palette/search';
 import type { PaletteConversationResult } from '@/lib/palette/types';
-import { useChatStore } from '@/lib/store';
+import { useChatStore, useUiStore } from '@/lib/store';
 
 /** Conversation search debounce (docs/COMMAND_PALETTE.md §4.1). */
 export const CONVERSATION_SEARCH_DEBOUNCE_MS = 160;
@@ -33,6 +34,7 @@ const EMPTY: ConversationSearchState = { results: [], loading: false, fallback: 
  */
 export function useConversationSearch(query: string, enabled: boolean): ConversationSearchState {
   const conversations = useChatStore((state) => state.conversations);
+  const layoutMode = useUiStore((state) => state.layoutMode);
   const conversationsRef = useRef(conversations);
   // Update the ref in an effect (not during render) so the debounced callback
   // always folds the latest local titles/previews without restarting the timer.
@@ -58,16 +60,25 @@ export function useConversationSearch(query: string, enabled: boolean): Conversa
 
     const timer = setTimeout(() => {
       void (async () => {
-        const localResults = rankConversations(conversationsRef.current, trimmedQuery, {
-          requireMatch: true,
-          limit: MAX_CONVERSATION_RESULTS,
-        });
+        // Only sessions of the active layout are searchable: Chat never finds
+        // Code sessions and vice versa (shared Chat sessions appear in both).
+        const localResults = rankConversations(
+          filterConversationsForLayout(conversationsRef.current, layoutMode),
+          trimmedQuery,
+          {
+            requireMatch: true,
+            limit: MAX_CONVERSATION_RESULTS,
+          },
+        );
         try {
           const backendResults = await api.searchConversations(trimmedQuery);
           if (token !== requestToken.current) return;
+          const visibleBackendResults = (Array.isArray(backendResults) ? backendResults : []).filter(
+            (conversation) => isConversationVisibleIn(conversation, layoutMode),
+          );
           const merged = mergeConversationResults(
             localResults.map((entry) => entry.conversation),
-            Array.isArray(backendResults) ? backendResults : [],
+            visibleBackendResults,
           );
           setState({
             results: rankConversations(merged, trimmedQuery, { limit: MAX_CONVERSATION_RESULTS }),
@@ -82,7 +93,7 @@ export function useConversationSearch(query: string, enabled: boolean): Conversa
     }, CONVERSATION_SEARCH_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [eligible, trimmedQuery]);
+  }, [eligible, trimmedQuery, layoutMode]);
 
   // Dropping the last request on unmount prevents "setState after unmount".
   useEffect(

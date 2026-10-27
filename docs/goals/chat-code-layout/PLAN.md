@@ -1,7 +1,9 @@
 # PLAN — Layouts Chat e Code (Fase 1: layout)
 
-> Status: **aguardando validação** do usuário. Escopo desta fase: só o layout; o harness de código
-> (workspace em disco, leitura de arquivos, git, agentes) vem na etapa seguinte.
+> Status: **concluído e verificado** (2026-10-27) — implementação + verificação independente
+> (`docs/goals/chat-code-layout/EVIDENCE.md`, veredito “aprovado com ressalvas”, correções finais
+> aplicadas no §7 da evidência). Escopo desta fase: só o layout; o harness de código (workspace em
+> disco, leitura de arquivos, git, agentes) vem na etapa seguinte.
 > Imagens de referência: `docs/goals/chat-code-layout/refs/`.
 
 ## 1. Resultado esperado
@@ -150,7 +152,7 @@ Mudanças de contrato (Lead):
 - Abas de sessão: `role="tablist"`/`role="tab"` com `aria-selected`, `aria-controls`, fechamento com
   `aria-label`, navegação por teclado (setas/Home/End) e `+` como botão.
 - Sidebar do Code: `aria-current` na sessão ativa; mesmas regras de foco da sidebar atual.
-- Painel: abas com `role="tablist"`, botão de recolher com `aria-pressed`/`aria-label`.
+- Painel: abas com `role="tablist"`, botão de recolher com `aria-label`.
 - Nenhuma cor nova; contraste AA; `reduceMotion` respeitado.
 
 ## 7. Testes (TDD, antes/durante a implementação)
@@ -205,3 +207,53 @@ Mudanças de contrato (Lead):
 | Painel direito espremer a conversa. | Largura via `resolveSidePanelLayout` (≥480px de conversa); fecha abaixo de 1120px. |
 | Token/hex solto ou borda assimétrica. | Revisão do verifier + checklist DESIGN §15. |
 | Escopo crescer para o harness. | Fora de escopo explícito: sem backend Rust, sem leitura de arquivos/git. |
+
+## 11. Registro de implementação (2026-10-27)
+
+Arquivos principais:
+
+- **Estado/contrato**: `src/lib/store/uiStore.ts` (`layoutMode`, `codeView`, `codePanelOpen`,
+  `codePanelTab` + actions; `layoutMode`/`codePanelOpen` persistidos com validação no merge),
+  `src/lib/store/chatStore.ts` (abrir/nova conversa volta para a sessão nos dois layouts),
+  `src/lib/store/index.ts`, `src/lib/hotkeys.ts` (`codeSkillsView`).
+- **Chrome**: `src/components/layout/LayoutModeSwitch.tsx` (pílula centrada, `aria-pressed`,
+  indicador `layoutId` com `reduceMotion`), `TitleBar.tsx` (grade de 3 colunas: marca/ações/switch;
+  `PlanUsageChip` oculto <1280px para não comprimir a busca/controles), `AppShell.tsx` (sidebar por
+  layout + `sidebarLabel`), `WorkspaceCenter.tsx` (composição central; `ChatView` único; Skills/
+  Biblioteca; `id="code-session-panel"`).
+- **Code workbench** (`src/components/code/**`): `CodeSidebar`, `CodeSessionHeader` (título,
+  “Sem workspace”, abas de sessão, toggle do painel), `CodePanel` (Arquivos/Alterações, barra
+  “Sem workspace”, “Sem commit +0 −0”, Commit desabilitado, estados vazios, `PanelResizer`,
+  largura persistida compartilhada, ⇢ oculto <1120px) e `CodeWelcomeScreen`.
+- **Integração**: `src/App.tsx` (sidebar/painel por modo, drag&drop da Biblioteca só no Chat,
+  `Esc` do Skills no Code volta à sessão), `src/components/chat/ChatView.tsx` (`welcome`),
+  `src/components/skills/SkillsView.tsx` (`onBack`/`backLabel`),
+  `src/components/composer/Composer.tsx` (placeholder/aria-label por `layoutMode`),
+  `src/components/palette/usePaletteActions.ts` (Ir para o modo Chat/Code; comandos de
+  Biblioteca/artefatos/fontes ausentes no Code; Skills abre no centro do modo atual).
+- **Docs**: `docs/DESIGN.md` (§5/§11/§13/§14), `docs/ARCHITECTURE.md` (§3), `AGENTS.md`
+  (nova área `src/components/code/**`).
+
+Decisões de implementação (ajustes finos ao plano):
+
+1. O cabeçalho de sessão do Code fica montado (oculto) enquanto a página de Skills está aberta,
+   preservando as abas abertas ao voltar; ao sair do modo Code ele é desmontado (as abas são
+   reconstruídas a partir da conversa ativa — estado local, sem backend novo).
+2. O seletor Chat/Code é uma grade de três colunas na title bar (não posicionamento absoluto),
+   garantindo centralização verdadeira sem colisão em janelas menores.
+3. `Commit`, branch/workspace, árvore de arquivos e alterações são **estados vazios** com copy e
+   tooltips explícitos; nada de dados falsos. O harness da próxima fase pode consumir
+   `layoutMode`/`codePanel*` sem retrabalho de layout.
+4. A paleta nunca oferece becos sem saída: no Code ela esconde os comandos de Biblioteca,
+   artefatos e fontes; `Ir para o modo Chat` volta ao layout de conversa.
+5. Skills no Code usa a mesma `SkillsView`, com “Voltar à sessão” (o rótulo/back são props).
+
+Verificação executada pelo Lead durante a implementação (evidência independente em
+`EVIDENCE.md`): `pnpm typecheck` limpo, `pnpm build` OK e `pnpm test` com a suíte inteira verde
+(76 arquivos / 1499 testes) antes dos últimos ajustes de hotkeys/title bar; os testes afetados
+foram re-executados depois (`hotkeys`, `TitleBar`, `WorkspaceCenter`, `uiStore`, `palette`,
+`code/**`, `Composer`) e seguem verdes.
+
+Pendências conhecidas (para as próximas fases): abrir/selecionar workspace real, árvore de
+arquivos, diff/commit git, seleção de harness (DeepSeek Harness/t3code/Codex), persistência de
+abas ao sair do modo Code e revisão visual manual dentro do app.

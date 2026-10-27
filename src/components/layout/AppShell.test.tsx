@@ -163,6 +163,28 @@ describe('AppShell — chrome contínuo e painel do chat', () => {
   });
 });
 
+describe('AppShell — sidebar por layout', () => {
+  it('renders the sidebar provided by the active layout instead of the chat sidebar', () => {
+    const renderSidebar = vi.fn(({ onClose }: { onClose?: () => void }) => (
+      <div data-testid="code-sidebar" data-has-close={onClose ? 'true' : 'false'} />
+    ));
+
+    render(
+      <AppShell sidebar={renderSidebar}>
+        <div data-testid="content" />
+      </AppShell>,
+    );
+
+    expect(renderSidebar).toHaveBeenCalled();
+    expect(screen.getByTestId('code-sidebar').getAttribute('data-has-close')).toBe('false');
+    expect(screen.queryByTestId('sidebar')).toBeNull();
+    // The wrapper kept the same resizable width contract as the chat sidebar.
+    expect(screen.getByTestId('code-sidebar').parentElement?.style.width).toBe(
+      `${SIDEBAR_WIDTH_DEFAULT}px`,
+    );
+  });
+});
+
 describe('AppShell — painel lateral direito', () => {
   it('renders the right panel as the last child of the content row, outside <main>', () => {
     render(

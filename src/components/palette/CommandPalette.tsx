@@ -23,6 +23,7 @@ import {
   readRecentCommandIds,
   recordRecentCommandId,
 } from '@/lib/palette/recents';
+import { filterConversationsForLayout } from '@/lib/conversations';
 import { useChatStore, useUiStore } from '@/lib/store';
 import { modKey } from '@/lib/utils';
 import { ConversationRow } from './ConversationRow';
@@ -137,7 +138,14 @@ function scheduleAfterClose(run: () => void | Promise<void>): void {
 export function CommandPalette() {
   const open = useUiStore((state) => state.commandPaletteOpen);
   const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
+  const layoutMode = useUiStore((state) => state.layoutMode);
   const conversations = useChatStore((state) => state.conversations);
+
+  /** Chat and Code search their own sessions only (shared ones show in both). */
+  const visibleConversations = useMemo(
+    () => filterConversationsForLayout(conversations, layoutMode),
+    [conversations, layoutMode],
+  );
 
   const [rawQuery, setRawQuery] = useState('');
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -160,8 +168,8 @@ export function CommandPalette() {
 
   const recentConversations = useMemo(() => {
     if (hasQuery || parsed.scope === 'commands') return [];
-    return rankConversations(conversations, '', { limit: RECENT_CONVERSATIONS_LIMIT });
-  }, [conversations, hasQuery, parsed.scope]);
+    return rankConversations(visibleConversations, '', { limit: RECENT_CONVERSATIONS_LIMIT });
+  }, [visibleConversations, hasQuery, parsed.scope]);
 
   const sections = useMemo<PaletteSection[]>(() => {
     if (parsed.scope === 'commands') return groupSections(commandResults);

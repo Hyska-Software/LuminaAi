@@ -37,6 +37,10 @@ function resetUi(): void {
     sourcesPanelOpen: false,
     activeArtifactId: null,
     artifacts: [],
+    layoutMode: 'chat',
+    codeView: 'session',
+    codePanelOpen: true,
+    codePanelTab: 'changes',
   });
 }
 
@@ -389,6 +393,81 @@ describe('useUiStore — abas de Configurações (deep-link da paleta)', () => {
     useUiStore.getState().setSettingsOpen(true);
     expect(useUiStore.getState().settingsOpen).toBe(true);
     expect(useUiStore.getState().settingsTab).toBe('providers');
+  });
+});
+
+describe('useUiStore — layouts Chat e Code', () => {
+  it('starts in the Chat layout with the session surface and the panel open on Alterações', () => {
+    expect(useUiStore.getState()).toMatchObject({
+      layoutMode: 'chat',
+      codeView: 'session',
+      codePanelOpen: true,
+      codePanelTab: 'changes',
+    });
+  });
+
+  it('switches and normalizes the layout mode', () => {
+    useUiStore.getState().setLayoutMode('code');
+    expect(useUiStore.getState().layoutMode).toBe('code');
+
+    useUiStore.getState().setLayoutMode('nope' as unknown as 'chat');
+    expect(useUiStore.getState().layoutMode).toBe('chat');
+  });
+
+  it('switches the Code center between session and Skills', () => {
+    useUiStore.getState().setCodeView('skills');
+    expect(useUiStore.getState().codeView).toBe('skills');
+
+    useUiStore.getState().setCodeView('bogus' as unknown as 'session');
+    expect(useUiStore.getState().codeView).toBe('session');
+  });
+
+  it('opens/closes the Code right panel and selects its tab', () => {
+    useUiStore.getState().toggleCodePanel();
+    expect(useUiStore.getState().codePanelOpen).toBe(false);
+
+    useUiStore.getState().setCodePanelOpen(true);
+    expect(useUiStore.getState().codePanelOpen).toBe(true);
+
+    useUiStore.getState().setCodePanelTab('files');
+    expect(useUiStore.getState().codePanelTab).toBe('files');
+
+    useUiStore.getState().setCodePanelTab('bogus' as unknown as 'changes');
+    expect(useUiStore.getState().codePanelTab).toBe('changes');
+  });
+
+  it('persists the layout mode and the Code panel state', () => {
+    useUiStore.getState().setLayoutMode('code');
+    useUiStore.getState().setCodePanelOpen(false);
+
+    const raw = window.localStorage.getItem('lumina.ui');
+    expect(raw).not.toBeNull();
+    const persisted = JSON.parse(raw as string) as {
+      state?: { layoutMode?: string; codePanelOpen?: boolean };
+    };
+    expect(persisted.state?.layoutMode).toBe('code');
+    expect(persisted.state?.codePanelOpen).toBe(false);
+  });
+
+  it('keeps a valid persisted layout and normalizes corrupted values while rehydrating', async () => {
+    window.localStorage.setItem(
+      'lumina.ui',
+      JSON.stringify({ version: 0, state: { layoutMode: 'code', codePanelOpen: false } }),
+    );
+    await useUiStore.persist.rehydrate();
+    expect(useUiStore.getState().layoutMode).toBe('code');
+    expect(useUiStore.getState().codePanelOpen).toBe(false);
+
+    // Write the corrupted snapshot after the runtime state: `setState` persists,
+    // so storing it first would be overwritten before the rehydrate below.
+    useUiStore.setState({ codePanelOpen: true });
+    window.localStorage.setItem(
+      'lumina.ui',
+      JSON.stringify({ version: 0, state: { layoutMode: 'work', codePanelOpen: 'yes' } }),
+    );
+    await useUiStore.persist.rehydrate();
+    expect(useUiStore.getState().layoutMode).toBe('chat');
+    expect(useUiStore.getState().codePanelOpen).toBe(true);
   });
 });
 

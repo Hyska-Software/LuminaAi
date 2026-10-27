@@ -205,6 +205,9 @@ export interface ChatMessage {
   providerState?: unknown;
 }
 
+/** Origem de uma sessão: o layout onde ela foi criada. */
+export type ConversationMode = 'chat' | 'code';
+
 export interface Conversation {
   id: string;
   title: string;
@@ -215,6 +218,16 @@ export interface Conversation {
   modelId: string;
   messageCount: number;
   preview?: string | null;
+  /**
+   * Layout onde a sessão nasceu. O backend sempre envia; opcional no tipo para
+   * fixtures/payloads antigos (tratados como `chat` por `lib/conversations`).
+   */
+  mode?: ConversationMode;
+  /**
+   * Sessão do Chat adicionada ao layout Code: aparece e é compartilhada nos
+   * dois modos. Só faz sentido para `mode === 'chat'`.
+   */
+  codeLinked?: boolean;
 }
 
 export interface ConversationDetail {

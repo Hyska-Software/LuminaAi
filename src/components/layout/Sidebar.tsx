@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
+  Code,
   Download,
   Ellipsis,
   Library,
@@ -12,10 +13,12 @@ import {
   Sparkles,
   SquarePen,
   Trash,
+  Unlink,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { filterConversationsForLayout } from '@/lib/conversations';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import type { Conversation } from '@/lib/types';
 import { cn, groupConversations, modKey } from '@/lib/utils';
@@ -104,6 +107,8 @@ interface ConversationRowProps {
   onCommitRename: () => void;
   onCancelRename: () => void;
   onTogglePin: () => void;
+  /** Shares the Chat session with the Code layout (or removes that link). */
+  onToggleCodeLink: () => void;
   onExport: () => void;
   onDelete: () => void;
 }
@@ -119,6 +124,7 @@ function ConversationRow({
   onCommitRename,
   onCancelRename,
   onTogglePin,
+  onToggleCodeLink,
   onExport,
   onDelete,
 }: ConversationRowProps) {
@@ -207,6 +213,12 @@ function ConversationRow({
             <MenuEntry icon={<Download className="size-3.5" />} onSelect={onExport}>
               Exportar
             </MenuEntry>
+            <MenuEntry
+              icon={conversation.codeLinked ? <Unlink className="size-3.5" /> : <Code className="size-3.5" />}
+              onSelect={onToggleCodeLink}
+            >
+              {conversation.codeLinked ? 'Remover do Code' : 'Usar no Code'}
+            </MenuEntry>
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
             <MenuEntry icon={<Trash className="size-3.5" />} danger onSelect={onDelete}>
               Excluir
@@ -235,7 +247,12 @@ export function Sidebar({ className, onClose }: SidebarProps) {
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
   const cancelRenameRef = useRef(false);
 
-  const groups = useMemo(() => groupConversations(conversations), [conversations]);
+  // The Chat sidebar only lists Chat sessions; Code sessions and shared
+  // sessions belong to their own listing (the shared ones still live here).
+  const groups = useMemo(
+    () => groupConversations(filterConversationsForLayout(conversations, 'chat')),
+    [conversations],
+  );
 
   const handleNewChat = () => {
     void useChatStore.getState().startNewConversation();
@@ -285,6 +302,20 @@ export function Sidebar({ className, onClose }: SidebarProps) {
 
   const handleTogglePin = (conversation: Conversation) => {
     void useChatStore.getState().togglePinned(conversation.id);
+  };
+
+  const handleToggleCodeLink = async (conversation: Conversation) => {
+    const linked = conversation.codeLinked !== true;
+    const ok = await useChatStore.getState().setConversationCodeLinked(conversation.id, linked);
+    if (!ok) {
+      toast.error(
+        linked ? 'Não foi possível adicionar a sessão ao Code' : 'Não foi possível remover a sessão do Code',
+      );
+      return;
+    }
+    toast.success(linked ? 'Sessão adicionada ao Code' : 'Sessão removida do Code', {
+      description: linked ? 'Agora ela aparece nos dois layouts.' : 'Ela continua disponível no Chat.',
+    });
   };
 
   const handleExport = async (conversation: Conversation) => {
@@ -393,6 +424,7 @@ export function Sidebar({ className, onClose }: SidebarProps) {
                     onCommitRename={handleCommitRename}
                     onCancelRename={handleCancelRename}
                     onTogglePin={() => handleTogglePin(conversation)}
+                    onToggleCodeLink={() => void handleToggleCodeLink(conversation)}
                     onExport={() => void handleExport(conversation)}
                     onDelete={() => setDeleteTarget(conversation)}
                   />

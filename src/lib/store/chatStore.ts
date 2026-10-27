@@ -16,9 +16,10 @@ import type {
 } from '../types';
 import { deriveTitle, newId } from '../utils';
 import { defaultSelection, getModel } from '../catalog';
+import { filterConversationsForLayout } from '../conversations';
 import { reasoningForModel } from '../modelMenu';
 import { useAppStore } from './appStore';
-import { useUiStore } from './uiStore';
+import { useUiStore, type LayoutMode } from './uiStore';
 
 export interface StreamingState {
   turnId: string;
@@ -34,6 +35,12 @@ interface ChatState {
   conversations: Conversation[];
   conversationsLoading: boolean;
   activeId: string | null;
+  /**
+   * Last session remembered by each layout (Chat | Code). Sessions are separate
+   * per layout, so switching layouts restores that layout's own conversation
+   * instead of leaking the other one (docs/goals/chat-code-sessions).
+   */
+  activeIdByLayout: Record<LayoutMode, string | null>;
   messagesByConversation: Record<string, ChatMessage[]>;
   loadingConversationId: string | null;
   streaming: StreamingState | null;
@@ -48,8 +55,27 @@ interface ChatState {
 
   init: () => Promise<void>;
   refreshConversations: () => Promise<void>;
-  openConversation: (id: string) => Promise<void>;
-  startNewConversation: () => Promise<string | null>;
+  /**
+   * Opens a conversation. `preserveView` keeps the layout's current page
+   * (Biblioteca/Skills) untouched; `enterLayout` uses it to restore the session
+   * in the background when the user comes back to a layout that was showing
+   * another surface (docs/goals/chat-code-sessions/PLAN.md §3).
+   */
+  openConversation: (id: string, options?: { preserveView?: boolean }) => Promise<void>;
+  startNewConversation: (mode?: LayoutMode) => Promise<string | null>;
+  /**
+   * Restores the active session of a layout after the Chat | Code switch:
+   * remembers/validates the layout's session and falls back to its first
+   * visible conversation (or the welcome state when the layout has none).
+   */
+  enterLayout: (mode: LayoutMode) => Promise<void>;
+  /** Clears the active session of the current layout (closing the last tab). */
+  clearActiveConversation: () => void;
+  /**
+   * Adds a Chat session to the Code layout (shared) or removes that link.
+   * Returns `false` when the backend rejects the change.
+   */
+  setConversationCodeLinked: (id: string, linked: boolean) => Promise<boolean>;
   deleteConversation: (id: string) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   togglePinned: (id: string) => Promise<void>;
@@ -260,6 +286,20 @@ export const useChatStore = create<ChatState>()((set, get) => {
     } catch (error) {
       console.error('failed to refresh conversations', error);
     }
+  };
+
+  /** Active layout (the store mirrors `uiStore.layoutMode` per operation). */
+  const currentLayout = (): LayoutMode => useUiStore.getState().layoutMode;
+
+  /** Sessions visible in one layout, preserving the backend order. */
+  const visibleConversations = (conversations: Conversation[], layout: LayoutMode) =>
+    filterConversationsForLayout(conversations, layout);
+
+  /** Remembers `id` as the active session of `layout` (default: current). */
+  const rememberActive = (id: string | null, layout: LayoutMode = currentLayout()) => {
+    set((state) => ({
+      activeIdByLayout: { ...state.activeIdByLayout, [layout]: id },
+    }));
   };
 
   // Monotonic token: a slow `list_artifacts` response must never overwrite the
@@ -525,15 +565,18 @@ export const useChatStore = create<ChatState>()((set, get) => {
   const ensureConversation = async (title: string, selection: ModelSelection): Promise<string> => {
     const current = get().activeId;
     if (current) return current;
+    const layout = currentLayout();
     const conversation = await api.createConversation(
       title,
       selection.providerId,
       selection.modelId,
+      layout,
     );
     set((state) => ({
       conversations: [conversation, ...state.conversations],
       activeId: conversation.id,
       messagesByConversation: { ...state.messagesByConversation, [conversation.id]: [] },
+      activeIdByLayout: { ...state.activeIdByLayout, [layout]: conversation.id },
     }));
     return conversation.id;
   };
@@ -542,6 +585,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
     conversations: [],
     conversationsLoading: false,
     activeId: null,
+    activeIdByLayout: { chat: null, code: null },
     messagesByConversation: {},
     loadingConversationId: null,
     streaming: null,
@@ -555,9 +599,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
       try {
         const conversations = await api.listConversations();
         set({ conversations, conversationsLoading: false });
-        const first = conversations[0];
-        if (first && !get().activeId) {
-          await get().openConversation(first.id);
+        if (!get().activeId) {
+          // Each layout opens the first session it can see; a layout with no
+          // sessions of its own starts on the welcome screen.
+          const layout = currentLayout();
+          const first = visibleConversations(conversations, layout)[0];
+          if (first) await get().openConversation(first.id);
         }
       } catch (error) {
         set({ conversationsLoading: false, error: String(error) });
@@ -566,16 +613,72 @@ export const useChatStore = create<ChatState>()((set, get) => {
 
     refreshConversations: refreshList,
 
-    openConversation: async (id) => {
-      // Navigating to a conversation always leaves the skills view.
-      useUiStore.getState().setActiveView('chat');
+    enterLayout: async (mode) => {
+      const state = get();
+      const visible = visibleConversations(state.conversations, mode);
+      const remembered = state.activeIdByLayout[mode];
+      const target = visible.some((conversation) => conversation.id === remembered)
+        ? remembered
+        : (visible[0]?.id ?? null);
+      if (target === state.activeId && (target === null || state.messagesByConversation[target])) {
+        rememberActive(target, mode);
+        return;
+      }
+      if (target) {
+        // Restore the session in the background: the layout keeps whichever page
+        // it was showing (Biblioteca/Skills) instead of being forced back to the
+        // conversation, matching WorkspaceCenter's per-layout view state.
+        await get().openConversation(target, { preserveView: true });
+        return;
+      }
+      // No session for this layout: show its welcome state without touching the
+      // other layout's cached conversation.
+      set({ activeId: null, loadingConversationId: null });
+      rememberActive(null, mode);
+      useUiStore.getState().setArtifacts([]);
+      useUiStore.getState().closeArtifactPanel();
+    },
+
+    clearActiveConversation: () => {
+      set({ activeId: null, loadingConversationId: null });
+      rememberActive(null);
+      useUiStore.getState().setArtifacts([]);
+      useUiStore.getState().closeArtifactPanel();
+    },
+
+    setConversationCodeLinked: async (id, linked) => {
+      try {
+        const updated = await api.setConversationCodeLinked(id, linked);
+        set((state) => ({
+          conversations: state.conversations.map((conversation) =>
+            conversation.id === id ? { ...conversation, ...updated } : conversation,
+          ),
+        }));
+        return true;
+      } catch (error) {
+        console.error('failed to update the conversation code link', error);
+        return false;
+      }
+    },
+
+    openConversation: async (id, options) => {
+      // Navigating to a conversation leaves the skills view by default and shows
+      // the session surface in both layouts (Code shares the same conversation).
+      // `enterLayout` preserves the page instead: switching layouts must not
+      // close the Biblioteca/Skills page the user was reading.
+      if (!options?.preserveView) {
+        useUiStore.getState().setActiveView('chat');
+        useUiStore.getState().setCodeView('session');
+      }
       if (get().activeId === id && get().messagesByConversation[id]) {
         // Messages are cached, but the artifacts may have changed (turn ended
         // in the background, deletion, app reload): always reconcile them.
+        rememberActive(id);
         await syncArtifacts(id);
         return;
       }
       set({ activeId: id, loadingConversationId: id });
+      rememberActive(id);
       // Never show the previous conversation's artifacts while the new one
       // loads (the panel may be open on the list).
       useUiStore.getState().setArtifacts([]);
@@ -599,9 +702,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
       }
     },
 
-    startNewConversation: async () => {
-      // "Novo chat" always returns to the chat surface.
+    startNewConversation: async (mode) => {
+      // "Novo chat"/"Novo agente" creates the session in that layout's own
+      // namespace and returns to the conversation surface.
+      const layout = mode ?? currentLayout();
       useUiStore.getState().setActiveView('chat');
+      useUiStore.getState().setCodeView('session');
       // Leaving a started conversation resets the composer to the configured
       // default model (the previous conversation's model is locked to it).
       if (selectModelLocked(get())) {
@@ -615,12 +721,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
           'Nova conversa',
           selection.providerId,
           selection.modelId,
+          layout,
         );
         set((state) => ({
           conversations: [conversation, ...state.conversations],
           activeId: conversation.id,
           messagesByConversation: { ...state.messagesByConversation, [conversation.id]: [] },
           pendingAttachments: [],
+          activeIdByLayout: { ...state.activeIdByLayout, [layout]: conversation.id },
         }));
         useUiStore.getState().setArtifacts([]);
         useUiStore.getState().closeArtifactPanel();
@@ -634,14 +742,25 @@ export const useChatStore = create<ChatState>()((set, get) => {
     deleteConversation: async (id) => {
       try {
         await api.deleteConversation(id);
+        const layout = currentLayout();
         set((state) => {
           const rest = state.conversations.filter((c) => c.id !== id);
           const messagesByConversation = { ...state.messagesByConversation };
           delete messagesByConversation[id];
+          const stillActive = state.activeId !== id;
+          const fallback = stillActive
+            ? state.activeId
+            : (filterConversationsForLayout(rest, layout)[0]?.id ?? null);
+          const activeIdByLayout = { ...state.activeIdByLayout };
+          if (!stillActive) activeIdByLayout[layout] = fallback;
+          for (const key of Object.keys(activeIdByLayout) as LayoutMode[]) {
+            if (activeIdByLayout[key] === id) activeIdByLayout[key] = null;
+          }
           return {
             conversations: rest,
             messagesByConversation,
-            activeId: state.activeId === id ? (rest[0]?.id ?? null) : state.activeId,
+            activeId: fallback,
+            activeIdByLayout,
           };
         });
         const next = get().activeId;

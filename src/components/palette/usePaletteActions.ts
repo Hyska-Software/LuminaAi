@@ -7,6 +7,7 @@
 import {
   ArrowLeft,
   Braces,
+  Code,
   Copy,
   Download,
   FilePlus,
@@ -15,6 +16,7 @@ import {
   Globe,
   Library,
   Lock,
+  MessageSquare,
   MessageSquarePlus,
   Monitor,
   PanelLeft,
@@ -117,16 +119,26 @@ function toggleSetting(
 
 function focusComposer(): void {
   const ui = useUiStore.getState();
-  if (ui.activeView === 'chat') {
+  // The composer lives in the single ChatView instance shared by both layouts;
+  // when another surface replaces the conversation, go back to it first and
+  // focus once the composer is visible again.
+  const hidden =
+    ui.layoutMode === 'code' ? ui.codeView !== 'session' : ui.activeView !== 'chat';
+  if (!hidden) {
     window.dispatchEvent(new CustomEvent('lumina:focus-composer'));
     return;
   }
-  // Skills replaces the chat column: switch back first, then focus once the
-  // composer is mounted/visible again.
-  ui.setActiveView('chat');
+  if (ui.layoutMode === 'code') ui.setCodeView('session');
+  else ui.setActiveView('chat');
   window.setTimeout(() => {
     window.dispatchEvent(new CustomEvent('lumina:focus-composer'));
   }, 0);
+}
+
+function openSkills(): void {
+  const ui = useUiStore.getState();
+  if (ui.layoutMode === 'code') ui.setCodeView('skills');
+  else ui.setActiveView('skills');
 }
 
 function openArtifacts(): void {
@@ -226,6 +238,8 @@ export function usePaletteActions(): PaletteAction[] {
   const settings = useAppStore((state) => state.settings);
   const theme = useUiStore((state) => state.theme);
   const activeView = useUiStore((state) => state.activeView);
+  const layoutMode = useUiStore((state) => state.layoutMode);
+  const codeView = useUiStore((state) => state.codeView);
   const artifacts = useUiStore((state) => state.artifacts);
 
   const activeConversation = conversations.find((entry) => entry.id === activeId);
@@ -240,12 +254,25 @@ export function usePaletteActions(): PaletteAction[] {
   actions.push({
     id: 'nova-conversa',
     group: 'conversas',
-    label: 'Novo chat',
-    description: 'Comece uma conversa em branco',
+    label: layoutMode === 'code' ? 'Novo agente' : 'Novo chat',
+    description:
+      layoutMode === 'code' ? 'Comece uma nova sessão no layout Code' : 'Comece uma conversa em branco',
     icon: MessageSquarePlus,
     shortcut: `${modKey}+N`,
-    keywords: 'nova conversa criar blank',
-    run: () => void useChatStore.getState().startNewConversation(),
+    keywords:
+      layoutMode === 'code'
+        ? 'novo agente sessão code criar'
+        : 'nova conversa criar blank',
+    run: () => {
+      if (layoutMode === 'code') {
+        void useChatStore.getState().startNewConversation('code');
+        return;
+      }
+      // A Chat session is created in the Chat namespace; make sure its layout
+      // is the visible one.
+      useUiStore.getState().setLayoutMode('chat');
+      void useChatStore.getState().startNewConversation('chat');
+    },
   });
 
   if (activeConversation) {
@@ -332,6 +359,20 @@ export function usePaletteActions(): PaletteAction[] {
 
   /* -------- Navegação -------- */
   actions.push({
+    id: layoutMode === 'chat' ? 'modo-code' : 'modo-chat',
+    group: 'navegacao',
+    label: layoutMode === 'chat' ? 'Ir para o modo Code' : 'Ir para o modo Chat',
+    description:
+      layoutMode === 'chat'
+        ? 'Abrir o workspace de código (sessões e alterações)'
+        : 'Voltar ao layout de conversa com o assistente',
+    icon: layoutMode === 'chat' ? Code : MessageSquare,
+    keywords: 'layout modo code chat conversa workspace agente',
+    run: () =>
+      useUiStore.getState().setLayoutMode(layoutMode === 'chat' ? 'code' : 'chat'),
+  });
+
+  actions.push({
     id: 'focar-composer',
     group: 'navegacao',
     label: 'Focar campo de mensagem',
@@ -351,47 +392,52 @@ export function usePaletteActions(): PaletteAction[] {
     keywords: 'sidebar histórico lateral',
     run: () => useUiStore.getState().toggleSidebar(),
   });
-  actions.push({
-    id: 'abrir-artefatos',
-    group: 'navegacao',
-    label: 'Abrir painel de artefatos',
-    description: artifacts.length
-      ? `${artifacts.length} ${artifacts.length === 1 ? 'artefato' : 'artefatos'} nesta conversa`
-      : 'Nenhum artefato nesta conversa',
-    icon: FileText,
-    keywords: 'arquivos canvas prévia preview',
-    run: openArtifacts,
-  });
-  actions.push({
-    id: 'abrir-fontes',
-    group: 'navegacao',
-    label: 'Abrir painel de fontes',
-    description: citations.length
-      ? `${citations.length} ${citations.length === 1 ? 'fonte' : 'fontes'} nesta conversa`
-      : 'Nenhuma fonte nesta conversa',
-    icon: Globe,
-    keywords: 'citações links referências web',
-    run: openSources,
-  });
 
-  actions.push({
-    id: 'abrir-biblioteca',
-    group: 'navegacao',
-    label: 'Abrir biblioteca',
-    description: 'Todos os arquivos das conversas e os enviados por você',
-    icon: Library,
-    keywords: 'biblioteca library arquivos favoritos upload enviados documentos',
-    run: openLibrary,
-  });
-  actions.push({
-    id: 'enviar-arquivos-biblioteca',
-    group: 'navegacao',
-    label: 'Enviar arquivos para a biblioteca',
-    description: 'Importar arquivos do computador para usar no chat',
-    icon: Upload,
-    keywords: 'upload importar enviar arquivos biblioteca library anexar',
-    run: importFilesToLibrary,
-  });
+  // Artifacts/library/sources are Chat-layout surfaces: the Code workbench
+  // replaces them with its Arquivos/Alterações panel, so the commands are
+  // simply absent there (never a dead end — COMMAND_PALETTE §5).
+  if (layoutMode === 'chat') {
+    actions.push({
+      id: 'abrir-artefatos',
+      group: 'navegacao',
+      label: 'Abrir painel de artefatos',
+      description: artifacts.length
+        ? `${artifacts.length} ${artifacts.length === 1 ? 'artefato' : 'artefatos'} nesta conversa`
+        : 'Nenhum artefato nesta conversa',
+      icon: FileText,
+      keywords: 'arquivos canvas prévia preview',
+      run: openArtifacts,
+    });
+    actions.push({
+      id: 'abrir-fontes',
+      group: 'navegacao',
+      label: 'Abrir painel de fontes',
+      description: citations.length
+        ? `${citations.length} ${citations.length === 1 ? 'fonte' : 'fontes'} nesta conversa`
+        : 'Nenhuma fonte nesta conversa',
+      icon: Globe,
+      keywords: 'citações links referências web',
+      run: openSources,
+    });
+    actions.push({
+      id: 'abrir-biblioteca',
+      group: 'navegacao',
+      label: 'Abrir biblioteca',
+      description: 'Todos os arquivos das conversas e os enviados por você',
+      icon: Library,
+      keywords: 'biblioteca library arquivos favoritos upload enviados documentos',
+      run: openLibrary,
+    });
+    actions.push({
+      id: 'enviar-arquivos-biblioteca',
+      group: 'navegacao',
+      label: 'Enviar arquivos para a biblioteca',
+      description: 'Importar arquivos do computador para usar no chat',
+      icon: Upload,
+      keywords: 'upload importar enviar arquivos biblioteca library anexar',
+      run: importFilesToLibrary,
+    });
+  }
 
   if (settings.skillsPanelEnabled) {
     actions.push({
@@ -401,7 +447,7 @@ export function usePaletteActions(): PaletteAction[] {
       description: 'Ativar, desativar e excluir skills do agente',
       icon: Sparkles,
       keywords: 'skills habilidades agente',
-      run: () => useUiStore.getState().setActiveView('skills'),
+      run: openSkills,
     });
     actions.push({
       id: 'abrir-pasta-skills',
@@ -414,7 +460,19 @@ export function usePaletteActions(): PaletteAction[] {
     });
   }
 
-  if (activeView === 'skills' || activeView === 'library') {
+  if (layoutMode === 'code') {
+    if (codeView === 'skills') {
+      actions.push({
+        id: 'voltar-a-sessao',
+        group: 'navegacao',
+        label: 'Voltar à sessão',
+        description: 'Sair da gestão de skills e voltar ao agente',
+        icon: ArrowLeft,
+        keywords: 'sessão agente voltar code',
+        run: () => useUiStore.getState().setCodeView('session'),
+      });
+    }
+  } else if (activeView === 'skills' || activeView === 'library') {
     actions.push({
       id: 'voltar-ao-chat',
       group: 'navegacao',

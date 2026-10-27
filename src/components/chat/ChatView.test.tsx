@@ -152,6 +152,38 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useAppStore.setState({ providers: [], auth: [], keys: [] });
+  useUiStore.setState({ layoutMode: 'chat' });
+  useChatStore.setState({ conversations: [], activeId: null, messagesByConversation: {} });
+});
+
+describe('ChatView — tela vazia', () => {
+  function seedEmpty(): void {
+    useChatStore.setState({
+      conversations: [conversation()],
+      activeId: 'conv-1',
+      messagesByConversation: { 'conv-1': [] },
+      streaming: null,
+      loadingConversationId: null,
+      errorCode: null,
+      errorHint: null,
+      error: null,
+    });
+  }
+
+  it('keeps the native chat welcome by default', () => {
+    seedEmpty();
+    render(<ChatView />);
+
+    expect(screen.getByText('Como posso ajudar?')).toBeTruthy();
+  });
+
+  it('aceita um welcome customizado (usado pelo layout Code)', () => {
+    seedEmpty();
+    render(<ChatView welcome={<div data-testid="code-welcome" />} />);
+
+    expect(screen.getByTestId('code-welcome')).toBeTruthy();
+    expect(screen.queryByText('Como posso ajudar?')).toBeNull();
+  });
 });
 
 describe('ChatView — banners de erro do turno (T4.4a)', () => {
@@ -235,5 +267,47 @@ describe('ChatView — banners de erro do turno (T4.4a)', () => {
     const alert = screen.getByRole('alert');
     expect(within(alert).getByText('Uso do plano indisponível')).toBeTruthy();
     expect(within(alert).queryByRole('button', { name: /tentar novamente/i })).toBeNull();
+  });
+});
+
+describe('ChatView — sessões por layout (defesa contra activeId obsoleto)', () => {
+  it('não renderiza a conversa de outro layout no modo Chat', () => {
+    const codeConversation: Conversation = { ...conversation(), mode: 'code' };
+    useChatStore.setState({
+      conversations: [codeConversation],
+      activeId: 'conv-1',
+      messagesByConversation: {
+        'conv-1': [userMessage(), assistantMessage('complete')],
+      },
+      loadingConversationId: null,
+      streaming: null,
+      errorCode: null,
+    });
+    useUiStore.setState({ layoutMode: 'chat' });
+
+    render(<ChatView />);
+
+    expect(screen.queryByTestId('messages')).toBeNull();
+    expect(screen.getByText('Como posso ajudar?')).toBeTruthy();
+  });
+
+  it('não renderiza a conversa do Chat no modo Code', () => {
+    const chatConversation: Conversation = { ...conversation(), mode: 'chat' };
+    useChatStore.setState({
+      conversations: [chatConversation],
+      activeId: 'conv-1',
+      messagesByConversation: {
+        'conv-1': [userMessage(), assistantMessage('complete')],
+      },
+      loadingConversationId: null,
+      streaming: null,
+      errorCode: null,
+    });
+    useUiStore.setState({ layoutMode: 'code' });
+
+    render(<ChatView welcome={<div data-testid="code-welcome" />} />);
+
+    expect(screen.queryByTestId('messages')).toBeNull();
+    expect(screen.getByTestId('code-welcome')).toBeTruthy();
   });
 });

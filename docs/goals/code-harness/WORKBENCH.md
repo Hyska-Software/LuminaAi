@@ -1,0 +1,405 @@
+# WORKBENCH — UI/UX do modo Code com harness real
+
+> Parte do plano `docs/goals/code-harness/`. Define a experiência do layout Code quando o harness
+> existe de verdade: anatomia, componentes, estados, fluxos, acessibilidade e microcopy.
+> Base: layout da fase 1 (`docs/goals/chat-code-layout/PLAN.md`, `src/components/code/**`),
+> referência Paseo (`docs/research/paseo-workbench.md`) e o design system atual
+> (`docs/DESIGN.md`, `src/styles/globals.css`).
+>
+> Regra de ouro herdada da fase 1: **estado honesto > tela cheia**. Nada de dado falso; se o dado
+> ainda não existe, o estado vazio diz o que falta e como resolver.
+
+## 1. Princípios
+
+1. **Workspace é o eixo.** A sidebar agrupa por pasta/repositório; a sessão pertence a um workspace.
+   Sem workspace, o Code é uma tela de abertura de pasta — não um chat solto.
+2. **O trabalho termina em revisão.** Toda tarefa desemboca em Alterações → diff → commit. O painel
+   direito é o "produto" da sessão.
+3. **Densidade sem ruído.** Chrome mais baixo que a fase 1 (~36 px no lugar de 56+44+40), tipografia
+   12–13 px no chrome e 15 px no transcript, hierarquia por contraste/espaço, bordas de 1 px.
+4. **Estado explícito.** Sessão tem status (`Trabalhando`, `Pronta para revisar`, `Concluída`,
+   `Erro`); turno tem fecho ("Trabalhou por 4m 29s · 12.4k tokens"); alterações têm origem
+   (agente × git).
+5. **Aprovação é conversa, não modal.** Pedidos de permissão aparecem no fluxo da conversa, com o
+   contexto necessário para decidir; negar não cancela o turno.
+6. **Tudo reversível.** "Reverter turno" e "Reverter arquivo" estão a um clique; rewind de
+   conversa reusa o truncate existente.
+7. **pt-BR fixo**, com glossário (§13). Termos técnicos consagrados (workspace, commit, branch, diff,
+   PR, terminal) ficam em inglês; o resto traduz.
+
+## 2. Anatomia
+
+```
+┌───────────────────────── TitleBar 48px (inalterada, pílula Chat | Code) ─────────────────────────┐
+├ CodeSidebar 272px ─┬────────────── centro ─────────────────────────────┬ CodePanel 480px ────────┤
+│ + Novo agente      │ ▣ Sessão: “Corrigir cálculo de juros”   ● Editando│ [Arquivos][Alterações][Terminal]│
+│ Buscar (⌘K)        │ ⊞ workspace: lumina-core  ⎇ main*  ▤ 2  ▣ painel │ ⎇ main ▾     +42 −7   ⟳  ⋯   │
+│ Skills             │ ┌ abas ────────────────────────────────────────┐ │ ▾ src/                      │
+│                    │ │ ● Correção de juros × │ ● Revisão do diff × │ │   M app.ts        +12 −3    │
+│ WORKSPACES    [+]  │ └──────────────────────────────────────────────┘ │   A novo.ts       +30 −0    │
+│ ▾ ▣ lumina-core  ● │ transcript (ChatView)                            │ ▸ tests/                    │
+│    • Correção…   ◐ │  …                                               │                             │
+│    • Revisão…    ✓ │  ┌ card de turno ─────────────────────────────┐  │ ┌ barra de commit ─────────┐ │
+│ ▸ ▣ site-instit   │  │ Trabalhou por 4m 29s · 38.2k tok · 2 jobs   │  │ │ mensagem…      Commit ▸ │ │
+│ ▸ Sem workspace   │  └────────────────────────────────────────────┘  │ └──────────────────────────┘ │
+│                   │ ┌ composer ───────────────────────────────────┐  │ ▸ Commits recentes (3)       │
+│ ───────────────   │ │ [@ src/app.ts ×] Descreva… @ /             │  │                              │
+│ Configurações  ?  │ │ + model ▾  🛡 Editar ▾  □ Plano   ◼ ～ 🎤  │  │                              │
+│ v0.1.0            │ └─────────────────────────────────────────────┘  │                              │
+└───────────────────┴─────────────────────────────────────────────────┴──────────────────────────────┘
+```
+
+- Larguras: sidebar 272 (220–480, existente), painel 360–900 (default 480, existente), conversa
+  ≥ 480. Painel aberto por padrão em janelas ≥ 1120 px (regra existente).
+- Em < 1024 px: sidebar vira drawer; painel vira overlay (padrão do `AppShell`/`lib/sidePanel.ts`).
+- Altura do chrome do centro: header 44 px + abas 36 px (reduzir 40 px vs. fase 1, seguindo a
+  lição do Paseo de fundir header+abas em ~40–72 px). Header e abas podem colapsar em uma faixa
+  quando a janela é estreita (abas viram seletor).
+
+## 3. CodeSidebar
+
+Estrutura (de cima para baixo):
+
+1. **Ações**: `+ Novo agente` (cria sessão no workspace ativo ou pede workspace), `Buscar` (⌘K) e
+   `Skills` (página existente, com "Voltar à sessão").
+2. **Workspaces** (seção com `+` para abrir pasta):
+   - cada workspace: ícone (pasta ou repo), nome, indicador `⎇ branch` + `●` sujo, contador de
+     sessões ativas; expande para listar sessões (agrupadas por status, não por data).
+   - ações (menu de contexto, `⋯` ou clique direito): **Nova sessão**, Renomear, **Abrir no
+     Explorer**, Copiar caminho, Remover do Lumina (não apaga a pasta), Atualizar.
+   - estado vazio: "Nenhum workspace aberto" + "Abrir pasta…" + explicação de uma linha.
+3. **Sessões sem workspace** (se existirem, herdadas da fase 1): grupo "Sem workspace" com CTA
+   "Vincular a um workspace".
+4. **Rodapé**: Configurações, ajuda (`?`), versão — inalterado.
+
+Persistência: workspaces abertos vêm do banco; workspace ativo e ordem → `uiStore` persistido.
+O sidebar nunca lista sessões de outro workspace fora do grupo dele.
+
+## 4. Cabeçalho da sessão (+ abas)
+
+- **Linha 1 (44 px)**: título da sessão (truncado), chip do workspace
+  (`📁 lumina-core · ⎇ main* · ▤ 2 alterações`; clique abre menu: trocar workspace, abrir pasta,
+  copiar caminho, atualizar git), **chip de modo de permissão** (`Leitura` / `Editar` /
+  `Autônomo`, com ícone de escudo e tooltip explicando o que está liberado), chip **Plano** quando
+  ativo, **medidor de contexto** (anel/barrinha: `38% · ~72k/200k`, clique abre popover com
+  detalhes e botão "Compactar agora"), botão ligar/desligar painel (`aria-pressed`).
+- **Linha 2 (36 px)**: abas das sessões abertas no Code (`role="tablist"`), `+` nova sessão, `X`
+  fechar (mínimo: fecha aba, não apaga sessão). Estado persistido por workspace (localStorage via
+  `uiStore`) — resolve a limitação conhecida da fase 1.
+- **Status da sessão** (ponto colorido na aba): `Trabalhando` (pulsante), `Aguardando aprovação`
+  (âmbar), `Pronta para revisar` (verde), `Erro` (vermelho), `Concluída`.
+- Se a sessão não tem workspace: chip "Sem workspace" com CTA "Abrir pasta" (não é beco sem saída).
+
+## 5. Transcript (ChatView + cards novos)
+
+O `ChatView` existente continua sendo a única instância (preserva draft/scroll). Novos blocos:
+
+### 5.1 Fecho de turno
+
+Ao fim de cada turno, um separador discreto `Trabalhou por 4m 29s · 38,2k tokens · 2 arquivos ·
++42 −7` com ações `Ver alterações` / `Reverter turno` / `Copiar resumo`. Colapsável (o conteúdo do
+turno pode ser recolhido) — resolve transcripts longos (padrão Paseo).
+
+### 5.2 Cards de tool (extensão de `AgentSteps`)
+
+| Tool | Card |
+| --- | --- |
+| `read_file` / `list_dir` / `search_*` | linha compacta: ícone, "Ler src/app.ts:1–80", status; expandir mostra conteúdo com syntax highlight e link "abrir no painel" |
+| `write_file` / `edit_file` | **card de diff**: caminho, `+N −M`, diff unificado (colapsado em 8 linhas + "ver completo"), botões "Reverter arquivo" e "Abrir no painel" |
+| `run_command` | terminal compacto: comando em mono, status (rodando/exited), saída com scroll e "ver saída completa"; ações "Parar" (se rodando), "Promover a job" |
+| `job_*` | card de job com barra de progresso indeterminada, tempo, botão parar |
+| `git_*` | diff/status formatado, link para o painel |
+| `todo_write` | card de lista de tarefas (checkbox/status) |
+| `submit_plan` | card grande de plano (ver 5.3) |
+| `ask_user` | card de pergunta com opções (ver 5.4) |
+| `web_search` / `fetch_url` | como hoje (citações) |
+| erro | card com código estável + mensagem acionável + "tentar de novo" quando aplicável |
+
+Todos os cards: `summary` sempre visível; conteúdo sob demanda; nada de auto-expandir saída longa.
+Ícones/labels no mapa de `src/lib/agentTrace.ts` (adicionar as tools novas + fallback genérico).
+
+### 5.3 Aprovação (card inline)
+
+```
+┌ ⚠ Executar comando? ──────────────────────────────────────────────┐
+│ pwsh · cwd: lumina-core                                           │
+│ ┌───────────────────────────────────────────────────────────────┐ │
+│ │ npm test -- --run                                             │ │
+│ └───────────────────────────────────────────────────────────────┘ │
+│ Risco: comando no workspace · nenhuma regra salva                 │
+│ [ Permitir]  [ Negar]  [ Sempre permitir ▾ ]        motivo: …     │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+- Foco automático no card (primeiro botão = Permitir; `Esc` = Negar); anúncio em `aria-live`.
+- "Sempre permitir ▾" abre escopos: **esta sessão** / **este workspace** / **sempre** (regra com
+  matcher exibido: `comando começa com "npm test"`).
+- Negar abre campo de motivo (opcional) que volta ao modelo.
+- Para escrita: mostra o diff resumido antes dos botões (ver o que será gravado).
+- Enquanto pendente, o composer fica disponível apenas para "Parar" (sem enviar mensagem).
+- Estado resolvido vira uma linha: `Permitido · sempre neste workspace` / `Negado: “use pnpm”`.
+
+### 5.4 Plano (modo Plano)
+
+- Card com Markdown renderizado do plano + metadados (arquivos que serão tocados, passos,
+  verificação). Ações: **Aprovar e executar** (sai do plano → Editar) / **Aprovar e revisar cada
+  edição** (sai para modo Editar com aprovação por escrita) / **Continuar planejando** (com
+  feedback livre) / Editar plano antes de aprovar (textarea auxiliar) — ver `HARNESS.md` §6.
+- Depois de aprovado, o plano permanece acessível no popover do chip "Plano" (com status por passo
+  vindo dos todos).
+
+### 5.5 Pergunta ao usuário
+
+Card com opções (rádio/checkbox), recomendada marcada, texto livre opcional, botão "Ignorar e
+continuar" (o modelo recebe `{ skipped: true }`). Nunca bloqueia a UI — o turno fica aguardando.
+
+## 6. Composer
+
+Reaproveita o `Composer` atual (draft, anexos, model picker, envio/parada) com:
+
+1. **`@` arquivos/pastas**: digitar `@` abre popover com busca fuzzy (`search_workspace_files`,
+   debounce 120 ms), navegação ↑/↓, `Tab`/`Enter` inserem chip; suporta faixa `@src/app.ts#L10-40`;
+   chips removíveis (`Backspace`). O backend resolve os arquivos em "contexto anexado" com limite
+   (cap por arquivo, total, sempre truncado com aviso).
+2. **`/` comandos**: popover com comandos do harness (catálogo §12), agrupados em
+   *Sessão* / *Plano* / *Git* / *Contexto*. Começam como atalho de intenção (preenchem o composer)
+   ou ação direta (`/compact`, `/commit`, `/review`, `/test`, `/init`, `/plan`, `/permissoes`).
+3. **Controles**: modelo (existente), **modo de permissão** (escudo: Leitura/Editar/Autônomo),
+   **Plano** (toggle), anexos (existente), enviar/parar. Tudo com `aria-label` e navegável.
+4. **Placeholder por estado**: com workspace → "Descreva a tarefa… @ para arquivos, / para comandos";
+   sem workspace → "Abra uma pasta para trabalhar com código".
+5. **Atalhos**: `Ctrl/Cmd+L` foca o composer (como o Paseo), `Ctrl+Enter` envia,
+   `Ctrl+.` abre o seletor de modo, `Shift+Tab` alterna Plano quando o foco está no composer.
+6. **Fila/steering (v1.2)**: enviar durante streaming enfileira; a mensagem entra no próximo passo
+   (steer) ou após o turno (followup), conforme escolha no próprio envio.
+
+## 7. CodePanel (direito)
+
+Abas: **Arquivos** · **Alterações** · **Terminal** (v1.1) · (opcional) **Plano**. Barra de contexto
+acima das abas: `⎇ main ▾` (lista de branches, criar/trocar), `+N −M`, botão atualizar (`⟳`),
+`⋯` (ações: abrir no Explorer, copiar caminho, configurações do painel).
+
+### 7.1 Arquivos
+
+- Árvore do workspace (`role="tree"`, virtualizada): pastas expandíveis, ícones por tipo, filtro
+  incremental no topo, **badges de estado git** (`M`, `A`, `D`, `U`, `!`), arquivos ignorados
+  ocultos por padrão (toggle "mostrar ignorados").
+- Clique curto → prévia read-only no painel (syntax highlight, imagem, PDF via pdf.js reusando o
+  preview de artefatos); duplo clique → abrir no editor externo (`opener`); menu: copiar caminho,
+  revelar no Explorer, "adicionar ao contexto" (vira `@` no composer).
+- Estados: carregando (skeleton), vazio, erro de leitura, workspace grande ("mostrando 5.000 de
+  38.000 arquivos — refine a busca").
+
+### 7.2 Alterações
+
+Duas origens, com origem marcada por arquivo:
+
+- **Sessão** (journal do agente): o que a sessão tocou desde o último commit.
+- **Git** (working tree): status real do repositório.
+
+Agrupamentos: `Staged` / `Não staged` / `Novos` (`Untracked`); modo de visualização "somente
+sessão" × "todos" (default todos, com a origem como badge). Cada linha: ícone, caminho relativo,
+`+N −M`, badge `agente` quando aplicável, ações no hover (reverter arquivo, stage/unstage).
+Clique abre o **diff**:
+
+- unificado (default) com números de linha, contexto 3, cabeçalhos de hunk, cores de adição/remoção;
+- toggle lado-a-lado; "abrir arquivo"; "copiar patch"; "reverter hunk"? (não na v1 — ver §16);
+- binário/grande: cartão com tipo/tamanho + "abrir" (sem diff).
+
+Rodapé: **barra de commit** — alvo (tudo/staged/seleção), `+N −M`, campo de mensagem (com
+**sugestão de IA** via botão `✨` → `suggest_commit_message`), botão **Commit** (desabilitado se
+nada selecionado; tooltip explica), e **Commits recentes** colapsável (hash curto, mensagem, autor,
+tempo; clique mostra o commit no painel). Push/PR ficam para depois (badge "em breve" não — apenas
+não existem).
+
+### 7.3 Terminal (v1.1)
+
+- Aba com abas de terminal (múltiplos), botão novo terminal (`+`), cwd = workspace, shell do usuário.
+- Renderização `@xterm/xterm` + fit; scrollback 5.000 linhas; tema pelos tokens do app.
+- Ações: novo, fechar, limpar, matar processo; aviso "rodando" no header.
+- Terminal é do **usuário**, não do agente (agente tem `run_command`/jobs) — quando o agente usa o
+  mesmo processo, o card de job abre no painel.
+
+### 7.4 Jobs (fora do painel)
+
+Faixa compacta acima do composer quando há jobs: `◐ npm run dev · 2m · [ver] [parar]`; expande
+para lista com saída ao vivo. Jobs pertencem à sessão.
+
+## 8. Fluxos principais
+
+### 8.1 Primeiro uso do modo Code
+
+1. Tela de boas-vindas do Code: título "Comece com uma pasta", botão **Abrir pasta…** (dialog
+   nativo), lista de **workspaces recentes**, e 3 sugestões de tarefa (só quando há workspace).
+2. Abrir pasta → workspace criado → pergunta de confiança (§8.2) → sessão criada automaticamente com
+   o workspace, header mostra branch/status.
+3. Sem git → chip "sem git" discreto; painel Alterações funciona pelo journal; aba Commits mostra
+   "Não é um repositório Git".
+
+### 8.2 Confiança na pasta (workspace trust)
+
+Primeira abertura de um workspace pergunta: **"Confiar nesta pasta?"** com explicação (o agente
+pode ler, editar e executar comandos aqui; instruções do projeto `AGENTS.md` e skills locais serão
+carregadas). Escolhas: **Confiar** (default Editar), **Abrir em Leitura** (só leitura), **Cancelar**.
+Workspace não confiável: modo Leitura, sem `AGENTS.md`/skills do projeto no prompt, sem shell.
+Medida de segurança contra repo clonado malicioso (padrão Claude Code/Cursor).
+
+### 8.3 Tarefa com plano
+
+`/plan Corrija o bug de arredondamento no cálculo de juros` → modo Plano ativa → agente explora
+(leitura/busca) → card de plano → **Aprovar e revisar cada edição** → agente edita (cada escrita
+gera card de diff) → roda testes com aprovação → fecho de turno com `+2 −1` → painel Alterações →
+commit.
+
+### 8.4 Aprovação de comando
+
+Agente chama `run_command` → card de aprovação → usuário "Sempre permitir" com escopo workspace →
+regra salva → próximas execuções passam; auditoria registra a regra. Destrutivo continua pedindo.
+
+### 8.5 Revisão e entrega
+
+Fim do turno → `Ver alterações` → diff por arquivo → ajustes conversando com o agente →
+`✨ Sugerir mensagem` → revisar → **Commit**. Fecho: toasts `Commit criado (a1b2c3)` e status da
+sessão vira `Concluída`/`Pronta para revisar`.
+
+### 8.6 Reverter
+
+- **Reverter arquivo**: no diff ou na linha → confirma → restaura o estado anterior do turno (se o
+  arquivo mudou por fora, aviso e opção "abrir diff atual").
+- **Reverter turno**: no fecho do turno → confirma → restaura todos os arquivos do turno (ordem
+  inversa) + registra evento; a conversa **não** é apagada.
+- **Voltar a este ponto** (v1.1): reverter turno + truncar a conversa até aquela mensagem
+  (reusa `truncate_conversation`).
+
+### 8.7 Sessões em paralelo
+
+Abrir outra sessão no mesmo workspace é permitido; badge `Trabalhando` por aba e notificação
+(sonner + notificação do SO, opt-in) quando uma sessão em segundo plano termina/aguarda aprovação.
+Conflito de arquivo: aviso "o arquivo foi alterado por outra sessão".
+
+## 9. Estados (matriz)
+
+| Situação | UI |
+| --- | --- |
+| Sem workspace | welcome "Abra uma pasta" + recentes; composer desabilitado com placeholder próprio |
+| Workspace não confiável | banner "Modo leitura — confie na pasta para liberar edições" + botão |
+| Sem git | chip "sem git"; commit desabilitado com tooltip; Alterações por sessão funcionam |
+| Carregando sessão | skeleton do transcript + header; nunca spinner de página inteira |
+| Turno rodando | aba com pulso; composer vira "Parar"; jobs ao vivo; cards incrementais |
+| Aguardando aprovação | badge âmbar na aba/header + card inline; notificação se app em background |
+| Erro de turno | card de erro com código + hint + "tentar de novo"; parcial preservado |
+| Provider sem credencial | gate existente do Chat (reuso) |
+| Arquivo binário/grande | cartão, sem diff |
+| Alterações vazias | "Nenhuma alteração pendente" + dica |
+| Jobs vazios | seção oculta |
+| Contexto compactado | card de sistema "Contexto compactado — 42 mensagens resumidas · ~18k liberados" |
+| Limite de passos | aviso "Limite de passos atingido — continuar?" com botão que abre novo turno |
+| Workspace removido/renomeado no disco | banner "pasta não encontrada" + "localizar pasta" |
+| Git com conflito | aviso no painel Alterações, commit bloqueado |
+
+## 10. Acessibilidade
+
+- Cabeçalho/abas: `role="tablist"`/`tab` com `aria-selected`, `aria-controls`, setas/Home/End;
+  fechar aba com `aria-label="Fechar aba <título>"`.
+- Árvore: `role="tree"`/`treeitem`, `aria-expanded`, `aria-selected`, teclado completo
+  (↑/↓/←/→/Home/End/Enter).
+- Aprovação: `role="alertdialog"` no card, foco no primeiro botão, `Esc` = negar, retorno de foco ao
+  composer ao resolver; anúncio `aria-live="assertive"`.
+- Cards de tool: botão de expandir com `aria-expanded`; conteúdo longo em região com `tabindex=0`.
+- Diff: cada linha com `aria-label` ("linha 12, adicionada, ...") apenas no modo acessível; cabeçalhos
+  de hunk focáveis.
+- Contraste AA em todos os tokens; nenhuma informação só por cor (badges com letra/símbolo).
+- `prefers-reduced-motion` respeitado (pulso de status desliga, transições encurtam).
+- Atalhos documentados na paleta de comandos (`?` abre ajuda).
+
+## 11. Motion e visual
+
+- Transições 150–220 ms `ease-out-soft` (tokens existentes); sem animação em streaming de texto.
+- Status pulsante apenas em "Trabalhando" (e desligado com reduced motion).
+- Diff com fundos `bg-success-subtle`/`bg-danger-subtle` (tokens existentes; criar se faltar,
+  sempre no `globals.css`), nunca hex.
+- Cards com `border-border`, `bg-surface`, `rounded-lg`, sombra só no hover/seleção.
+- Ícones lucide 16/18 px, stroke 1.75–2.
+
+## 12. Comandos `/` (catálogo do composer)
+
+| Comando | Ação | Fase |
+| --- | --- | --- |
+| `/plan [instrução]` | entra no modo Plano (com instrução opcional) | v1.0 |
+| `/plan off` | sai do modo Plano | v1.0 |
+| `/permissoes` | abre seletor de modo de permissão | v1.0 |
+| `/compact` | compacta o contexto agora | v1.0 |
+| `/limpar` | limpa o composer | v1.0 |
+| `/commit` | abre o commit do painel | v1.0 |
+| `/test` | roda a verificação do projeto (comando detectado) com aprovação | v1.2 |
+| `/review` | pede revisão do diff atual (agente revisor) | v1.2 |
+| `/init` | gera `AGENTS.md` do projeto | v1.2 |
+| `/fix` | pede correção dos testes/erros atuais | v1.2 |
+| `/novo` | nova sessão no workspace ativo | v1.0 |
+
+Comandos de projeto (`.lumina/commands/*.md`) entram na v1.3 (mesmo parser, precedência projeto >
+usuário). A paleta ⌘K continua com os comandos globais.
+
+## 13. Glossário (pt-BR) e microcopy
+
+| Termo | Uso |
+| --- | --- |
+| workspace | manter "workspace" (já usado na fase 1) |
+| sessão | uma conversa/agente no Code |
+| agente | a instância que executa (modelo + tools) |
+| turno | uma execução do agente a partir de uma mensagem |
+| alterações | mudanças de arquivo pendentes (não "diff" no rótulo da aba; "diff" no conteúdo técnico) |
+| commit / branch / merge / PR | manter (termos do git) |
+| aprovar / negar / permitir | ações de permissão |
+| confiar na pasta | trust do workspace |
+
+Microcopy-chave:
+
+- Vazio de workspace: "Nenhuma pasta aberta" / "Abra uma pasta para o agente ler, editar e rodar comandos aqui." / botão **Abrir pasta…**
+- Vazio de alterações: "Nenhuma alteração pendente" / "As edições do agente e as mudanças do git aparecem aqui."
+- Vazio de commits: "Sem commits ainda" (nunca "0 commits").
+- Aprovação: "Executar comando?" / "Gravar alteração?" / "Ler arquivo fora do projeto?" com o
+  caminho absoluto e o motivo.
+- Bloqueio por modo: "O modo Leitura não permite editar arquivos. Mude para Editar para continuar."
+- Erro de path: "O caminho fica fora do workspace. Permitir acesso?" (nunca "operação inválida").
+- Contexto: "Contexto em 78% — o próximo passo deve compactar automaticamente."
+- Fim de turno: "Trabalhou por 4m 29s" / "Pronta para revisar" / "2 arquivos alterados".
+
+## 14. Responsivo
+
+- ≥ 1440 px: 3 colunas folgadas, painel 480–560.
+- 1120–1440: painel 420–480; abas de sessão com scroll horizontal.
+- 900–1120: painel fechado por padrão (abre em overlay); header colapsa o chip de workspace em
+  ícone com tooltip.
+- < 900: sidebar drawer, painel overlay, abas viram select; composer ocupa largura total.
+- Nunca: esconder o botão de parar, o modo de permissão ou o card de aprovação.
+
+## 15. Matriz de testes (UI)
+
+| Componente/serviço | Testes |
+| --- | --- |
+| `CodeSidebar` | workspaces (agrupamento, expansão, menu, remover sem apagar pasta), sessões por status, abrir pasta, empty state |
+| `CodeSessionHeader` | título, chip workspace (branch/sujo/ahead), modo de permissão, plano, medidor, toggle painel, abas persistidas |
+| `FileTree` | expandir/colapsar, filtro, badges git, virtualização, seleção, teclado, estado grande/vazio |
+| `ChangesPanel` | agrupamentos, origem, contadores, diff, reverter arquivo/turno (com confirmação), commit desabilitado/habilitado |
+| `DiffView` | unificado, linhas, hunks, binário, grande, lado-a-lado, a11y |
+| `CommitBar` | mensagem, sugestão IA, seleção, estados de erro |
+| `ApprovalCard` | render por tipo (comando/path/segredo), aprovar/negar/motivo/escopo, teclado, aria-live, resolução |
+| `PlanCard` | render markdown, aprovar/revisar cada edição/continuar, feedback, estado aprovado |
+| `AskUserCard` | opções single/multi, texto livre, ignorar, teclado |
+| `TodoCard` / `ContextMeter` / `JobsBar` | estados, contadores, ações |
+| `Composer` (novos) | `@` (busca, chips, faixa de linhas, backspace), `/` (filtro, teclado, execução), modos, placeholder por estado |
+| `chatStore` | aplicação de eventos novos (aprov/plan/todo/changes/context/job), replay de `presentation`, tolerância a eventos desconhecidos |
+| `uiStore` | workspace ativo, abas por workspace, painel/aba, persistência e merge |
+
+## 16. Não-objetivos desta fase (registrados)
+
+- Editor de código completo dentro do app (a edição é do agente; o painel é prévia/diff). Abrir no
+  editor externo é o caminho.
+- Revisão por hunk com aceitar/rejeitar antes de aplicar (o modelo é "aplicar + reverter"; v2 pode
+  introduzir staging de edições).
+- Browser embutido, plugins, múltiplos clientes (daemon/mobile) e voz — escopo do Paseo, não do
+  Lumina local-first.
+- Tabs heterogêneas (terminal/browser/arquivo como abas de sessão) — o painel fixo cobre; reavaliar
+  depois do terminal.
+- i18n: pt-BR fixo (decisão do app).

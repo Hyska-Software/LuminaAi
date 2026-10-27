@@ -11,6 +11,14 @@ const EASE_OUT_SOFT: [number, number, number, number] = [0.22, 1, 0.36, 1];
 export interface AppShellProps {
   children: ReactNode;
   /**
+   * Sidebar surface of the active layout. Chat passes the conversation sidebar
+   * (default), Code passes its sessions sidebar. The drawer variant receives
+   * `onClose` so the overlay can be dismissed after navigation.
+   */
+  sidebar?: (context: { onClose?: () => void }) => ReactNode;
+  /** Accessible name of the sidebar/drawer (DESIGN §5, PLAN §3.2). */
+  sidebarLabel?: string;
+  /**
    * Right side panel (sources/artifacts). It self-positions inside the content
    * row: absolutely over the chat in overlay mode or as a flex column when
    * docked. Keeping it as the row's last child lets docked mode share width
@@ -32,13 +40,21 @@ export interface AppShellProps {
  * (no persistence on every pointer move) while the committed value lives in
  * `useUiStore` with the rest of the persisted UI state.
  */
-export function AppShell({ children, rightPanel, overlays }: AppShellProps) {
+export function AppShell({
+  children,
+  sidebar,
+  sidebarLabel = 'Conversas',
+  rightPanel,
+  overlays,
+}: AppShellProps) {
   const sidebarOpen = useUiStore((state) => state.sidebarOpen);
   const setSidebarOpen = useUiStore((state) => state.setSidebarOpen);
   const sidebarWidth = useUiStore((state) => state.sidebarWidth);
   const setSidebarWidth = useUiStore((state) => state.setSidebarWidth);
   const isCompact = useIsCompact();
   const reduceMotion = useReduceMotion();
+
+  const renderSidebar = sidebar ?? ((context: { onClose?: () => void }) => <Sidebar {...context} />);
 
   /** Width previewed while dragging; `null` means "use the persisted width". */
   const [liveWidth, setLiveWidth] = useState<number | null>(null);
@@ -107,7 +123,7 @@ export function AppShell({ children, rightPanel, overlays }: AppShellProps) {
               className="relative z-20 shrink-0 overflow-hidden"
             >
               <div className="h-full" style={{ width }} inert={!sidebarOpen}>
-                <Sidebar />
+                {renderSidebar({})}
               </div>
             </motion.div>
           ) : null}
@@ -152,7 +168,7 @@ export function AppShell({ children, rightPanel, overlays }: AppShellProps) {
                   key="sidebar-drawer"
                   role="dialog"
                   aria-modal="true"
-                  aria-label="Conversas"
+                  aria-label={sidebarLabel}
                   initial={{ x: reduceMotion ? 0 : -drawerWidth }}
                   animate={{ x: 0 }}
                   exit={{ x: reduceMotion ? 0 : -drawerWidth }}
@@ -160,7 +176,7 @@ export function AppShell({ children, rightPanel, overlays }: AppShellProps) {
                   style={{ width: drawerWidth }}
                   className="fixed inset-y-0 left-0 z-50 max-w-[calc(100vw-3rem)] shadow-2xl"
                 >
-                  <Sidebar onClose={() => setSidebarOpen(false)} />
+                  {renderSidebar({ onClose: () => setSidebarOpen(false) })}
                 </motion.div>,
               ]
             : null}

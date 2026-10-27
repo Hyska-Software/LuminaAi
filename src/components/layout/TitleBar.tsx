@@ -5,6 +5,7 @@ import { IconButton, Kbd, Tooltip } from '@/components/ui';
 import { useUiStore } from '@/lib/store';
 import { cn, modKey } from '@/lib/utils';
 import { BrandMark } from '@/components/chat/BrandMark';
+import { LayoutModeSwitch } from './LayoutModeSwitch';
 import { PlanUsageChip } from './PlanUsageChip';
 
 /** Resolves the Tauri window lazily so the renderer also boots outside Tauri. */
@@ -27,6 +28,11 @@ const CONTROL_BASE =
  * native window controls. The model/thinking selector lives only in the chat
  * composer (`components/composer/Composer.tsx`); the "Plano ChatGPT" indicator
  * is account-level and lives here, next to the global actions.
+ *
+ * The Chat | Code layout switch sits centered between the brand and the global
+ * actions, like the reference pill (docs/goals/chat-code-layout/PLAN.md §3.1).
+ * The three-column grid keeps it truly centered without letting either side
+ * overlap it on narrower windows.
  */
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -100,40 +106,50 @@ export function TitleBar() {
       data-tauri-drag-region
       onDoubleClick={handleDragDoubleClick}
       className={cn(
-        'drag-region relative z-30 flex h-14 shrink-0 select-none items-center gap-2',
-        'bg-surface pl-2 pr-1',
+        'drag-region relative z-30 grid h-14 shrink-0 select-none grid-cols-[1fr_auto_1fr]',
+        'items-center gap-2 bg-surface pl-2 pr-1',
       )}
     >
-      <Tooltip
-        content={
-          <span className="flex items-center gap-1.5">
-            Alternar barra lateral
-            <Kbd>{modKey}</Kbd>
-            <Kbd>B</Kbd>
-          </span>
-        }
-        side="bottom"
-      >
-        <IconButton label="Alternar barra lateral" size="sm" variant="ghost" onClick={toggleSidebar} className="no-drag">
-          <PanelLeft className="size-4" />
-        </IconButton>
-      </Tooltip>
+      <div data-tauri-drag-region className="flex min-w-0 items-center gap-2">
+        <Tooltip
+          content={
+            <span className="flex items-center gap-1.5">
+              Alternar barra lateral
+              <Kbd>{modKey}</Kbd>
+              <Kbd>B</Kbd>
+            </span>
+          }
+          side="bottom"
+        >
+          <IconButton label="Alternar barra lateral" size="sm" variant="ghost" onClick={toggleSidebar} className="no-drag">
+            <PanelLeft className="size-4" />
+          </IconButton>
+        </Tooltip>
 
-      <div data-tauri-drag-region className="flex items-center gap-2 pl-1 pr-1">
-        <BrandMark size={22} />
-        <span className="text-[14px] font-semibold tracking-tight text-foreground">Lumina</span>
+        <div data-tauri-drag-region className="flex min-w-0 items-center gap-2 pl-1 pr-1">
+          <BrandMark size={22} />
+          <span className="truncate text-[14px] font-semibold tracking-tight text-foreground">
+            Lumina
+          </span>
+        </div>
+
+        <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
       </div>
 
-      <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
+      <div className="no-drag justify-self-center">
+        <LayoutModeSwitch />
+      </div>
 
-      <div className="no-drag flex items-center gap-2">
-        <PlanUsageChip />
+      <div className="no-drag flex min-w-0 items-center justify-end gap-2" data-tauri-drag-region>
+        <div className="hidden xl:block">
+          <PlanUsageChip />
+        </div>
         <button
           type="button"
           onClick={() => setCommandPaletteOpen(true)}
           aria-label="Buscar conversas e comandos"
           className={cn(
-            'flex h-8 items-center gap-2 rounded-lg border border-border bg-background px-2.5',
+            'flex h-8 shrink-0 items-center gap-2 rounded-lg border border-border bg-background px-2.5',
             'text-[13px] text-foreground-subtle transition-colors duration-150',
             'hover:border-border-strong hover:bg-surface-hover hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
@@ -146,28 +162,28 @@ export function TitleBar() {
             <Kbd>K</Kbd>
           </span>
         </button>
-      </div>
 
-      <div className="no-drag ml-1 flex items-center gap-0.5">
-        <button type="button" aria-label="Minimizar" onClick={handleMinimize} className={CONTROL_BASE}>
-          <Minus className="size-4" strokeWidth={2} />
-        </button>
-        <button
-          type="button"
-          aria-label={isMaximized ? 'Restaurar' : 'Maximizar'}
-          onClick={() => void handleToggleMaximize()}
-          className={CONTROL_BASE}
-        >
-          {isMaximized ? <Copy className="size-3.5" strokeWidth={2} /> : <Square className="size-3.5" strokeWidth={2} />}
-        </button>
-        <button
-          type="button"
-          aria-label="Fechar"
-          onClick={handleClose}
-          className={cn(CONTROL_BASE, 'hover:bg-danger hover:text-background')}
-        >
-          <X className="size-4" strokeWidth={2} />
-        </button>
+        <div className="ml-1 flex items-center gap-0.5">
+          <button type="button" aria-label="Minimizar" onClick={handleMinimize} className={CONTROL_BASE}>
+            <Minus className="size-4" strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            aria-label={isMaximized ? 'Restaurar' : 'Maximizar'}
+            onClick={() => void handleToggleMaximize()}
+            className={CONTROL_BASE}
+          >
+            {isMaximized ? <Copy className="size-3.5" strokeWidth={2} /> : <Square className="size-3.5" strokeWidth={2} />}
+          </button>
+          <button
+            type="button"
+            aria-label="Fechar"
+            onClick={handleClose}
+            className={cn(CONTROL_BASE, 'hover:bg-danger hover:text-background')}
+          >
+            <X className="size-4" strokeWidth={2} />
+          </button>
+        </div>
       </div>
     </header>
   );

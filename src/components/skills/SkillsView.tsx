@@ -160,15 +160,27 @@ function SkillGroup({
   );
 }
 
+export interface SkillsViewProps {
+  /**
+   * Overrides the default "back to chat" navigation. The Code layout opens the
+   * same page in its center column and returns to the agent session instead
+   * (docs/goals/chat-code-layout/PLAN.md §3.2).
+   */
+  onBack?: () => void;
+  /** Label of the back action (defaults to the Chat copy). */
+  backLabel?: string;
+}
+
 /**
  * Skills manager rendered as the main view in place of the chat column
  * (FILES §7.4): list grouped by origin, per-skill enable switch, inline
  * deletion for user skills. The chat stays mounted behind it, so "Voltar ao
  * chat" restores the conversation untouched.
  */
-export function SkillsView() {
+export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewProps = {}) {
   const reloadSettings = useAppStore((state) => state.reloadSettings);
   const setActiveView = useUiStore((state) => state.setActiveView);
+  const handleBack = onBack ?? (() => setActiveView('chat'));
 
   const [state, setState] = useState<SkillsState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
@@ -263,9 +275,9 @@ export function SkillsView() {
               size="sm"
               variant="ghost"
               leftIcon={<ArrowLeft className="size-4" />}
-              onClick={() => setActiveView('chat')}
+              onClick={() => handleBack()}
             >
-              Voltar ao chat
+              {backLabel}
             </Button>
             <div className="ml-auto flex items-center gap-2">
               <Button

@@ -25,6 +25,8 @@ export interface HotkeySnapshot {
   skillsView: boolean;
   /** A página Biblioteca também substitui o chat (Esc volta ao chat). */
   libraryView?: boolean;
+  /** Skills aberto no centro do layout Code (Esc volta à sessão). */
+  codeSkillsView?: boolean;
   streaming: boolean;
 }
 
@@ -95,7 +97,9 @@ export function resolveHotkey(event: HotkeyEvent, snapshot: HotkeySnapshot): Hot
     ) {
       return 'close-overlays';
     }
-    if (snapshot.skillsView || snapshot.libraryView) return 'return-to-chat';
+    if (snapshot.skillsView || snapshot.libraryView || snapshot.codeSkillsView) {
+      return 'return-to-chat';
+    }
     if (snapshot.streaming) return 'stop-streaming';
     return null;
   }

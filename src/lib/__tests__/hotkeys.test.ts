@@ -80,6 +80,9 @@ describe('resolveHotkey', () => {
     expect(resolveHotkey(event({ key: 'Escape' }), snapshot({ libraryView: true }))).toBe(
       'return-to-chat',
     );
+    expect(resolveHotkey(event({ key: 'Escape' }), snapshot({ codeSkillsView: true }))).toBe(
+      'return-to-chat',
+    );
     expect(
       resolveHotkey(event({ key: 'Escape' }), snapshot({ skillsView: true, streaming: true })),
     ).toBe('return-to-chat');

@@ -1,19 +1,17 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { Toaster, toast } from 'sonner';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { AppShell } from '@/components/layout/AppShell';
-import { ChatView } from '@/components/chat/ChatView';
+import { WorkspaceCenter } from '@/components/layout/WorkspaceCenter';
+import { CodePanel, CodeSidebar } from '@/components/code';
 import { SettingsDialog } from '@/components/settings/SettingsDialog';
 import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
 import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
 import { SourcesPanel } from '@/components/chat/SourcesPanel';
-import { SkillsView } from '@/components/skills';
-import { LibraryView } from '@/components/library';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { TooltipProvider } from '@/components/ui';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import { resolveHotkey, type HotkeyCommand } from '@/lib/hotkeys';
-import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { SplashScreen } from '@/components/SplashScreen';
 
@@ -65,7 +63,15 @@ function runHotkey(command: HotkeyCommand, event: KeyboardEvent): void {
       ui.closeSourcesPanel();
       break;
     case 'return-to-chat':
+      // In the Code layout, Escape/“return” only leaves the Skills page; the
+      // Chat layout is a separate surface the user switches explicitly.
+      if (ui.layoutMode === 'code' && ui.codeView === 'skills') {
+        ui.setCodeView('session');
+        break;
+      }
+      ui.setLayoutMode('chat');
       ui.setActiveView('chat');
+      ui.setCodeView('session');
       break;
     case 'stop-streaming':
       void chat.stop();
@@ -83,7 +89,7 @@ export default function App() {
   const initializing = useAppStore((state) => state.initializing);
   const error = useAppStore((state) => state.error);
   const theme = useUiStore((state) => state.theme);
-  const activeView = useUiStore((state) => state.activeView);
+  const layoutMode = useUiStore((state) => state.layoutMode);
   const settingsTheme = useAppStore((state) => state.settings.theme);
   const fontScale = useAppStore((state) => state.settings.fontScale);
   const reduceMotion = useAppStore((state) => state.settings.reduceMotion);
@@ -116,6 +122,13 @@ export default function App() {
     applyFontScale(fontScale);
   }, [fontScale]);
 
+  // Chat and Code have separate session lists; switching layouts restores each
+  // layout's own active session instead of leaking the other one.
+  useLayoutEffect(() => {
+    if (!ready) return;
+    void useChatStore.getState().enterLayout(layoutMode);
+  }, [layoutMode, ready]);
+
   useEffect(() => {
     document.documentElement.classList.toggle('reduce-motion', reduceMotion);
   }, [reduceMotion]);
@@ -137,8 +150,12 @@ export default function App() {
         settingsOpen: ui.settingsOpen,
         artifactPanelOpen: ui.artifactPanelOpen,
         sourcesPanelOpen: ui.sourcesPanelOpen,
-        skillsView: ui.activeView === 'skills',
-        libraryView: ui.activeView === 'library',
+        // The Chat views only own Escape while the Chat layout is active; in
+        // the Code layout a stale `activeView` must not hijack Esc (the Code
+        // Skills page has its own `codeSkillsView` flag).
+        skillsView: ui.layoutMode === 'chat' && ui.activeView === 'skills',
+        libraryView: ui.layoutMode === 'chat' && ui.activeView === 'library',
+        codeSkillsView: ui.layoutMode === 'code' && ui.codeView === 'skills',
         streaming: useChatStore.getState().streaming !== null,
       });
       if (command) runHotkey(command, event);
@@ -161,8 +178,10 @@ export default function App() {
           if (disposed) return;
           // The Biblioteca page replaces the chat column: a drop there imports
           // files into the user library instead of attaching them to the
-          // composer (library-page PLAN §2.6). The view owns the import.
-          if (useUiStore.getState().activeView === 'library') {
+          // composer (library-page PLAN §2.6). The view owns the import. It only
+          // exists in the Chat layout (docs/goals/chat-code-layout/PLAN §3.5).
+          const uiState = useUiStore.getState();
+          if (uiState.layoutMode === 'chat' && uiState.activeView === 'library') {
             if (event.payload.type === 'drop') {
               dispatchLibraryDrag(false);
               const paths = event.payload.paths ?? [];
@@ -209,25 +228,22 @@ export default function App() {
     <TooltipProvider delayDuration={280}>
       <ErrorBoundary>
         <AppShell
+          sidebar={
+            layoutMode === 'code' ? (context) => <CodeSidebar {...context} /> : undefined
+          }
+          sidebarLabel={layoutMode === 'code' ? 'Sessões' : 'Conversas'}
           rightPanel={
-            <>
-              <ArtifactPanel />
-              <SourcesPanel />
-            </>
+            layoutMode === 'code' ? (
+              <CodePanel />
+            ) : (
+              <>
+                <ArtifactPanel />
+                <SourcesPanel />
+              </>
+            )
           }
         >
-          {/* Chat stays mounted (draft/scroll preserved) while Skills or the
-              Biblioteca replace it. */}
-          <div
-            className={cn(
-              'min-h-0 flex-1 flex-col',
-              activeView === 'chat' ? 'flex h-full' : 'hidden',
-            )}
-          >
-            <ChatView />
-          </div>
-          {activeView === 'skills' ? <SkillsView /> : null}
-          {activeView === 'library' ? <LibraryView /> : null}
+          <WorkspaceCenter />
         </AppShell>
         <SettingsDialog />
         <ModelPickerDialog />

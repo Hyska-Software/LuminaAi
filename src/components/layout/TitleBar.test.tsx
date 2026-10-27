@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const windowMock = vi.hoisted(() => ({
   isMaximized: vi.fn(async () => false),
@@ -16,7 +16,7 @@ vi.mock('@/lib/api', () => ({ api: {} }));
 vi.mock('@/components/chat/external', () => ({ openExternalUrl: vi.fn(async () => true) }));
 
 // Imported after the mocks.
-import { useAppStore } from '@/lib/store';
+import { useAppStore, useUiStore } from '@/lib/store';
 import type { ProviderAuthStatus, ProviderInfo } from '@/lib/types';
 import { TitleBar } from './TitleBar';
 
@@ -62,6 +62,7 @@ function planAuth(): ProviderAuthStatus {
 afterEach(() => {
   cleanup();
   useAppStore.setState({ providers: [], auth: [], keys: [] });
+  useUiStore.setState({ layoutMode: 'chat' });
 });
 
 describe('TitleBar', () => {
@@ -129,5 +130,30 @@ describe('TitleBar', () => {
     await waitFor(() => expect(windowMock.isMaximized).toHaveBeenCalled());
 
     expect(screen.queryByText('Plano ChatGPT')).toBeNull();
+  });
+
+  it('mostra o seletor Chat | Code centralizado no chrome', async () => {
+    render(<TitleBar />);
+
+    await waitFor(() => expect(windowMock.isMaximized).toHaveBeenCalled());
+
+    const group = screen.getByRole('group', { name: 'Modo do aplicativo' });
+    const header = screen.getByRole('banner');
+    expect(header.contains(group)).toBe(true);
+    // A coluna do seletor é centralizada na grade de três colunas da title bar.
+    expect(group.parentElement?.className).toContain('justify-self-center');
+
+    expect(screen.getByRole('button', { name: 'Chat' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Code' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('ativa o layout Code pelo seletor da title bar', async () => {
+    render(<TitleBar />);
+
+    await waitFor(() => expect(windowMock.isMaximized).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Code' }));
+
+    expect(useUiStore.getState().layoutMode).toBe('code');
   });
 });

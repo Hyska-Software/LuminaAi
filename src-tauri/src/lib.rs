@@ -64,6 +64,7 @@ pub fn run() {
             commands::conversations::rename_conversation,
             commands::conversations::delete_conversation,
             commands::conversations::set_conversation_pinned,
+            commands::conversations::set_conversation_code_linked,
             commands::conversations::search_conversations,
             commands::conversations::truncate_conversation,
             commands::conversations::export_conversation,

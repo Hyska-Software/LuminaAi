@@ -86,15 +86,18 @@ pub fn create_conversation(
     title: Option<String>,
     provider_id: Option<String>,
     model_id: Option<String>,
+    mode: Option<String>,
 ) -> Result<Conversation, String> {
     let title = title
         .map(|title| title.trim().to_string())
         .filter(|title| !title.is_empty())
         .unwrap_or_else(|| "Nova conversa".to_string());
     let (provider_id, model_id) = resolve_defaults(&state, provider_id, model_id);
+    // `mode` ausente/inválido cai no layout padrão (Chat).
+    let mode = crate::domain::conversation_mode_or_default(mode.as_deref());
     state
         .db
-        .create_conversation(&title, &provider_id, &model_id)
+        .create_conversation_with_mode(&title, &provider_id, &model_id, &mode)
         .map_err(to_error)
 }
 
@@ -131,6 +134,21 @@ pub fn set_conversation_pinned(
     pinned: bool,
 ) -> Result<(), String> {
     state.db.set_pinned(&id, pinned).map_err(to_error)
+}
+
+/// Compartilha uma sessão do Chat com o layout Code (`linked = true`) ou
+/// desfaz o vínculo (`linked = false`). Só sessões criadas no Chat podem ser
+/// compartilhadas; o backend devolve a conversa atualizada.
+#[tauri::command]
+pub fn set_conversation_code_linked(
+    state: State<'_, AppState>,
+    id: String,
+    linked: bool,
+) -> Result<Conversation, String> {
+    state
+        .db
+        .set_conversation_code_linked(&id, linked)
+        .map_err(to_error)
 }
 
 #[tauri::command]
@@ -431,6 +449,8 @@ mod tests {
                 model_id: "glm-5.3-flash".to_string(),
                 message_count: 2,
                 preview: None,
+                mode: "chat".to_string(),
+                code_linked: false,
             },
             messages: vec![user, assistant],
         }
