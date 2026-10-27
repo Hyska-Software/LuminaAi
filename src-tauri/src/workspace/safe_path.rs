@@ -46,7 +46,11 @@ impl std::error::Error for FsError {}
 /// Acesso requerido ao path (leitura valida existência; escrita valida o pai).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
+    /// Leitura de **arquivo** (diretório vira `FS_NOT_A_FILE`).
     Read,
+    /// Leitura de **diretório** (listagem de árvore; arquivo vira
+    /// `FS_NOT_A_FILE`). Existe porque listar `.` é uma operação válida.
+    ReadDir,
     Write,
 }
 
@@ -124,6 +128,20 @@ pub fn resolve(root: &Path, requested: &str, access: Access) -> Result<PathBuf, 
                 return Err(FsError::new(
                     FS_NOT_A_FILE,
                     format!("'{requested}' é um diretório"),
+                ));
+            }
+        }
+        Access::ReadDir => {
+            if !candidate.exists() {
+                return Err(FsError::new(
+                    FS_NOT_FOUND,
+                    format!("pasta não encontrada: {requested}"),
+                ));
+            }
+            if !candidate.is_dir() {
+                return Err(FsError::new(
+                    FS_NOT_A_FILE,
+                    format!("'{requested}' não é um diretório"),
                 ));
             }
         }
@@ -386,6 +404,36 @@ mod tests {
         );
         fs::create_dir_all(root.join("sub")).expect("criar sub");
         assert_eq!(err_code(resolve(&root, "sub", Access::Read)), FS_NOT_A_FILE);
+    }
+
+    #[test]
+    fn read_dir_allows_directories_and_still_confines_them() {
+        let (temp, root) = workspace();
+        fs::create_dir_all(root.join("src")).expect("criar src");
+        fs::write(root.join("src").join("app.ts"), "x").expect("criar arquivo");
+        fs::write(root.join("a.txt"), "ok").expect("criar a");
+
+        // Regressão da aba Arquivos: listar o próprio root (".") é válido.
+        let base = resolve(&root, ".", Access::ReadDir).expect("root é diretório");
+        assert!(base.is_dir());
+        let nested = resolve(&root, "src", Access::ReadDir).expect("src é diretório");
+        assert!(nested.is_dir());
+        assert_eq!(to_relative(&root, &nested), "src");
+
+        // Arquivo continua recusado na leitura de diretório e Read continua só arquivo.
+        assert_eq!(err_code(resolve(&root, "a.txt", Access::ReadDir)), FS_NOT_A_FILE);
+        assert_eq!(err_code(resolve(&root, "src", Access::Read)), FS_NOT_A_FILE);
+        assert_eq!(
+            err_code(resolve(&root, "nao-existe", Access::ReadDir)),
+            FS_NOT_FOUND
+        );
+
+        // Confinamento continua valendo para diretórios.
+        fs::create_dir_all(temp.path().join("fora")).expect("criar fora");
+        assert_eq!(
+            err_code(resolve(&root, "../fora", Access::ReadDir)),
+            FS_OUTSIDE_WORKSPACE
+        );
     }
 
     #[test]

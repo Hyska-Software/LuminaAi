@@ -198,32 +198,12 @@ fn relative_path(ctx: &ToolCtx, path: &Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"))
 }
 
-/// Resolve um diretório dentro do workspace (`safe_path::resolve` só aceita
-/// arquivos na leitura, então tratamos o caso `FS_NOT_A_FILE` como diretório).
+/// Resolve um diretório dentro do workspace (`Access::ReadDir` valida que é
+/// pasta e não deixa escapar do workspace).
 fn resolve_dir(ctx: &ToolCtx, requested: &str) -> Result<PathBuf, ToolOutcome> {
     let root = workspace_root(ctx)?;
-    match safe_path::resolve(&root, requested, safe_path::Access::Read) {
-        Ok(path) => Err(err(
-            "FS_NOT_A_FILE",
-            format!("'{}' não é um diretório", relative_path(ctx, &path)),
-        )),
-        Err(error) if error.code == safe_path::FS_NOT_A_FILE => {
-            let joined = if Path::new(requested).is_absolute() {
-                PathBuf::from(requested)
-            } else {
-                root.join(requested)
-            };
-            let canonical = dunce::canonicalize(&joined).map_err(|_| {
-                err("FS_NOT_FOUND", format!("diretório não encontrado: {requested}"))
-            })?;
-            if !safe_path::is_within(&root, &canonical) {
-                return Err(err(
-                    "FS_OUTSIDE_WORKSPACE",
-                    format!("'{requested}' está fora do workspace"),
-                ));
-            }
-            Ok(canonical)
-        }
+    match safe_path::resolve(&root, requested, safe_path::Access::ReadDir) {
+        Ok(path) => Ok(path),
         Err(error) => Err(err(error.code, error.message)),
     }
 }

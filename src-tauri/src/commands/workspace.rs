@@ -282,8 +282,15 @@ pub async fn open_workspace_in_explorer(
 /* Árvore, busca e prévia                                              */
 /* ------------------------------------------------------------------ */
 
-fn build_tree(entries: &[(String, bool, u64)], _root_label: &str) -> Vec<WorkspaceFileEntry> {
+fn build_tree(entries: &[(String, bool, u64)], root_label: &str) -> Vec<WorkspaceFileEntry> {
     use std::collections::HashMap;
+    let base = root_label.trim_matches('/');
+    let base = if base == "." || base.is_empty() { "" } else { base };
+    let base_depth = if base.is_empty() {
+        0
+    } else {
+        base.matches('/').count() as u32 + 1
+    };
     // Passo 1: agrupa filhos por pai (None = raiz da listagem).
     let mut children: HashMap<Option<String>, Vec<String>> = HashMap::new();
     let mut info: HashMap<String, (bool, u64)> = HashMap::new();
@@ -297,16 +304,18 @@ fn build_tree(entries: &[(String, bool, u64)], _root_label: &str) -> Vec<Workspa
         path: &str,
         children: &HashMap<Option<String>, Vec<String>>,
         info: &HashMap<String, (bool, u64)>,
+        base_depth: u32,
     ) -> WorkspaceFileEntry {
         let (is_dir, size) = info.get(path).copied().unwrap_or((false, 0));
         let name = path.rsplit('/').next().unwrap_or(path).to_string();
-        let depth = path.matches('/').count() as u32;
+        // Profundidade relativa à raiz da listagem (0 = primeiro nível).
+        let depth = (path.matches('/').count() as u32).saturating_sub(base_depth);
         let mut child_nodes: Vec<WorkspaceFileEntry> = children
             .get(&Some(path.to_string()))
             .map(|paths| {
                 paths
                     .iter()
-                    .map(|child| build(child, children, info))
+                    .map(|child| build(child, children, info, base_depth))
                     .collect()
             })
             .unwrap_or_default();
@@ -326,12 +335,17 @@ fn build_tree(entries: &[(String, bool, u64)], _root_label: &str) -> Vec<Workspa
             children: child_nodes,
         }
     }
+    let top_parent = if base.is_empty() {
+        None
+    } else {
+        Some(base.to_string())
+    };
     let mut roots: Vec<WorkspaceFileEntry> = children
-        .get(&None)
+        .get(&top_parent)
         .map(|paths| {
             paths
                 .iter()
-                .map(|path| build(path, &children, &info))
+                .map(|path| build(path, &children, &info, base_depth))
                 .collect()
         })
         .unwrap_or_default();
@@ -345,20 +359,17 @@ fn build_tree(entries: &[(String, bool, u64)], _root_label: &str) -> Vec<Workspa
 }
 
 /// Lista a árvore do workspace a partir de um diretório relativo.
-#[tauri::command]
-pub async fn list_workspace_files(
-    state: State<'_, AppState>,
-    workspace_id: String,
-    path: Option<String>,
-    depth: Option<u32>,
+///
+/// A resolução usa `Access::ReadDir` (o root "." é um diretório válido); a
+/// classificação `Read` continua reservada para arquivos. Regressão coberta por
+/// `lists_the_workspace_tree_from_the_root_and_subdirectories`.
+fn list_tree(
+    root: &std::path::Path,
+    relative: &str,
+    depth: u32,
 ) -> Result<Vec<WorkspaceFileEntry>, String> {
-    let root = workspace_path(&state, &workspace_id)?;
-    let relative = path.unwrap_or_else(|| ".".to_string());
-    let base = safe_path::resolve(&root, &relative, Access::Read).map_err(map_err)?;
-    if !base.is_dir() {
-        return Err(format!("`{relative}` não é uma pasta"));
-    }
-    let depth = depth.unwrap_or(2).clamp(1, 6);
+    let base = safe_path::resolve(root, relative, Access::ReadDir).map_err(map_err)?;
+    let depth = depth.clamp(1, 6);
     let mut entries: Vec<(String, bool, u64)> = Vec::new();
     let walker = ignore::WalkBuilder::new(&base)
         .max_depth(Some(depth as usize + 1))
@@ -376,7 +387,7 @@ pub async fn list_workspace_files(
         if entry_path == base {
             continue;
         }
-        let Ok(relative_path) = entry_path.strip_prefix(&root) else {
+        let Ok(relative_path) = entry_path.strip_prefix(root) else {
             continue;
         };
         let is_dir = entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
@@ -387,7 +398,19 @@ pub async fn list_workspace_files(
             size,
         ));
     }
-    let mut tree = build_tree(&entries, &relative);
+    Ok(build_tree(&entries, relative))
+}
+
+#[tauri::command]
+pub async fn list_workspace_files(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: Option<String>,
+    depth: Option<u32>,
+) -> Result<Vec<WorkspaceFileEntry>, String> {
+    let root = workspace_path(&state, &workspace_id)?;
+    let relative = path.unwrap_or_else(|| ".".to_string());
+    let mut tree = list_tree(&root, &relative, depth.unwrap_or(2))?;
     // Badges de git para os arquivos visíveis.
     let status = crate::workspace::git::detect(&root).await;
     if status.is_repo {
@@ -570,6 +593,33 @@ mod tests {
         assert!(tree[0].is_dir);
         assert_eq!(tree[0].children.len(), 2);
         assert_eq!(tree[1].name, "README.md");
+    }
+
+    #[test]
+    fn lists_the_workspace_tree_from_the_root_and_subdirectories() {
+        // Regressão da aba Arquivos: `list_workspace_files(".", …)` quebrava com
+        // `FS_NOT_A_FILE: '.' é um diretório` porque a resolução de leitura
+        // recusava diretórios.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("src").join("lib")).expect("dirs");
+        std::fs::write(dir.path().join("README.md"), "ok").expect("readme");
+        std::fs::write(dir.path().join("src").join("app.ts"), "export {}").expect("app");
+        std::fs::write(dir.path().join("src").join("lib").join("util.ts"), "x").expect("util");
+
+        let root = list_tree(dir.path(), ".", 2).expect("listar root");
+        assert!(root.iter().any(|entry| entry.name == "src" && entry.is_dir));
+        assert!(root.iter().any(|entry| entry.name == "README.md"));
+        let src = root.iter().find(|entry| entry.name == "src").expect("src");
+        assert!(src.children.iter().any(|child| child.name == "app.ts"));
+
+        let sub = list_tree(dir.path(), "src", 1).expect("listar src");
+        assert!(sub.iter().any(|entry| entry.name == "app.ts"));
+
+        // Arquivo não é diretório; fora do workspace não escapa.
+        let file_as_dir = list_tree(dir.path(), "README.md", 1).expect_err("arquivo");
+        assert!(file_as_dir.contains("FS_NOT_A_FILE"), "{file_as_dir}");
+        let outside = list_tree(dir.path(), "../", 1).expect_err("fora");
+        assert!(outside.contains("FS_OUTSIDE_WORKSPACE"), "{outside}");
     }
 
     #[test]
