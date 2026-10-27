@@ -255,7 +255,7 @@ function WorkspaceRow({
   const canExpand = sessions.length > 0;
 
   return (
-    <div className={cn('rounded-lg', active && 'bg-surface-active/60')}>
+    <div className="rounded-lg">
       <div className="group flex h-8 min-w-0 items-center gap-0.5 rounded-lg pr-0.5">
         <button
           type="button"
