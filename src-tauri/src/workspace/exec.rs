@@ -269,6 +269,70 @@ pub fn shell_for(script: &str) -> (String, Vec<String>) {
 }
 
 /// Classifica comandos destrutivos (heurística de UX; nunca é a única defesa).
+/// Comando de **leitura** conhecido (sem escrita/rede): o modo Editar pode
+/// rodá-lo sem aprovação (`git status/diff/log`, `ls`, `cat`, grep, testes de
+/// versão). Qualquer metacaractere de composição (`;`, `&&`, `|`, `>`, `$(`, …)
+/// invalida a classificação — nunca auto-aprovamos comandos compostos.
+pub fn is_readonly_command(command: &str) -> bool {
+    let trimmed = command.trim();
+    if trimmed.is_empty()
+        || trimmed.contains(';')
+        || trimmed.contains("&&")
+        || trimmed.contains("||")
+        || trimmed.contains('|')
+        || trimmed.contains('>')
+        || trimmed.contains('<')
+        || trimmed.contains("$(")
+        || trimmed.contains('`')
+        || trimmed.contains('\n')
+    {
+        return false;
+    }
+    let mut parts = trimmed.split_whitespace();
+    let Some(program) = parts.next() else {
+        return false;
+    };
+    let program = program.to_ascii_lowercase();
+    let basename = program
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(program.as_str())
+        .trim_end_matches(".exe");
+    let rest: Vec<String> = parts.map(|part| part.to_ascii_lowercase()).collect();
+    match basename {
+        "git" => rest
+            .iter()
+            .find(|part| !part.starts_with('-'))
+            .is_some_and(|sub| {
+                matches!(
+                    sub.as_str(),
+                    "status"
+                        | "diff"
+                        | "log"
+                        | "show"
+                        | "branch"
+                        | "rev-parse"
+                        | "ls-files"
+                        | "blame"
+                        | "describe"
+                        | "shortlog"
+                        | "remote"
+                )
+            }),
+        "ls" | "dir" | "pwd" | "whoami" | "hostname" | "wc" | "head" | "tail" | "which"
+        | "where" | "type" | "file" | "stat" | "du" | "df" => true,
+        "cat" | "get-content" | "gc" => true,
+        "rg" | "grep" | "ag" | "findstr" => true,
+        "find" | "fd" => true,
+        "node" | "python" | "python3" | "cargo" | "npm" | "pnpm" | "yarn" | "rustc" | "go"
+            if rest.iter().any(|part| part == "--version" || part == "-v" || part == "-version") =>
+        {
+            true
+        }
+        _ => false,
+    }
+}
+
 pub fn is_destructive_command(command: &str) -> Option<&'static str> {
     static MATCHERS: OnceLock<(regex::RegexSet, Vec<&'static str>)> = OnceLock::new();
     let (set, reasons) = MATCHERS.get_or_init(|| {
@@ -641,6 +705,25 @@ async fn kill_process_tree(pid: u32) {
 /* ------------------------------------------------------------------ */
 /* Testes                                                              */
 /* ------------------------------------------------------------------ */
+
+
+    #[test]
+    fn readonly_command_classifier_is_conservative() {
+        assert!(is_readonly_command("git status"));
+        assert!(is_readonly_command("git log --oneline -5"));
+        assert!(is_readonly_command("git diff --stat"));
+        assert!(is_readonly_command("ls -la"));
+        assert!(is_readonly_command("cat src/main.rs"));
+        assert!(is_readonly_command("rg --files"));
+        assert!(is_readonly_command("node --version"));
+        assert!(!is_readonly_command("git commit -m x"));
+        assert!(!is_readonly_command("git status && rm -rf build"));
+        assert!(!is_readonly_command("cat a.txt > b.txt"));
+        assert!(!is_readonly_command("echo $(whoami)"));
+        assert!(!is_readonly_command("npm run test"));
+        assert!(!is_readonly_command(""));
+    }
+
 
 #[cfg(test)]
 mod tests {

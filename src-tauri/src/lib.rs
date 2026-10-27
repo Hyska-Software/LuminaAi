@@ -20,6 +20,7 @@ mod events;
 mod harness;
 mod http;
 mod jobs;
+mod mcp;
 mod oauth;
 mod policy;
 mod providers;
@@ -118,6 +119,7 @@ pub fn run() {
             commands::code::set_plan_mode,
             commands::code::respond_approval,
             commands::code::respond_question,
+            commands::code::mcp_status,
             commands::code::list_approval_rules,
             commands::code::save_approval_rule,
             commands::code::delete_approval_rule,

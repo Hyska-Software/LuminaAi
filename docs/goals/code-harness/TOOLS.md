@@ -361,6 +361,23 @@ M  src/app.ts           (staged)
 - **Testes**: kinds/parse, catálogo reduzido, guarda de profundidade, execução de um turno filho
   real com provider falso (conversa efêmera apagada), runner inexistente/sem workspace.
 
+#### Servidores MCP (`mcp__<servidor>__<tool>`)
+
+- Configuração em `<app-data>/mcp.json` (fora do repo): `{ "servers": [{ "name", "command", "args",
+  "env", "enabled", "cwd" }] }`. O app conecta sob demanda na primeira sessão Code, fala o
+  transporte oficial **stdio** (JSON-RPC 2.0 por linha), faz `initialize` →
+  `notifications/initialized` → `tools/list` e cacheia as tools descobertas.
+- As tools entram no wire do perfil Code depois das 19 estáticas (`mcp__servidor__tool`, nomes
+  sanitizados) com o `inputSchema` do servidor; o prompt lista nome/servidor/descrição.
+- **Aprovação sempre explícita** (inclusive em Autônomo; regras "sempre permitir/negar" do usuário
+  com matcher exact/prefix/glob vencem); o card mostra servidor/ferramenta/argumentos. Timeout de
+  120 s; cancelamento do turno aborta; resultado extrai `content[].text` (ou JSON) e marca
+  `MCP_ERROR` quando `isError`.
+- Falhas por servidor não derrubam os demais (`MCP_SPAWN`/`MCP_INIT`/`MCP_TIMEOUT`/`MCP_PROTOCOL`,
+  logadas no stderr do app); `mcp_status` devolve servidores + tools para inspeção.
+- **Testes**: sanitização/config tolerante, manager vazio degradando honesto e handshake +
+  `tools/list` + `tools/call` contra um servidor MCP fake em Node (pulado sem Node).
+
 #### `/test`, `/review`, `/init` (composer)
 
 Comandos do composer preenchem prompts que usam `run_checks` (verificação), `task` (revisão

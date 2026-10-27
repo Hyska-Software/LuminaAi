@@ -322,6 +322,18 @@ pub async fn set_plan_mode(
     session_state(&state, &conversation_id).await
 }
 
+/// Status dos servidores MCP configurados (`mcp.json`) e tools descobertas.
+#[tauri::command]
+pub async fn mcp_status(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let tools = state.mcp.refresh_tools().await;
+    Ok(serde_json::json!({
+        "servers": state.mcp.config().servers,
+        "tools": tools,
+    }))
+}
+
 /// Responde a uma pergunta pendente do agente (`ask_user`).
 #[tauri::command]
 pub async fn respond_question(
@@ -785,6 +797,7 @@ pub async fn compact_session(
         observed: Some(state.observed.clone()),
         jobs: Some(state.jobs.clone()),
         questions: Some(state.questions.clone()),
+        mcp: Some(state.mcp.clone()),
     };
     let request = crate::harness::batch::BatchRequest {
         provider_id: &conversation.provider_id,

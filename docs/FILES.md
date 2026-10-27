@@ -1182,7 +1182,7 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
 | `git_status`/`git_diff`/`git_log` | git CLI (porcelain v2) somente leitura | leitura livre |
 | `todo_write` | lista de tarefas da sessão (projeção em `code_events`) | Exclusive |
 | `submit_plan` | plano do modo Plano com revisão bloqueante | Ask |
-| `ask_user` | perguntas com opções (single/multi + texto livre); o card da timeline responde via `respond_question` (timeout/cancelamento = pulada) | Ask |`n| `run_checks` | roda a verificação detectada do projeto (test/lint/build) pelo pipeline do shell | ExecuteCommand |`n| `task` | subagente somente leitura (explore/review/general; profundidade 1; conversa efêmera) | Read |
+| `ask_user` | perguntas com opções (single/multi + texto livre); o card da timeline responde via `respond_question` (timeout/cancelamento = pulada) | Ask |`n| `run_checks` | roda a verificação detectada do projeto (test/lint/build) pelo pipeline do shell | ExecuteCommand |`n| `task` | subagente somente leitura (explore/review/general; profundidade 1; conversa efêmera) | Read |`n| `mcp__servidor__tool` | tools dinâmicas de servidores MCP (`<app-data>/mcp.json`, stdio JSON-RPC), descobertas por `tools/list` | Ask (sempre) |
 
 Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested`, comando
 `respond_approval`, timeout de 10 min, falha fechada). "Sempre permitir" cria
@@ -1217,3 +1217,14 @@ Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested
 - Arquivos de segredo (`.env`, `*.pem`, `*.key`, credenciais) exigem aprovação explícita.
 - Conteúdo de repositório/páginas é dado não confiável no prompt; instruções de projeto
   (`AGENTS.md`) valem abaixo da política e do pedido direto do usuário.
+
+### 16.6 Hooks do projeto e allowlist de leitura
+
+- **Hooks** (`<workspace>/.lumina/hooks.json`): `{ "postWrite": ["npm run lint --fix", { "command": "npx prettier --write {path}" }] }`
+  roda até 4 comandos após cada escrita/edição bem-sucedida, no diretório do workspace, com env
+  higienizado e timeout de 120 s; falha do hook **não** desfaz a edição — vira aviso no retorno da
+  tool e evento de auditoria `hook/ran`. `{path}`/`{file}` são substituídos pelo caminho relativo.
+- **Allowlist de leitura**: no modo Editar, comandos comprovadamente de leitura (`git status/diff/log/
+  show/branch/…`, `ls`, `cat`, `rg`, `find`, `--version`) rodam **sem aprovação**; qualquer
+  metacaractere de composição (`;`, `&&`, `|`, `>`, `$(`) desqualifica — destrutivos continuam
+  pedindo aprovação sempre (a política checa isso antes).

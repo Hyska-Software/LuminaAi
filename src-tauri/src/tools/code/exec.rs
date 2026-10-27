@@ -371,6 +371,178 @@ fn approval_options() -> Vec<ApprovalOption> {
     ]
 }
 
+
+/// Executa uma tool dinâmica de servidor MCP (`mcp__servidor__tool`).
+///
+/// Aprovação **explícita** (o código roda fora do processo do agente): regras
+/// "sempre permitir" do usuário vencem; sem regra, o card pergunta sempre,
+/// inclusive em modo Autônomo. Timeout de 120 s; cancelamento do turno aborta.
+pub async fn run_mcp(ctx: &ToolCtx, wire: &str, args: Value) -> ToolOutcome {
+    let Some(manager) = ctx.mcp.clone() else {
+        return err(
+            "MCP_UNAVAILABLE",
+            "nenhum servidor MCP está configurado (crie `<app-data>/mcp.json`)",
+        );
+    };
+    let Some((server, tool)) = crate::mcp::parse_wire_name(wire) else {
+        return err("MCP_INVALID", format!("nome de tool MCP inválido: `{wire}`"));
+    };
+    let display = format!("{server} · {tool}");
+
+    match mcp_rule_decision(ctx, wire) {
+        Some(crate::domain::ApprovalDecision::Denied) => {
+            return err(
+                "APPROVAL_DENIED",
+                format!("uma regra do usuário nega `{wire}`; ajuste a abordagem"),
+            )
+        }
+        Some(crate::domain::ApprovalDecision::Approved) => {}
+        _ => {
+            if ctx.approval.is_none() {
+                return err(
+                    "APPROVAL_UNAVAILABLE",
+                    "tools MCP exigem aprovação; não há canal disponível — falhando fechado",
+                );
+            }
+            let detail = ApprovalDetail::Other {
+                text: format!(
+                    "Servidor MCP: {server}\nFerramenta: {tool}\nArgumentos:\n{}",
+                    truncate_json(&args, 1_200)
+                ),
+            };
+            let request = ApprovalRequest {
+                id: format!("apr-{}", uuid::Uuid::new_v4().simple()),
+                conversation_id: ctx.conversation_id.clone(),
+                tool_call_id: ctx.tool_call_id.clone(),
+                tool: wire.to_string(),
+                title: "Chamar ferramenta MCP".to_string(),
+                detail,
+                risk: RiskClass::Network,
+                preview: None,
+                options: vec![
+                    crate::domain::ApprovalOption {
+                        id: "allow".into(),
+                        label: "Permitir uma vez".into(),
+                        scope: None,
+                    },
+                    crate::domain::ApprovalOption {
+                        id: "deny".into(),
+                        label: "Negar".into(),
+                        scope: None,
+                    },
+                ],
+                created_at: now_ms(),
+            };
+            let approval_id = request.id.clone();
+            audit_append(
+                ctx,
+                EV_APPROVAL_ASKED,
+                &json!({ "approvalId": approval_id, "tool": wire, "risk": "network" }),
+            );
+            let outcome = ctx.request_approval(request).await;
+            audit_append(
+                ctx,
+                EV_APPROVAL_DECIDED,
+                &json!({
+                    "approvalId": approval_id,
+                    "decision": outcome.decision.as_str(),
+                    "scope": outcome.scope.map(|scope| scope.as_str()),
+                }),
+            );
+            if !outcome.is_approved() {
+                let feedback = outcome
+                    .feedback
+                    .filter(|value| !value.trim().is_empty())
+                    .map(|value| format!(": {value}"))
+                    .unwrap_or_default();
+                return match outcome.decision {
+                    crate::domain::ApprovalDecision::Denied => err(
+                        "APPROVAL_DENIED",
+                        format!("a chamada MCP foi negada pelo usuário{feedback}; ajuste a abordagem"),
+                    ),
+                    crate::domain::ApprovalDecision::Cancelled => {
+                        err("APPROVAL_CANCELLED", "a aprovação foi cancelada")
+                    }
+                    _ => err("APPROVAL_EXPIRED", "a aprovação expirou; pergunte de novo"),
+                };
+            }
+        }
+    }
+
+    let result = tokio::select! {
+        _ = ctx.cancel.cancelled() => return err("MCP_CANCELLED", "o turno foi cancelado"),
+        result = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            manager.call(wire, args),
+        ) => match result {
+            Ok(Ok(value)) => value,
+            Ok(Err(error)) => return err("MCP_FAILED", error),
+            Err(_) => return err("MCP_TIMEOUT", "a tool MCP excedeu 120 s"),
+        },
+    };
+    let content = mcp_result_text(&result);
+    let (inline, _) = spill_text(ctx, &content);
+    ToolOutcome {
+        content: inline,
+        summary: Some(format!("MCP {display}")),
+        presentation: Some(json!({ "kind": "output" })),
+        ..Default::default()
+    }
+}
+
+/// Regra "sempre permitir/negar" que casa com a tool MCP (exact/prefix/glob).
+fn mcp_rule_decision(ctx: &ToolCtx, wire: &str) -> Option<crate::domain::ApprovalDecision> {
+    for rule in ctx.policy_rules() {
+        if rule.tool != wire && rule.tool != "mcp" && rule.tool != "mcp__*" {
+            continue;
+        }
+        let matches = match rule.matcher.as_str() {
+            "prefix" => wire.starts_with(&rule.pattern),
+            "glob" => crate::policy::glob_match(&rule.pattern, wire),
+            _ => rule.pattern == wire,
+        };
+        if matches {
+            return Some(rule.decision);
+        }
+    }
+    None
+}
+
+fn truncate_json(value: &Value, max: usize) -> String {
+    let text = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+    if text.chars().count() <= max {
+        return text;
+    }
+    text.chars().take(max).collect::<String>() + "…"
+}
+
+/// Extrai texto de um resultado MCP (`content: [{type:"text",text}]`).
+fn mcp_result_text(result: &Value) -> String {
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mut parts = Vec::new();
+    if let Some(items) = result.get("content").and_then(Value::as_array) {
+        for item in items {
+            if let Some(text) = item.get("text").and_then(Value::as_str) {
+                parts.push(text.to_string());
+            } else {
+                parts.push(item.to_string());
+            }
+        }
+    }
+    if parts.is_empty() {
+        parts.push(serde_json::to_string_pretty(result).unwrap_or_else(|_| result.to_string()));
+    }
+    let body = parts.join("\n");
+    if is_error {
+        format!("MCP_ERROR: {body}")
+    } else {
+        body
+    }
+}
+
 /// Aplica a matriz de permissões e, se necessário, pausa o turno pedindo
 /// aprovação humana. `Allow` → `Ok`; `Deny`/`Ask` recusado → `Err(erro)`.
 async fn policy_check(
@@ -1123,6 +1295,103 @@ fn observed_hash(bytes: &[u8]) -> String {
     crate::harness::code::observed::hash_bytes(bytes)
 }
 
+
+/// Comandos de hook do projeto (`.lumina/hooks.json`): `postWrite`.
+fn project_post_write_hooks(root: &Path) -> Vec<String> {
+    let path = root.join(".lumina").join("hooks.json");
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return Vec::new();
+    };
+    value
+        .get("postWrite")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| match item {
+                    Value::String(command) => Some(command.clone()),
+                    Value::Object(map) => map
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    _ => None,
+                })
+                .take(4)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Roda os hooks pós-escrita e anexa o resultado ao retorno da tool. Os hooks
+/// são configurados pelo usuário no próprio workspace (`.lumina/hooks.json`) e
+/// não mutam a decisão da política: falha vira aviso, nunca erro do turno.
+async fn with_post_write_hooks(ctx: &ToolCtx, relative: &str, content: String) -> String {
+    let Ok(root) = writable_root(ctx) else {
+        return content;
+    };
+    let commands = project_post_write_hooks(&root);
+    if commands.is_empty() {
+        return content;
+    }
+    let mut body = content;
+    let mut notes: Vec<String> = Vec::new();
+    for command in commands {
+        let expanded = command.replace("{path}", relative).replace("{file}", relative);
+        let (program, args) = exec::shell_for(&expanded);
+        let request = exec::ExecRequest {
+            program,
+            args,
+            cwd: root.clone(),
+            env: exec::sanitized_env(&[("LUMINA_HOOK", "postWrite")]),
+            timeout: std::time::Duration::from_secs(120),
+            cancel: ctx.cancel.clone(),
+            max_output_bytes: 16 * 1024,
+        };
+        match exec::run(request, None).await {
+            Ok(output) => {
+                let ok = output.exit_code == Some(0);
+                let combined = format!("{}{}", output.stdout, output.stderr);
+                let snippet: String = combined.trim().chars().take(600).collect();
+                notes.push(format!(
+                    "- `{}` → {} {}",
+                    command,
+                    if ok { "ok" } else { "falhou" },
+                    snippet
+                ));
+                audit_append(
+                    ctx,
+                    "hook/ran",
+                    &json!({
+                        "hook": "postWrite",
+                        "command": command,
+                        "exitCode": output.exit_code,
+                        "timedOut": output.timed_out,
+                    }),
+                );
+                if !ok {
+                    notes.push(
+                        "  (a edição foi mantida; corrija o hook ou o arquivo antes de seguir)"
+                            .to_string(),
+                    );
+                }
+            }
+            Err(error) => notes.push(format!("- `{command}` → erro: {error}")),
+        }
+    }
+    if notes.is_empty() {
+        return body;
+    }
+    body.push_str("\n\nHooks do projeto (`.lumina/hooks.json` · postWrite):\n");
+    for note in notes {
+        body.push_str(&note);
+        body.push('\n');
+    }
+    body
+}
+
 async fn write_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let requested = match arg_str(args, "path") {
         Ok(value) => value,
@@ -1175,12 +1444,15 @@ async fn write_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let normalized = preserve_bom(&normalize_eol(&content, existing.as_deref()), existing.as_deref());
     let after = normalized.into_bytes();
     match commit_mutation(ctx, &path, &relative, existing.as_deref(), &after, kind) {
-        Ok((content, presentation)) => finish(
-            ctx,
-            content,
-            Some(format!("Escrever {relative}")),
-            Some(presentation),
-        ),
+        Ok((content, presentation)) => {
+            let content = with_post_write_hooks(ctx, &relative, content).await;
+            finish(
+                ctx,
+                content,
+                Some(format!("Escrever {relative}")),
+                Some(presentation),
+            )
+        },
         Err(outcome) => outcome,
     }
 }
@@ -1265,12 +1537,15 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     };
     let after = after_text.into_bytes();
     match commit_mutation(ctx, &path, &relative, Some(&before), &after, FileChangeKind::Modified) {
-        Ok((content, presentation)) => finish(
-            ctx,
-            content,
-            Some(format!("Editar {relative}")),
-            Some(presentation),
-        ),
+        Ok((content, presentation)) => {
+            let content = with_post_write_hooks(ctx, &relative, content).await;
+            finish(
+                ctx,
+                content,
+                Some(format!("Editar {relative}")),
+                Some(presentation),
+            )
+        },
         Err(outcome) => outcome,
     }
 }
@@ -1413,6 +1688,13 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     };
     let workdir_relative = relative_path(ctx, &workdir);
     let destructive = exec::is_destructive_command(&command);
+    // Comandos de leitura conhecidos não pedem aprovação no modo Editar; o
+    // destrutivo continua vencendo (política checa isso antes).
+    let risk = if destructive.is_none() && exec::is_readonly_command(&command) {
+        RiskClass::Read
+    } else {
+        RiskClass::Shell
+    };
     let detail = ApprovalDetail::Command {
         command: command.clone(),
         workdir: workdir_relative.clone(),
@@ -1420,7 +1702,7 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     if let Err(outcome) = policy_check(
         ctx,
         "run_command",
-        RiskClass::Shell,
+        risk,
         true,
         Some(command.as_str()),
         false,
@@ -2140,6 +2422,7 @@ mod tests {
                 plan_mode: false,
                 jobs: Some(self.jobs.clone()),
                 questions: None,
+        mcp: None,
                 subagent: None,
             }
         }
@@ -2155,6 +2438,9 @@ mod tests {
     }
 
     async fn call(ctx: &ToolCtx, name: &str, args: Value) -> ToolOutcome {
+        if name.starts_with("mcp__") {
+            return super::run_mcp(ctx, name, args).await;
+        }
         let exec = ToolExec::for_tool(name).expect("tool do catálogo");
         super::run(ctx, exec, args).await
     }
@@ -2613,6 +2899,118 @@ mod tests {
         assert!(denied.content.contains("faltou contexto"), "{}", denied.content);
     }
 
+
+
+    #[test]
+    fn project_hooks_parse_strings_and_objects() {
+        let fixture = Fixture::new();
+        fixture.write(
+            ".lumina/hooks.json",
+            r#"{"postWrite":["echo um",{"command":"echo dois"},"  ","echo tres"]}"#,
+        );
+        let hooks = super::project_post_write_hooks(&fixture.root);
+        assert_eq!(hooks, vec!["echo um", "echo dois", "  ", "echo tres"]);
+    }
+
+    #[tokio::test]
+    async fn write_file_runs_project_post_write_hooks() {
+        let fixture = Fixture::new();
+        fixture.write(
+            ".lumina/hooks.json",
+            r#"{"postWrite":["echo hook-run >> hook.log"]}"#,
+        );
+        let mut ctx = fixture.ctx();
+        ctx.workspace.as_mut().expect("ws").permission_mode = PermissionMode::Autonomous;
+        let outcome = call(
+            &ctx,
+            "write_file",
+            json!({ "path": "src/novo.ts", "content": "export const a = 1;\n" }),
+        )
+        .await;
+        if error_code(&outcome) == "EXEC_SPAWN" || error_code(&outcome) == "EXEC_FAILED" {
+            eprintln!("shell indisponível neste ambiente: teste de hook pulado");
+            return;
+        }
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("Hooks do projeto"), "{}", outcome.content);
+        assert!(fixture.root.join("hook.log").exists(), "hook não escreveu o arquivo");
+    }
+
+
+    #[tokio::test]
+    async fn readonly_shell_command_does_not_need_approval_in_edit_mode() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.approval = None;
+        ctx.workspace.as_mut().expect("ws").permission_mode = PermissionMode::Edit;
+        let outcome = call(
+            &ctx,
+            "run_command",
+            json!({ "command": "git status", "description": "ver status" }),
+        )
+        .await;
+        if error_code(&outcome) == "EXEC_SPAWN" || error_code(&outcome) == "EXEC_FAILED" {
+            eprintln!("shell indisponível neste ambiente: teste pulado");
+            return;
+        }
+        assert_ne!(error_code(&outcome), "APPROVAL_UNAVAILABLE", "{}", outcome.content);
+        assert_ne!(error_code(&outcome), "APPROVAL_DENIED", "{}", outcome.content);
+    }
+
+    #[tokio::test]
+    async fn mcp_tool_without_manager_fails_closed_with_a_hint() {
+        let fixture = Fixture::new();
+        let ctx = fixture.ctx();
+        let outcome = call(&ctx, "mcp__fs__read", json!({ "path": "x" })).await;
+        assert_eq!(error_code(&outcome), "MCP_UNAVAILABLE");
+        assert!(outcome.content.contains("mcp.json"), "{}", outcome.content);
+    }
+
+    #[test]
+    fn mcp_result_text_extracts_content_and_flags_errors() {
+        let ok = serde_json::json!({
+            "content": [{ "type": "text", "text": "linha 1" }, { "type": "text", "text": "linha 2" }]
+        });
+        assert_eq!(super::mcp_result_text(&ok), "linha 1\nlinha 2");
+        let err = serde_json::json!({
+            "isError": true,
+            "content": [{ "type": "text", "text": "falhou" }]
+        });
+        assert!(super::mcp_result_text(&err).starts_with("MCP_ERROR"));
+        let raw = serde_json::json!({ "foo": "bar" });
+        assert!(super::mcp_result_text(&raw).contains("foo"));
+        assert!(super::truncate_json(&raw, 100).contains("foo"));
+        assert!(super::truncate_json(&raw, 3).ends_with('…'));
+    }
+
+    #[test]
+    fn mcp_rules_match_exact_prefix_and_glob() {
+        use crate::domain::{ApprovalDecision, ApprovalRule, ApprovalScope};
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        let rule = |id: &str, matcher: &str, pattern: &str, decision: ApprovalDecision| ApprovalRule {
+            id: id.to_string(),
+            scope: ApprovalScope::Session,
+            scope_id: None,
+            tool: "mcp".to_string(),
+            matcher: matcher.to_string(),
+            pattern: pattern.to_string(),
+            decision,
+            created_at: 1,
+        };
+        ctx.rules = vec![rule("r1", "prefix", "mcp__fs__", ApprovalDecision::Approved)];
+        assert_eq!(
+            super::mcp_rule_decision(&ctx, "mcp__fs__read"),
+            Some(ApprovalDecision::Approved)
+        );
+        ctx.rules = vec![rule("r2", "glob", "mcp__*__write", ApprovalDecision::Denied)];
+        assert_eq!(
+            super::mcp_rule_decision(&ctx, "mcp__fs__write"),
+            Some(ApprovalDecision::Denied)
+        );
+        ctx.rules = vec![rule("r3", "exact", "mcp__fs__read", ApprovalDecision::Approved)];
+        assert_eq!(super::mcp_rule_decision(&ctx, "mcp__fs__other"), None);
+    }
     #[tokio::test]
     async fn run_checks_reports_missing_project_checks_and_plan_mode() {
         let fixture = Fixture::new();

@@ -37,6 +37,7 @@ pub async fn run_turn(
         observed: Some(state.observed.clone()),
         jobs: Some(state.jobs.clone()),
         questions: Some(state.questions.clone()),
+        mcp: Some(state.mcp.clone()),
         streamer: None,
         api_key_override: None,
         // Produção resolve credencial/modelos pelo `AppState` (OAuth refresh,

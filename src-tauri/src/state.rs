@@ -35,6 +35,8 @@ pub struct AppState {
     pub observed: Arc<crate::harness::code::observed::ObservedFiles>,
     /// Jobs de processo em background do harness de código (F4).
     pub jobs: Arc<crate::jobs::JobRegistry>,
+    /// Servidores MCP configurados (<app-data>/mcp.json).
+    pub mcp: Arc<crate::mcp::McpManager>,
     /// Terminais PTY abertos no layout Code.
     pub terminals: Arc<crate::terminal::TerminalRegistry>,
     /// Perguntas estruturadas pendentes (sk_user).
@@ -55,10 +57,11 @@ impl AppState {
             catalog,
             http: crate::http::client(),
             search_http: crate::http::search_client(),
-            data_dir,
+        data_dir: data_dir.clone(),
             oauth: Arc::new(OAuthState::new()),
             approvals: Arc::new(ApprovalRegistry::new()),
             observed: Arc::new(crate::harness::code::observed::ObservedFiles::new()),
+            mcp: Arc::new(crate::mcp::McpManager::load(data_dir.as_path())),
             terminals: Arc::new(crate::terminal::TerminalRegistry::new()),
             questions: Arc::new(crate::harness::code::questions::QuestionRegistry::new()),
             jobs: Arc::new(crate::jobs::JobRegistry::new()),

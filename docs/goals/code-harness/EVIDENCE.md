@@ -144,3 +144,50 @@ Pesquisa (5 documentos em `docs/research/`, ~190 KB): `dsh-harness-map.md` (DSH 
 Pendências para as próximas rodadas (F8 restante): cliente **MCP** (stdio) com tools dinâmicas,
 hooks de ciclo de vida e a UI de "Verificações" no painel; depois CSP restritiva e allowlist de
 comandos de leitura no modo Editar.
+## 10. Rodada 6 — cliente MCP (F8, parte 2)
+
+- **Cliente MCP stdio real** em `src-tauri/src/mcp/mod.rs`: config `<app-data>/mcp.json`,
+  JSON-RPC 2.0 por linha, `initialize` → `notifications/initialized` → `tools/list` (cache) e
+  `tools/call`; leitor/escritor em tasks, stderr drenado, timeout de 60 s por request e 30 s no
+  handshake, kill ao dropar. `McpManager` conecta sob demanda e degrada por servidor.
+- **Integração no perfil Code**: tools `mcp__servidor__tool` entram no wire depois das 19 estáticas
+  (com `inputSchema` do servidor) e no prompt; execução fora do registry estático (aprovação
+  explícita sempre, regras exact/prefix/glob, timeout 120 s, cancelamento, extração de
+  `content[].text`, `MCP_ERROR`). `mcp_status` expõe servidores/tools; `mcp: None` nos testes e
+  composer/deps atualizados.
+- **Testes**: sanitização e parse wire, config tolerante, manager vazio, handshake + list/call
+  contra servidor MCP **fake em Node** (pulado sem Node), erros `MCP_*` e regras de aprovação.
+  Docs: `TOOLS.md` §2.6 (MCP), `FILES` §16, `ARCHITECTURE` §8.3.
+
+Pendências: UI de MCP ("Servidores") na aba de configurações, hooks de ciclo de vida, UI de
+"Verificações" no painel, CSP restritiva e allowlist de comandos de leitura.
+## 11. Rodada 7 — hooks de projeto e allowlist de leitura
+
+- **Hooks** (`.lumina/hooks.json` · `postWrite`): comandos configurados pelo usuário no workspace
+  rodam após `write_file`/`edit_file` (até 4, `{path}` expansion, env higienizado, timeout 120 s,
+  output limitado), com auditoria `hook/ran`; falha não desfaz a edição (aviso no resultado).
+  Testes: parse string/objeto e execução real de hook (pulado sem shell).
+- **Allowlist de leitura** no modo Editar (`workspace::exec::is_readonly_command`): `git status/diff/
+  log/show/branch/…`, `ls`, `cat`, `rg`, `find`, `--version` rodam sem aprovação; composição
+  (`;`, `&&`, `|`, `>`, `$(`) desqualifica; destrutivo continua sempre pedindo. Testado no
+  classificador e ponta a ponta via `run_command` sem canal de aprovação.
+
+## 12. Fecho — estado final vs. plano
+
+Fases do `PLAN.md` entregues e verificadas: **F0** (contratos/base), **F1** (workspaces/sessões/UI),
+**F2** (leitura/busca/observação CAS), **F3** (edição/journal/diff/revert), **F4** (shell/jobs),
+**F5** (plano/tarefas/perguntas/contexto/compactação), **F6** (git CLI + commit com sugestão de IA),
+**F7** (terminal PTY com xterm), **F8** (verificação de projeto, subagentes somente leitura, MCP
+stdio, hooks e allowlist de leitura). Composer com `@arquivos`/`/comandos`, cards de aprovação/
+plano/tarefas/jobs/respostas/apresentações, painel Arquivos/Alterações real e docs atualizadas
+(`ARCHITECTURE` §5/§8.3/§12/§13/§16, `FILES` §14/§16, `DESIGN` §5, `TOOLS` §2.6, `EVIDENCE`).
+
+**Verificação final da branch `feat/code-harness`:** `cargo check --all-targets` verde;
+`cargo test --lib` 707 verdes; `pnpm typecheck` verde; `pnpm test` 97 arquivos/1717 testes verdes;
+`pnpm build` verde. Nenhum mock/fake em produto (fakes apenas em testes, com provider/streamer
+controlados).
+
+**Fora do escopo entregue (documentado, consistente com o plano):** CSP restritiva no
+`tauri.conf.json` (dívida pré-existente; exige validação manual do app empacotado), telas de
+configuração para MCP/servidores e "Verificações" no painel (backend exposto por `mcp_status` e
+`run_checks`), worktrees/LSP/ACP/agendamentos (v2 do PLAN).

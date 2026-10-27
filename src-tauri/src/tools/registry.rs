@@ -113,6 +113,8 @@ pub struct ToolCtx {
     /// Perguntas estruturadas ao usuário (`ask_user`).
     pub questions: Option<Arc<crate::harness::code::questions::QuestionRegistry>>,
     /// Runner de subagentes (	ask; None em testes).
+    /// Servidores MCP (tools dinâmicas `mcp__servidor__tool`).
+    pub mcp: Option<Arc<crate::mcp::McpManager>>,
     pub subagent: Option<Arc<dyn crate::harness::code::subagent::SubagentRunner>>,
 }
 
@@ -686,6 +688,7 @@ mod tests {
             plan_mode: false,
             jobs: None,
             questions: None,
+        mcp: None,
             subagent: None,
         }
     }

@@ -192,6 +192,8 @@ pub struct HarnessDeps {
     pub jobs: Option<Arc<crate::jobs::JobRegistry>>,
     /// Perguntas estruturadas pendentes (`ask_user`).
     pub questions: Option<Arc<crate::harness::code::questions::QuestionRegistry>>,
+    /// Servidores MCP disponíveis (tools mcp__servidor__tool).
+    pub mcp: Option<Arc<crate::mcp::McpManager>>,
 }
 
 /// Actionable copy for planned limits. The renderer knows the fixed
@@ -834,6 +836,23 @@ pub async fn run_turn(
     } else {
         Vec::new()
     };
+    // Servidores MCP: na primeira vez que uma sessão Code roda com servidores
+    // configurados, conecta e descobre as tools (os turnos seguintes usam o cache).
+    if profile == TurnProfile::Code {
+        if let Some(mcp) = deps.mcp.as_ref() {
+            if mcp.has_servers() && mcp.cached_tools().is_empty() {
+                mcp.refresh_tools().await;
+            }
+        }
+    }
+    let mcp_tools = if profile == TurnProfile::Code {
+        deps.mcp
+            .as_ref()
+            .map(|mcp| mcp.cached_tools())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let system_prompt = match (profile, code_context.as_ref()) {
         (TurnProfile::Code, Some(code_ctx)) => {
             let prompt_ctx = code_ctx.prompt_context();
@@ -845,6 +864,21 @@ pub async fn run_turn(
                 std::env::consts::OS,
                 &chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
             );
+            // Tools de servidores MCP entram no prompt com nome wire e descrição.
+            if !mcp_tools.is_empty() {
+                prompt.push_str("\n# Ferramentas de servidores MCP\n\n");
+                prompt.push_str(
+                    "Estas ferramentas rodam em servidores MCP configurados pelo usuário e \
+                     exigem aprovação dele a cada chamada. Use quando fizer sentido; erros voltam \
+                     como `MCP_*`.\n\n",
+                );
+                for tool in &mcp_tools {
+                    prompt.push_str(&format!(
+                        "- `{}` — [{}] {}\n",
+                        tool.wire_name, tool.server, tool.description
+                    ));
+                }
+            }
             // Subagente: o harness do filho recebe instruções extras do pai.
             if let Some(extra) = options.system_prompt_override.as_deref() {
                 prompt.push_str("\n\n");
@@ -857,7 +891,17 @@ pub async fn run_turn(
     };
     let tool_definitions = match (profile, code_context.as_ref()) {
         (TurnProfile::Code, Some(code_ctx)) => {
-            code_tool_definitions(code_ctx, &settings, options.delegation_depth)
+            let mut definitions =
+                code_tool_definitions(code_ctx, &settings, options.delegation_depth);
+            // Tools de servidores MCP entram após as estáticas (nome wire).
+            for tool in &mcp_tools {
+                definitions.push(crate::providers::ToolDefinition {
+                    name: tool.wire_name.clone(),
+                    description: format!("[{}] {}", tool.server, tool.description),
+                    parameters: tool.input_schema.clone(),
+                });
+            }
+            definitions
         }
         _ => tools::definitions(&options),
     };
@@ -897,6 +941,7 @@ pub async fn run_turn(
             plan_mode: code_ctx.plan_mode,
             jobs: deps.jobs.clone(),
             questions: deps.questions.clone(),
+            mcp: deps.mcp.clone(),
             subagent: Some(code::subagent::runner(
                 &deps,
                 &settings,
@@ -2697,6 +2742,7 @@ mod agent_loop_tests {
             observed: None,
             jobs: None,
             questions: None,
+        mcp: None,
         }
     }
 
@@ -2798,6 +2844,7 @@ mod agent_loop_tests {
             observed: None,
             jobs: None,
             questions: None,
+        mcp: None,
         }
     }
 
@@ -2934,6 +2981,7 @@ mod agent_loop_tests {
             observed: None,
             jobs: None,
             questions: None,
+        mcp: None,
         }
     }
 

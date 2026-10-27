@@ -305,6 +305,7 @@ pub async fn suggest_commit_message(
         observed: None,
         jobs: None,
             questions: None,
+            mcp: None,
     };
     let request = crate::harness::batch::BatchRequest {
         provider_id: &settings.default_provider,

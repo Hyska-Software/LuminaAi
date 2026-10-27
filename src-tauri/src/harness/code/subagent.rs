@@ -265,6 +265,7 @@ mod tests {
             observed: None,
             jobs: None,
             questions: None,
+        mcp: None,
         };
         let settings = Settings::default();
         let runner = runner(&deps, &settings, &parent, 0);

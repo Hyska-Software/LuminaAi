@@ -118,6 +118,7 @@ mod tests {
             observed: None,
             jobs: None,
             questions: None,
+        mcp: None,
         }
     }
 

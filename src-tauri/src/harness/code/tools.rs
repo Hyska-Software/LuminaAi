@@ -44,10 +44,11 @@ fn default_timeout_ms(name: &str) -> Option<u64> {
 
 /// Executa uma tool do perfil Code. Nunca entra em pânico: falhas viram
 /// `ToolOutcome` de erro com código estável.
+///
+/// Tools dinâmicas de servidores MCP (`mcp__servidor__tool`) não estão no
+/// registry estático; elas são executadas pelo mesmo caminho (aprovação,
+/// timeout) através de [`crate::tools::code::exec::run_mcp`].
 pub async fn execute(ctx: &ToolCtx, call: &ToolCallRecord) -> ToolOutcome {
-    let Some(exec) = ToolExec::for_tool(&call.name) else {
-        return ToolOutcome::error(format!("TOOL_UNKNOWN: ferramenta desconhecida: {}", call.name));
-    };
     let args = match parse_arguments(&call.arguments) {
         Ok(args) => args,
         Err(outcome) => return outcome,
@@ -56,6 +57,12 @@ pub async fn execute(ctx: &ToolCtx, call: &ToolCallRecord) -> ToolOutcome {
     // apresentação (`presentation`) do card correto.
     let mut call_ctx = ctx.clone();
     call_ctx.tool_call_id = call.id.clone();
+    if call.name.starts_with("mcp__") {
+        return crate::tools::code::exec::run_mcp(&call_ctx, &call.name, args).await;
+    }
+    let Some(exec) = ToolExec::for_tool(&call.name) else {
+        return ToolOutcome::error(format!("TOOL_UNKNOWN: ferramenta desconhecida: {}", call.name));
+    };
     // Timeout do contrato aplicado pelo runtime (nunca "decorativo").
     match default_timeout_ms(&call.name) {
         Some(timeout) => {
@@ -103,6 +110,13 @@ pub async fn execute_batch(ctx: &ToolCtx, calls: &[ToolCallRecord]) -> Vec<ToolO
         for (request_index, outcome) in futures_util::future::join_all(batch_futures).await {
             let (call_index, _) = &indexed[request_index];
             outcomes[*call_index] = Some(outcome);
+        }
+    }
+    // Tools MCP são dinâmicas (não estão no registry estático) e rodam depois do
+    // lote, em ordem: a aprovação de uma pode depender do usuário.
+    for (index, call) in calls.iter().enumerate() {
+        if outcomes[index].is_none() && call.name.starts_with("mcp__") {
+            outcomes[index] = Some(execute(ctx, call).await);
         }
     }
     outcomes
@@ -157,6 +171,7 @@ mod tests {
             observed: None,
             jobs: None,
             questions: None,
+        mcp: None,
             subagent: None,
             emit: None,
             rules: Vec::new(),
