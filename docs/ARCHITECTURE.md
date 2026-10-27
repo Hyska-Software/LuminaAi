@@ -48,8 +48,11 @@ painel Arquivos/Alterações; sem Biblioteca). Os dois compartilham a mesma inst
 e o mesmo `TitleBar` com o seletor Chat/Code. **As sessões são separadas por layout** (`conversations.mode`):
 uma sessão do Chat nunca aparece no Code e vice-versa; uma sessão do Chat pode ser marcada como
 compartilhada com o Code (`code_linked`), passando a aparecer nos dois e sendo a mesma conversa. O
-harness de código ainda não existe nesta fase: docs/goals/chat-code-layout/PLAN.md e
-docs/goals/chat-code-sessions/PLAN.md.
+harness de código ainda não existe nesta fase (layout em docs/goals/chat-code-layout/PLAN.md e
+sessões em docs/goals/chat-code-sessions/PLAN.md); o planejamento completo do harness de código —
+workspaces, tools de FS/shell/git, permissões, contexto e UI de revisão — está em
+**`docs/goals/code-harness/PLAN.md`** (+ `HARNESS.md`, `TOOLS.md`, `WORKBENCH.md` e
+`docs/research/`).
 
 ## 4. Fluxo de um turno
 

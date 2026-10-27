@@ -184,6 +184,13 @@ Leitura paginada com números de linha. **Nunca** lê binário como texto.
 > **Decisão**: a v1 usa `write_file` + `edit_file` (formato Claude Code/DSH). `apply_patch`
 > multi-arquivo fica para a v1.2 (bom para refactors grandes, custa um parser e um modelo de
 > aprovação por arquivo); o `edit_file` cobre 95% dos casos e erra de forma recuperável.
+>
+> **v1.2 (roadmap, fora do catálogo v1.0)**: `apply_patch` (unified diff por hunk, com rejeição por
+> hunk), `delete_path` e `move_path` (mutantes, sempre com aprovação), `diagnostics`/`run_checks`
+> (comandos de teste/lint do projeto estruturados), `task` (subagente), `mcp__<server>__<tool>`
+> (tools externas do MCP). O benchmark recomenda `apply_patch` já na fase 1; adiamos conscientemente
+> para manter a v1.0 em 18 tools e porque `edit_file`+`write_file` cobrem o fluxo do MVP — decisão
+> revisável na F3 se os modelos reais mostrarem dificuldade em refactors grandes.
 
 ### 2.3 Execução
 

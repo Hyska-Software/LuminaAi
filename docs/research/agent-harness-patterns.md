@@ -82,16 +82,16 @@ Toda célula de matriz traz o número da referência. Quando a célula não tem 
 
 ## §3. Padrões que convergem (o que quase todo harness faz)
 
-1. **Tools nomeadas, com schema, e resultados estruturados.** Todos os harnesses com tool calling têm nomes estáveis em `snake_case`, entrada JSON e saída em texto + metadados. O modelo nunca recebe “string mágica”: recebe resultado com status. [13][23][33]
-2. **Leitura antes da escrita.** Editores exigem ler o arquivo antes de editar (e muitos detectam stale/version conflict). Reduz alucinação de patch e permite diff ancorado. [13][24][I para o restante]
-3. **Diff como cidadão de primeira classe.** Todo harness que edita arquivos mostra diff antes/depois e permite reverter. ACP formaliza isso com `kind: edit` + conteúdo de diff por tool call. [16][30][35]
-4. **Aprovação em dois níveis: política (modo) + exceção (regra).** Modo define baseline; regras `Tool(specifier)`/wildcards refinam. Deny sempre vence. [14][15][22]
-5. **Sandbox separado de aprovação.** Quando existe sandbox de SO (Seatbelt/bubblewrap/nativo Windows/Docker), ele é ortogonal ao approval. [1][14][38]
-6. **Plan mode como estado explícito e com gate.** O agente pesquisa e propõe; a saída do modo exige aprovação do plano. Formato do plano: lista estruturada (tasks/steps), não prosa livre. [13][14][31][35]
+1. **Tools nomeadas, com schema e resultados estruturados.** Nomes `snake_case` estáveis, entrada JSON e saída com status; o modelo nunca recebe “string mágica”. [13][23][33]
+2. **Leitura antes da escrita.** Editores exigem ler antes de editar e detectam stale/version conflict — reduz patch alucinado e ancora o diff. [13][24][I]
+3. **Diff como cidadão de primeira classe.** Todo harness que edita mostra antes/depois e permite reverter; ACP formaliza (`kind: edit` + diff por tool call). [16][30][35]
+4. **Aprovação em dois níveis: política (modo) + exceção (regra).** Modo é baseline; regras `Tool(specifier)`/wildcards refinam; deny sempre vence. [14][15][22]
+5. **Sandbox separado de aprovação.** Seatbelt/bubblewrap/nativo Windows/Docker são ortogonais ao approval. [1][14][38]
+6. **Plan mode como estado explícito com gate.** O agente pesquisa e propõe; sair do modo exige aprovação do plano, em lista estruturada, não prosa. [13][14][31][35]
 7. **Instruções de projeto em arquivo versionado** (`AGENTS.md`/`CLAUDE.md`/rules), descobertas hierarquicamente. [5][19][26]
-8. **Compactação de contexto automática + comando manual.** Nenhum harness sobrevive a sessões longas sem compactar; todos oferecem compactação automática e/ou manual. [6][16][18]
-9. **Extensibilidade por três canais**: tools externas via MCP, automação por hooks, conhecimento por skills/instruções. [7][8][11][17][19][27]
-10. **Revisão final antes de “entregar”**: review de alterações, não só execução. Codex tem code review nativo contra working tree/commit/base branch [10]; Claude Code tem `/code-review` e `ReportFindings` [13]; Cursor tem Agent Review [34].
+8. **Compactação de contexto automática e manual** — nenhum harness sobrevive a sessão longa sem isso. [6][16][18]
+9. **Extensibilidade por três canais**: MCP (tools externas), hooks (automação), skills/instruções (conhecimento). [7][8][11][17][19][27]
+10. **Revisão final antes de entregar**: Codex tem code review nativo contra working tree/commit/base [10]; CC tem `/code-review` e `ReportFindings` [13]; Cursor tem Agent Review [34].
 
 ---
 
@@ -212,41 +212,40 @@ Toda célula de matriz traz o número da referência. Quando a célula não tem 
 
 ### 7.2 Notas de implementação em Rust/Tauri
 
-- **MCP**: implementar cliente JSON-RPC com `tokio` + `reqwest` (a infra já existe via `AppState::http` **[H]**); processo stdio via `tokio::process` com timeout e kill. Existe SDK oficial em Rust (`rmcp`) — **confirmar versão/licença antes** de adotar **[I/NC]**. Tools MCP entram no mesmo registry das nativas, com namespace `mcp:<server>:<tool>` para evitar colisão de nomes e para exibir origem na aprovação **[I]**.
-- **Hooks**: executar como subprocessos locais (nunca eval), com `timeout` curto (ex.: 5 s), ambiente filtrado e contrato JSON de entrada/saída; modo *blocking* apenas em `pre_tool_use` e `permission_request` [7][17]. Em Tauri, rodar no backend (`harness`/`tools`), nunca no renderer.
-- **Skills**: reaproveitar o carregador existente de skills embutidas **[H]**; ordenar precedência `projeto > usuário > embutida`; expor `allowed-tools` como restrição efetiva (não só prompt) **[I]**.
-- **`AGENTS.md`**: parse simples (Markdown puro, sem campos obrigatórios — a spec não exige nada [26]); concatenar com limite de bytes (Codex usa 32 KiB por padrão [5]) e registrar no trace quais arquivos entraram.
-- **Eventos de UI**: estender `TurnEvent` com `tool_call_update` (status + diff + locations) para permitir timeline viva; hoje o Lumina emite `tool_call_started/args/finished` **[H]**, e o padrão ACP pede updates intermediários [30].
-- **Paralelismo**: manter o teto de 4 execuções **[H]**, mas particionar por classe (`parallel-safe` vs `serial`) e nunca intercalar escrita com leitura do mesmo arquivo (`expectedHash`/version guard no backend) **[I]**.
+- **MCP**: cliente JSON-RPC com `tokio` + `reqwest` (infra já existe via `AppState::http` **[H]**); stdio com `tokio::process`, timeout e kill. SDK oficial em Rust (`rmcp`): **confirmar versão/licença** **[I/NC]**. Registry único com namespace `mcp:<server>:<tool>` para evitar colisão e exibir origem na aprovação **[I]**.
+- **Hooks**: subprocessos locais (nunca eval), timeout curto (~5 s), ambiente filtrado, contrato JSON; *blocking* só em `pre_tool_use`/`permission_request` [7][17]; sempre no backend, nunca no renderer.
+- **Skills**: reaproveitar o carregador embutido **[H]**; precedência `projeto > usuário > embutida`; `allowed-tools` como restrição efetiva, não só prompt **[I]**.
+- **`AGENTS.md`**: parse Markdown puro (spec não exige campos [26]); concatenar com limite de bytes (Codex: 32 KiB [5]) e registrar no trace quais arquivos entraram.
+- **Eventos**: estender `TurnEvent` com `tool_call_update` (status + diff + locations); hoje há `tool_call_started/args/finished` **[H]** e o ACP pede updates intermediários [30].
+- **Paralelismo**: manter teto de 4 **[H]**, particionar por classe (`parallel-safe` × `serial`) e nunca intercalar escrita e leitura do mesmo arquivo (`expectedHash` no backend) **[I]**.
 
 ### 7.3 Segurança (não negociável)
 
-- **MCP**: consentimento explícito antes da primeira invocação de cada tool; descrição/annotations de tool são **dados não confiáveis** [27]; mostrar servidor de origem em toda aprovação.
-- **Hooks/skills do projeto**: não executar nada de repositório recém-clonado antes de “confiar na pasta” (modelo CC) [14]; scripts de skill só via `run_code` com workspace isolado **[H]**.
-- **Path jail + `expectedHash`**: barreira determinística que não depende do modelo [I].
-- **Shell**: allowlist de comandos read-only para autoaprovação (padrão CC de “read-only commands”) [13]; nunca autoaprovar `rm`, `git push`, `npm publish`, `curl` com corpo para fora etc. **[I]**.
+- **MCP**: consentimento explícito antes da 1ª invocação de cada tool; descrição/annotations são **dados não confiáveis** [27]; origem visível em toda aprovação.
+- **Projeto clonado**: hooks/skills só rodam depois de “confiar na pasta” [14]; script de skill só via `run_code` isolado **[H]**.
+- **Path jail + `expectedHash`**: barreira determinística que não depende do modelo **[I]**.
+- **Shell**: allowlist read-only para autoaprovação [13]; nunca autoaprovar `rm`, `git push`, `npm publish`, `curl` com corpo para fora **[I]**.
 
 ---
 
 ## §8. O que o benchmark NÃO decide (decisões em aberto para o Lead)
 
-1. **Primitiva de edição única ou duas?** `apply_patch` (Codex/Aider) × `edit_file` (CC) × ambos (opencode). Recomendação deste doc: **ambas**, com `apply_patch` como preferida no prompt e `edit_file` como fallback robusto.
-2. **Motor de regras na v1 ou só modos?** Recomendação: modos + regras mínimas de projeto (`allow`/`deny`) já na v1, porque sem regras a fadiga de aprovação mata o uso diário (evidência convergente [14][22][33]).
-3. **Autoaprovação por classificador?** Recomendação: **não** na v1 (local-first, custo/latência, superfície de confiança); deixar o gancho `approvals_reviewer` no contrato para plugar depois [1][4][14].
-4. **Checkpoint: snapshot, git ou os dois?** Recomendação: snapshot de turno na v1 + ações git explícitas; auto-commit nunca por padrão [16][39].
-5. **Worktree por tarefa?** Recomendação: **não** na v1 (Windows/build compartilhado); desenhar `isolation` no contrato de `delegate_task` e implementar depois [9][18].
-6. **ACP agora?** Recomendação: não; primeiro MCP (tools) e depois ACP (agentes externos), se “traga seu agente” for prioridade de produto [28][36].
-7. **Plano estruturado vs Markdown**: recomendação: estrutura de dados estruturada com render Markdown; gate de aprovação copiado do CC [14][31].
+1. **Edição: uma ou duas primitivas?** `apply_patch` × `edit_file` × ambas. Recomendo **ambas** — patch preferido no prompt, string-replace como fallback.
+2. **Regras na v1 ou só modos?** Recomendo modos + `allow`/`deny` mínimos já na v1; sem regras, a fadiga de aprovação mata o uso diário [14][22][33].
+3. **Autoaprovação por classificador?** Recomendo **não** na v1 (local-first, custo/latência, confiança); deixar o gancho `approvals_reviewer` no contrato [1][4][14].
+4. **Checkpoint: snapshot, git ou ambos?** Snapshot de turno na v1 + git explícito; auto-commit nunca por padrão [16][39].
+5. **Worktree por tarefa?** Não na v1 (Windows/build compartilhado); desenhar `isolation` no contrato de `delegate_task` [9][18].
+6. **ACP agora?** Não; MCP primeiro e ACP depois, se “traga seu agente” for requisito [28][36].
+7. **Plano estruturado × Markdown?** Estrutura + render Markdown, com gate de aprovação [14][31].
 
 ---
 
 ## §9. Limites desta pesquisa (transparência)
 
-- **Não verificados**: t3code, Conductor, Terragon, Jules, Devin, Continue, SWE-agent e a maior parte de “worktree orchestrators” — citados no pedido, mas sem documentação oficial consultada nesta rodada. Tratados como **[NC]**. O padrão “workspace isolado por tarefa” aparece de forma documentada em Codex (worktrees) e Claude Code (worktrees/isolation) [9][18][20], o que cobre a decisão de arquitetura.
-- **Cursor**: página oficial consultada cobre Agent, Agent Review, Planning, Rules, Subagents, Cloud Agents, Security Agents e PR Routing & Approval [34]; detalhes de permissões e hooks não foram confirmados **[NC]**.
-- **OpenHands**: confirmados Agent Canvas, CodeAct (legacy), Docker por conversa, ACP agents e plugins [38]; detalhes de tools/permissões **[NC]**.
-- **Detalhes internos**: “provavelmente X” aparece marcado como **[I]**; nada foi inventado como se fosse documentado. Nenhum nome de tool foi atribuído a um harness sem confirmação na doc.
-- **Datas**: documentações mudam rápido (Codex aposentou `untrusted`; Claude Code migrou docs para `code.claude.com` e comandos para skills). Revalidar antes de implementar.
+- **Não verificados**: t3code, Conductor, Terragon, Jules, Devin, Continue, SWE-agent e “worktree orchestrators” — sem doc oficial consultada; tratados como **[NC]**. O padrão “workspace isolado por tarefa” está documentado em Codex (worktrees) e CC (worktrees/isolation) [9][18][20], o que cobre a decisão de arquitetura.
+- **Cursor** [34]: Agent, Agent Review, Planning, Rules, Subagents, Cloud Agents, Security Agents, PR Routing & Approval; detalhes de permissões/hooks **[NC]**. **OpenHands** [38]: Agent Canvas, CodeAct (legacy), Docker por conversa, ACP agents, plugins; tools/permissões **[NC]**.
+- **Detalhes internos**: “provavelmente X” está marcado **[I]**; nenhum nome de tool foi atribuído a um harness sem confirmação na doc.
+- **Datas**: docs mudam rápido (Codex aposentou `untrusted`; CC migrou para `code.claude.com` e comandos para skills). Revalidar antes de implementar.
 
 ---
 

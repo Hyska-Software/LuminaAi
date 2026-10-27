@@ -55,13 +55,13 @@ Tudo isso no mesmo app, sem servidor, sem CLI externa obrigatória, com o Chat i
 | P2 | Workspace | Workspace = pasta em disco (com git opcional). Sessão do Code pertence a um workspace; abrir pasta é o primeiro gesto do modo Code. |
 | P3 | Escopo de escrita | Confinado ao workspace por padrão. Fora dele, só leitura? Não: escrita fora exige aprovação explícita por chamada. |
 | P4 | Permissões | Três modos de sessão: **Leitura**, **Editar** (padrão), **Autônomo**; mais o overlay **Plano** (somente leitura) e aprovações interativas para comandos sensíveis. |
-| P5 | Shell | `pwsh` no Windows (e `bash` quando disponível), com timeout, teto de saída, morte de árvore de processos e jobs em background. Terminal PTY persistente como painel (fase 4). |
+| P5 | Shell | `pwsh` no Windows (e `bash` quando disponível), com timeout, teto de saída, morte de árvore de processos e jobs em background. Terminal PTY persistente como painel na v1.1 (fase F7). |
 | P6 | Git | Git do usuário via CLI (sem libgit2 embutida), com painel de status/diff/stage/commit; operações destrutivas exigem aprovação. Sem commit automático. |
 | P7 | Revisão | Todo turno tem **checkpoint** (journal de arquivos) → "Reverter turno" e "Reverter arquivo" são sempre possíveis. |
 | P8 | Extensibilidade | Sessões têm `agentKind` (`lumina` hoje; `acp:<agente>` no futuro) — o workbench é agnóstico ao motor. MCP/hooks/agentes externos entram como fases posteriores. |
 | P9 | Escopo dos modelos | O harness de código usa o mesmo catálogo e os mesmos provedores; a UI sugere modelos com boa capacidade de ferramentas, mas não bloqueia. |
 
-## Fora do escopo da v1.0 (roadmap em `PLAN.md` §11)
+## Fora do escopo da v1.0 (roadmap em `PLAN.md` §8, fases F7/F8 e v2)
 
 - Edição colaborativa/multiusuário, servidor remoto, sandbox de SO real no Windows.
 - LSP completo, depuração interativa, agendamentos (cron), PR automático.
