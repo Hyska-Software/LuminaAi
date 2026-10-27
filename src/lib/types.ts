@@ -137,7 +137,276 @@ export interface ToolCallRecord {
   summary?: string | null;
   startedAt?: number | null;
   finishedAt?: number | null;
+  /**
+   * Apresentação estruturada do resultado (diff, lista de tarefas, plano, job,
+   * aprovação) usada pelos cards do harness de código e persistida no DB.
+   * JSON opaco versionado por `kind` — ver docs/goals/code-harness/TOOLS.md §1.1.
+   */
+  presentation?: ToolPresentation | null;
 }
+
+/* ------------------------------------------------------------------ */
+/* Harness de código (docs/goals/code-harness/)                        */
+/* ------------------------------------------------------------------ */
+
+export type TurnProfile = 'chat' | 'code';
+
+export type PermissionMode = 'read_only' | 'edit' | 'autonomous';
+
+export type RiskClass =
+  | 'read'
+  | 'write'
+  | 'shell'
+  | 'outside'
+  | 'secret'
+  | 'destroy'
+  | 'network'
+  | 'ask';
+
+export type ApprovalScope = 'session' | 'workspace' | 'global';
+
+export type ApprovalDecision = 'approved' | 'denied' | 'cancelled' | 'expired';
+
+export interface ApprovalOption {
+  id: string;
+  label: string;
+  scope?: ApprovalScope | null;
+}
+
+export type ApprovalDetail =
+  | { kind: 'command'; command: string; workdir: string }
+  | { kind: 'paths'; paths: string[]; change: string }
+  | { kind: 'secret'; path: string }
+  | { kind: 'outside'; path: string }
+  | { kind: 'other'; text: string };
+
+/** Pedido de aprovação mostrado no card da timeline (`approval_requested`). */
+export interface ApprovalRequest {
+  id: string;
+  /** Sessão que pediu a aprovação. */
+  conversationId?: string;
+  toolCallId: string;
+  tool: string;
+  title: string;
+  detail: ApprovalDetail;
+  risk: RiskClass;
+  preview?: string | null;
+  options: ApprovalOption[];
+  createdAt: number;
+}
+
+/** Regra "sempre permitir/negar" persistida (`approval_rules`). */
+export interface ApprovalRule {
+  id: string;
+  scope: ApprovalScope;
+  scopeId?: string | null;
+  tool: string;
+  matcher: 'exact' | 'prefix' | 'glob';
+  pattern: string;
+  decision: ApprovalDecision;
+  createdAt: number;
+}
+
+/** Estado git do workspace (branch/upstream/contadores). */
+export interface GitInfo {
+  root: string;
+  branch: string;
+  ahead?: number;
+  behind?: number;
+  dirty?: boolean;
+  staged?: number;
+  unstaged?: number;
+  untracked?: number;
+}
+
+/** Workspace = pasta do usuário (git opcional) que agrupa sessões de código. */
+export interface Workspace {
+  id: string;
+  name: string;
+  path: string;
+  createdAt: number;
+  updatedAt: number;
+  lastOpenedAt?: number | null;
+  pinned?: boolean;
+  trusted?: boolean;
+  git?: GitInfo | null;
+}
+
+export interface ProjectCheckInfo {
+  id: string;
+  label: string;
+  command: string;
+}
+
+export interface ProjectInfo {
+  kind: string;
+  name?: string | null;
+  checks: ProjectCheckInfo[];
+}
+
+export interface WorkspaceContext {
+  workspace: Workspace;
+  project?: ProjectInfo | null;
+}
+
+export type TodoStatus = 'pending' | 'in_progress' | 'completed';
+
+export interface TodoItem {
+  content: string;
+  status: TodoStatus;
+}
+
+export type PlanState = 'inactive' | 'planning' | 'reviewing' | 'approved';
+
+export interface PlanView {
+  state: PlanState;
+  markdown?: string | null;
+  updatedAt: number;
+}
+
+export type FileChangeKind = 'created' | 'modified' | 'deleted' | 'renamed';
+
+/** Alteração de um arquivo (card de tool / evento `file_changed`). */
+export interface FileChange {
+  path: string;
+  kind: FileChangeKind;
+  added?: number;
+  removed?: number;
+  diff?: string | null;
+}
+
+export interface FileChangeSummary {
+  path: string;
+  kind: FileChangeKind;
+  added?: number;
+  removed?: number;
+  /** `session` (journal do agente), `git` (working tree) ou `both`. */
+  origin?: 'session' | 'git' | 'both' | null;
+  staged?: boolean;
+}
+
+export interface ChangesSummary {
+  turnId?: string | null;
+  files: FileChangeSummary[];
+  added?: number;
+  removed?: number;
+}
+
+/** Medidor de contexto do turno/sessão. */
+export interface ContextStats {
+  used: number;
+  window: number;
+  outputCap: number;
+  percent: number;
+  compacted?: number;
+  messages?: number;
+}
+
+export type JobStatus = 'running' | 'done' | 'failed' | 'killed';
+
+export interface JobView {
+  id: string;
+  command: string;
+  status: JobStatus;
+  startedAt: number;
+  durationMs?: number;
+  exitCode?: number | null;
+  outputPreview?: string | null;
+}
+
+/** Apresentação de tool persistida no `ToolCallRecord.presentation`. */
+export type ToolPresentation =
+  | { kind: 'file_change'; path: string; change: FileChangeKind; added: number; removed: number; diff?: string | null }
+  | { kind: 'changes'; turnId?: string | null; files: FileChangeSummary[]; added: number; removed: number }
+  | { kind: 'todos'; items: TodoItem[] }
+  | { kind: 'plan'; plan: PlanView }
+  | { kind: 'job'; job: JobView }
+  | { kind: 'output'; lines?: number | null; spillId?: string | null }
+  | { kind: 'terminal'; sessionId: string; title: string };
+
+/** Snapshot completo da sessão de código (`get_code_session_state`). */
+export interface CodeSessionState {
+  conversationId: string;
+  permissionMode: PermissionMode;
+  planMode: boolean;
+  plan?: PlanView | null;
+  todos: TodoItem[];
+  workspace?: Workspace | null;
+  project?: ProjectInfo | null;
+  context?: ContextStats | null;
+  changes?: ChangesSummary | null;
+  jobs: JobView[];
+  approvals: ApprovalRequest[];
+}
+
+/** Entrada da árvore de arquivos do workspace (`list_workspace_files`). */
+export interface WorkspaceFileEntry {
+  /** Caminho relativo ao workspace, sempre com `/`. */
+  path: string;
+  name: string;
+  isDir: boolean;
+  depth: number;
+  /** Tamanho em bytes (arquivos). */
+  size?: number;
+  /** Estado no git: `M`/`A`/`D`/`U`/`?`/vazio. */
+  gitStatus?: string | null;
+  /** Filhos (quando a entrada é um diretório expandido). */
+  children?: WorkspaceFileEntry[];
+}
+
+/** Conteúdo de um arquivo do workspace para prévia read-only. */
+export interface WorkspaceFileContent {
+  path: string;
+  text: string;
+  /** `true` quando o backend truncou o conteúdo. */
+  truncated: boolean;
+  /** Tamanho total em bytes. */
+  size: number;
+  /** Binário: nenhum texto é enviado. */
+  binary?: boolean;
+  /** Encoding detectado quando não UTF-8. */
+  encoding?: string | null;
+}
+
+/** Entrada para criar/editar uma regra de aprovação. */
+export interface ApprovalRuleInput {
+  scope: ApprovalScope;
+  scopeId?: string | null;
+  /** Sessão/workspace de origem (para resolver o escopo no backend). */
+  conversationId?: string | null;
+  tool: string;
+  matcher: 'exact' | 'prefix' | 'glob';
+  pattern: string;
+  decision: ApprovalDecision;
+}
+
+/** Arquivo no status do git (painel Alterações). */
+export interface WorkspaceGitFile {
+  path: string;
+  status: string;
+}
+
+/** Status do git de um workspace (working tree + staged). */
+export interface WorkspaceGitStatus {
+  isRepo: boolean;
+  root?: string | null;
+  branch?: string | null;
+  ahead?: number;
+  behind?: number;
+  staged: WorkspaceGitFile[];
+  unstaged: WorkspaceGitFile[];
+  untracked: string[];
+  conflicted: string[];
+}
+
+/** Commit recente para o painel. */
+export interface WorkspaceGitCommit {
+  hash: string;
+  subject: string;
+  author: string;
+  date: string;
+}
+
 
 export interface Citation {
   id: string;
@@ -228,6 +497,12 @@ export interface Conversation {
    * dois modos. Só faz sentido para `mode === 'chat'`.
    */
   codeLinked?: boolean;
+  /** Workspace de código da sessão (ausente = sem workspace). */
+  workspaceId?: string | null;
+  /** Motor do agente: `lumina` (nativo); `acp:<agente>` é futuro. */
+  agentKind?: string;
+  /** Modo de permissão da sessão de código (o Chat ignora). */
+  permissionMode?: PermissionMode;
 }
 
 export interface ConversationDetail {
@@ -266,6 +541,8 @@ export interface TurnPayload {
   modelId: string;
   reasoning?: ReasoningSelection | null;
   options: TurnOptions;
+  /** Perfil do turno; ausente = `chat` (retrocompatível). */
+  profile?: TurnProfile;
   turnId?: string | null;
 }
 
@@ -299,7 +576,19 @@ export type TurnEvent =
   | { type: 'title_updated'; conversationId: string; title: string }
   | { type: 'done'; result: TurnResult }
   | { type: 'cancelled' }
-  | { type: 'error'; message: string; code?: string; hint?: string };
+  | { type: 'error'; message: string; code?: string; hint?: string }
+  /* -------- harness de código (docs/goals/code-harness/HARNESS.md §12) -------- */
+  | { type: 'approval_requested'; approval: ApprovalRequest }
+  | { type: 'approval_resolved'; approvalId: string; decision: ApprovalDecision; scope?: ApprovalScope }
+  | { type: 'tool_progress'; id: string; stream?: 'stdout' | 'stderr'; delta: string }
+  | { type: 'file_changed'; change: FileChange }
+  | { type: 'workspace_changes'; summary: ChangesSummary }
+  | { type: 'todos_updated'; todos: TodoItem[] }
+  | { type: 'plan_updated'; plan: PlanView }
+  | { type: 'context_stats'; stats: ContextStats }
+  | { type: 'compacted'; messages: number; tokensFreed: number }
+  | { type: 'job_updated'; job: JobView }
+  | { type: 'profile_changed'; profile: TurnProfile; permissionMode: PermissionMode; planMode: boolean };
 
 /* ------------------------------------------------------------------ */
 /* Artifacts                                                           */
@@ -507,6 +796,23 @@ export interface Settings {
   skillsPanelEnabled: boolean;
   /** Nomes de skills desativadas; o agente as ignora. */
   disabledSkills: string[];
+  /* ---- harness de código (docs/goals/code-harness/PLAN.md §7) ---- */
+  /** Máximo de passos por turno no perfil Code (o backend sempre envia). */
+  codeMaxSteps?: number;
+  /** Permite ao agente executar comandos de shell (`run_command`). */
+  shellEnabled?: boolean;
+  /** Compacta o contexto automaticamente quando a janela aperta. */
+  autoCompact?: boolean;
+  /** Retenção dos arquivos de spill, em dias. */
+  spillRetentionDays?: number;
+  /** Tempo máximo para responder uma aprovação (segundos). */
+  approvalTimeoutSecs?: number;
+  /** Notificações do sistema no fim de turnos em segundo plano. */
+  notificationsEnabled?: boolean;
+  /** Modo de permissão padrão de novas sessões do Code. */
+  codeDefaultPermissionMode?: PermissionMode;
+  /** Confia automaticamente em workspaces abertos antes. */
+  trustWorkspacesByDefault?: boolean;
 }
 
 export interface ProviderKeyStatus {

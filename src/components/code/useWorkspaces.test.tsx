@@ -1,0 +1,324 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import type { Conversation, Workspace, WorkspaceContext } from '@/lib/types';
+
+const mocks = vi.hoisted(() => ({
+  listWorkspaces: vi.fn(),
+  pickWorkspaceFolder: vi.fn(),
+  addWorkspace: vi.fn(),
+  setWorkspaceTrusted: vi.fn(),
+  setPermissionMode: vi.fn(),
+  removeWorkspace: vi.fn(),
+  renameWorkspace: vi.fn(),
+  getWorkspace: vi.fn(),
+  setConversationWorkspace: vi.fn(),
+  createConversation: vi.fn(),
+  listConversations: vi.fn(),
+  getConversation: vi.fn(),
+  listArtifacts: vi.fn(),
+}));
+
+vi.mock('@/lib/api', () => ({ api: mocks }));
+
+import { useChatStore, useUiStore } from '@/lib/store';
+import {
+  __resetWorkspacesForTests,
+  openFolder,
+  reloadWorkspaces,
+  startSessionInWorkspace,
+  useWorkspaces,
+} from './useWorkspaces';
+
+function workspace(overrides: Partial<Workspace> = {}): Workspace {
+  return {
+    id: 'ws-1',
+    name: 'lumina-core',
+    path: 'C:/dev/lumina',
+    createdAt: 1,
+    updatedAt: 2,
+    lastOpenedAt: 2,
+    trusted: false,
+    git: { root: 'C:/dev/lumina', branch: 'feat/code-harness', dirty: true },
+    ...overrides,
+  };
+}
+
+function conversation(overrides: Partial<Conversation> = {}): Conversation {
+  return {
+    id: 'c-new',
+    title: 'Nova conversa',
+    createdAt: 1,
+    updatedAt: 1,
+    pinned: false,
+    providerId: 'deepseek',
+    modelId: 'deepseek-v4.1-flash',
+    messageCount: 0,
+    preview: null,
+    mode: 'code',
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  __resetWorkspacesForTests();
+  mocks.listWorkspaces.mockResolvedValue([]);
+  mocks.listConversations.mockResolvedValue([]);
+  mocks.listArtifacts.mockResolvedValue([]);
+  mocks.createConversation.mockResolvedValue(conversation());
+  mocks.setConversationWorkspace.mockImplementation(async (id: string, workspaceId: string | null) =>
+    conversation({ id, workspaceId }),
+  );
+  useChatStore.setState({
+    conversations: [],
+    conversationsLoading: false,
+    activeId: null,
+    activeIdByLayout: { chat: null, code: null },
+    messagesByConversation: {},
+  });
+  useUiStore.setState({
+    layoutMode: 'code',
+    activeWorkspaceId: null,
+    openSessionsByWorkspace: {},
+  });
+});
+
+afterEach(() => {
+  cleanup();
+});
+
+describe('useWorkspaces — carregamento', () => {
+  it('carrega a lista real do backend e compartilha uma única requisição', async () => {
+    const ws = workspace();
+    mocks.listWorkspaces.mockResolvedValue([ws]);
+
+    const first = renderHook(() => useWorkspaces());
+    const second = renderHook(() => useWorkspaces());
+
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    expect(second.result.current.workspaces).toHaveLength(1);
+    expect(first.result.current.workspaces[0]?.id).toBe('ws-1');
+    expect(mocks.listWorkspaces).toHaveBeenCalledTimes(1);
+  });
+
+  it('expõe erro honesto quando a listagem falha e permite recarregar', async () => {
+    mocks.listWorkspaces.mockRejectedValueOnce(new Error('backend offline'));
+    const { result } = renderHook(() => useWorkspaces());
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBe('backend offline');
+    expect(result.current.workspaces).toEqual([]);
+
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    await act(async () => {
+      await reloadWorkspaces();
+    });
+    await waitFor(() => expect(result.current.error).toBeNull());
+    expect(result.current.workspaces).toHaveLength(1);
+  });
+});
+
+describe('useWorkspaces — abrir pasta e confiança', () => {
+  it('abre a pasta, cria a sessão vinculada e deixa a confiança pendente', async () => {
+    const ws = workspace();
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.addWorkspace.mockResolvedValue(ws);
+    mocks.listWorkspaces.mockResolvedValue([ws]);
+
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    await act(async () => {
+      await result.current.openFolder();
+    });
+
+    expect(mocks.pickWorkspaceFolder).toHaveBeenCalledTimes(1);
+    expect(mocks.addWorkspace).toHaveBeenCalledWith('C:/dev/lumina', false);
+    expect(mocks.setConversationWorkspace).toHaveBeenCalledWith('c-new', 'ws-1');
+    expect(useUiStore.getState().activeWorkspaceId).toBe('ws-1');
+    expect(useUiStore.getState().openSessionsByWorkspace['ws-1']).toEqual(['c-new']);
+    await waitFor(() => expect(result.current.pendingTrust?.workspace.id).toBe('ws-1'));
+    expect(result.current.pendingTrust?.conversationId).toBe('c-new');
+  });
+
+  it('não pergunta a confiança de uma pasta já confiada', async () => {
+    const ws = workspace({ trusted: true });
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.addWorkspace.mockResolvedValue(ws);
+    mocks.listWorkspaces.mockResolvedValue([ws]);
+
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    await act(async () => {
+      await result.current.openFolder();
+    });
+
+    expect(result.current.pendingTrust).toBeNull();
+  });
+
+  it('com uma sessão existente vincula sem criar outra conversa', async () => {
+    const ws = workspace();
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.addWorkspace.mockResolvedValue(ws);
+    mocks.listWorkspaces.mockResolvedValue([ws]);
+
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    await act(async () => {
+      await openFolder({ conversationId: 'c-existing' });
+    });
+
+    expect(mocks.createConversation).not.toHaveBeenCalled();
+    expect(mocks.setConversationWorkspace).toHaveBeenCalledWith('c-existing', 'ws-1');
+    expect(result.current.pendingTrust?.conversationId).toBe('c-existing');
+  });
+
+  it('cancelar o seletor de pasta não cria workspace', async () => {
+    mocks.pickWorkspaceFolder.mockResolvedValue(null);
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    let opened: Workspace | null = workspace();
+    await act(async () => {
+      opened = await result.current.openFolder();
+    });
+
+    expect(opened).toBeNull();
+    expect(mocks.addWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('resolver a confiança aplica trusted + modo de permissão e limpa a pendência', async () => {
+    const ws = workspace();
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.addWorkspace.mockResolvedValue(ws);
+    mocks.listWorkspaces.mockResolvedValue([ws]);
+
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    await act(async () => {
+      await result.current.openFolder();
+    });
+
+    mocks.setWorkspaceTrusted.mockResolvedValue({ ...ws, trusted: true });
+    mocks.setPermissionMode.mockResolvedValue({
+      conversationId: 'c-new',
+      permissionMode: 'edit',
+      planMode: false,
+      todos: [],
+      jobs: [],
+      approvals: [],
+    });
+
+    await act(async () => {
+      await result.current.resolveTrust(true);
+    });
+
+    expect(mocks.setWorkspaceTrusted).toHaveBeenCalledWith('ws-1', true);
+    expect(mocks.setPermissionMode).toHaveBeenCalledWith('c-new', 'edit');
+    await waitFor(() => expect(result.current.pendingTrust).toBeNull());
+  });
+
+  it('cancelar a confiança remove o workspace recém-criado da lista', async () => {
+    const ws = workspace();
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.addWorkspace.mockResolvedValue(ws);
+    mocks.listWorkspaces.mockResolvedValueOnce([ws]).mockResolvedValue([]);
+    mocks.removeWorkspace.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    await act(async () => {
+      await result.current.openFolder();
+    });
+
+    await act(async () => {
+      await result.current.cancelTrust();
+    });
+
+    expect(mocks.removeWorkspace).toHaveBeenCalledWith('ws-1');
+    expect(useUiStore.getState().activeWorkspaceId).toBeNull();
+    await waitFor(() => expect(result.current.workspaces).toEqual([]));
+  });
+});
+
+describe('useWorkspaces — ações do menu', () => {
+  it('renomeia e recarrega a lista', async () => {
+    const ws = workspace();
+    mocks.listWorkspaces.mockResolvedValue([ws]);
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    mocks.renameWorkspace.mockResolvedValue({ ...ws, name: 'core' });
+    mocks.listWorkspaces.mockResolvedValue([{ ...ws, name: 'core' }]);
+
+    await act(async () => {
+      await result.current.rename(ws, 'core');
+    });
+
+    expect(mocks.renameWorkspace).toHaveBeenCalledWith('ws-1', 'core');
+    await waitFor(() => expect(result.current.workspaces[0]?.name).toBe('core'));
+  });
+
+  it('remove sem apagar a pasta, limpa as abas e troca o workspace ativo', async () => {
+    const ws = workspace();
+    const other = workspace({ id: 'ws-2', name: 'site', path: 'C:/dev/site' });
+    mocks.listWorkspaces.mockResolvedValue([ws, other]);
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    useUiStore.setState({
+      activeWorkspaceId: 'ws-1',
+      openSessionsByWorkspace: { 'ws-1': ['c-1'] },
+    });
+    mocks.removeWorkspace.mockResolvedValue(undefined);
+    mocks.listWorkspaces.mockResolvedValue([other]);
+
+    await act(async () => {
+      await result.current.remove(ws);
+    });
+
+    expect(mocks.removeWorkspace).toHaveBeenCalledWith('ws-1');
+    expect(useUiStore.getState().activeWorkspaceId).toBe('ws-2');
+    await waitFor(() => expect(result.current.workspaces).toHaveLength(1));
+  });
+
+  it('atualiza o contexto git do workspace', async () => {
+    const ws = workspace();
+    mocks.listWorkspaces.mockResolvedValue([ws]);
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    const context: WorkspaceContext = {
+      workspace: { ...ws, git: { root: 'C:/dev/lumina', branch: 'main', dirty: false } },
+      project: { kind: 'node', name: 'lumina', checks: [] },
+    };
+    mocks.getWorkspace.mockResolvedValue(context);
+
+    await act(async () => {
+      await result.current.refreshContext('ws-1');
+    });
+
+    expect(result.current.workspaces[0]?.git?.branch).toBe('main');
+    expect(result.current.workspaces[0]?.git?.dirty).toBe(false);
+  });
+});
+
+describe('useWorkspaces — sessão em workspace', () => {
+  it('startSession cria a conversa, vincula e registra a aba', async () => {
+    useChatStore.setState({ conversations: [] });
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    let id: string | null = null;
+    await act(async () => {
+      id = await startSessionInWorkspace('ws-1');
+    });
+
+    expect(id).toBe('c-new');
+    expect(mocks.createConversation).toHaveBeenCalledTimes(1);
+    expect(mocks.setConversationWorkspace).toHaveBeenCalledWith('c-new', 'ws-1');
+    expect(useUiStore.getState().openSessionsByWorkspace['ws-1']).toEqual(['c-new']);
+  });
+});

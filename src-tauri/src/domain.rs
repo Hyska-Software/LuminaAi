@@ -50,6 +50,19 @@ pub struct Conversation {
     /// dois layouts. Só existe para `mode == "chat"`.
     #[serde(default)]
     pub code_linked: bool,
+    /// Workspace de código ao qual a sessão pertence (NULL = sem workspace).
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    /// Motor do agente: `lumina` (nativo). Reservado para `acp:<agente>` no futuro.
+    #[serde(default = "default_agent_kind")]
+    pub agent_kind: String,
+    /// Modo de permissão da sessão de código (Chat ignora).
+    #[serde(default)]
+    pub permission_mode: PermissionMode,
+}
+
+fn default_agent_kind() -> String {
+    "lumina".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +114,11 @@ pub struct ToolCallRecord {
     pub started_at: Option<i64>,
     #[serde(default)]
     pub finished_at: Option<i64>,
+    /// Apresentação estruturada do resultado (diff, lista de tarefas, plano,
+    /// job, aprovação) usada pelos cards do renderer e persistida no DB.
+    /// JSON opaco versionado por `kind` — ver `docs/goals/code-harness/TOOLS.md` §1.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation: Option<Value>,
 }
 
 fn default_tool_status() -> ToolCallStatus {
@@ -118,6 +136,7 @@ impl ToolCallRecord {
             summary: None,
             started_at: Some(now_ms()),
             finished_at: None,
+            presentation: None,
         }
     }
 }
@@ -335,6 +354,9 @@ pub struct TurnPayload {
     pub reasoning: Option<ReasoningSelection>,
     #[serde(default)]
     pub options: TurnOptions,
+    /// Perfil do turno: `chat` (default, retrocompatível) ou `code`.
+    #[serde(default)]
+    pub profile: TurnProfile,
     /// Client generated id used to cancel the stream.
     #[serde(default)]
     pub turn_id: Option<String>,
@@ -688,6 +710,24 @@ pub struct Settings {
     pub skills_panel_enabled: bool,
     /// Nomes de skills desativadas; o agente as ignora no prompt e nas tools.
     pub disabled_skills: Vec<String>,
+    /* ---- harness de código (docs/goals/code-harness/PLAN.md §7) ---- */
+    /// Máximo de passos por turno no perfil Code (1..=MAX_STEPS_LIMIT).
+    pub code_max_steps: u32,
+    /// Permite ao agente executar comandos de shell (`run_command`).
+    pub shell_enabled: bool,
+    /// Compacta o contexto automaticamente quando a janela aperta.
+    pub auto_compact: bool,
+    /// Retenção dos arquivos de spill (saída completa de tools), em dias.
+    pub spill_retention_days: u32,
+    /// Tempo máximo para o usuário responder uma aprovação (segundos).
+    pub approval_timeout_secs: u32,
+    /// Notificações do sistema no fim de turnos em segundo plano.
+    pub notifications_enabled: bool,
+    /// Modo de permissão padrão de novas sessões do Code.
+    pub code_default_permission_mode: PermissionMode,
+    /// Confia automaticamente em workspaces já abertos antes (o usuário pode
+    /// revogar por workspace); quando falso, cada pasta nova pede confirmação.
+    pub trust_workspaces_by_default: bool,
 }
 
 impl Default for Settings {
@@ -716,6 +756,14 @@ impl Default for Settings {
             code_node_path: String::new(),
             skills_panel_enabled: true,
             disabled_skills: Vec::new(),
+            code_max_steps: 120,
+            shell_enabled: true,
+            auto_compact: true,
+            spill_retention_days: 30,
+            approval_timeout_secs: 600,
+            notifications_enabled: true,
+            code_default_permission_mode: PermissionMode::Edit,
+            trust_workspaces_by_default: false,
         }
     }
 }
@@ -814,6 +862,519 @@ pub struct CatalogView {
     pub auth: Vec<ProviderAuthStatus>,
     #[serde(default)]
     pub remote_refreshed_at: Option<i64>,
+}
+
+/* ------------------------------------------------------------------ */
+/* Harness de código — contratos de sessão, workspace e permissões      */
+/* (docs/goals/code-harness/HARNESS.md §4–§12)                          */
+/* ------------------------------------------------------------------ */
+
+/// Perfil de um turno do agente: conversa (Chat) ou trabalho de código (Code).
+///
+/// O perfil muda prompt, catálogo de tools, política e orçamentos do mesmo
+/// loop (`harness::run_turn`); nunca cria um segundo loop.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TurnProfile {
+    #[default]
+    Chat,
+    Code,
+}
+
+impl TurnProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Code => "code",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "code" => Self::Code,
+            _ => Self::Chat,
+        }
+    }
+}
+
+/// Modo de permissão da sessão de código (chip no header; `HARNESS.md` §6).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionMode {
+    /// Só leitura: nenhuma mutação de arquivo, sem shell.
+    ReadOnly,
+    /// Padrão: edita dentro do workspace; shell pede aprovação.
+    #[default]
+    Edit,
+    /// Escritas e comandos liberados, exceto comandos destrutivos.
+    Autonomous,
+}
+
+impl PermissionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read_only",
+            Self::Edit => "edit",
+            Self::Autonomous => "autonomous",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "read_only" | "readonly" | "leitura" => Self::ReadOnly,
+            "autonomous" | "autonomo" | "autônomo" => Self::Autonomous,
+            _ => Self::Edit,
+        }
+    }
+}
+
+/// Classe de risco de uma tool/chamada — insumo da política de permissões.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskClass {
+    /// Leitura local (arquivos, busca, git read).
+    Read,
+    /// Escrita/edição dentro do workspace.
+    Write,
+    /// Execução de comando de shell.
+    Shell,
+    /// Alvo fora do workspace.
+    Outside,
+    /// Arquivo que casa com padrões de segredo (`.env`, `*.pem`, …).
+    Secret,
+    /// Operação destrutiva (rm -rf, git reset --hard, force-push, …).
+    Destroy,
+    /// Tráfego de rede (busca/fetch).
+    Network,
+    /// Pausa explícita para o usuário (plano/pergunta).
+    Ask,
+}
+
+/// Escopo de uma regra "sempre permitir/negar".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ApprovalScope {
+    Session,
+    Workspace,
+    Global,
+}
+
+impl ApprovalScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Session => "session",
+            Self::Workspace => "workspace",
+            Self::Global => "global",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "session" | "sessao" | "sessão" => Self::Session,
+            "workspace" => Self::Workspace,
+            _ => Self::Global,
+        }
+    }
+}
+
+/// Decisão de uma aprovação (ou de uma regra persistida).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ApprovalDecision {
+    Approved,
+    Denied,
+    Cancelled,
+    Expired,
+}
+
+impl ApprovalDecision {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::Denied => "denied",
+            Self::Cancelled => "cancelled",
+            Self::Expired => "expired",
+        }
+    }
+}
+
+/// Rótulo de uma opção do card de aprovação.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalOption {
+    /// `allow` | `deny` | `allow_session` | `allow_workspace` | `allow_global`
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub scope: Option<ApprovalScope>,
+}
+
+/// O que a aprovação está autorizando (mostrado no card).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ApprovalDetail {
+    Command {
+        command: String,
+        workdir: String,
+    },
+    Paths {
+        paths: Vec<String>,
+        change: String,
+    },
+    Secret {
+        path: String,
+    },
+    Outside {
+        path: String,
+    },
+    Other {
+        text: String,
+    },
+}
+
+/// Pedido de aprovação enviado ao renderer (`TurnEvent::ApprovalRequested`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalRequest {
+    pub id: String,
+    /// Sessão que pediu a aprovação (o snapshot da sessão filtra por ela).
+    #[serde(default)]
+    pub conversation_id: String,
+    pub tool_call_id: String,
+    pub tool: String,
+    pub title: String,
+    pub detail: ApprovalDetail,
+    pub risk: RiskClass,
+    #[serde(default)]
+    pub preview: Option<String>,
+    #[serde(default)]
+    pub options: Vec<ApprovalOption>,
+    pub created_at: i64,
+}
+
+/// Regra persistida em `approval_rules` (`HARNESS.md` §6.2).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalRule {
+    pub id: String,
+    pub scope: ApprovalScope,
+    #[serde(default)]
+    pub scope_id: Option<String>,
+    pub tool: String,
+    /// `exact` | `prefix` | `glob`
+    pub matcher: String,
+    pub pattern: String,
+    pub decision: ApprovalDecision,
+    pub created_at: i64,
+}
+
+/// Workspace = pasta do usuário (git opcional) que agrupa sessões de código.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Workspace {
+    pub id: String,
+    pub name: String,
+    /// Caminho absoluto canonicalizado; o renderer só exibe.
+    pub path: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    #[serde(default)]
+    pub last_opened_at: Option<i64>,
+    #[serde(default)]
+    pub pinned: bool,
+    /// Aprovado pelo usuário na primeira abertura ("Confiar nesta pasta").
+    #[serde(default)]
+    pub trusted: bool,
+    #[serde(default)]
+    pub git: Option<GitInfo>,
+}
+
+/// Resumo do estado git do workspace (branch/upstream/dirty).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitInfo {
+    pub root: String,
+    pub branch: String,
+    #[serde(default)]
+    pub ahead: u32,
+    #[serde(default)]
+    pub behind: u32,
+    #[serde(default)]
+    pub dirty: bool,
+    #[serde(default)]
+    pub staged: u32,
+    #[serde(default)]
+    pub unstaged: u32,
+    #[serde(default)]
+    pub untracked: u32,
+}
+
+/// Comando de verificação detectado do projeto (test/lint/build).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCheckInfo {
+    pub id: String,
+    pub label: String,
+    pub command: String,
+}
+
+/// Perfil detectado do projeto do workspace.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectInfo {
+    /// `node` | `rust` | `python` | `go` | `dotnet` | `unknown`
+    pub kind: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub checks: Vec<ProjectCheckInfo>,
+}
+
+/// Estado do workspace para o header/painel (`get_workspace_context`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceContext {
+    pub workspace: Workspace,
+    #[serde(default)]
+    pub project: Option<ProjectInfo>,
+}
+
+/// Item de tarefa mantida pelo agente (`todo_write`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoItem {
+    pub content: String,
+    pub status: TodoStatus,
+}
+
+/// Estado do modo Plano (`HARNESS.md` §6; `WORKBENCH.md` §5.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanState {
+    Inactive,
+    Planning,
+    Reviewing,
+    Approved,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanView {
+    pub state: PlanState,
+    #[serde(default)]
+    pub markdown: Option<String>,
+    pub updated_at: i64,
+}
+
+/// Tipo de alteração de um arquivo (journal/presentation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FileChangeKind {
+    Created,
+    Modified,
+    Deleted,
+    Renamed,
+}
+
+/// Alteração de um arquivo (card de tool / evento `FileChanged`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileChange {
+    pub path: String,
+    pub kind: FileChangeKind,
+    #[serde(default)]
+    pub added: u32,
+    #[serde(default)]
+    pub removed: u32,
+    #[serde(default)]
+    pub diff: Option<String>,
+}
+
+/// Resumo compacto por arquivo (painel Alterações / evento `WorkspaceChanges`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileChangeSummary {
+    pub path: String,
+    pub kind: FileChangeKind,
+    #[serde(default)]
+    pub added: u32,
+    #[serde(default)]
+    pub removed: u32,
+    /// `session` (journal do agente), `git` (working tree) ou `both`.
+    #[serde(default)]
+    pub origin: Option<String>,
+    #[serde(default)]
+    pub staged: bool,
+}
+
+/// Alterações de um turno (evento `WorkspaceChanges` / painel).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangesSummary {
+    #[serde(default)]
+    pub turn_id: Option<String>,
+    pub files: Vec<FileChangeSummary>,
+    #[serde(default)]
+    pub added: u32,
+    #[serde(default)]
+    pub removed: u32,
+}
+
+/// Uso de contexto estimado (medidor do header).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextStats {
+    pub used: u32,
+    pub window: u32,
+    pub output_cap: u32,
+    pub percent: f32,
+    #[serde(default)]
+    pub compacted: u32,
+    #[serde(default)]
+    pub messages: u32,
+}
+
+/// Estado de um job de processo em background.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JobStatus {
+    Running,
+    Done,
+    Failed,
+    Killed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobView {
+    pub id: String,
+    pub command: String,
+    pub status: JobStatus,
+    pub started_at: i64,
+    #[serde(default)]
+    pub duration_ms: u64,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    #[serde(default)]
+    pub output_preview: Option<String>,
+}
+
+/// Snapshot completo da sessão de código (`get_code_session_state`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeSessionState {
+    pub conversation_id: String,
+    pub permission_mode: PermissionMode,
+    pub plan_mode: bool,
+    #[serde(default)]
+    pub plan: Option<PlanView>,
+    #[serde(default)]
+    pub todos: Vec<TodoItem>,
+    #[serde(default)]
+    pub workspace: Option<Workspace>,
+    #[serde(default)]
+    pub project: Option<ProjectInfo>,
+    #[serde(default)]
+    pub context: Option<ContextStats>,
+    #[serde(default)]
+    pub changes: Option<ChangesSummary>,
+    #[serde(default)]
+    pub jobs: Vec<JobView>,
+    #[serde(default)]
+    pub approvals: Vec<ApprovalRequest>,
+}
+
+/// Entrada da árvore de arquivos do workspace (`list_workspace_files`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileEntry {
+    /// Path relativo ao workspace, sempre com `/`.
+    pub path: String,
+    pub name: String,
+    pub is_dir: bool,
+    /// Profundidade relativa ao diretório pedido (0 = raiz da listagem).
+    pub depth: u32,
+    #[serde(default)]
+    pub size: Option<u64>,
+    /// Estado no git (`M`, `A`, `D`, `U`, `?`) quando disponível.
+    #[serde(default)]
+    pub git_status: Option<String>,
+    #[serde(default)]
+    pub children: Vec<WorkspaceFileEntry>,
+}
+
+/// Conteúdo de um arquivo do workspace para prévia read-only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileContent {
+    pub path: String,
+    pub text: String,
+    /// O backend truncou o conteúdo (arquivo maior que o limite de prévia).
+    pub truncated: bool,
+    /// Tamanho total em bytes.
+    pub size: u64,
+    #[serde(default)]
+    pub binary: bool,
+    /// Encoding detectado quando o conteúdo não era UTF-8.
+    #[serde(default)]
+    pub encoding: Option<String>,
+}
+
+/// Arquivo no status do git (painel Alterações).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitFile {
+    pub path: String,
+    pub status: String,
+}
+
+/// Status do git de um workspace (working tree + staged).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitStatus {
+    pub is_repo: bool,
+    #[serde(default)]
+    pub root: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub ahead: u32,
+    #[serde(default)]
+    pub behind: u32,
+    #[serde(default)]
+    pub staged: Vec<WorkspaceGitFile>,
+    #[serde(default)]
+    pub unstaged: Vec<WorkspaceGitFile>,
+    #[serde(default)]
+    pub untracked: Vec<String>,
+    #[serde(default)]
+    pub conflicted: Vec<String>,
+}
+
+/// Commit recente para o painel (git log).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitCommit {
+    pub hash: String,
+    pub subject: String,
+    pub author: String,
+    pub date: String,
+}
+
+impl ToolCallRecord {
+    /// Constrói o record com apresentação estruturada (diff/todo/plano/job).
+    pub fn with_presentation(mut self, presentation: Option<Value>) -> Self {
+        self.presentation = presentation;
+        self
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1064,6 +1625,9 @@ mod tests {
             preview: Some("primeira pergunta".into()),
             mode: CONVERSATION_MODE_CODE.to_string(),
             code_linked: true,
+            workspace_id: Some("ws-1".into()),
+            agent_kind: "lumina".into(),
+            permission_mode: PermissionMode::Edit,
         };
         let json = serde_json::to_value(&conversation).expect("serialize conversation");
         assert_eq!(json["mode"], "code");

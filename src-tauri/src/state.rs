@@ -12,6 +12,7 @@ use crate::catalog::{CatalogFile, ModelInfo};
 use crate::db::Db;
 use crate::domain::ProviderAuthStatus;
 use crate::oauth::OAuthState;
+use crate::policy::approval::ApprovalRegistry;
 
 /// Account-specific model list fetched from the provider (`/v1/models`).
 #[derive(Debug, Clone)]
@@ -28,6 +29,8 @@ pub struct AppState {
     pub search_http: reqwest::Client,
     pub data_dir: PathBuf,
     pub oauth: Arc<OAuthState>,
+    /// Aprovações interativas pendentes do harness de código (por turno).
+    pub approvals: Arc<ApprovalRegistry>,
     dynamic_models: RwLock<HashMap<String, DynamicModels>>,
     turns: Mutex<HashMap<String, CancellationToken>>,
 }
@@ -46,6 +49,7 @@ impl AppState {
             search_http: crate::http::search_client(),
             data_dir,
             oauth: Arc::new(OAuthState::new()),
+            approvals: Arc::new(ApprovalRegistry::new()),
             dynamic_models: RwLock::new(HashMap::new()),
             turns: Mutex::new(HashMap::new()),
         };
@@ -225,7 +229,16 @@ impl AppState {
 pub fn ensure_dirs(app: &AppHandle) -> anyhow::Result<()> {
     // `skills-bundled` não entra aqui: o módulo de skills o materializa (e
     // regrava) a cada inicialização; `skills` é a pasta do usuário.
-    for sub in ["attachments", "artifacts", "logs", "code-runs", "skills"] {
+    for sub in [
+        "attachments",
+        "artifacts",
+        "logs",
+        "code-runs",
+        "skills",
+        // Harness de código: checkpoints (journal) e spill de saídas longas.
+        "checkpoints",
+        "spill",
+    ] {
         let dir = crate::config::data_dir(app)?.join(sub);
         std::fs::create_dir_all(dir)?;
     }

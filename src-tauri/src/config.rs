@@ -62,6 +62,16 @@ pub fn secrets_path(app: &AppHandle) -> PathBuf {
 pub const CODE_TIMEOUT_MIN_SECS: u32 = 10;
 pub const CODE_TIMEOUT_MAX_SECS: u32 = 600;
 
+/// Retenção dos arquivos de spill (saída completa de tools) do harness de
+/// código, em dias. Fora da faixa, o valor é clampado.
+pub const SPILL_RETENTION_MIN_DAYS: u32 = 1;
+pub const SPILL_RETENTION_MAX_DAYS: u32 = 365;
+
+/// Tempo máximo para o usuário responder a uma aprovação do harness, em
+/// segundos (30 s .. 1 h). Fora da faixa, o valor é clampado.
+pub const APPROVAL_TIMEOUT_MIN_SECS: u32 = 30;
+pub const APPROVAL_TIMEOUT_MAX_SECS: u32 = 3_600;
+
 /// Normaliza a lista de skills desativadas vinda do disco ou do renderer:
 /// `trim`, descarta entradas vazias, remove duplicatas e ordena (a comparação
 /// com o catálogo é por nome canônico). `skills_panel_enabled` é booleano e não
@@ -125,13 +135,49 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     settings.code_node_path = settings.code_node_path.trim().to_string();
     settings.disabled_skills =
         normalize_disabled_skills(std::mem::take(&mut settings.disabled_skills));
+
+    // Harness de código (docs/goals/code-harness/PLAN.md §7). Os booleanos
+    // `shell_enabled`/`auto_compact`/`notifications_enabled`/
+    // `trust_workspaces_by_default` são preferências do usuário: preservados
+    // como vieram (o default seguro de cada um já está em `Settings::default`).
+    // `code_default_permission_mode` é enum tipado: valores inválidos no JSON
+    // são tratados na leitura (`parse_settings_json`).
+    settings.code_max_steps = settings.code_max_steps.clamp(1, MAX_STEPS_LIMIT);
+    settings.spill_retention_days = settings
+        .spill_retention_days
+        .clamp(SPILL_RETENTION_MIN_DAYS, SPILL_RETENTION_MAX_DAYS);
+    settings.approval_timeout_secs = settings
+        .approval_timeout_secs
+        .clamp(APPROVAL_TIMEOUT_MIN_SECS, APPROVAL_TIMEOUT_MAX_SECS);
     settings
+}
+
+/// Parse tolerante de `settings.json`.
+///
+/// `Settings` carrega enums (`codeDefaultPermissionMode`); um valor inválido
+/// gravado à mão faria o `serde` falhar o arquivo inteiro e `load_settings`
+/// cair em `Settings::default()`, apagando todas as preferências. Aqui a chave
+/// inválida é removida antes da tipagem, então só ela volta ao default.
+fn parse_settings_json(raw: &str) -> Result<Settings, serde_json::Error> {
+    let mut value: serde_json::Value = serde_json::from_str(raw)?;
+    if let Some(object) = value.as_object_mut() {
+        let invalid_mode = object
+            .get("codeDefaultPermissionMode")
+            .and_then(serde_json::Value::as_str)
+            .map_or(false, |mode| {
+                !matches!(mode.trim(), "read_only" | "edit" | "autonomous")
+            });
+        if invalid_mode {
+            object.remove("codeDefaultPermissionMode");
+        }
+    }
+    serde_json::from_value(value)
 }
 
 pub fn load_settings(app: &AppHandle) -> Settings {
     let path = settings_path(app);
     match std::fs::read_to_string(&path) {
-        Ok(raw) => serde_json::from_str::<Settings>(&raw)
+        Ok(raw) => parse_settings_json(&raw)
             .map(normalize_settings)
             .unwrap_or_default(),
         Err(_) => Settings::default(),
@@ -1645,6 +1691,159 @@ mod tests {
         assert_eq!(
             normalize_settings(settings).code_timeout_secs,
             CODE_TIMEOUT_MAX_SECS
+        );
+    }
+
+    /* -------------------------------------------------------------- */
+    /* Harness de código (docs/goals/code-harness/PLAN.md §7)          */
+    /* -------------------------------------------------------------- */
+
+    #[test]
+    fn code_harness_settings_default_to_safe_values() {
+        let defaults = Settings::default();
+        assert_eq!(defaults.code_max_steps, 120);
+        // Shell é opt-in por sessão, mas o default do app já vem ligado: cada
+        // comando fora do workspace continua passando pela política de aprovação.
+        assert!(defaults.shell_enabled);
+        assert!(defaults.auto_compact);
+        assert_eq!(defaults.spill_retention_days, 30);
+        assert_eq!(defaults.approval_timeout_secs, 600);
+        assert!(defaults.notifications_enabled);
+        assert_eq!(
+            defaults.code_default_permission_mode,
+            crate::domain::PermissionMode::Edit
+        );
+        // Pasta nova pede confirmação explícita.
+        assert!(!defaults.trust_workspaces_by_default);
+    }
+
+    #[test]
+    fn normalizes_out_of_range_code_harness_settings() {
+        let settings = Settings {
+            code_max_steps: 5_000,
+            spill_retention_days: 9_999,
+            approval_timeout_secs: 1,
+            ..Settings::default()
+        };
+        let normalized = normalize_settings(settings);
+        assert_eq!(normalized.code_max_steps, MAX_STEPS_LIMIT);
+        assert_eq!(
+            normalized.spill_retention_days,
+            SPILL_RETENTION_MAX_DAYS
+        );
+        assert_eq!(
+            normalized.approval_timeout_secs,
+            APPROVAL_TIMEOUT_MIN_SECS
+        );
+
+        let settings = Settings {
+            code_max_steps: 0,
+            spill_retention_days: 0,
+            approval_timeout_secs: 0,
+            ..Settings::default()
+        };
+        let normalized = normalize_settings(settings);
+        assert_eq!(normalized.code_max_steps, 1);
+        assert_eq!(
+            normalized.spill_retention_days,
+            SPILL_RETENTION_MIN_DAYS
+        );
+        assert_eq!(
+            normalized.approval_timeout_secs,
+            APPROVAL_TIMEOUT_MIN_SECS
+        );
+    }
+
+    #[test]
+    fn code_harness_settings_accept_their_boundaries() {
+        let settings = Settings {
+            code_max_steps: 1,
+            spill_retention_days: SPILL_RETENTION_MIN_DAYS,
+            approval_timeout_secs: APPROVAL_TIMEOUT_MAX_SECS,
+            ..Settings::default()
+        };
+        let normalized = normalize_settings(settings);
+        assert_eq!(normalized.code_max_steps, 1);
+        assert_eq!(
+            normalized.spill_retention_days,
+            SPILL_RETENTION_MIN_DAYS
+        );
+        assert_eq!(
+            normalized.approval_timeout_secs,
+            APPROVAL_TIMEOUT_MAX_SECS
+        );
+
+        let settings = Settings {
+            spill_retention_days: SPILL_RETENTION_MAX_DAYS,
+            ..Settings::default()
+        };
+        assert_eq!(
+            normalize_settings(settings).spill_retention_days,
+            SPILL_RETENTION_MAX_DAYS
+        );
+    }
+
+    #[test]
+    fn legacy_settings_file_without_code_harness_fields_uses_defaults() {
+        // `settings.json` de antes do harness de código.
+        let raw = r#"{"theme":"dark","maxSteps":10,"codeMaxSteps":9999}"#;
+        let parsed = parse_settings_json(raw).expect("desserializar settings antigos");
+        let normalized = normalize_settings(parsed);
+        assert_eq!(normalized.theme, "dark");
+        assert_eq!(normalized.max_steps, 10);
+        // Campo presente no arquivo: normalizado normalmente.
+        assert_eq!(normalized.code_max_steps, MAX_STEPS_LIMIT);
+        // Campos ausentes: defaults do harness.
+        assert!(normalized.shell_enabled);
+        assert!(normalized.auto_compact);
+        assert_eq!(normalized.spill_retention_days, 30);
+        assert_eq!(normalized.approval_timeout_secs, 600);
+        assert!(normalized.notifications_enabled);
+        assert_eq!(
+            normalized.code_default_permission_mode,
+            crate::domain::PermissionMode::Edit
+        );
+        assert!(!normalized.trust_workspaces_by_default);
+    }
+
+    #[test]
+    fn invalid_permission_mode_does_not_wipe_the_other_settings() {
+        // Arquivo editado à mão com um modo de permissão desconhecido: só esse
+        // campo volta ao default; o resto do arquivo é preservado.
+        let raw = r#"{"theme":"dark","codeDefaultPermissionMode":"yolo",
+                      "approvalTimeoutSecs":900,"shellEnabled":false}"#;
+        let parsed = parse_settings_json(raw).expect("parse tolerante");
+        let normalized = normalize_settings(parsed);
+        assert_eq!(normalized.theme, "dark");
+        assert_eq!(normalized.approval_timeout_secs, 900);
+        assert!(!normalized.shell_enabled);
+        assert_eq!(
+            normalized.code_default_permission_mode,
+            crate::domain::PermissionMode::Edit
+        );
+    }
+
+    #[test]
+    fn code_harness_settings_round_trip_with_camel_case_keys() {
+        let value =
+            serde_json::to_value(Settings::default()).expect("serializar settings do harness");
+        assert_eq!(value["codeMaxSteps"], 120);
+        assert_eq!(value["shellEnabled"], true);
+        assert_eq!(value["autoCompact"], true);
+        assert_eq!(value["spillRetentionDays"], 30);
+        assert_eq!(value["approvalTimeoutSecs"], 600);
+        assert_eq!(value["notificationsEnabled"], true);
+        assert_eq!(value["codeDefaultPermissionMode"], "edit");
+        assert_eq!(value["trustWorkspacesByDefault"], false);
+        assert!(value.get("code_max_steps").is_none());
+
+        // Reler o JSON gravado devolve os mesmos valores (contrato IPC).
+        let parsed: Settings =
+            serde_json::from_value(value).expect("reler settings serializados");
+        assert_eq!(parsed.code_max_steps, 120);
+        assert_eq!(
+            parsed.code_default_permission_mode,
+            crate::domain::PermissionMode::Edit
         );
     }
 }

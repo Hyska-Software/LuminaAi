@@ -1,10 +1,23 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { AppInfo, Conversation, Settings } from '@/lib/types';
+import type { AppInfo, CodeSessionState, Conversation, Settings, Workspace } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
+  listWorkspaces: vi.fn(),
+  pickWorkspaceFolder: vi.fn(),
+  addWorkspace: vi.fn(),
+  setWorkspaceTrusted: vi.fn(),
+  setPermissionMode: vi.fn(),
+  setPlanMode: vi.fn(),
+  removeWorkspace: vi.fn(),
+  renameWorkspace: vi.fn(),
+  getWorkspace: vi.fn(),
+  setConversationWorkspace: vi.fn(),
+  openWorkspaceInExplorer: vi.fn(),
+  getCodeSessionState: vi.fn(),
   createConversation: vi.fn(),
+  listConversations: vi.fn(),
   getConversation: vi.fn(),
   listArtifacts: vi.fn(),
 }));
@@ -13,6 +26,7 @@ vi.mock('@/lib/api', () => ({ api: mocks }));
 
 // Imported after the API mock.
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { __resetWorkspacesForTests } from './useWorkspaces';
 import { CodeSessionHeader } from './CodeSessionHeader';
 
 const originalMatchMedia = window.matchMedia;
@@ -66,6 +80,19 @@ function settings(overrides: Partial<Settings> = {}): Settings {
   };
 }
 
+function workspace(overrides: Partial<Workspace> = {}): Workspace {
+  return {
+    id: 'ws-1',
+    name: 'lumina-core',
+    path: 'C:/dev/lumina',
+    createdAt: 1,
+    updatedAt: 2,
+    trusted: true,
+    git: { root: 'C:/dev/lumina', branch: 'main', dirty: true },
+    ...overrides,
+  };
+}
+
 function conversation(overrides: Partial<Conversation> = {}): Conversation {
   return {
     id: 'c-new',
@@ -83,6 +110,18 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
   };
 }
 
+function sessionState(overrides: Partial<CodeSessionState> = {}): CodeSessionState {
+  return {
+    conversationId: 'c-new',
+    permissionMode: 'edit',
+    planMode: false,
+    todos: [],
+    jobs: [],
+    approvals: [],
+    ...overrides,
+  };
+}
+
 function appInfo(): AppInfo {
   return {
     name: 'Lumina',
@@ -96,16 +135,29 @@ function appInfo(): AppInfo {
 
 const tab = (name: string): HTMLElement => screen.getByRole('tab', { name });
 
+/** Radix DropdownMenu opens on pointerdown, not click (see other tests). */
+function openMenu(trigger: HTMLElement): void {
+  fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  __resetWorkspacesForTests();
   window.matchMedia = matchMediaReturning(false);
   setViewport(1440);
+  mocks.listWorkspaces.mockResolvedValue([]);
+  mocks.listConversations.mockResolvedValue([]);
+  mocks.listArtifacts.mockResolvedValue([]);
   mocks.createConversation.mockResolvedValue(conversation());
+  mocks.getCodeSessionState.mockResolvedValue(null);
+  mocks.getWorkspace.mockResolvedValue(null);
   mocks.getConversation.mockImplementation(async (id: string) => ({
     conversation: conversation({ id, title: id }),
     messages: [],
   }));
-  mocks.listArtifacts.mockResolvedValue([]);
+  mocks.setConversationWorkspace.mockImplementation(async (id: string, workspaceId: string | null) =>
+    conversation({ id, workspaceId }),
+  );
   useAppStore.setState({ settings: settings(), appInfo: appInfo() });
   useChatStore.setState({
     conversations: [],
@@ -118,6 +170,8 @@ beforeEach(() => {
     codeView: 'session',
     codePanelOpen: true,
     codePanelTab: 'changes',
+    activeWorkspaceId: null,
+    openSessionsByWorkspace: {},
     artifactPanelOpen: false,
     artifacts: [],
   });
@@ -212,6 +266,192 @@ describe('CodeSessionHeader — cabeçalho da sessão', () => {
     expect(mocks.createConversation.mock.calls[0]?.[3]).toBe('code');
     await waitFor(() => expect(useChatStore.getState().activeId).toBe('c-new'));
     await waitFor(() => expect(tab('Nova conversa').getAttribute('aria-selected')).toBe('true'));
+  });
+});
+
+describe('CodeSessionHeader — workspace real', () => {
+  it('mostra nome, branch e estado sujo do workspace da sessão', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Corrigir o build', workspaceId: 'ws-1' })],
+      activeId: 'c-1',
+    });
+
+    render(<CodeSessionHeader />);
+
+    const chip = await screen.findByRole('button', {
+      name: 'Workspace lumina-core, branch main, alterações não commitadas',
+    });
+    expect(chip).toBeTruthy();
+    expect(chip.textContent).toContain('lumina-core');
+    expect(chip.textContent).toContain('main');
+  });
+
+  it('o menu do workspace atualiza o contexto git e abre no Explorer', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    mocks.getWorkspace.mockResolvedValue({ workspace: workspace() });
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', workspaceId: 'ws-1' })],
+      activeId: 'c-1',
+    });
+
+    render(<CodeSessionHeader />);
+    const chip = await screen.findByRole('button', { name: /Workspace lumina-core/ });
+    openMenu(chip);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Atualizar' }));
+    await waitFor(() => expect(mocks.getWorkspace).toHaveBeenCalledWith('ws-1'));
+
+    openMenu(chip);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Abrir no Explorer' }));
+    await waitFor(() => expect(mocks.openWorkspaceInExplorer).toHaveBeenCalledWith('ws-1'));
+  });
+
+  it('permite trocar a sessão de workspace pelo chip', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Sem pasta', workspaceId: null })],
+      activeId: 'c-1',
+    });
+
+    render(<CodeSessionHeader />);
+    const chip = await screen.findByRole('button', { name: /Sem workspace/ });
+    openMenu(chip);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'lumina-core' }));
+
+    await waitFor(() =>
+      expect(mocks.setConversationWorkspace).toHaveBeenCalledWith('c-1', 'ws-1'),
+    );
+    expect(useUiStore.getState().activeWorkspaceId).toBe('ws-1');
+    expect(useUiStore.getState().openSessionsByWorkspace['ws-1']).toEqual(['c-1']);
+  });
+
+  it('sem workspace o chip oferece Abrir pasta… (não é beco sem saída)', async () => {
+    mocks.listWorkspaces.mockResolvedValue([]);
+    const ws = workspace({ trusted: false });
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.addWorkspace.mockResolvedValue(ws);
+    mocks.listWorkspaces.mockResolvedValueOnce([]).mockResolvedValue([ws]);
+
+    render(<CodeSessionHeader />);
+    const chip = await screen.findByRole('button', { name: /Sem workspace/ });
+    openMenu(chip);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Abrir pasta…' }));
+
+    await waitFor(() => expect(mocks.pickWorkspaceFolder).toHaveBeenCalledTimes(1));
+    // O diálogo de confiança é hospedado pelo cabeçalho.
+    const dialog = await screen.findByRole('dialog', { name: 'Confiar nesta pasta?' });
+    expect(dialog).toBeTruthy();
+  });
+});
+
+describe('CodeSessionHeader — confiança da pasta', () => {
+  it('“Confiar” aplica trusted + permissão na sessão recém-criada', async () => {
+    const ws = workspace({ trusted: false });
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.addWorkspace.mockResolvedValue(ws);
+    mocks.listWorkspaces.mockResolvedValue([ws]);
+    mocks.setWorkspaceTrusted.mockResolvedValue({ ...ws, trusted: true });
+    mocks.setPermissionMode.mockResolvedValue(sessionState({ permissionMode: 'edit' }));
+
+    render(<CodeSessionHeader />);
+    const chip = await screen.findByRole('button', { name: /Sem workspace/ });
+    openMenu(chip);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Abrir pasta…' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Confiar nesta pasta?' });
+    expect(dialog).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Confiar' }));
+
+    await waitFor(() => expect(mocks.setWorkspaceTrusted).toHaveBeenCalledWith('ws-1', true));
+    await waitFor(() =>
+      expect(mocks.setPermissionMode).toHaveBeenCalledWith('c-new', 'edit'),
+    );
+  });
+});
+
+describe('CodeSessionHeader — modo de permissão e Plano', () => {
+  it('mostra o modo da conversa e permite mudar de forma otimista', async () => {
+    mocks.setPermissionMode.mockResolvedValue(sessionState({ permissionMode: 'autonomous' }));
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', permissionMode: 'edit' })],
+      activeId: 'c-1',
+    });
+
+    render(<CodeSessionHeader />);
+    const chip = screen.getByRole('button', { name: 'Modo de permissão: Editar' });
+    openMenu(chip);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Autônomo' }));
+
+    // Otimista: o chip muda antes da resposta.
+    expect(
+      screen.getByRole('button', { name: 'Modo de permissão: Autônomo' }),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(mocks.setPermissionMode).toHaveBeenCalledWith('c-1', 'autonomous'),
+    );
+  });
+
+  it('reverte o modo de permissão quando o backend falha', async () => {
+    mocks.setPermissionMode.mockRejectedValue(new Error('negado'));
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', permissionMode: 'edit' })],
+      activeId: 'c-1',
+    });
+
+    render(<CodeSessionHeader />);
+    openMenu(screen.getByRole('button', { name: 'Modo de permissão: Editar' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Autônomo' }));
+
+    await waitFor(() =>
+      expect(mocks.setPermissionMode).toHaveBeenCalledWith('c-1', 'autonomous'),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Modo de permissão: Editar' })).toBeTruthy(),
+    );
+  });
+
+  it('o estado da sessão sincroniza permissão e Plano ao abrir', async () => {
+    mocks.getCodeSessionState.mockResolvedValue(
+      sessionState({ permissionMode: 'read_only', planMode: true }),
+    );
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1' })],
+      activeId: 'c-1',
+    });
+
+    render(<CodeSessionHeader />);
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Modo de permissão: Leitura' })).toBeTruthy(),
+    );
+    const plan = screen.getByRole('button', { name: 'Modo Plano' });
+    expect(plan.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('o chip Plano alterna com atualização otimista', async () => {
+    mocks.setPlanMode.mockResolvedValue(sessionState({ planMode: true }));
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1' })],
+      activeId: 'c-1',
+    });
+
+    render(<CodeSessionHeader />);
+    const plan = screen.getByRole('button', { name: 'Modo Plano' });
+    expect(plan.getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(plan);
+
+    expect(screen.getByRole('button', { name: 'Modo Plano' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    await waitFor(() => expect(mocks.setPlanMode).toHaveBeenCalledWith('c-1', true));
+  });
+
+  it('não mostra os chips de sessão quando não há conversa ativa', () => {
+    render(<CodeSessionHeader />);
+
+    expect(screen.queryByRole('button', { name: /Modo de permissão/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Modo Plano' })).toBeNull();
   });
 });
 

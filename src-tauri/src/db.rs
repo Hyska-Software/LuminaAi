@@ -1,4 +1,6 @@
-//! SQLite persistence (conversations, messages, attachments, artifacts, usage).
+//! SQLite persistence (conversations, messages, attachments, artifacts, usage
+//! and the code-harness tables: workspaces, code events, file journal, session
+//! summaries and approval rules).
 //!
 //! One shared `rusqlite::Connection` guarded by a `parking_lot::Mutex` keeps
 //! `Db` `Send + Sync`, which is what the Tauri state requires. All JSON columns
@@ -14,8 +16,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::domain::{
-    conversation_mode_or_default, now_ms, Artifact, ArtifactKind, AttachmentInfo, ChatMessage,
-    Conversation, ConversationDetail, LibraryArtifact, MessageRole, MessageStatus, UsageInfo,
+    conversation_mode_or_default, now_ms, ApprovalDecision, ApprovalRule, ApprovalScope, Artifact,
+    ArtifactKind, AttachmentInfo, ChatMessage, Conversation, ConversationDetail, FileChangeKind,
+    LibraryArtifact, MessageRole, MessageStatus, PermissionMode, UsageInfo, Workspace,
     CONVERSATION_MODE_CHAT,
 };
 
@@ -24,7 +27,11 @@ use crate::domain::{
 /* ------------------------------------------------------------------ */
 
 const CONVERSATION_COLUMNS: &str = "id, title, created_at, updated_at, pinned, \
-     provider_id, model_id, message_count, preview, mode, code_linked";
+     provider_id, model_id, message_count, preview, mode, code_linked, workspace_id, \
+     agent_kind, permission_mode";
+
+const WORKSPACE_COLUMNS: &str = "id, name, path, created_at, updated_at, last_opened_at, \
+     pinned, trusted";
 
 const MESSAGE_COLUMNS: &str = "id, conversation_id, role, content, reasoning, status, \
      tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, created_at, trace";
@@ -65,7 +72,13 @@ CREATE TABLE IF NOT EXISTS conversations (
   -- Layout onde a sessão nasceu ('chat' | 'code'); bancos legados viram 'chat'.
   mode          TEXT NOT NULL DEFAULT 'chat',
   -- Sessão do Chat adicionada ao Code (compartilhada nos dois layouts).
-  code_linked   INTEGER NOT NULL DEFAULT 0
+  code_linked   INTEGER NOT NULL DEFAULT 0,
+  -- Harness de código: workspace da sessão (NULL = sem workspace), motor do
+  -- agente ('lumina'; 'acp:<agente>' fica reservado) e modo de permissão
+  -- ('read_only' | 'edit' | 'autonomous'). O Chat ignora os três.
+  workspace_id    TEXT,
+  agent_kind      TEXT NOT NULL DEFAULT 'lumina',
+  permission_mode TEXT NOT NULL DEFAULT 'edit'
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -137,6 +150,74 @@ CREATE TABLE IF NOT EXISTS meta (
 
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
+
+/* ---- harness de código (docs/goals/code-harness/PLAN.md §7) ---- */
+
+CREATE TABLE IF NOT EXISTS workspaces (
+  id             TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  path           TEXT NOT NULL UNIQUE,
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL,
+  last_opened_at INTEGER,
+  pinned         INTEGER NOT NULL DEFAULT 0,
+  trusted        INTEGER NOT NULL DEFAULT 0
+);
+
+-- Trilha persistida do agente de código: um evento por passo/ferramenta, com
+-- `seq` monotônico por conversa (usado pelo replay/compactação).
+CREATE TABLE IF NOT EXISTS code_events (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id TEXT NOT NULL,
+  turn_id         TEXT,
+  seq             INTEGER NOT NULL,
+  kind            TEXT NOT NULL,
+  payload         TEXT NOT NULL,
+  created_at      INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_code_events_conv_seq ON code_events(conversation_id, seq);
+
+-- Journal das escritas de arquivo feitas pelo agente (painel Alterações/replay).
+CREATE TABLE IF NOT EXISTS file_journal (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id TEXT NOT NULL,
+  turn_id         TEXT NOT NULL,
+  path            TEXT NOT NULL,
+  change_kind     TEXT NOT NULL,
+  before_hash     TEXT,
+  after_hash      TEXT,
+  added           INTEGER,
+  removed         INTEGER,
+  created_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_file_journal_conv_turn ON file_journal(conversation_id, turn_id);
+
+-- Resumos de compactação: cobrem a faixa de `seq` de code_events.
+CREATE TABLE IF NOT EXISTS session_summaries (
+  id              TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  from_seq        INTEGER NOT NULL,
+  to_seq          INTEGER NOT NULL,
+  content         TEXT NOT NULL,
+  tokens          INTEGER,
+  created_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_summaries_conv
+  ON session_summaries(conversation_id, created_at);
+
+-- Regras de aprovacao (sempre permitir/negar) por escopo sessao/workspace/global.
+CREATE TABLE IF NOT EXISTS approval_rules (
+  id         TEXT PRIMARY KEY,
+  scope      TEXT NOT NULL,
+  scope_id   TEXT,
+  tool       TEXT NOT NULL,
+  matcher    TEXT NOT NULL,
+  pattern    TEXT NOT NULL,
+  decision   TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_approval_rules_scope ON approval_rules(scope, scope_id);
+CREATE INDEX IF NOT EXISTS idx_approval_rules_tool ON approval_rules(tool);
 ";
 
 /* ------------------------------------------------------------------ */
@@ -182,6 +263,98 @@ impl StoredAttachment {
 pub struct StoredArtifact {
     pub artifact: Artifact,
     pub path: String,
+}
+
+/* ---- harness de código: linhas persistidas ---- */
+
+/// Evento da trilha do agente de código (`code_events`). `payload` é o JSON
+/// opaco do evento (o renderer/replay decide como interpretar por `kind`).
+#[derive(Debug, Clone)]
+pub struct StoredCodeEvent {
+    pub id: i64,
+    pub conversation_id: String,
+    pub turn_id: Option<String>,
+    /// Monotônico por conversa, começando em 1 (garantido por índice único).
+    pub seq: i64,
+    pub kind: String,
+    pub payload: String,
+    pub created_at: i64,
+}
+
+/// Entrada do journal de escritas de arquivo (`file_journal`).
+#[derive(Debug, Clone)]
+pub struct FileJournalEntry {
+    pub id: i64,
+    pub conversation_id: String,
+    pub turn_id: String,
+    pub path: String,
+    pub change_kind: FileChangeKind,
+    pub before_hash: Option<String>,
+    pub after_hash: Option<String>,
+    pub added: Option<u32>,
+    pub removed: Option<u32>,
+    pub created_at: i64,
+}
+
+impl FileJournalEntry {
+    /// Entrada mínima (sem hashes/contagem); `created_at` = agora.
+    pub fn new(
+        conversation_id: impl Into<String>,
+        turn_id: impl Into<String>,
+        path: impl Into<String>,
+        change_kind: FileChangeKind,
+    ) -> Self {
+        Self {
+            id: 0,
+            conversation_id: conversation_id.into(),
+            turn_id: turn_id.into(),
+            path: path.into(),
+            change_kind,
+            before_hash: None,
+            after_hash: None,
+            added: None,
+            removed: None,
+            created_at: now_ms(),
+        }
+    }
+
+    /// Hashes de conteúdo antes/depois da escrita (para "desfazer"/comparar).
+    pub fn with_hashes(mut self, before: Option<&str>, after: Option<&str>) -> Self {
+        self.before_hash = before.map(str::to_string);
+        self.after_hash = after.map(str::to_string);
+        self
+    }
+
+    /// Linhas adicionadas/removidas do arquivo (contagem do diff).
+    pub fn with_line_counts(mut self, added: u32, removed: u32) -> Self {
+        self.added = Some(added);
+        self.removed = Some(removed);
+        self
+    }
+}
+
+/// Resumo de compactação que cobre a faixa `[from_seq, to_seq]` de
+/// `code_events` de uma conversa (`session_summaries`).
+#[derive(Debug, Clone)]
+pub struct SessionSummary {
+    pub id: String,
+    pub conversation_id: String,
+    pub from_seq: i64,
+    pub to_seq: i64,
+    pub content: String,
+    pub tokens: Option<u32>,
+    pub created_at: i64,
+}
+
+/// Dados para criar uma regra de aprovação; o `Db` gera `id` e `created_at`.
+#[derive(Debug, Clone)]
+pub struct NewApprovalRule<'a> {
+    pub scope: ApprovalScope,
+    pub scope_id: Option<&'a str>,
+    pub tool: &'a str,
+    pub matcher: &'a str,
+    pub pattern: &'a str,
+    pub decision: ApprovalDecision,
 }
 
 /* ------------------------------------------------------------------ */
@@ -302,9 +475,16 @@ fn migrate_artifacts_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Migração aditiva e idempotente da separação Chat/Code: bancos criados antes
-/// dos dois layouts ganham `mode` (`'chat'` em todas as linhas existentes) e
-/// `code_linked` (`0`, nenhuma sessão compartilhada). Nenhuma linha é perdida.
+/// Migração aditiva e idempotente da tabela `conversations`:
+///
+/// 1. separação Chat/Code: bancos criados antes dos dois layouts ganham `mode`
+///    (`'chat'` em todas as linhas existentes) e `code_linked` (`0`);
+/// 2. harness de código: bancos criados antes do harness ganham `workspace_id`
+///    (`NULL` = sem workspace), `agent_kind` (`'lumina'`) e `permission_mode`
+///    (`'edit'`). O Chat ignora os três; `workspace_id` é preenchido quando o
+///    usuário abre uma sessão de código com workspace.
+///
+/// Nenhuma linha é perdida e a migração pode rodar quantas vezes for preciso.
 fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
     ensure_column(
         conn,
@@ -317,6 +497,24 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         "conversations",
         "code_linked",
         "ALTER TABLE conversations ADD COLUMN code_linked INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(
+        conn,
+        "conversations",
+        "workspace_id",
+        "ALTER TABLE conversations ADD COLUMN workspace_id TEXT",
+    )?;
+    ensure_column(
+        conn,
+        "conversations",
+        "agent_kind",
+        "ALTER TABLE conversations ADD COLUMN agent_kind TEXT NOT NULL DEFAULT 'lumina'",
+    )?;
+    ensure_column(
+        conn,
+        "conversations",
+        "permission_mode",
+        "ALTER TABLE conversations ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'edit'",
     )?;
     Ok(())
 }
@@ -401,6 +599,46 @@ fn artifact_kind_from_str(raw: &str) -> ArtifactKind {
     }
 }
 
+/// `FileChangeKind` <-> TEXT do `file_journal.change_kind`.
+fn file_change_kind_to_str(kind: FileChangeKind) -> &'static str {
+    match kind {
+        FileChangeKind::Created => "created",
+        FileChangeKind::Modified => "modified",
+        FileChangeKind::Deleted => "deleted",
+        FileChangeKind::Renamed => "renamed",
+    }
+}
+
+fn file_change_kind_from_str(raw: &str) -> FileChangeKind {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "created" => FileChangeKind::Created,
+        "deleted" => FileChangeKind::Deleted,
+        "renamed" => FileChangeKind::Renamed,
+        _ => FileChangeKind::Modified,
+    }
+}
+
+/// `ApprovalDecision` <-> TEXT de `approval_rules.decision`. Valor desconhecido
+/// cai em `Denied` (regra persistida nunca vira permissão por engano).
+fn approval_decision_from_str(raw: &str) -> ApprovalDecision {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "approved" => ApprovalDecision::Approved,
+        "cancelled" => ApprovalDecision::Cancelled,
+        "expired" => ApprovalDecision::Expired,
+        _ => ApprovalDecision::Denied,
+    }
+}
+
+/// True when the error is a SQLite constraint violation (path de workspace
+/// duplicado, id repetido, …), usado para devolver mensagens amigáveis.
+fn is_constraint_violation(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(inner, _)
+            if inner.code == rusqlite::ErrorCode::ConstraintViolation
+    )
+}
+
 /* ------------------------------------------------------------------ */
 /* Small value helpers                                                 */
 /* ------------------------------------------------------------------ */
@@ -433,6 +671,7 @@ fn u32_from_db(value: Option<i64>) -> Option<u32> {
 /* ------------------------------------------------------------------ */
 
 fn conversation_from_row(row: &Row<'_>) -> rusqlite::Result<Conversation> {
+    let permission_mode: String = row.get(13)?;
     Ok(Conversation {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -445,6 +684,81 @@ fn conversation_from_row(row: &Row<'_>) -> rusqlite::Result<Conversation> {
         preview: row.get(8)?,
         mode: row.get(9)?,
         code_linked: row.get::<_, i64>(10)? != 0,
+        // Sessões do harness de código. A migração aditiva preenche os bancos
+        // legados com NULL/'lumina'/'edit'; o Chat ignora os três campos.
+        workspace_id: row.get(11)?,
+        agent_kind: row.get(12)?,
+        permission_mode: PermissionMode::from_str(&permission_mode),
+    })
+}
+
+fn workspace_from_row(row: &Row<'_>) -> rusqlite::Result<Workspace> {
+    Ok(Workspace {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        path: row.get(2)?,
+        created_at: row.get(3)?,
+        updated_at: row.get(4)?,
+        last_opened_at: row.get(5)?,
+        pinned: row.get::<_, i64>(6)? != 0,
+        trusted: row.get::<_, i64>(7)? != 0,
+        // `git` é detectado em memória pelo módulo `workspace`; não é coluna.
+        git: None,
+    })
+}
+
+fn code_event_from_row(row: &Row<'_>) -> rusqlite::Result<StoredCodeEvent> {
+    Ok(StoredCodeEvent {
+        id: row.get(0)?,
+        conversation_id: row.get(1)?,
+        turn_id: row.get(2)?,
+        seq: row.get(3)?,
+        kind: row.get(4)?,
+        payload: row.get(5)?,
+        created_at: row.get(6)?,
+    })
+}
+
+fn file_journal_from_row(row: &Row<'_>) -> rusqlite::Result<FileJournalEntry> {
+    let change_kind: String = row.get(4)?;
+    Ok(FileJournalEntry {
+        id: row.get(0)?,
+        conversation_id: row.get(1)?,
+        turn_id: row.get(2)?,
+        path: row.get(3)?,
+        change_kind: file_change_kind_from_str(&change_kind),
+        before_hash: row.get(5)?,
+        after_hash: row.get(6)?,
+        added: u32_from_db(row.get(7)?),
+        removed: u32_from_db(row.get(8)?),
+        created_at: row.get(9)?,
+    })
+}
+
+fn session_summary_from_row(row: &Row<'_>) -> rusqlite::Result<SessionSummary> {
+    Ok(SessionSummary {
+        id: row.get(0)?,
+        conversation_id: row.get(1)?,
+        from_seq: row.get(2)?,
+        to_seq: row.get(3)?,
+        content: row.get(4)?,
+        tokens: u32_from_db(row.get(5)?),
+        created_at: row.get(6)?,
+    })
+}
+
+fn approval_rule_from_row(row: &Row<'_>) -> rusqlite::Result<ApprovalRule> {
+    let scope: String = row.get(1)?;
+    let decision: String = row.get(6)?;
+    Ok(ApprovalRule {
+        id: row.get(0)?,
+        scope: ApprovalScope::from_str(&scope),
+        scope_id: row.get(2)?,
+        tool: row.get(3)?,
+        matcher: row.get(4)?,
+        pattern: row.get(5)?,
+        decision: approval_decision_from_str(&decision),
+        created_at: row.get(7)?,
     })
 }
 
@@ -846,6 +1160,15 @@ impl Db {
             let tx = conn.unchecked_transaction()?;
             tx.execute("DELETE FROM messages WHERE conversation_id = ?1", [id])?;
             tx.execute("DELETE FROM artifacts WHERE conversation_id = ?1", [id])?;
+            // Trilha/journal/resumos da sessão de código.
+            tx.execute("DELETE FROM code_events WHERE conversation_id = ?1", [id])?;
+            tx.execute("DELETE FROM file_journal WHERE conversation_id = ?1", [id])?;
+            tx.execute("DELETE FROM session_summaries WHERE conversation_id = ?1", [id])?;
+            // Regras "sempre permitir/negar" com escopo de sessão.
+            tx.execute(
+                "DELETE FROM approval_rules WHERE scope = 'session' AND scope_id = ?1",
+                [id],
+            )?;
             tx.execute("DELETE FROM conversations WHERE id = ?1", [id])?;
             tx.commit()?;
         }
@@ -875,7 +1198,8 @@ impl Db {
         let conn = self.conn.lock();
         let sql = format!(
             "SELECT DISTINCT c.id, c.title, c.created_at, c.updated_at, c.pinned, \
-             c.provider_id, c.model_id, c.message_count, c.preview, c.mode, c.code_linked \
+             c.provider_id, c.model_id, c.message_count, c.preview, c.mode, c.code_linked, \
+             c.workspace_id, c.agent_kind, c.permission_mode \
              FROM conversations c \
              LEFT JOIN messages m ON m.conversation_id = c.id \
              WHERE c.title LIKE ?1 ESCAPE '\\' OR m.content LIKE ?1 ESCAPE '\\' \
@@ -911,6 +1235,642 @@ impl Db {
         )
         .context("falha ao atualizar o modelo da conversa")?;
         Ok(())
+    }
+
+    /* ---------------- harness de código: workspaces ---------------- */
+
+    /// Cria um workspace; o caminho é único (o mesmo diretório não entra duas
+    /// vezes). `git` não é persistido — é detectado em memória pelo módulo
+    /// `workspace`.
+    pub fn create_workspace(&self, name: &str, path: &str) -> anyhow::Result<Workspace> {
+        let path = path.trim();
+        if path.is_empty() {
+            return Err(anyhow::anyhow!("o caminho do workspace não pode ser vazio"));
+        }
+        let name = name.trim();
+        let name = if name.is_empty() {
+            path.to_string()
+        } else {
+            name.to_string()
+        };
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_ms();
+        {
+            let conn = self.conn.lock();
+            if let Err(error) = conn.execute(
+                "INSERT INTO workspaces \
+                 (id, name, path, created_at, updated_at, last_opened_at, pinned, trusted) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, 0)",
+                params![&id, &name, path, now, now],
+            ) {
+                if is_constraint_violation(&error) {
+                    return Err(anyhow::anyhow!(
+                        "já existe um workspace para o caminho `{path}`"
+                    ));
+                }
+                return Err(error).context("falha ao criar workspace");
+            }
+        }
+        self.get_workspace(&id)?
+            .ok_or_else(|| anyhow::anyhow!("workspace recém-criado não encontrado"))
+    }
+
+    pub fn get_workspace(&self, id: &str) -> anyhow::Result<Option<Workspace>> {
+        let conn = self.conn.lock();
+        let sql = format!("SELECT {WORKSPACE_COLUMNS} FROM workspaces WHERE id = ?1");
+        conn.query_row(&sql, [id], workspace_from_row)
+            .optional()
+            .context("falha ao ler workspace")
+    }
+
+    pub fn find_workspace_by_path(&self, path: &str) -> anyhow::Result<Option<Workspace>> {
+        let conn = self.conn.lock();
+        let sql = format!("SELECT {WORKSPACE_COLUMNS} FROM workspaces WHERE path = ?1");
+        conn.query_row(&sql, [path.trim()], workspace_from_row)
+            .optional()
+            .context("falha ao buscar workspace pelo caminho")
+    }
+
+    /// Lista na ordem da sidebar: fixados primeiro, depois os abertos mais
+    /// recentemente, depois os atualizados mais recentemente.
+    pub fn list_workspaces(&self) -> anyhow::Result<Vec<Workspace>> {
+        let conn = self.conn.lock();
+        let sql = format!(
+            "SELECT {WORKSPACE_COLUMNS} FROM workspaces \
+             ORDER BY pinned DESC, COALESCE(last_opened_at, 0) DESC, updated_at DESC, \
+             name COLLATE NOCASE ASC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([], |row| workspace_from_row(row))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar workspaces")
+    }
+
+    /// Atualiza os metadados editáveis do workspace (nome, caminho, fixado,
+    /// confiável e último acesso). Use [`Db::touch_workspace`] /
+    /// [`Db::mark_workspace_opened`] para os carimbos de tempo.
+    pub fn update_workspace(&self, workspace: &Workspace) -> anyhow::Result<()> {
+        let name = workspace.name.trim();
+        let path = workspace.path.trim();
+        if path.is_empty() {
+            return Err(anyhow::anyhow!("o caminho do workspace não pode ser vazio"));
+        }
+        let conn = self.conn.lock();
+        let changed = match conn.execute(
+            "UPDATE workspaces SET name = ?2, path = ?3, pinned = ?4, trusted = ?5, \
+             last_opened_at = ?6, updated_at = ?7 WHERE id = ?1",
+            params![
+                &workspace.id,
+                name,
+                path,
+                if workspace.pinned { 1i64 } else { 0i64 },
+                if workspace.trusted { 1i64 } else { 0i64 },
+                workspace.last_opened_at,
+                now_ms(),
+            ],
+        ) {
+            Ok(changed) => changed,
+            Err(error) if is_constraint_violation(&error) => {
+                return Err(anyhow::anyhow!(
+                    "já existe um workspace para o caminho `{path}`"
+                ));
+            }
+            Err(error) => return Err(error).context("falha ao atualizar workspace"),
+        };
+        if changed == 0 {
+            return Err(anyhow::anyhow!("workspace não encontrado: {}", workspace.id));
+        }
+        Ok(())
+    }
+
+    pub fn touch_workspace(&self, id: &str) -> anyhow::Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE workspaces SET updated_at = ?2 WHERE id = ?1",
+            params![id, now_ms()],
+        )
+        .context("falha ao atualizar a data do workspace")?;
+        Ok(())
+    }
+
+    /// Marca o workspace como aberto agora (ordena a sidebar).
+    pub fn mark_workspace_opened(&self, id: &str) -> anyhow::Result<()> {
+        let now = now_ms();
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE workspaces SET last_opened_at = ?2, updated_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )
+        .context("falha ao marcar o workspace como aberto")?;
+        Ok(())
+    }
+
+    pub fn set_workspace_pinned(&self, id: &str, pinned: bool) -> anyhow::Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE workspaces SET pinned = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, if pinned { 1i64 } else { 0i64 }, now_ms()],
+        )
+        .context("falha ao fixar/desafixar workspace")?;
+        Ok(())
+    }
+
+    /// Marca a pasta como confiável ("Confiar nesta pasta") ou revoga.
+    pub fn set_workspace_trusted(&self, id: &str, trusted: bool) -> anyhow::Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE workspaces SET trusted = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, if trusted { 1i64 } else { 0i64 }, now_ms()],
+        )
+        .context("falha ao alterar a confiança do workspace")?;
+        Ok(())
+    }
+
+    /// Remove o workspace. As sessões sobrevivem (ficam sem workspace) e as
+    /// regras de aprovação com escopo de workspace são apagadas junto.
+    /// Devolve `true` quando havia um workspace para remover.
+    pub fn delete_workspace(&self, id: &str) -> anyhow::Result<bool> {
+        let conn = self.conn.lock();
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE conversations SET workspace_id = NULL WHERE workspace_id = ?1",
+            [id],
+        )
+        .context("falha ao desvincular as sessões do workspace")?;
+        tx.execute(
+            "DELETE FROM approval_rules WHERE scope = 'workspace' AND scope_id = ?1",
+            [id],
+        )
+        .context("falha ao apagar as regras do workspace")?;
+        let removed = tx
+            .execute("DELETE FROM workspaces WHERE id = ?1", [id])
+            .context("falha ao remover o workspace")?;
+        tx.commit()?;
+        Ok(removed > 0)
+    }
+
+    /// Sessões de código de um workspace (ordem da sidebar).
+    pub fn list_conversations_for_workspace(
+        &self,
+        workspace_id: &str,
+    ) -> anyhow::Result<Vec<Conversation>> {
+        let conn = self.conn.lock();
+        let sql = format!(
+            "SELECT {CONVERSATION_COLUMNS} FROM conversations WHERE workspace_id = ?1 \
+             ORDER BY pinned DESC, updated_at DESC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([workspace_id], |row| conversation_from_row(row))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar as sessões do workspace")
+    }
+
+    /* ---------------- harness de código: eventos ---------------- */
+
+    /// Anexa um evento à trilha da conversa com `seq` monotônico (1, 2, 3…).
+    /// A leitura/inserção roda numa transação, então dois appends concorrentes
+    /// nunca repetem `seq` (há também um índice único como rede de segurança).
+    pub fn append_code_event(
+        &self,
+        conversation_id: &str,
+        turn_id: Option<&str>,
+        kind: &str,
+        payload: &str,
+    ) -> anyhow::Result<StoredCodeEvent> {
+        let kind = kind.trim();
+        if kind.is_empty() {
+            return Err(anyhow::anyhow!("o tipo do evento não pode ser vazio"));
+        }
+        let turn_id = turn_id.map(str::trim).filter(|value| !value.is_empty());
+        let created_at = now_ms();
+        let conn = self.conn.lock();
+        let tx = conn.unchecked_transaction()?;
+        let seq: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(seq), 0) + 1 FROM code_events WHERE conversation_id = ?1",
+                [conversation_id],
+                |row| row.get(0),
+            )
+            .context("falha ao calcular o seq do evento")?;
+        tx.execute(
+            "INSERT INTO code_events (conversation_id, turn_id, seq, kind, payload, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![conversation_id, turn_id, seq, kind, payload, created_at],
+        )
+        .context("falha ao gravar o evento do agente")?;
+        let id = tx.last_insert_rowid();
+        tx.commit()?;
+        Ok(StoredCodeEvent {
+            id,
+            conversation_id: conversation_id.to_string(),
+            turn_id: turn_id.map(str::to_string),
+            seq,
+            kind: kind.to_string(),
+            payload: payload.to_string(),
+            created_at,
+        })
+    }
+
+    /// Eventos da conversa a partir de `from_seq` **inclusive** (replay).
+    pub fn list_code_events(
+        &self,
+        conversation_id: &str,
+        from_seq: i64,
+    ) -> anyhow::Result<Vec<StoredCodeEvent>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, turn_id, seq, kind, payload, created_at \
+             FROM code_events WHERE conversation_id = ?1 AND seq >= ?2 ORDER BY seq ASC",
+        )?;
+        let rows = stmt.query_map(params![conversation_id, from_seq], |row| {
+            code_event_from_row(row)
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar os eventos do agente")
+    }
+
+    /// Último evento de um `kind` (projeção de estado, ex.: plano/todos/uso).
+    pub fn latest_code_event(
+        &self,
+        conversation_id: &str,
+        kind: &str,
+    ) -> anyhow::Result<Option<StoredCodeEvent>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id, conversation_id, turn_id, seq, kind, payload, created_at \
+             FROM code_events WHERE conversation_id = ?1 AND kind = ?2 \
+             ORDER BY seq DESC LIMIT 1",
+            params![conversation_id, kind.trim()],
+            |row| code_event_from_row(row),
+        )
+        .optional()
+        .context("falha ao ler o último evento do agente")
+    }
+
+    /* ---------------- harness de código: journal ---------------- */
+
+    /// Registra uma escrita/edição de arquivo feita pelo agente.
+    /// Devolve o id da linha inserida.
+    pub fn append_file_journal(&self, entry: &FileJournalEntry) -> anyhow::Result<i64> {
+        let path = entry.path.trim();
+        if path.is_empty() {
+            return Err(anyhow::anyhow!("o caminho do arquivo não pode ser vazio"));
+        }
+        if entry.turn_id.trim().is_empty() {
+            return Err(anyhow::anyhow!("o turno do journal não pode ser vazio"));
+        }
+        let created_at = if entry.created_at > 0 {
+            entry.created_at
+        } else {
+            now_ms()
+        };
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO file_journal \
+             (conversation_id, turn_id, path, change_kind, before_hash, after_hash, added, \
+              removed, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                &entry.conversation_id,
+                entry.turn_id.trim(),
+                path,
+                file_change_kind_to_str(entry.change_kind),
+                entry.before_hash,
+                entry.after_hash,
+                entry.added.map(i64::from),
+                entry.removed.map(i64::from),
+                created_at,
+            ],
+        )
+        .context("falha ao gravar o journal de arquivos")?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// Journal de um turno (painel Alterações), em ordem cronológica.
+    pub fn list_file_journal_for_turn(
+        &self,
+        conversation_id: &str,
+        turn_id: &str,
+    ) -> anyhow::Result<Vec<FileJournalEntry>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, turn_id, path, change_kind, before_hash, after_hash, \
+             added, removed, created_at \
+             FROM file_journal WHERE conversation_id = ?1 AND turn_id = ?2 ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![conversation_id, turn_id], |row| {
+            file_journal_from_row(row)
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar o journal do turno")
+    }
+
+    /// Journal completo da sessão, em ordem cronológica.
+    pub fn list_file_journal(
+        &self,
+        conversation_id: &str,
+    ) -> anyhow::Result<Vec<FileJournalEntry>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, turn_id, path, change_kind, before_hash, after_hash, \
+             added, removed, created_at \
+             FROM file_journal WHERE conversation_id = ?1 ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map([conversation_id], |row| file_journal_from_row(row))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar o journal da sessão")
+    }
+
+    /* ---------------- harness de código: resumos ---------------- */
+
+    /// Registra um resumo de compactação para a faixa `[from_seq, to_seq]`.
+    pub fn insert_session_summary(
+        &self,
+        conversation_id: &str,
+        from_seq: i64,
+        to_seq: i64,
+        content: &str,
+        tokens: Option<u32>,
+    ) -> anyhow::Result<SessionSummary> {
+        if from_seq < 1 || to_seq < from_seq {
+            return Err(anyhow::anyhow!(
+                "faixa de compactação inválida: {from_seq}..{to_seq}"
+            ));
+        }
+        let summary = SessionSummary {
+            id: uuid::Uuid::new_v4().to_string(),
+            conversation_id: conversation_id.to_string(),
+            from_seq,
+            to_seq,
+            content: content.to_string(),
+            tokens,
+            created_at: now_ms(),
+        };
+        {
+            let conn = self.conn.lock();
+            conn.execute(
+                "INSERT INTO session_summaries \
+                 (id, conversation_id, from_seq, to_seq, content, tokens, created_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    &summary.id,
+                    &summary.conversation_id,
+                    summary.from_seq,
+                    summary.to_seq,
+                    &summary.content,
+                    summary.tokens.map(i64::from),
+                    summary.created_at,
+                ],
+            )
+            .context("falha ao gravar o resumo da sessão")?;
+        }
+        Ok(summary)
+    }
+
+    pub fn list_session_summaries(
+        &self,
+        conversation_id: &str,
+    ) -> anyhow::Result<Vec<SessionSummary>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, from_seq, to_seq, content, tokens, created_at \
+             FROM session_summaries WHERE conversation_id = ?1 ORDER BY from_seq ASC, created_at ASC",
+        )?;
+        let rows = stmt.query_map([conversation_id], |row| session_summary_from_row(row))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar os resumos da sessão")
+    }
+
+    /// Resumo mais recente (maior `to_seq`), usado para montar o contexto.
+    pub fn latest_session_summary(
+        &self,
+        conversation_id: &str,
+    ) -> anyhow::Result<Option<SessionSummary>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id, conversation_id, from_seq, to_seq, content, tokens, created_at \
+             FROM session_summaries WHERE conversation_id = ?1 \
+             ORDER BY to_seq DESC, created_at DESC LIMIT 1",
+            [conversation_id],
+            |row| session_summary_from_row(row),
+        )
+        .optional()
+        .context("falha ao ler o resumo mais recente da sessão")
+    }
+
+    /* ---------------- harness de código: regras de aprovação ---------------- */
+
+    /// Persiste uma regra já montada (id/created_at fornecidos pelo chamador).
+    pub fn insert_approval_rule(&self, rule: &ApprovalRule) -> anyhow::Result<()> {
+        if rule.tool.trim().is_empty() {
+            return Err(anyhow::anyhow!("a regra precisa de uma ferramenta"));
+        }
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO approval_rules \
+             (id, scope, scope_id, tool, matcher, pattern, decision, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                &rule.id,
+                rule.scope.as_str(),
+                rule.scope_id,
+                rule.tool.trim(),
+                rule.matcher.trim(),
+                rule.pattern.trim(),
+                rule.decision.as_str(),
+                rule.created_at,
+            ],
+        )
+        .context("falha ao gravar a regra de aprovação")?;
+        Ok(())
+    }
+
+    /// Cria a regra gerando `id`/`created_at` (caminho usado pelos comandos).
+    pub fn create_approval_rule(
+        &self,
+        spec: &NewApprovalRule<'_>,
+    ) -> anyhow::Result<ApprovalRule> {
+        let tool = spec.tool.trim();
+        if tool.is_empty() {
+            return Err(anyhow::anyhow!("a regra precisa de uma ferramenta"));
+        }
+        let matcher = spec.matcher.trim();
+        if matcher.is_empty() {
+            return Err(anyhow::anyhow!("a regra precisa de um matcher"));
+        }
+        let rule = ApprovalRule {
+            id: uuid::Uuid::new_v4().to_string(),
+            scope: spec.scope,
+            scope_id: spec.scope_id.map(str::to_string),
+            tool: tool.to_string(),
+            matcher: matcher.to_string(),
+            pattern: spec.pattern.trim().to_string(),
+            decision: spec.decision,
+            created_at: now_ms(),
+        };
+        self.insert_approval_rule(&rule)?;
+        Ok(rule)
+    }
+
+    pub fn list_approval_rules(&self) -> anyhow::Result<Vec<ApprovalRule>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, scope, scope_id, tool, matcher, pattern, decision, created_at \
+             FROM approval_rules ORDER BY created_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map([], |row| approval_rule_from_row(row))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar as regras de aprovação")
+    }
+
+    /// Regras de um escopo exato (`scope_id` `None` casa com NULL).
+    pub fn list_approval_rules_for_scope(
+        &self,
+        scope: ApprovalScope,
+        scope_id: Option<&str>,
+    ) -> anyhow::Result<Vec<ApprovalRule>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, scope, scope_id, tool, matcher, pattern, decision, created_at \
+             FROM approval_rules WHERE scope = ?1 AND scope_id IS ?2 \
+             ORDER BY created_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(params![scope.as_str(), scope_id], |row| {
+            approval_rule_from_row(row)
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar as regras do escopo")
+    }
+
+    /// Regras que valem para uma sessão: globais + as da sessão + as do
+    /// workspace dela (insumo direto da política de permissões).
+    pub fn list_approval_rules_for_context(
+        &self,
+        conversation_id: Option<&str>,
+        workspace_id: Option<&str>,
+    ) -> anyhow::Result<Vec<ApprovalRule>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, scope, scope_id, tool, matcher, pattern, decision, created_at \
+             FROM approval_rules \
+             WHERE scope = 'global' \
+                OR (scope = 'session' AND scope_id = ?1) \
+                OR (scope = 'workspace' AND scope_id = ?2) \
+             ORDER BY created_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(params![conversation_id, workspace_id], |row| {
+            approval_rule_from_row(row)
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar as regras de aprovação aplicáveis")
+    }
+
+    /// Devolve `true` quando existia uma regra com o id.
+    pub fn delete_approval_rule(&self, id: &str) -> anyhow::Result<bool> {
+        let conn = self.conn.lock();
+        let removed = conn
+            .execute("DELETE FROM approval_rules WHERE id = ?1", [id])
+            .context("falha ao remover a regra de aprovação")?;
+        Ok(removed > 0)
+    }
+
+    pub fn delete_approval_rules_for_scope(
+        &self,
+        scope: ApprovalScope,
+        scope_id: Option<&str>,
+    ) -> anyhow::Result<usize> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM approval_rules WHERE scope = ?1 AND scope_id IS ?2",
+            params![scope.as_str(), scope_id],
+        )
+        .context("falha ao remover as regras do escopo")
+    }
+
+    /* ---------------- harness de código: sessão ---------------- */
+
+    /// Associa (ou desassocia, com `None`) a sessão a um workspace. O workspace
+    /// precisa existir; a conversa também (erro claro em ambos os casos).
+    pub fn set_conversation_workspace(
+        &self,
+        id: &str,
+        workspace_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        if let Some(workspace_id) = workspace_id {
+            if self.get_workspace(workspace_id)?.is_none() {
+                return Err(anyhow::anyhow!(
+                    "workspace não encontrado: {workspace_id}"
+                ));
+            }
+        }
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE conversations SET workspace_id = ?2 WHERE id = ?1",
+                params![id, workspace_id],
+            )
+            .context("falha ao associar a sessão ao workspace")?;
+        if changed == 0 {
+            return Err(anyhow::anyhow!("conversa não encontrada: {id}"));
+        }
+        Ok(())
+    }
+
+    pub fn clear_conversation_workspace(&self, id: &str) -> anyhow::Result<()> {
+        self.set_conversation_workspace(id, None)
+    }
+
+    /// Define o motor do agente da sessão (`lumina` hoje). Vazio é rejeitado.
+    pub fn set_conversation_agent_kind(&self, id: &str, agent_kind: &str) -> anyhow::Result<()> {
+        let agent_kind = agent_kind.trim();
+        if agent_kind.is_empty() {
+            return Err(anyhow::anyhow!("o motor do agente não pode ser vazio"));
+        }
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE conversations SET agent_kind = ?2 WHERE id = ?1",
+                params![id, agent_kind],
+            )
+            .context("falha ao atualizar o motor do agente")?;
+        if changed == 0 {
+            return Err(anyhow::anyhow!("conversa não encontrada: {id}"));
+        }
+        Ok(())
+    }
+
+    pub fn set_conversation_permission_mode(
+        &self,
+        id: &str,
+        mode: PermissionMode,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE conversations SET permission_mode = ?2 WHERE id = ?1",
+                params![id, mode.as_str()],
+            )
+            .context("falha ao atualizar o modo de permissão da sessão")?;
+        if changed == 0 {
+            return Err(anyhow::anyhow!("conversa não encontrada: {id}"));
+        }
+        Ok(())
+    }
+
+    pub fn get_conversation_permission_mode(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<Option<PermissionMode>> {
+        let conn = self.conn.lock();
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT permission_mode FROM conversations WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("falha ao ler o modo de permissão da sessão")?;
+        Ok(raw.map(|value| PermissionMode::from_str(&value)))
     }
 
     /* ---------------- messages ---------------- */
@@ -1316,7 +2276,8 @@ impl Db {
         }))
     }
 
-    /// Deletes every conversation, message, attachment and artifact record.
+    /// Deletes every conversation, message, attachment, artifact, code-harness
+    /// record (workspaces/journal/eventos/resumos/regras) and meta key.
     pub fn reset(&self) -> anyhow::Result<()> {
         let conn = self.conn.lock();
         let tx = conn.unchecked_transaction()?;
@@ -1325,6 +2286,11 @@ impl Db {
             "artifacts",
             "attachments",
             "usage_log",
+            "code_events",
+            "file_journal",
+            "session_summaries",
+            "approval_rules",
+            "workspaces",
             "conversations",
             "meta",
         ] {
@@ -2553,5 +3519,652 @@ mod tests {
         db.reset().expect("reset");
         assert!(db.list_library_artifacts().expect("biblioteca").is_empty());
         assert!(db.list_all_artifacts().expect("artefatos").is_empty());
+    }
+
+    /* -------------------------------------------------------------- */
+    /* Harness de código: migração e persistência                     */
+    /* -------------------------------------------------------------- */
+
+    fn code_conversation(db: &Db) -> Conversation {
+        db.create_conversation_with_mode(
+            "Sessão de código",
+            "opencode-go",
+            "glm-5.3-flash",
+            "code",
+        )
+        .expect("criar conversa de código")
+    }
+
+    fn code_harness_rule<'a>(
+        scope: ApprovalScope,
+        scope_id: Option<&'a str>,
+        tool: &'a str,
+    ) -> NewApprovalRule<'a> {
+        NewApprovalRule {
+            scope,
+            scope_id,
+            tool,
+            matcher: "prefix",
+            pattern: "npm run",
+            decision: ApprovalDecision::Approved,
+        }
+    }
+
+    /// Banco legado (anterior ao harness de código) com a tabela `conversations`
+    /// sem `workspace_id`/`agent_kind`/`permission_mode`.
+    fn create_legacy_code_harness_database(path: &Path) {
+        let conn = Connection::open(path).expect("abrir banco legado");
+        legacy_conversations_table(&conn);
+    }
+
+    #[test]
+    fn migrates_legacy_conversations_with_the_code_harness_columns() {
+        let temp = TempDir::new("lumina-db-code-harness-migrate");
+        let path = temp.path.join("lumina.db");
+        create_legacy_code_harness_database(&path);
+
+        // `Db::open` roda o schema novo (idempotente) e as migrações aditivas.
+        let db = Db::open(&path).expect("abrir e migrar banco legado");
+        let conversation = db
+            .get_conversation("legacy-1")
+            .expect("ler conversa legada")
+            .expect("conversa antiga preservada");
+        assert_eq!(conversation.title, "Conversa antiga");
+        assert!(conversation.pinned);
+        assert_eq!(conversation.mode, "chat");
+        assert_eq!(conversation.workspace_id, None);
+        assert_eq!(conversation.agent_kind, "lumina");
+        assert_eq!(conversation.permission_mode, PermissionMode::Edit);
+        drop(db);
+
+        // As colunas existem fisicamente e os defaults valem para a linha antiga.
+        let conn = Connection::open(&path).expect("reabrir banco migrado");
+        let columns = table_columns(&conn, "conversations").expect("colunas");
+        for column in ["workspace_id", "agent_kind", "permission_mode"] {
+            assert!(
+                columns.iter().any(|(name, _)| name == column),
+                "coluna {column} ausente após a migração"
+            );
+        }
+        let raw: (Option<String>, String, String) = conn
+            .query_row(
+                "SELECT workspace_id, agent_kind, permission_mode FROM conversations \
+                 WHERE id = 'legacy-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("valores migrados");
+        assert_eq!(raw, (None, "lumina".to_string(), "edit".to_string()));
+        drop(conn);
+
+        // A migração é idempotente: reabrir o arquivo mantém tudo.
+        let reopened = Db::open(&path).expect("reabrir");
+        let conversation = reopened
+            .get_conversation("legacy-1")
+            .expect("get")
+            .expect("presente");
+        assert_eq!(conversation.permission_mode, PermissionMode::Edit);
+    }
+
+    #[test]
+    fn creates_lists_and_finds_workspaces() {
+        let db = test_db();
+        let alpha = db
+            .create_workspace("  Alpha  ", "C:\\projetos\\alpha")
+            .expect("criar alpha");
+        assert_eq!(alpha.name, "Alpha", "nome é aparado");
+        assert_eq!(alpha.path, "C:\\projetos\\alpha");
+        assert!(alpha.last_opened_at.is_none());
+        assert!(!alpha.pinned);
+        assert!(!alpha.trusted);
+        assert!(alpha.git.is_none(), "git não é coluna; é detectado em memória");
+
+        let found = db
+            .find_workspace_by_path("  C:\\projetos\\alpha  ")
+            .expect("buscar por caminho")
+            .expect("workspace presente");
+        assert_eq!(found.id, alpha.id);
+        assert!(db
+            .find_workspace_by_path("C:\\projetos\\inexistente")
+            .expect("buscar")
+            .is_none());
+
+        let duplicate = db.create_workspace("Outro nome", "C:\\projetos\\alpha");
+        let error = duplicate.expect_err("caminho duplicado é rejeitado");
+        assert!(
+            format!("{error}").contains("já existe"),
+            "erro amigável: {error}"
+        );
+        assert!(db.create_workspace("Vazio", "   ").is_err());
+
+        let beta = db
+            .create_workspace("Beta", "C:\\projetos\\beta")
+            .expect("criar beta");
+        let listed = db.list_workspaces().expect("listar");
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].id, alpha.id, "empate de data: ordena por nome");
+        assert_eq!(listed[1].id, beta.id);
+    }
+
+    #[test]
+    fn updates_pins_trusts_and_opens_workspaces() {
+        let db = test_db();
+        let workspace = db
+            .create_workspace("Projeto", "C:\\projetos\\p")
+            .expect("criar");
+        let created_at = workspace.created_at;
+
+        db.set_workspace_pinned(&workspace.id, true)
+            .expect("fixar");
+        db.set_workspace_trusted(&workspace.id, true)
+            .expect("confiar");
+        db.mark_workspace_opened(&workspace.id).expect("abrir");
+        let mut loaded = db
+            .get_workspace(&workspace.id)
+            .expect("get")
+            .expect("presente");
+        assert!(loaded.pinned);
+        assert!(loaded.trusted);
+        assert!(
+            loaded.last_opened_at.is_some_and(|value| value >= created_at),
+            "last_opened_at carimbado"
+        );
+        assert!(loaded.updated_at >= created_at);
+
+        // `update_workspace` grava o estado completo do struct (inclusive
+        // pinned/trusted), por isso parte do estado recém-lido.
+        loaded.name = "Projeto renomeado".to_string();
+        loaded.pinned = false;
+        db.update_workspace(&loaded).expect("atualizar metadados");
+        let reloaded = db
+            .get_workspace(&workspace.id)
+            .expect("get")
+            .expect("presente");
+        assert_eq!(reloaded.name, "Projeto renomeado");
+        assert!(!reloaded.pinned);
+        assert!(reloaded.trusted);
+
+        // `mark_workspace_opened` ordena a sidebar pelo último acesso.
+        let other = db
+            .create_workspace("Outro", "C:\\projetos\\o")
+            .expect("criar outro");
+        db.mark_workspace_opened(&other.id).expect("abrir outro");
+        let listed = db.list_workspaces().expect("listar");
+        assert_eq!(listed[0].id, other.id, "último aberto vem primeiro");
+
+        db.touch_workspace(&other.id).expect("touch");
+        let missing = Workspace {
+            id: "ws-inexistente".to_string(),
+            ..other.clone()
+        };
+        assert!(
+            db.update_workspace(&missing).is_err(),
+            "update de workspace desconhecido é erro claro"
+        );
+    }
+
+    #[test]
+    fn deletes_workspace_unlinks_sessions_and_drops_its_rules() {
+        let db = test_db();
+        let workspace = db
+            .create_workspace("App", "C:\\projetos\\app")
+            .expect("criar workspace");
+        let conversation = code_conversation(&db);
+        db.set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("associar");
+        db.create_approval_rule(&code_harness_rule(
+            ApprovalScope::Workspace,
+            Some(&workspace.id),
+            "shell",
+        ))
+        .expect("regra do workspace");
+        assert_eq!(db.list_approval_rules().expect("regras").len(), 1);
+
+        assert!(db.delete_workspace(&workspace.id).expect("remover"));
+        assert!(
+            !db.delete_workspace(&workspace.id).expect("remover de novo"),
+            "segunda remoção devolve false"
+        );
+        let reloaded = db
+            .get_conversation(&conversation.id)
+            .expect("get")
+            .expect("sessão sobrevive");
+        assert!(reloaded.workspace_id.is_none(), "sessão fica sem workspace");
+        assert!(
+            db.list_approval_rules().expect("regras").is_empty(),
+            "regras de escopo do workspace são apagadas junto"
+        );
+    }
+
+    #[test]
+    fn appends_code_events_with_monotonic_seq_per_conversation() {
+        let db = test_db();
+        let first = db
+            .append_code_event("conv-1", Some("turn-1"), "step", r#"{"step":1}"#)
+            .expect("evento 1");
+        let second = db
+            .append_code_event("conv-1", None, "tool", r#"{"tool":"read"}"#)
+            .expect("evento 2");
+        let third = db
+            .append_code_event("conv-1", Some("turn-2"), "step", r#"{"step":2}"#)
+            .expect("evento 3");
+        assert_eq!((first.seq, second.seq, third.seq), (1, 2, 3));
+        assert_eq!(first.turn_id.as_deref(), Some("turn-1"));
+        assert_eq!(second.turn_id, None);
+        assert_eq!(first.conversation_id, "conv-1");
+        assert_eq!(first.kind, "step");
+
+        let other = db
+            .append_code_event("conv-2", None, "step", "{}")
+            .expect("outra conversa");
+        assert_eq!(other.seq, 1, "o seq é por conversa");
+
+        let from_two = db.list_code_events("conv-1", 2).expect("listar desde seq 2");
+        assert_eq!(
+            from_two.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+        assert!(db
+            .list_code_events("conv-1", 9)
+            .expect("listar")
+            .is_empty());
+
+        let latest_step = db
+            .latest_code_event("conv-1", "step")
+            .expect("último step")
+            .expect("presente");
+        assert_eq!(latest_step.seq, 3);
+        assert!(db
+            .latest_code_event("conv-1", "inexistente")
+            .expect("último")
+            .is_none());
+        assert!(db
+            .append_code_event("conv-1", None, "   ", "{}")
+            .is_err());
+    }
+
+    #[test]
+    fn journals_file_changes_per_turn_and_conversation() {
+        let db = test_db();
+        let created = FileJournalEntry::new(
+            "conv-1",
+            "turn-1",
+            "src/main.rs",
+            FileChangeKind::Created,
+        )
+        .with_hashes(None, Some("abc123"))
+        .with_line_counts(12, 0);
+        let id = db.append_file_journal(&created).expect("journal");
+        assert!(id > 0);
+
+        let modified = FileJournalEntry::new(
+            "conv-1",
+            "turn-1",
+            "src/lib.rs",
+            FileChangeKind::Modified,
+        )
+        .with_hashes(Some("old"), Some("new"))
+        .with_line_counts(4, 2);
+        db.append_file_journal(&modified).expect("journal 2");
+        db.append_file_journal(&FileJournalEntry::new(
+            "conv-1",
+            "turn-2",
+            "README.md",
+            FileChangeKind::Deleted,
+        ))
+        .expect("journal 3");
+
+        let turn = db
+            .list_file_journal_for_turn("conv-1", "turn-1")
+            .expect("por turno");
+        assert_eq!(turn.len(), 2);
+        assert_eq!(turn[0].path, "src/main.rs");
+        assert_eq!(turn[0].change_kind, FileChangeKind::Created);
+        assert_eq!(turn[0].after_hash.as_deref(), Some("abc123"));
+        assert_eq!((turn[0].added, turn[0].removed), (Some(12), Some(0)));
+        assert_eq!(turn[1].change_kind, FileChangeKind::Modified);
+        assert_eq!(turn[1].before_hash.as_deref(), Some("old"));
+
+        let all = db.list_file_journal("conv-1").expect("por conversa");
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[2].change_kind, FileChangeKind::Deleted);
+        assert!(db
+            .list_file_journal_for_turn("conv-1", "turn-9")
+            .expect("vazio")
+            .is_empty());
+
+        assert!(db
+            .append_file_journal(&FileJournalEntry::new(
+                "conv-1",
+                "turn-1",
+                "  ",
+                FileChangeKind::Modified,
+            ))
+            .is_err());
+        assert!(db
+            .append_file_journal(&FileJournalEntry::new(
+                "conv-1",
+                "  ",
+                "a.txt",
+                FileChangeKind::Modified,
+            ))
+            .is_err());
+    }
+
+    #[test]
+    fn session_summaries_roundtrip_and_latest() {
+        let db = test_db();
+        let first = db
+            .insert_session_summary("conv-1", 1, 10, "Resumo inicial", Some(500))
+            .expect("resumo 1");
+        assert_eq!(first.from_seq, 1);
+        assert_eq!(first.tokens, Some(500));
+        assert_eq!(first.content, "Resumo inicial");
+        db.insert_session_summary("conv-1", 11, 20, "Resumo seguinte", None)
+            .expect("resumo 2");
+        db.insert_session_summary("conv-2", 1, 5, "Outra sessão", Some(1))
+            .expect("outra sessão");
+
+        let listed = db.list_session_summaries("conv-1").expect("listar");
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].from_seq, 1);
+        let latest = db
+            .latest_session_summary("conv-1")
+            .expect("último")
+            .expect("presente");
+        assert_eq!(latest.to_seq, 20);
+        assert_eq!(latest.tokens, None);
+        assert!(db
+            .latest_session_summary("conv-9")
+            .expect("último")
+            .is_none());
+
+        assert!(db
+            .insert_session_summary("conv-1", 0, 5, "x", None)
+            .is_err());
+        assert!(db
+            .insert_session_summary("conv-1", 10, 5, "x", None)
+            .is_err());
+    }
+
+    #[test]
+    fn approval_rules_scope_lookup_and_delete() {
+        let db = test_db();
+        db.create_approval_rule(&code_harness_rule(ApprovalScope::Global, None, "shell"))
+            .expect("global");
+        db.create_approval_rule(&code_harness_rule(
+            ApprovalScope::Session,
+            Some("conv-1"),
+            "shell",
+        ))
+        .expect("sessão 1");
+        db.create_approval_rule(&code_harness_rule(
+            ApprovalScope::Session,
+            Some("conv-2"),
+            "shell",
+        ))
+        .expect("sessão 2");
+        db.create_approval_rule(&code_harness_rule(
+            ApprovalScope::Workspace,
+            Some("ws-1"),
+            "shell",
+        ))
+        .expect("workspace 1");
+        db.create_approval_rule(&code_harness_rule(
+            ApprovalScope::Workspace,
+            Some("ws-2"),
+            "shell",
+        ))
+        .expect("workspace 2");
+
+        assert_eq!(db.list_approval_rules().expect("todas").len(), 5);
+        assert_eq!(
+            db.list_approval_rules_for_scope(ApprovalScope::Global, None)
+                .expect("global")
+                .len(),
+            1
+        );
+        let session = db
+            .list_approval_rules_for_scope(ApprovalScope::Session, Some("conv-1"))
+            .expect("sessão");
+        assert_eq!(session.len(), 1);
+        assert_eq!(session[0].scope_id.as_deref(), Some("conv-1"));
+        assert_eq!(session[0].decision, ApprovalDecision::Approved);
+        assert_eq!(session[0].matcher, "prefix");
+        assert_eq!(session[0].pattern, "npm run");
+
+        // Contexto da política: globais + regras da sessão + regras do workspace.
+        let context = db
+            .list_approval_rules_for_context(Some("conv-1"), Some("ws-1"))
+            .expect("contexto");
+        assert_eq!(context.len(), 3);
+        let only_session = db
+            .list_approval_rules_for_context(Some("conv-2"), None)
+            .expect("contexto sem workspace");
+        assert_eq!(only_session.len(), 2);
+
+        assert!(db
+            .create_approval_rule(&NewApprovalRule {
+                scope: ApprovalScope::Global,
+                scope_id: None,
+                tool: "  ",
+                matcher: "exact",
+                pattern: "x",
+                decision: ApprovalDecision::Denied,
+            })
+            .is_err());
+        assert!(db
+            .create_approval_rule(&NewApprovalRule {
+                scope: ApprovalScope::Global,
+                scope_id: None,
+                tool: "shell",
+                matcher: " ",
+                pattern: "x",
+                decision: ApprovalDecision::Denied,
+            })
+            .is_err());
+
+        assert_eq!(
+            db.delete_approval_rules_for_scope(ApprovalScope::Workspace, Some("ws-1"))
+                .expect("apagar escopo"),
+            1
+        );
+        assert_eq!(db.list_approval_rules().expect("todas").len(), 4);
+        let single = db
+            .create_approval_rule(&code_harness_rule(
+                ApprovalScope::Session,
+                Some("conv-1"),
+                "shell",
+            ))
+            .expect("regra individual");
+        assert!(db.delete_approval_rule(&single.id).expect("apagar"));
+        assert!(!db.delete_approval_rule(&single.id).expect("apagar de novo"));
+    }
+
+    #[test]
+    fn associates_workspace_and_updates_session_settings() {
+        let db = test_db();
+        let workspace = db
+            .create_workspace("App", "C:\\projetos\\app")
+            .expect("workspace");
+        let conversation = code_conversation(&db);
+        assert!(conversation.workspace_id.is_none());
+        assert_eq!(conversation.agent_kind, "lumina");
+        assert_eq!(conversation.permission_mode, PermissionMode::Edit);
+
+        db.set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("associar workspace");
+        let loaded = db
+            .get_conversation(&conversation.id)
+            .expect("get")
+            .expect("presente");
+        assert_eq!(
+            loaded.workspace_id.as_deref(),
+            Some(workspace.id.as_str())
+        );
+        assert_eq!(
+            db.list_conversations_for_workspace(&workspace.id)
+                .expect("sessões do workspace")
+                .len(),
+            1
+        );
+
+        db.set_conversation_permission_mode(&conversation.id, PermissionMode::ReadOnly)
+            .expect("modo de permissão");
+        assert_eq!(
+            db.get_conversation_permission_mode(&conversation.id)
+                .expect("ler modo"),
+            Some(PermissionMode::ReadOnly)
+        );
+        let loaded = db
+            .get_conversation(&conversation.id)
+            .expect("get")
+            .expect("presente");
+        assert_eq!(loaded.permission_mode, PermissionMode::ReadOnly);
+
+        db.set_conversation_agent_kind(&conversation.id, " acp:codex ")
+            .expect("motor do agente");
+        let loaded = db
+            .get_conversation(&conversation.id)
+            .expect("get")
+            .expect("presente");
+        assert_eq!(loaded.agent_kind, "acp:codex");
+
+        db.clear_conversation_workspace(&conversation.id)
+            .expect("desassociar");
+        let loaded = db
+            .get_conversation(&conversation.id)
+            .expect("get")
+            .expect("presente");
+        assert!(loaded.workspace_id.is_none());
+
+        // Erros orientativos para ids/campos inválidos.
+        assert!(db
+            .set_conversation_workspace(&conversation.id, Some("ws-inexistente"))
+            .is_err());
+        assert!(db
+            .set_conversation_workspace("conv-inexistente", None)
+            .is_err());
+        assert!(db
+            .set_conversation_agent_kind(&conversation.id, "   ")
+            .is_err());
+        assert!(db
+            .set_conversation_permission_mode("conv-inexistente", PermissionMode::Edit)
+            .is_err());
+        assert_eq!(
+            db.get_conversation_permission_mode("conv-inexistente")
+                .expect("sem conversa"),
+            None
+        );
+        assert!(db
+            .list_conversations_for_workspace("ws-inexistente")
+            .expect("workspace sem sessões")
+            .is_empty());
+    }
+
+    #[test]
+    fn delete_conversation_cleans_code_harness_records() {
+        let db = test_db();
+        let workspace = db
+            .create_workspace("App", "C:\\projetos\\app")
+            .expect("workspace");
+        let conversation = code_conversation(&db);
+        db.set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("associar");
+        db.append_code_event(&conversation.id, Some("turn-1"), "step", "{}")
+            .expect("evento");
+        db.append_file_journal(&FileJournalEntry::new(
+            &conversation.id,
+            "turn-1",
+            "a.txt",
+            FileChangeKind::Created,
+        ))
+        .expect("journal");
+        db.insert_session_summary(&conversation.id, 1, 5, "resumo", None)
+            .expect("resumo");
+        db.create_approval_rule(&NewApprovalRule {
+            scope: ApprovalScope::Session,
+            scope_id: Some(&conversation.id),
+            tool: "shell",
+            matcher: "exact",
+            pattern: "ls",
+            decision: ApprovalDecision::Approved,
+        })
+        .expect("regra da sessão");
+        db.create_approval_rule(&NewApprovalRule {
+            scope: ApprovalScope::Workspace,
+            scope_id: Some(&workspace.id),
+            tool: "shell",
+            matcher: "exact",
+            pattern: "ls",
+            decision: ApprovalDecision::Approved,
+        })
+        .expect("regra do workspace");
+
+        db.delete_conversation(&conversation.id)
+            .expect("excluir sessão");
+
+        assert!(db
+            .list_code_events(&conversation.id, 0)
+            .expect("eventos")
+            .is_empty());
+        assert!(db
+            .list_file_journal(&conversation.id)
+            .expect("journal")
+            .is_empty());
+        assert!(db
+            .list_session_summaries(&conversation.id)
+            .expect("resumos")
+            .is_empty());
+        let rules = db.list_approval_rules().expect("regras restantes");
+        assert_eq!(rules.len(), 1, "só a regra do workspace sobrevive");
+        assert_eq!(rules[0].scope, ApprovalScope::Workspace);
+        assert!(
+            db.get_workspace(&workspace.id)
+                .expect("workspace")
+                .is_some(),
+            "apagar a sessão não apaga o workspace"
+        );
+    }
+
+    #[test]
+    fn reset_clears_code_harness_records() {
+        let db = test_db();
+        let workspace = db
+            .create_workspace("App", "C:\\projetos\\app")
+            .expect("workspace");
+        let conversation = code_conversation(&db);
+        db.set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("associar");
+        db.append_code_event(&conversation.id, Some("turn-1"), "step", "{}")
+            .expect("evento");
+        db.append_file_journal(&FileJournalEntry::new(
+            &conversation.id,
+            "turn-1",
+            "a.txt",
+            FileChangeKind::Modified,
+        ))
+        .expect("journal");
+        db.insert_session_summary(&conversation.id, 1, 5, "resumo", None)
+            .expect("resumo");
+        db.create_approval_rule(&code_harness_rule(ApprovalScope::Global, None, "shell"))
+            .expect("regra global");
+
+        db.reset().expect("reset");
+
+        assert!(db.list_workspaces().expect("workspaces").is_empty());
+        assert!(db
+            .list_code_events(&conversation.id, 0)
+            .expect("eventos")
+            .is_empty());
+        assert!(db
+            .list_file_journal(&conversation.id)
+            .expect("journal")
+            .is_empty());
+        assert!(db
+            .list_session_summaries(&conversation.id)
+            .expect("resumos")
+            .is_empty());
+        assert!(db.list_approval_rules().expect("regras").is_empty());
     }
 }

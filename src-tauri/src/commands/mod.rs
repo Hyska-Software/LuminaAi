@@ -3,9 +3,12 @@
 
 pub mod artifacts;
 pub mod attachments;
+pub mod code;
 pub mod conversations;
+pub mod git;
 pub mod models;
 pub mod oauth;
 pub mod settings;
 pub mod skills;
 pub mod turn;
+pub mod workspace;

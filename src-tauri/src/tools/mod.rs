@@ -12,10 +12,13 @@ use crate::providers::ToolDefinition;
 
 pub mod artifact_library;
 pub mod artifacts;
+pub mod code;
 pub mod code_exec;
 pub mod create_file;
 pub mod fetch_url;
 pub mod genui;
+pub mod pipeline;
+pub mod registry;
 pub mod skills;
 pub mod web_search;
 
@@ -51,6 +54,11 @@ pub struct ToolOutcome {
     pub citations: Vec<Citation>,
     pub artifacts: Vec<Artifact>,
     pub is_error: bool,
+    /// Apresentação estruturada do resultado (diff, lista de tarefas, plano,
+    /// job, aprovação) usada pelos cards do renderer e persistida em
+    /// `ToolCallRecord.presentation`. JSON opaco versionado por `kind` — ver
+    /// `docs/goals/code-harness/TOOLS.md` §1.1.
+    pub presentation: Option<Value>,
 }
 
 impl ToolOutcome {

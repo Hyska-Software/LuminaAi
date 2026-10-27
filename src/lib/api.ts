@@ -4,6 +4,10 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import type {
   AppInfo,
+  ApprovalDecision,
+  ApprovalRule,
+  ApprovalRuleInput,
+  ApprovalScope,
   Artifact,
   ArtifactContent,
   ArtifactPreview,
@@ -11,11 +15,15 @@ import type {
   AttachmentInfo,
   CatalogView,
   CodeEnvironmentStatus,
+  CodeSessionState,
   Conversation,
   ConversationDetail,
   ConversationMode,
+  FileChange,
+  JobView,
   LibraryArtifact,
   LoginChallenge,
+  PermissionMode,
   ProviderAuthStatus,
   ProviderValidation,
   Settings,
@@ -25,6 +33,12 @@ import type {
   TurnEvent,
   TurnPayload,
   TurnResult,
+  Workspace,
+  WorkspaceContext,
+  WorkspaceFileContent,
+  WorkspaceFileEntry,
+  WorkspaceGitCommit,
+  WorkspaceGitStatus,
 } from './types';
 
 export const api = {
@@ -130,6 +144,92 @@ export const api = {
 
   /* -------- turn streaming -------- */
   cancelTurn: (turnId: string) => invoke<boolean>('cancel_turn', { turnId }),
+
+  /* -------- workspace (harness de código) -------- */
+  /** Abre o seletor nativo de pasta e devolve o caminho escolhido (null = cancelado). */
+  pickWorkspaceFolder: () => invoke<string | null>('pick_workspace_folder'),
+  /** Registra/abre uma pasta como workspace (cria a linha no DB). */
+  addWorkspace: (path: string, trusted = false) =>
+    invoke<Workspace>('add_workspace', { path, trusted }),
+  listWorkspaces: () => invoke<Workspace[]>('list_workspaces'),
+  getWorkspace: (id: string) => invoke<WorkspaceContext | null>('get_workspace_context', { id }),
+  renameWorkspace: (id: string, name: string) =>
+    invoke<Workspace>('rename_workspace', { id, name }),
+  removeWorkspace: (id: string) => invoke<void>('remove_workspace', { id }),
+  setWorkspaceTrusted: (id: string, trusted: boolean) =>
+    invoke<Workspace>('set_workspace_trusted', { id, trusted }),
+  setConversationWorkspace: (conversationId: string, workspaceId: string | null) =>
+    invoke<Conversation>('set_conversation_workspace', { conversationId, workspaceId }),
+  openWorkspaceInExplorer: (id: string) => invoke<void>('open_workspace_in_explorer', { id }),
+  listWorkspaceFiles: (workspaceId: string, path = '.', depth = 2) =>
+    invoke<WorkspaceFileEntry[]>('list_workspace_files', { workspaceId, path, depth }),
+  searchWorkspaceFiles: (workspaceId: string, query: string, limit = 50) =>
+    invoke<string[]>('search_workspace_files', { workspaceId, query, limit }),
+  readWorkspaceFile: (workspaceId: string, path: string) =>
+    invoke<WorkspaceFileContent>('read_workspace_file', { workspaceId, path }),
+
+  /* -------- sessão de código -------- */
+  getCodeSessionState: (conversationId: string) =>
+    invoke<CodeSessionState>('get_code_session_state', { conversationId }),
+  setPermissionMode: (conversationId: string, mode: PermissionMode) =>
+    invoke<CodeSessionState>('set_permission_mode', { conversationId, mode }),
+  setPlanMode: (conversationId: string, planMode: boolean) =>
+    invoke<CodeSessionState>('set_plan_mode', { conversationId, planMode }),
+  respondApproval: (
+    approvalId: string,
+    decision: ApprovalDecision,
+    options?: { scope?: ApprovalScope | null; feedback?: string | null },
+  ) =>
+    invoke<boolean>('respond_approval', {
+      approvalId,
+      decision,
+      scope: options?.scope ?? null,
+      feedback: options?.feedback ?? null,
+    }),
+  listApprovalRules: (conversationId: string) =>
+    invoke<ApprovalRule[]>('list_approval_rules', { conversationId }),
+  saveApprovalRule: (input: ApprovalRuleInput) =>
+    invoke<ApprovalRule>('save_approval_rule', { input }),
+  deleteApprovalRule: (id: string) => invoke<void>('delete_approval_rule', { id }),
+  getWorkspaceChanges: (conversationId: string) =>
+    invoke<FileChange[]>('get_workspace_changes', { conversationId }),
+  getFileDiff: (workspaceId: string, path: string, staged = false) =>
+    invoke<string>('get_file_diff', { workspaceId, path, staged }),
+  revertFile: (conversationId: string, path: string) =>
+    invoke<boolean>('revert_file', { conversationId, path }),
+  revertTurn: (conversationId: string, turnId: string) =>
+    invoke<boolean>('revert_turn', { conversationId, turnId }),
+  compactSession: (conversationId: string) => invoke<boolean>('compact_session', { conversationId }),
+
+  /* -------- git (painel) -------- */
+  gitStatus: (workspaceId: string) => invoke<WorkspaceGitStatus>('git_status', { workspaceId }),
+  gitDiff: (workspaceId: string, paths: string[], staged = false) =>
+    invoke<string>('git_diff', { workspaceId, paths, staged }),
+  gitStage: (workspaceId: string, paths: string[]) =>
+    invoke<WorkspaceGitStatus>('git_stage', { workspaceId, paths }),
+  gitUnstage: (workspaceId: string, paths: string[]) =>
+    invoke<WorkspaceGitStatus>('git_unstage', { workspaceId, paths }),
+  gitDiscard: (workspaceId: string, paths: string[]) =>
+    invoke<WorkspaceGitStatus>('git_discard', { workspaceId, paths }),
+  gitCommit: (workspaceId: string, message: string, paths?: string[]) =>
+    invoke<WorkspaceGitStatus>('git_commit', { workspaceId, message, paths: paths ?? null }),
+  gitBranches: (workspaceId: string) =>
+    invoke<{ current: string | null; branches: string[] }>('git_branches', { workspaceId }),
+  gitSwitchBranch: (workspaceId: string, branch: string) =>
+    invoke<WorkspaceGitStatus>('git_switch_branch', { workspaceId, branch }),
+  gitLog: (workspaceId: string, limit = 20) =>
+    invoke<WorkspaceGitCommit[]>('git_log', { workspaceId, limit }),
+  suggestCommitMessage: (workspaceId: string) =>
+    invoke<string>('suggest_commit_message', { workspaceId }),
+
+  /* -------- jobs (processos em background) -------- */
+  listJobs: (conversationId: string) => invoke<JobView[]>('list_jobs', { conversationId }),
+  getJobOutput: (jobId: string, cursor = 0) =>
+    invoke<{ output: string; nextCursor: number; job: JobView }>('get_job_output', {
+      jobId,
+      cursor,
+    }),
+  killJob: (jobId: string) => invoke<JobView>('kill_job', { jobId }),
 
   /**
    * Starts a turn. `onEvent` receives every streamed event; the promise

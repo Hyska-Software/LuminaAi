@@ -87,6 +87,14 @@ interface UiState {
   codePanelOpen: boolean;
   /** Active tab of the Code right panel. */
   codePanelTab: CodePanelTab;
+  /** Workspace ativo do layout Code (`null` = nenhum/nenhuma pasta aberta). */
+  activeWorkspaceId: string | null;
+  /**
+   * Abas de sessão abertas por workspace (`workspaceId -> conversationIds`).
+   * Persistido para o Code restaurar as abas ao reabrir o app (limitação da
+   * fase 1 resolvida em docs/goals/code-harness/WORKBENCH.md §4).
+   */
+  openSessionsByWorkspace: Record<string, string[]>;
   sidebarOpen: boolean;
   /** Persisted width of the desktop sidebar, in px (docs/DESIGN.md §5). */
   sidebarWidth: number;
@@ -115,6 +123,14 @@ interface UiState {
   setCodePanelOpen: (open: boolean) => void;
   toggleCodePanel: () => void;
   setCodePanelTab: (tab: CodePanelTab) => void;
+  /** Define o workspace ativo do layout Code (persistido). */
+  setActiveWorkspace: (workspaceId: string | null) => void;
+  /** Abre (ou ativa) uma aba de sessão dentro de um workspace. */
+  openWorkspaceSession: (workspaceId: string, conversationId: string) => void;
+  /** Fecha uma aba de sessão; devolve o id vizinho sugerido (ou `null`). */
+  closeWorkspaceSession: (workspaceId: string, conversationId: string) => string | null;
+  /** Substitui a lista de abas de um workspace (sincronização com o backend). */
+  setWorkspaceSessions: (workspaceId: string, conversationIds: string[]) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   /** Clamps to `SIDEBAR_WIDTH_MIN`…`SIDEBAR_WIDTH_MAX` and persists the width. */
@@ -176,6 +192,8 @@ export const useUiStore = create<UiState>()(
       codeView: 'session',
       codePanelOpen: true,
       codePanelTab: 'changes',
+      activeWorkspaceId: null,
+      openSessionsByWorkspace: {},
       sidebarOpen: true,
       sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
       settingsOpen: false,
@@ -203,6 +221,34 @@ export const useUiStore = create<UiState>()(
       toggleCodePanel: () => set((state) => ({ codePanelOpen: !state.codePanelOpen })),
       setCodePanelTab: (codePanelTab) =>
         set({ codePanelTab: codePanelTab === 'files' ? 'files' : 'changes' }),
+      setActiveWorkspace: (activeWorkspaceId) => set({ activeWorkspaceId }),
+      openWorkspaceSession: (workspaceId, conversationId) =>
+        set((state) => {
+          const current = state.openSessionsByWorkspace[workspaceId] ?? [];
+          const next = current.includes(conversationId) ? current : [...current, conversationId];
+          return {
+            openSessionsByWorkspace: { ...state.openSessionsByWorkspace, [workspaceId]: next },
+          };
+        }),
+      closeWorkspaceSession: (workspaceId, conversationId) => {
+        const state = get();
+        const current = state.openSessionsByWorkspace[workspaceId] ?? [];
+        const index = current.indexOf(conversationId);
+        if (index < 0) return null;
+        const next = current.filter((id) => id !== conversationId);
+        const neighbor = next[Math.min(index, next.length - 1)] ?? null;
+        set({
+          openSessionsByWorkspace: { ...state.openSessionsByWorkspace, [workspaceId]: next },
+        });
+        return neighbor;
+      },
+      setWorkspaceSessions: (workspaceId, conversationIds) =>
+        set((state) => ({
+          openSessionsByWorkspace: {
+            ...state.openSessionsByWorkspace,
+            [workspaceId]: [...new Set(conversationIds)],
+          },
+        })),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
       setSidebarWidth: (sidebarWidth) => set({ sidebarWidth: clampSidebarWidth(sidebarWidth) }),
@@ -292,6 +338,8 @@ export const useUiStore = create<UiState>()(
         sidebarWidth: state.sidebarWidth,
         sidePanelWidth: state.sidePanelWidth,
         sidePanelMode: state.sidePanelMode,
+        activeWorkspaceId: state.activeWorkspaceId,
+        openSessionsByWorkspace: state.openSessionsByWorkspace,
       }),
       /**
        * Rehydrated layouts may carry an out-of-range width (manually edited
@@ -300,6 +348,18 @@ export const useUiStore = create<UiState>()(
        */
       merge: (persisted, current) => {
         const stored = (persisted ?? {}) as Partial<UiState>;
+        const validWorkspaceId = (value: unknown): string | null =>
+          typeof value === 'string' && value.trim().length > 0 ? value : null;
+        const validSessions = (value: unknown): Record<string, string[]> => {
+          if (!value || typeof value !== 'object') return {};
+          const mapped: Record<string, string[]> = {};
+          for (const [workspaceId, ids] of Object.entries(value as Record<string, unknown>)) {
+            if (!Array.isArray(ids)) continue;
+            const clean = ids.filter((id): id is string => typeof id === 'string' && id.length > 0);
+            if (clean.length > 0) mapped[workspaceId] = [...new Set(clean)];
+          }
+          return mapped;
+        };
         return {
           ...current,
           ...stored,
@@ -309,6 +369,8 @@ export const useUiStore = create<UiState>()(
           sidebarWidth: clampSidebarWidth(stored.sidebarWidth ?? current.sidebarWidth),
           sidePanelWidth: clampSidePanelWidth(stored.sidePanelWidth ?? current.sidePanelWidth),
           sidePanelMode: stored.sidePanelMode === 'docked' ? 'docked' : 'overlay',
+          activeWorkspaceId: validWorkspaceId(stored.activeWorkspaceId),
+          openSessionsByWorkspace: validSessions(stored.openSessionsByWorkspace),
         };
       },
     },

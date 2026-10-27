@@ -1,0 +1,111 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+
+const utilsMocks = vi.hoisted(() => ({ copyText: vi.fn(async () => true) }));
+const toastMocks = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
+
+vi.mock('@/lib/utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/utils')>();
+  return { ...actual, copyText: utilsMocks.copyText };
+});
+vi.mock('sonner', () => ({ toast: toastMocks }));
+
+import { DiffView } from './DiffView';
+
+const SMALL_DIFF = [
+  'diff --git a/src/app.ts b/src/app.ts',
+  'index 1111111..2222222 100644',
+  '--- a/src/app.ts',
+  '+++ b/src/app.ts',
+  '@@ -10,2 +20,2 @@',
+  ' const a = 1;',
+  '-const b = 2;',
+  '+const b = 3;',
+].join('\n');
+
+function bigHunkDiff(lines: number): string {
+  const body = Array.from({ length: lines }, (_, index) => ` linha ${index + 1}`);
+  return [
+    'diff --git a/big.ts b/big.ts',
+    '--- a/big.ts',
+    '+++ b/big.ts',
+    `@@ -1,${lines} +1,${lines} @@`,
+    ...body,
+  ].join('\n');
+}
+
+afterEach(cleanup);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  utilsMocks.copyText.mockResolvedValue(true);
+});
+
+describe('DiffView', () => {
+  it('renders file headers, hunk headers and the line counters', () => {
+    render(<DiffView path="src/app.ts" diff={SMALL_DIFF} />);
+    expect(screen.getByText('src/app.ts')).toBeTruthy();
+    expect(screen.getByText('+1')).toBeTruthy();
+    expect(screen.getByText('−1')).toBeTruthy();
+    const hunk = screen.getByText('@@ -10,2 +20,2 @@');
+    expect(hunk.getAttribute('tabindex')).toBe('0');
+    expect(screen.getByText('--- a/src/app.ts')).toBeTruthy();
+  });
+
+  it('renders additions/removals with theme-token backgrounds and both line numbers', () => {
+    render(<DiffView path="src/app.ts" diff={SMALL_DIFF} />);
+    const added = screen.getByText('const b = 3;');
+    expect(added.parentElement?.className ?? '').toContain('bg-success-soft');
+    expect(added.parentElement?.textContent ?? '').toContain('21');
+
+    const removed = screen.getByText('const b = 2;');
+    expect(removed.parentElement?.className ?? '').toContain('bg-danger-soft');
+    expect(removed.parentElement?.textContent ?? '').toContain('11');
+  });
+
+  it('collapses hunks over 200 lines behind "ver mais"', () => {
+    render(<DiffView path="big.ts" diff={bigHunkDiff(250)} />);
+    expect(screen.queryByText('linha 220')).toBeNull();
+    const more = screen.getByRole('button', { name: 'Ver mais (210 linhas)' });
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(more);
+    expect(screen.getByText('linha 220')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Recolher trecho' }).getAttribute('aria-expanded'),
+    ).toBe('true');
+  });
+
+  it('copies the patch', () => {
+    render(<DiffView path="src/app.ts" diff={SMALL_DIFF} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copiar patch' }));
+    expect(utilsMocks.copyText).toHaveBeenCalledWith(SMALL_DIFF);
+  });
+
+  it('renders the binary card instead of a fake patch', () => {
+    render(<DiffView path="img.png" diff={'Binary files a/img.png and b/img.png differ'} />);
+    expect(screen.getByText('Arquivo binário')).toBeTruthy();
+    expect(screen.queryByRole('group', { name: /Diff de/ })).toBeNull();
+  });
+
+  it('renders honest empty, loading and error states', () => {
+    const { unmount } = render(<DiffView path="src/app.ts" diff="" />);
+    expect(screen.getByText('Sem diferenças para mostrar')).toBeTruthy();
+    unmount();
+
+    const loading = render(<DiffView path="src/app.ts" loading />);
+    expect(screen.getByRole('status', { name: 'Carregando diff' })).toBeTruthy();
+    loading.unmount();
+
+    render(<DiffView path="src/app.ts" error="git diff falhou." />);
+    expect(screen.getByText('Não foi possível carregar o diff')).toBeTruthy();
+    expect(screen.getByText('git diff falhou.')).toBeTruthy();
+  });
+
+  it('does not render the diff meta lines as changes', () => {
+    render(<DiffView path="src/app.ts" diff={SMALL_DIFF} />);
+    expect(screen.queryByText('+4')).toBeNull();
+    expect(screen.getByText('+1')).toBeTruthy();
+  });
+});

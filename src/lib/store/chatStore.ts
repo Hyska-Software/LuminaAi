@@ -12,6 +12,7 @@ import type {
   TurnEvent,
   TurnOptions,
   TurnPayload,
+  TurnProfile,
   TurnResult,
 } from '../types';
 import { deriveTitle, newId } from '../utils';
@@ -19,6 +20,7 @@ import { defaultSelection, getModel } from '../catalog';
 import { filterConversationsForLayout } from '../conversations';
 import { reasoningForModel } from '../modelMenu';
 import { useAppStore } from './appStore';
+import { isCodeEvent, useCodeStore } from './codeStore';
 import { useUiStore, type LayoutMode } from './uiStore';
 
 export interface StreamingState {
@@ -291,6 +293,24 @@ export const useChatStore = create<ChatState>()((set, get) => {
   /** Active layout (the store mirrors `uiStore.layoutMode` per operation). */
   const currentLayout = (): LayoutMode => useUiStore.getState().layoutMode;
 
+  /**
+   * Perfil do turno: o layout Code só usa o perfil `code` para sessões do Code
+   * (nativas ou compartilhadas). O backend rejeita um perfil que não
+   * corresponde à sessão, então a decisão aqui é conservadora.
+   */
+  const turnProfileFor = (conversation: Conversation | undefined): TurnProfile => {
+    if (!conversation) return 'chat';
+    if (currentLayout() !== 'code') return 'chat';
+    return conversation.mode === 'code' || conversation.codeLinked ? 'code' : 'chat';
+  };
+
+  /** Carrega/atualiza o estado da sessão de código quando ela é do Code. */
+  const syncCodeSession = (conversation: Conversation | undefined): void => {
+    if (!conversation) return;
+    if (conversation.mode !== 'code' && !conversation.codeLinked) return;
+    void useCodeStore.getState().load(conversation.id);
+  };
+
   /** Sessions visible in one layout, preserving the backend order. */
   const visibleConversations = (conversations: Conversation[], layout: LayoutMode) =>
     filterConversationsForLayout(conversations, layout);
@@ -368,6 +388,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
     };
 
     const handleEvent = (event: TurnEvent) => {
+      // O estado de harness de código (aprovações/plano/tarefas/contexto/
+      // alterações/jobs) é ortogonal ao streaming e vive no `codeStore`.
+      if (isCodeEvent(event)) useCodeStore.getState().applyEvent(context.conversationId, event);
       switch (event.type) {
         case 'turn_started': {
           if (context.optimisticUserId) {
@@ -481,6 +504,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           flush();
           finished = true;
           applyResult(event.result);
+          void useCodeStore.getState().refresh(context.conversationId);
           break;
         case 'cancelled':
           flush();
@@ -491,6 +515,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           }));
           set({ streaming: null });
           void syncArtifacts(context.conversationId);
+          void useCodeStore.getState().refresh(context.conversationId);
           break;
         case 'error':
           flush();
@@ -506,6 +531,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
             errorHint: event.hint ?? null,
           });
           void syncArtifacts(context.conversationId);
+          void useCodeStore.getState().refresh(context.conversationId);
           toast.error('Falha na resposta', { description: event.hint ?? event.message });
           break;
         default:
@@ -675,6 +701,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         // in the background, deletion, app reload): always reconcile them.
         rememberActive(id);
         await syncArtifacts(id);
+        syncCodeSession(get().conversations.find((conversation) => conversation.id === id));
         return;
       }
       set({ activeId: id, loadingConversationId: id });
@@ -693,6 +720,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           // The conversation's model is locked in once it has messages; mirror
           // it in the composer so the locked pill shows the right model.
           syncSelectionToConversation(detail.conversation, detail.messages.length);
+          syncCodeSession(detail.conversation);
         } else {
           set({ loadingConversationId: null });
         }
@@ -930,6 +958,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         modelId: selection.modelId,
         reasoning: reasoning ?? null,
         options: turnOptionsFromSettings(options?.turnOptions),
+        profile: turnProfileFor(get().conversations.find((c) => c.id === conversationId)),
         turnId,
       };
 
@@ -1005,6 +1034,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         modelId: selection.modelId,
         reasoning: selection.reasoning ?? null,
         options: turnOptionsFromSettings({ regenerate: true }),
+        profile: turnProfileFor(get().conversations.find((c) => c.id === conversationId)),
         turnId,
       };
 

@@ -1,10 +1,21 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { AppInfo, Conversation, Settings } from '@/lib/types';
+import type { AppInfo, Conversation, Settings, Workspace } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
+  listWorkspaces: vi.fn(),
+  pickWorkspaceFolder: vi.fn(),
+  addWorkspace: vi.fn(),
+  setWorkspaceTrusted: vi.fn(),
+  setPermissionMode: vi.fn(),
+  removeWorkspace: vi.fn(),
+  renameWorkspace: vi.fn(),
+  getWorkspace: vi.fn(),
+  setConversationWorkspace: vi.fn(),
+  openWorkspaceInExplorer: vi.fn(),
   createConversation: vi.fn(),
+  listConversations: vi.fn(),
   getConversation: vi.fn(),
   listArtifacts: vi.fn(),
   setConversationCodeLinked: vi.fn(),
@@ -14,6 +25,7 @@ vi.mock('@/lib/api', () => ({ api: mocks }));
 
 // Imported after the API mock.
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { __resetWorkspacesForTests } from './useWorkspaces';
 import { CodeSidebar } from './CodeSidebar';
 
 const originalMatchMedia = window.matchMedia;
@@ -61,6 +73,19 @@ function settings(overrides: Partial<Settings> = {}): Settings {
   };
 }
 
+function workspace(overrides: Partial<Workspace> = {}): Workspace {
+  return {
+    id: 'ws-1',
+    name: 'lumina-core',
+    path: 'C:/dev/lumina',
+    createdAt: 1,
+    updatedAt: 2,
+    trusted: true,
+    git: { root: 'C:/dev/lumina', branch: 'main', dirty: true },
+    ...overrides,
+  };
+}
+
 function conversation(overrides: Partial<Conversation> = {}): Conversation {
   return {
     id: 'c-new',
@@ -93,9 +118,18 @@ function renderSidebar(onClose?: () => void) {
   return render(onClose ? <CodeSidebar onClose={onClose} /> : <CodeSidebar />);
 }
 
+/** Radix DropdownMenu opens on pointerdown, not click (see other tests). */
+function openMenu(trigger: HTMLElement): void {
+  fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  __resetWorkspacesForTests();
   window.matchMedia = matchMediaReturning(false);
+  mocks.listWorkspaces.mockResolvedValue([]);
+  mocks.listConversations.mockResolvedValue([]);
+  mocks.listArtifacts.mockResolvedValue([]);
   mocks.createConversation.mockResolvedValue(conversation());
   mocks.getConversation.mockImplementation(async (id: string) => ({
     // Mirror the backend: the stored conversation keeps its mode/codeLinked.
@@ -104,10 +138,21 @@ beforeEach(() => {
       conversation({ id }),
     messages: [],
   }));
-  mocks.listArtifacts.mockResolvedValue([]);
   mocks.setConversationCodeLinked.mockImplementation(async (id: string, linked: boolean) =>
     conversation({ id, mode: 'chat', codeLinked: linked }),
   );
+  mocks.setConversationWorkspace.mockImplementation(async (id: string, workspaceId: string | null) =>
+    conversation({ id, workspaceId }),
+  );
+  mocks.setWorkspaceTrusted.mockResolvedValue(workspace({ trusted: true }));
+  mocks.setPermissionMode.mockResolvedValue({
+    conversationId: 'c-new',
+    permissionMode: 'edit',
+    planMode: false,
+    todos: [],
+    jobs: [],
+    approvals: [],
+  });
   useAppStore.setState({ settings: settings(), appInfo: appInfo() });
   useChatStore.setState({
     conversations: [],
@@ -120,6 +165,8 @@ beforeEach(() => {
     codeView: 'session',
     codePanelOpen: true,
     codePanelTab: 'changes',
+    activeWorkspaceId: null,
+    openSessionsByWorkspace: {},
     commandPaletteOpen: false,
     settingsOpen: false,
   });
@@ -140,16 +187,20 @@ describe('CodeSidebar — chrome e ações', () => {
     expect(aside.className).not.toContain('border-r');
   });
 
-  it('oferece Novo agente, Adicionar sessão do Chat, Buscar e Skills, na ordem do plano', () => {
+  it('oferece Novo agente, Abrir pasta, Adicionar sessão do Chat, Buscar e Skills, na ordem', async () => {
     renderSidebar();
 
     const newAgent = screen.getByRole('button', { name: /Novo agente/ });
+    const openFolder = screen.getByRole('button', { name: 'Abrir pasta' });
     const addSession = screen.getByRole('button', { name: 'Adicionar sessão do Chat' });
     const search = screen.getByRole('button', { name: /Buscar/ });
     const skills = screen.getByRole('button', { name: 'Skills' });
 
     expect(
-      newAgent.compareDocumentPosition(addSession) & Node.DOCUMENT_POSITION_FOLLOWING,
+      newAgent.compareDocumentPosition(openFolder) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      openFolder.compareDocumentPosition(addSession) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
       addSession.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -157,19 +208,38 @@ describe('CodeSidebar — chrome e ações', () => {
     expect(
       search.compareDocumentPosition(skills) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    await waitFor(() => expect(mocks.listWorkspaces).toHaveBeenCalled());
   });
 
-  it('+ Novo agente cria uma conversa real no namespace Code e volta para a sessão', async () => {
-    useUiStore.setState({ codeView: 'skills' });
+  it('+ Novo agente no workspace ativo cria a sessão vinculada', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useUiStore.setState({ activeWorkspaceId: 'ws-1', codeView: 'skills' });
     renderSidebar();
 
     fireEvent.click(screen.getByRole('button', { name: /Novo agente/ }));
 
-    // O centro volta para a sessão imediatamente; a conversa é criada no backend.
+    // O centro volta para a sessão imediatamente.
     expect(useUiStore.getState().codeView).toBe('session');
     await waitFor(() => expect(mocks.createConversation).toHaveBeenCalledTimes(1));
     expect(mocks.createConversation.mock.calls[0]?.[3]).toBe('code');
+    await waitFor(() =>
+      expect(mocks.setConversationWorkspace).toHaveBeenCalledWith('c-new', 'ws-1'),
+    );
     await waitFor(() => expect(useChatStore.getState().activeId).toBe('c-new'));
+    expect(useUiStore.getState().openSessionsByWorkspace['ws-1']).toEqual(['c-new']);
+  });
+
+  it('+ Novo agente sem workspace ativo pede uma pasta', async () => {
+    const ws = workspace();
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.addWorkspace.mockResolvedValue(ws);
+    mocks.listWorkspaces.mockResolvedValue([ws]);
+    renderSidebar();
+
+    fireEvent.click(screen.getByRole('button', { name: /Novo agente/ }));
+
+    await waitFor(() => expect(mocks.pickWorkspaceFolder).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(useUiStore.getState().activeWorkspaceId).toBe('ws-1'));
   });
 
   it('Buscar abre a paleta de comandos', () => {
@@ -247,103 +317,192 @@ describe('CodeSidebar — chrome e ações', () => {
   });
 });
 
-describe('CodeSidebar — Workspaces (estado vazio honesto)', () => {
-  it('mostra a seção com o estado vazio do harness, sem botão morto', () => {
+describe('CodeSidebar — Workspaces reais', () => {
+  it('mostra o estado vazio honesto com CTA de abrir pasta', async () => {
     renderSidebar();
 
     expect(screen.getByRole('heading', { name: 'Workspaces' })).toBeTruthy();
-    expect(screen.getByText('Nenhum workspace aberto')).toBeTruthy();
+    expect(await screen.findByText('Nenhum workspace aberto')).toBeTruthy();
     expect(
-      screen.getByText('Os workspaces do harness de código aparecem aqui na próxima etapa.'),
+      screen.getByText('Abra uma pasta para o agente ler, editar e rodar comandos.'),
     ).toBeTruthy();
 
-    // Nenhuma ação de workspace fictícia (criar/adicionar workspace).
-    expect(screen.queryByRole('button', { name: /workspace/i })).toBeNull();
+    const cta = screen.getByRole('button', { name: 'Abrir pasta…' });
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.addWorkspace.mockResolvedValue(workspace());
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    fireEvent.click(cta);
+
+    await waitFor(() => expect(mocks.pickWorkspaceFolder).toHaveBeenCalledTimes(1));
+  });
+
+  it('lista workspaces com nome/branch/estado sujo e contador de sessões', async () => {
+    mocks.listWorkspaces.mockResolvedValue([
+      workspace(),
+      workspace({ id: 'ws-2', name: 'site-institucional', path: 'C:/dev/site', git: null }),
+    ]);
+    useChatStore.setState({
+      conversations: [
+        conversation({ id: 'c-1', title: 'Corrigir o build', workspaceId: 'ws-1' }),
+        conversation({ id: 'c-2', title: 'Revisar o diff', workspaceId: 'ws-1' }),
+      ],
+    });
+
+    renderSidebar();
+
+    const core = await screen.findByRole('button', { name: 'lumina-core' });
+    expect(core.textContent).toContain('main');
+    expect(core.textContent).toContain('2');
+    const site = screen.getByRole('button', { name: 'site-institucional' });
+    expect(site.textContent).toContain('0');
+
+    // As sessões do workspace aparecem agrupadas sob ele.
+    expect(screen.getByRole('button', { name: 'Corrigir o build' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Revisar o diff' })).toBeTruthy();
+  });
+
+  it('expande/recolhe as sessões do workspace', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Corrigir o build', workspaceId: 'ws-1' })],
+    });
+    renderSidebar();
+
+    expect(await screen.findByRole('button', { name: 'Corrigir o build' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Recolher sessões de lumina-core' }));
+
+    expect(screen.queryByRole('button', { name: 'Corrigir o build' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expandir sessões de lumina-core' }));
+    expect(screen.getByRole('button', { name: 'Corrigir o build' })).toBeTruthy();
+  });
+
+  it('destaca o workspace ativo e marca pasta não confiável como Leitura', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace({ trusted: false })]);
+    useUiStore.setState({ activeWorkspaceId: 'ws-1' });
+    renderSidebar();
+
+    const row = await screen.findByRole('button', { name: 'lumina-core' });
+    expect(row.getAttribute('aria-current')).toBe('true');
+    expect(row.textContent).toContain('Leitura');
+  });
+
+  it('sessões sem workspace ficam no grupo "Sem workspace"', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Sessão órfã', workspaceId: null })],
+    });
+    renderSidebar();
+
+    expect(await screen.findByRole('heading', { name: 'Sem workspace' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sessão órfã' })).toBeTruthy();
+  });
+
+  it('abre a conversa ao clicar na sessão e registra a aba do workspace', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Corrigir o build', workspaceId: 'ws-1' })],
+    });
+    useUiStore.setState({ codeView: 'skills', activeWorkspaceId: 'ws-1' });
+
+    renderSidebar();
+    await screen.findByRole('button', { name: 'Corrigir o build' });
+    fireEvent.click(screen.getByRole('button', { name: 'Corrigir o build' }));
+
+    expect(useUiStore.getState().codeView).toBe('session');
+    await waitFor(() => expect(mocks.getConversation).toHaveBeenCalledWith('c-1'));
+    await waitFor(() => expect(useChatStore.getState().activeId).toBe('c-1'));
+    expect(useUiStore.getState().openSessionsByWorkspace['ws-1']).toEqual(['c-1']);
+  });
+
+  it('mostra erro de listagem com ação de tentar novamente', async () => {
+    mocks.listWorkspaces.mockRejectedValueOnce(new Error('backend offline'));
+    renderSidebar();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Não foi possível carregar os workspaces');
+    expect(alert.textContent).toContain('backend offline');
+
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'lumina-core' })).toBeTruthy());
   });
 });
 
-describe('CodeSidebar — Sessões (conversas reais)', () => {
-  it('agrupa as conversas reais e destaca a sessão ativa', () => {
-    const today = Date.now() - 1000;
-    const old = Date.now() - 40 * 86_400_000;
-    useChatStore.setState({
-      conversations: [
-        conversation({ id: 'c-ativa', title: 'Corrigir o build', updatedAt: today }),
-        conversation({ id: 'c-antiga', title: 'Refatorar parser', updatedAt: old }),
-      ],
-      activeId: 'c-ativa',
-    });
-
+describe('CodeSidebar — menu do workspace', () => {
+  async function renderWithWorkspace(): Promise<Workspace> {
+    const ws = workspace();
+    mocks.listWorkspaces.mockResolvedValue([ws]);
     renderSidebar();
+    await screen.findByRole('button', { name: 'lumina-core' });
+    return ws;
+  }
 
-    expect(screen.getByRole('heading', { name: 'Sessões' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Hoje' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Mais antigas' })).toBeTruthy();
+  it('cria uma sessão no workspace pelo menu', async () => {
+    await renderWithWorkspace();
 
-    const active = screen.getByRole('button', { name: 'Corrigir o build' });
-    const other = screen.getByRole('button', { name: 'Refatorar parser' });
-    expect(active.getAttribute('aria-current')).toBe('true');
-    expect(other.getAttribute('aria-current')).toBeNull();
+    openMenu(screen.getByRole('button', { name: 'Opções do workspace lumina-core' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Nova sessão' }));
+
+    await waitFor(() => expect(mocks.createConversation).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mocks.setConversationWorkspace).toHaveBeenCalledWith('c-new', 'ws-1'),
+    );
   });
 
-  it('abre a conversa ao clicar e volta para a sessão', async () => {
-    useChatStore.setState({
-      conversations: [conversation({ id: 'c-antiga', title: 'Refatorar parser' })],
-    });
-    useUiStore.setState({ codeView: 'skills' });
+  it('abre a pasta no Explorer', async () => {
+    await renderWithWorkspace();
 
-    renderSidebar();
-    fireEvent.click(screen.getByRole('button', { name: 'Refatorar parser' }));
+    openMenu(screen.getByRole('button', { name: 'Opções do workspace lumina-core' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Abrir no Explorer' }));
 
-    expect(useUiStore.getState().codeView).toBe('session');
-    await waitFor(() => expect(mocks.getConversation).toHaveBeenCalledWith('c-antiga'));
-    await waitFor(() => expect(useChatStore.getState().activeId).toBe('c-antiga'));
+    await waitFor(() => expect(mocks.openWorkspaceInExplorer).toHaveBeenCalledWith('ws-1'));
   });
 
-  it('lista só sessões visíveis no Code e marca as compartilhadas do Chat', () => {
-    useChatStore.setState({
-      conversations: [
-        conversation({ id: 'code-1', title: 'Sessão do Code' }),
-        conversation({ id: 'chat-1', title: 'Conversa só do Chat', mode: 'chat' }),
-        conversation({
-          id: 'shared-1',
-          title: 'Conversa compartilhada',
-          mode: 'chat',
-          codeLinked: true,
-        }),
-      ],
+  it('copia o caminho do workspace', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
     });
+    await renderWithWorkspace();
 
-    renderSidebar();
+    openMenu(screen.getByRole('button', { name: 'Opções do workspace lumina-core' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copiar caminho' }));
 
-    expect(screen.getByRole('button', { name: 'Sessão do Code' })).toBeTruthy();
-    // A sessão do Chat que não foi compartilhada não pertence ao Code.
-    expect(screen.queryByRole('button', { name: 'Conversa só do Chat' })).toBeNull();
-
-    const shared = screen.getByRole('button', {
-      name: 'Conversa compartilhada, sessão compartilhada do Chat',
-    });
-    expect(shared).toBeTruthy();
-    expect(shared.textContent).toContain('Do Chat');
-    expect(shared.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
-    // Só a sessão compartilhada tem o selo "Sessão compartilhada do Chat".
-    expect(screen.getAllByTitle('Sessão compartilhada do Chat')).toHaveLength(1);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('C:/dev/lumina'));
   });
 
-  it('mostra o estado vazio quando não há sessões', () => {
-    renderSidebar();
+  it('renomeia o workspace pelo diálogo', async () => {
+    mocks.renameWorkspace.mockResolvedValue(workspace({ name: 'core' }));
+    await renderWithWorkspace();
 
-    expect(screen.getByText('Nenhuma sessão ainda.')).toBeTruthy();
-    expect(
-      screen.getByText('Comece um novo agente ou adicione uma sessão do Chat.'),
-    ).toBeTruthy();
+    openMenu(screen.getByRole('button', { name: 'Opções do workspace lumina-core' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Renomear' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Renomear workspace' });
+    const input = within(dialog).getByRole('textbox', { name: 'Nome do workspace' });
+    fireEvent.change(input, { target: { value: 'core' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() =>
+      expect(mocks.renameWorkspace).toHaveBeenCalledWith('ws-1', 'core'),
+    );
   });
 
-  it('não renderiza a Biblioteca no modo Code', () => {
-    renderSidebar();
+  it('remove do Lumina com confirmação, avisando que a pasta não é apagada', async () => {
+    mocks.removeWorkspace.mockResolvedValue(undefined);
+    await renderWithWorkspace();
 
-    expect(screen.queryByRole('button', { name: /Biblioteca/ })).toBeNull();
-    expect(screen.queryByText('Biblioteca')).toBeNull();
+    openMenu(screen.getByRole('button', { name: 'Opções do workspace lumina-core' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remover do Lumina' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Remover workspace do Lumina?' });
+    expect(dialog.textContent).toContain('não será apagada');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remover' }));
+
+    await waitFor(() => expect(mocks.removeWorkspace).toHaveBeenCalledWith('ws-1'));
   });
 });
 
@@ -360,8 +519,9 @@ describe('CodeSidebar — rodapé', () => {
   it('fecha o drawer compacto depois das ações', async () => {
     window.matchMedia = matchMediaReturning(true);
     const onClose = vi.fn();
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
     useChatStore.setState({
-      conversations: [conversation({ id: 'c-1', title: 'Sessão compacta' })],
+      conversations: [conversation({ id: 'c-1', title: 'Sessão compacta', workspaceId: 'ws-1' })],
     });
 
     renderSidebar(onClose);

@@ -17,7 +17,7 @@ use crate::db::{Db, StoredAttachment};
 use crate::domain::{
     now_ms, AttachmentInfo, ChatMessage, Citation, MessageRole, MessageStatus, ReasoningMode,
     ReasoningSelection, Settings, ToolCallRecord, ToolCallStatus, TraceStep, TurnOptions,
-    TurnPayload, TurnResult, UsageInfo, MAX_STEPS_LIMIT,
+    TurnPayload, TurnProfile, TurnResult, UsageInfo, MAX_STEPS_LIMIT,
 };
 use crate::events::TurnEvent;
 use crate::providers::{
@@ -26,6 +26,7 @@ use crate::providers::{
 };
 use crate::tools::{self, ToolOutcome, ToolRuntime};
 
+pub mod code;
 pub mod prompt;
 
 /// Tool calls executed concurrently per step.
@@ -640,6 +641,19 @@ pub async fn run_turn(
         .db
         .get_conversation(&payload.conversation_id)?
         .ok_or_else(|| anyhow!("conversa não encontrada: {}", payload.conversation_id))?;
+    // Perfil do turno: o Code exige uma sessão do layout Code (nativa ou
+    // compartilhada do Chat). Não deixamos o renderer transformar uma conversa
+    // do Chat em sessão de código por engano.
+    let profile = payload.profile;
+    if profile == TurnProfile::Code
+        && conversation.mode != crate::domain::CONVERSATION_MODE_CODE
+        && !conversation.code_linked
+    {
+        return Err(anyhow!(
+            "CONVERSATION_NOT_CODE: a sessão `{}` não pertence ao layout Code",
+            conversation.id
+        ));
+    }
     let provider = deps
         .catalog
         .provider(&payload.provider_id)
@@ -678,7 +692,12 @@ pub async fn run_turn(
     // `run_code` is opt-in: the turn option is further gated by the global
     // setting, so the tool/prompt section disappears when code execution is off.
     options.run_code = options.run_code && settings.code_execution_enabled;
-    options.max_steps = options.max_steps.clamp(1, MAX_STEPS_LIMIT);
+    options.max_steps = match profile {
+        // O perfil Code tem orçamento próprio de passos (default 120) e o
+        // usuário o configura em Configurações → Ferramentas.
+        TurnProfile::Code => settings.code_max_steps.clamp(1, MAX_STEPS_LIMIT),
+        TurnProfile::Chat => options.max_steps.clamp(1, MAX_STEPS_LIMIT),
+    };
 
     /* ---------------------------------------------------------------- */
     /* 3. Persist the user message (or reuse it when regenerating) and   */
@@ -699,6 +718,16 @@ pub async fn run_turn(
             assistant_message_id: assistant_message.id.clone(),
         },
     );
+    if profile == TurnProfile::Code {
+        emit(
+            &on_event,
+            TurnEvent::ProfileChanged {
+                profile: profile.as_str().to_string(),
+                permission_mode: conversation.permission_mode.as_str().to_string(),
+                plan_mode: false,
+            },
+        );
+    }
 
     /* ---------------------------------------------------------------- */
     /* 4. Build the neutral history + system prompt                      */
@@ -746,7 +775,26 @@ pub async fn run_turn(
         None => tools::skills::catalog_enabled(&data_dir, &settings.disabled_skills),
     }
     .unwrap_or_default();
-    let system_prompt = prompt::build_system_prompt(&model, &options, &settings, &skills);
+    let system_prompt = match profile {
+        TurnProfile::Code => {
+            // Contexto do workspace: preenchido na Fase 1 (workspaces) — por ora
+            // o perfil já entra com o prompt de código e a política da sessão.
+            let code_ctx = code::prompt::CodeContext {
+                permission_mode: conversation.permission_mode,
+                ..Default::default()
+            };
+            code::prompt::build_system_prompt(
+                &model,
+                &code_ctx,
+                // Orientações de tool: o registry da Fase 0 vira a fonte única;
+                // enquanto ele não está plugado, o prompt não promete tools.
+                &[],
+                std::env::consts::OS,
+                &chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
+            )
+        }
+        TurnProfile::Chat => prompt::build_system_prompt(&model, &options, &settings, &skills),
+    };
     let tool_definitions = tools::definitions(&options);
     let reasoning = reasoning_request(payload.reasoning.as_ref(), &model);
     let temperature = temperature_request(&options, &settings, &model);
@@ -1855,6 +1903,7 @@ fn tool_call_record(call: StreamingToolCall) -> ToolCallRecord {
         summary: None,
         started_at: Some(now_ms()),
         finished_at: None,
+        presentation: None,
     }
 }
 
@@ -2532,6 +2581,7 @@ mod agent_loop_tests {
                 max_steps: 2,
                 ..Default::default()
             },
+            profile: TurnProfile::Chat,
             turn_id: Some(uuid::Uuid::new_v4().to_string()),
         }
     }
@@ -2558,6 +2608,7 @@ mod agent_loop_tests {
                 max_steps,
                 ..Default::default()
             },
+            profile: TurnProfile::Chat,
             turn_id: Some(uuid::Uuid::new_v4().to_string()),
         }
     }
@@ -2664,6 +2715,7 @@ mod agent_loop_tests {
                 max_steps: 2,
                 ..Default::default()
             },
+            profile: TurnProfile::Chat,
             turn_id: Some(uuid::Uuid::new_v4().to_string()),
         }
     }
@@ -3466,6 +3518,7 @@ mod agent_loop_tests {
             summary: None,
             started_at: Some(0),
             finished_at: Some(1),
+            presentation: None,
         }
     }
 

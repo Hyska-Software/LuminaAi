@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Lumina — desktop AI chat harness (OpenCode Go / Zen / OpenAI ChatGPT plan)"
 authors = ["Lumina"]
 edition = "2021"
-rust-version = "1.77"
+# Necessário pelo harness de código: `notify` (watch) exige 1.85 e `ignore`/crates
+# de busca exigem 1.88; o toolchain do projeto é 1.99 (docs/goals/code-harness/PLAN.md §10).
+rust-version = "1.89"
 
 [lib]
 name = "lumina_lib"
@@ -73,6 +75,17 @@ async-trait = "0.1"
 parking_lot = "0.13"
 once_cell = "1"
 percent-encoding = "2"
+
+# --- Harness de código (docs/goals/code-harness/) -------------------------
+# Diff de linhas para o painel Alterações / journal (similar 2.7 está no cache).
+similar = "2"
+# Diretórios temporários nos testes das tools de FS/git e no journal.
+tempfile = "3"
+# Caminhos canônicos no Windows (remove prefixo `\\?\` sem perder a canonicalização).
+dunce = "1"
+# Árvore/busca do workspace respeitando `.gitignore` (mesmo motor do ripgrep).
+ignore = "0.4"
+globset = "0.4"
 
 [profile.dev]
 incremental = true

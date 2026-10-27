@@ -20,9 +20,11 @@ mod events;
 mod harness;
 mod http;
 mod oauth;
+mod policy;
 mod providers;
 mod state;
 mod tools;
+mod workspace;
 
 use tauri::Manager;
 
@@ -95,6 +97,43 @@ pub fn run() {
             commands::artifacts::save_artifact,
             commands::artifacts::open_artifact,
             commands::artifacts::delete_artifact,
+            /* -------- harness de código: workspace -------- */
+            commands::workspace::pick_workspace_folder,
+            commands::workspace::add_workspace,
+            commands::workspace::list_workspaces,
+            commands::workspace::get_workspace_context,
+            commands::workspace::rename_workspace,
+            commands::workspace::remove_workspace,
+            commands::workspace::set_workspace_trusted,
+            commands::workspace::set_conversation_workspace,
+            commands::workspace::open_workspace_in_explorer,
+            commands::workspace::list_workspace_files,
+            commands::workspace::search_workspace_files,
+            commands::workspace::read_workspace_file,
+            /* -------- harness de código: sessão -------- */
+            commands::code::get_code_session_state,
+            commands::code::set_permission_mode,
+            commands::code::set_plan_mode,
+            commands::code::respond_approval,
+            commands::code::list_approval_rules,
+            commands::code::save_approval_rule,
+            commands::code::delete_approval_rule,
+            commands::code::get_workspace_changes,
+            commands::code::get_file_diff,
+            commands::code::revert_file,
+            commands::code::revert_turn,
+            commands::code::compact_session,
+            /* -------- harness de código: git -------- */
+            commands::git::git_status,
+            commands::git::git_diff,
+            commands::git::git_stage,
+            commands::git::git_unstage,
+            commands::git::git_discard,
+            commands::git::git_commit,
+            commands::git::git_branches,
+            commands::git::git_switch_branch,
+            commands::git::git_log,
+            commands::git::suggest_commit_message,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lumina");

@@ -68,4 +68,61 @@ pub enum TurnEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hint: Option<String>,
     },
+
+    /* ------------------------------------------------------------------ */
+    /* Harness de código (docs/goals/code-harness/HARNESS.md §12)          */
+    /* ------------------------------------------------------------------ */
+    /// Uma tool pausou o turno pedindo permissão ao usuário.
+    ApprovalRequested {
+        approval: crate::domain::ApprovalRequest,
+    },
+    /// A aprovação pendente foi resolvida (pelo usuário, regra, timeout ou cancelamento).
+    ApprovalResolved {
+        approval_id: String,
+        decision: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+    },
+    /// Saída incremental de uma tool (shell/job) para o card ao vivo.
+    ToolProgress {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stream: Option<String>,
+        delta: String,
+    },
+    /// Um arquivo foi criado/alterado/removido pelo agente neste turno.
+    FileChanged {
+        change: crate::domain::FileChange,
+    },
+    /// Resumo das alterações do turno (journal + working tree), emitido no fecho.
+    WorkspaceChanges {
+        summary: crate::domain::ChangesSummary,
+    },
+    /// Lista de tarefas do agente mudou (substituição integral).
+    TodosUpdated {
+        todos: Vec<crate::domain::TodoItem>,
+    },
+    /// Estado do modo Plano mudou (entrou, plano submetido, aprovado, saiu).
+    PlanUpdated {
+        plan: crate::domain::PlanView,
+    },
+    /// Medidor de contexto do turno (tokens estimados/janela).
+    ContextStats {
+        stats: crate::domain::ContextStats,
+    },
+    /// O contexto foi compactado (resumo aplicado à janela do modelo).
+    Compacted {
+        messages: u32,
+        tokens_freed: u32,
+    },
+    /// Um job de processo em background mudou de estado.
+    JobUpdated {
+        job: crate::domain::JobView,
+    },
+    /// Perfil/modo da sessão mudou (permission mode, plan mode, profile).
+    ProfileChanged {
+        profile: String,
+        permission_mode: String,
+        plan_mode: bool,
+    },
 }

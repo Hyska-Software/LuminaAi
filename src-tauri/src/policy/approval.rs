@@ -1,0 +1,212 @@
+//! Seam de aprovação interativa: pedido → evento no renderer → decisão.
+//!
+//! O `ApprovalRegistry` guarda o pedido (para a UI/snapshot) e um
+//! `oneshot::Sender` por aprovação pendente. Quem executa a tool aguarda o
+//! `oneshot::Receiver`; o comando Tauri `respond_approval` resolve o canal.
+//! Timeout/cancelamento resolvem como `Cancelled`/`Expired` (falha fechada) —
+//! nunca como aprovação.
+//!
+//! Contrato: `docs/goals/code-harness/HARNESS.md` §6.3.
+
+use std::collections::HashMap;
+
+use parking_lot::Mutex;
+use tokio::sync::oneshot;
+
+use crate::domain::{ApprovalDecision, ApprovalRequest, ApprovalScope};
+
+/// Resultado de uma aprovação.
+#[derive(Debug, Clone)]
+pub struct ApprovalOutcome {
+    pub decision: ApprovalDecision,
+    pub scope: Option<ApprovalScope>,
+    pub feedback: Option<String>,
+}
+
+impl ApprovalOutcome {
+    pub fn approved(scope: Option<ApprovalScope>) -> Self {
+        Self {
+            decision: ApprovalDecision::Approved,
+            scope,
+            feedback: None,
+        }
+    }
+
+    pub fn denied(feedback: Option<String>) -> Self {
+        Self {
+            decision: ApprovalDecision::Denied,
+            scope: None,
+            feedback,
+        }
+    }
+
+    pub fn cancelled() -> Self {
+        Self {
+            decision: ApprovalDecision::Cancelled,
+            scope: None,
+            feedback: None,
+        }
+    }
+
+    pub fn expired() -> Self {
+        Self {
+            decision: ApprovalDecision::Expired,
+            scope: None,
+            feedback: None,
+        }
+    }
+
+    pub fn is_approved(&self) -> bool {
+        self.decision == ApprovalDecision::Approved
+    }
+}
+
+struct PendingApproval {
+    request: ApprovalRequest,
+    sender: oneshot::Sender<ApprovalOutcome>,
+}
+
+/// Registro de aprovações pendentes (compartilhado no `AppState`).
+#[derive(Default)]
+pub struct ApprovalRegistry {
+    pending: Mutex<HashMap<String, PendingApproval>>,
+}
+
+impl ApprovalRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registra o pedido (para o snapshot/UI) e devolve o receptor que a tool
+    /// deve aguardar.
+    pub fn register_request(
+        &self,
+        request: ApprovalRequest,
+    ) -> oneshot::Receiver<ApprovalOutcome> {
+        let (tx, rx) = oneshot::channel();
+        let id = request.id.clone();
+        self.pending.lock().insert(
+            id,
+            PendingApproval {
+                request,
+                sender: tx,
+            },
+        );
+        rx
+    }
+
+    /// Resolve um pedido pendente. Retorna `false` quando não existe (já foi
+    /// resolvido, cancelado ou o app reiniciou).
+    pub fn resolve(&self, approval_id: &str, outcome: ApprovalOutcome) -> bool {
+        let pending = self.pending.lock().remove(approval_id);
+        match pending {
+            Some(entry) => entry.sender.send(outcome).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Pedidos pendentes (snapshot para `get_code_session_state`).
+    pub fn pending_requests(&self) -> Vec<ApprovalRequest> {
+        let mut requests: Vec<ApprovalRequest> = self
+            .pending
+            .lock()
+            .values()
+            .map(|entry| entry.request.clone())
+            .collect();
+        requests.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+        requests
+    }
+
+    /// Pedido por id (para derivar a regra "sempre permitir" da UI).
+    pub fn request(&self, approval_id: &str) -> Option<ApprovalRequest> {
+        self.pending
+            .lock()
+            .get(approval_id)
+            .map(|entry| entry.request.clone())
+    }
+
+    /// Cancela todos os pedidos pendentes (fim de turno/cancelamento/app).
+    pub fn cancel_all(&self) -> usize {
+        let pending: Vec<(String, PendingApproval)> = self.pending.lock().drain().collect();
+        let count = pending.len();
+        for (_, entry) in pending {
+            let _ = entry.sender.send(ApprovalOutcome::cancelled());
+        }
+        count
+    }
+
+    pub fn pending_ids(&self) -> Vec<String> {
+        self.pending.lock().keys().cloned().collect()
+    }
+
+    pub fn has_pending(&self, approval_id: &str) -> bool {
+        self.pending.lock().contains_key(approval_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{ApprovalDetail, RiskClass};
+
+    fn request(id: &str) -> ApprovalRequest {
+        ApprovalRequest {
+            id: id.to_string(),
+            conversation_id: "conv-1".to_string(),
+            tool_call_id: "call-1".to_string(),
+            tool: "run_command".to_string(),
+            title: "Executar comando?".to_string(),
+            detail: ApprovalDetail::Command {
+                command: "npm test".to_string(),
+                workdir: ".".to_string(),
+            },
+            risk: RiskClass::Shell,
+            preview: None,
+            options: Vec::new(),
+            created_at: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn register_and_resolve_roundtrip() {
+        let registry = ApprovalRegistry::new();
+        let rx = registry.register_request(request("apr-1"));
+        assert!(registry.has_pending("apr-1"));
+        assert_eq!(registry.pending_requests().len(), 1);
+        assert!(registry.resolve("apr-1", ApprovalOutcome::approved(None)));
+        let outcome = rx.await.expect("decisão enviada");
+        assert!(outcome.is_approved());
+        assert!(!registry.has_pending("apr-1"));
+    }
+
+    #[tokio::test]
+    async fn resolve_unknown_id_returns_false() {
+        let registry = ApprovalRegistry::new();
+        assert!(!registry.resolve("nope", ApprovalOutcome::approved(None)));
+    }
+
+    #[tokio::test]
+    async fn request_lookup_is_available_for_rule_creation() {
+        let registry = ApprovalRegistry::new();
+        let _rx = registry.register_request(request("apr-2"));
+        let found = registry.request("apr-2").expect("pedido registrado");
+        assert_eq!(found.tool, "run_command");
+    }
+
+    #[tokio::test]
+    async fn cancel_all_resolves_every_pending_request() {
+        let registry = ApprovalRegistry::new();
+        let first = registry.register_request(request("a"));
+        let second = registry.register_request(request("b"));
+        assert_eq!(registry.cancel_all(), 2);
+        assert_eq!(
+            first.await.expect("a").decision,
+            ApprovalDecision::Cancelled
+        );
+        assert_eq!(
+            second.await.expect("b").decision,
+            ApprovalDecision::Cancelled
+        );
+        assert!(registry.pending_ids().is_empty());
+    }
+}

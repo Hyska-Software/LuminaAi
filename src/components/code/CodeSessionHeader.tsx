@@ -1,11 +1,40 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { Folder, PanelRight, Plus, X } from 'lucide-react';
-import { IconButton, Tooltip } from '@/components/ui';
+import {
+  Copy,
+  ExternalLink,
+  Folder,
+  FolderGit2,
+  FolderOpen,
+  GitBranch,
+  ListChecks,
+  PanelRight,
+  Plus,
+  RefreshCw,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  IconButton,
+  Tooltip,
+} from '@/components/ui';
+import { api } from '@/lib/api';
 import { filterConversationsForLayout } from '@/lib/conversations';
 import { useChatStore, useUiStore } from '@/lib/store';
-import type { Conversation } from '@/lib/types';
+import type { Conversation, PermissionMode, Workspace } from '@/lib/types';
 import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel';
-import { cn } from '@/lib/utils';
+import { cn, copyText } from '@/lib/utils';
+import { WorkspaceTrustDialog } from './WorkspaceTrustDialog';
+import { NO_WORKSPACE_KEY, openFolder, useWorkspaces } from './useWorkspaces';
 
 /** Synthetic tab shown when the Code layout has no active conversation. */
 const NEW_SESSION_ID = '__new_session__';
@@ -18,6 +47,33 @@ const NEW_SESSION_TITLE = 'Nova sessão';
  */
 const SESSION_PANEL_ID = 'code-session-panel';
 
+const PERMISSION_LABELS: Record<PermissionMode, string> = {
+  read_only: 'Leitura',
+  edit: 'Editar',
+  autonomous: 'Autônomo',
+};
+
+const PERMISSION_DESCRIPTIONS: Record<PermissionMode, string> = {
+  read_only: 'O agente só pode ler arquivos e consultar o workspace.',
+  edit: 'O agente pode editar arquivos; comandos pedem aprovação.',
+  autonomous: 'O agente pode editar e executar comandos com menos confirmações.',
+};
+
+const PERMISSION_ICONS: Record<PermissionMode, LucideIcon> = {
+  read_only: Shield,
+  edit: ShieldCheck,
+  autonomous: ShieldAlert,
+};
+
+const PERMISSION_ORDER: PermissionMode[] = ['read_only', 'edit', 'autonomous'];
+
+const chipClassName =
+  'inline-flex h-7 max-w-60 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 ' +
+  'text-[11.5px] text-foreground-muted transition-colors duration-150 ' +
+  'hover:bg-surface-hover hover:text-foreground ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ' +
+  'disabled:pointer-events-none disabled:opacity-60';
+
 interface SessionTab {
   id: string;
   title: string;
@@ -27,11 +83,183 @@ function sessionTitle(conversations: Conversation[], id: string): string {
   return conversations.find((conversation) => conversation.id === id)?.title ?? NEW_SESSION_TITLE;
 }
 
+interface WorkspaceChipProps {
+  workspace: Workspace | null;
+  busy: boolean;
+  onRefresh: () => void;
+  onOpenExplorer: () => void;
+  onCopyPath: () => void;
+  onOpenFolder: () => void;
+  /** Troca a sessão ativa de workspace (null = sem workspace). */
+  onBind: (workspaceId: string | null) => void;
+  onToggleTrust: () => void;
+}
+
 /**
- * Code session chrome (PLAN §3.3): header with the active conversation title,
- * the workspace chip ("Sem workspace" until the harness lands), the right panel
- * toggle and the open-session tabs. Tabs are a local view of the real
- * `chatStore` conversations — no new backend state.
+ * Chip do workspace da sessão + menu de ações (WORKBENCH §4). Sem workspace o
+ * chip vira o CTA "Sem workspace" (abrir pasta ou vincular a um já aberto) —
+ * nunca um beco sem saída.
+ */
+function WorkspaceChip({
+  workspace,
+  busy,
+  onRefresh,
+  onOpenExplorer,
+  onCopyPath,
+  onOpenFolder,
+  onBind,
+  onToggleTrust,
+}: WorkspaceChipProps) {
+  const { workspaces } = useWorkspaces();
+  const Icon = workspace ? (workspace.git ? FolderGit2 : Folder) : FolderOpen;
+  const label = workspace ? workspace.name : 'Sem workspace';
+  const branch = workspace?.git?.branch;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-label={
+            workspace
+              ? `Workspace ${workspace.name}${branch ? `, branch ${branch}` : ''}${
+                  workspace.git?.dirty ? ', alterações não commitadas' : ''
+                }`
+              : 'Sem workspace — abrir pasta'
+          }
+          title={workspace?.path ?? 'Abrir uma pasta para o agente trabalhar'}
+          className={chipClassName}
+        >
+          <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+          <span className="truncate">{label}</span>
+          {branch ? (
+            <span className="flex min-w-0 items-center gap-1 text-foreground-subtle">
+              <span aria-hidden>·</span>
+              <GitBranch aria-hidden className="size-3 shrink-0" strokeWidth={1.75} />
+              <span className="max-w-24 truncate">{branch}</span>
+            </span>
+          ) : null}
+          {workspace?.git?.dirty ? (
+            <span
+              aria-hidden
+              title="Alterações não commitadas"
+              className="size-1.5 shrink-0 rounded-full bg-warning"
+            />
+          ) : null}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-60">
+        {workspace ? (
+          <>
+            <DropdownMenuLabel className="max-w-56 truncate normal-case tracking-normal text-foreground-muted">
+              {workspace.name}
+            </DropdownMenuLabel>
+            <DropdownMenuItem icon={<RefreshCw className="size-4" />} onSelect={onRefresh}>
+              Atualizar
+            </DropdownMenuItem>
+            <DropdownMenuItem icon={<ExternalLink className="size-4" />} onSelect={onOpenExplorer}>
+              Abrir no Explorer
+            </DropdownMenuItem>
+            <DropdownMenuItem icon={<Copy className="size-4" />} onSelect={onCopyPath}>
+              Copiar caminho
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              icon={<ShieldCheck className="size-4" />}
+              onSelect={onToggleTrust}
+              disabled={busy}
+            >
+              {workspace.trusted ? 'Revogar confiança' : 'Confiar na pasta'}
+            </DropdownMenuItem>
+          </>
+        ) : (
+          <>
+            <DropdownMenuLabel className="normal-case tracking-normal text-foreground-muted">
+              Nenhuma pasta vinculada
+            </DropdownMenuLabel>
+            <DropdownMenuItem icon={<FolderOpen className="size-4" />} onSelect={onOpenFolder}>
+              Abrir pasta…
+            </DropdownMenuItem>
+          </>
+        )}
+
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>Trocar workspace</DropdownMenuLabel>
+        <DropdownMenuItem
+          icon={<Folder className="size-4" />}
+          checked={!workspace}
+          onSelect={() => onBind(null)}
+        >
+          Sem workspace
+        </DropdownMenuItem>
+        {workspaces.map((entry) => (
+          <DropdownMenuItem
+            key={entry.id}
+            icon={entry.git ? <FolderGit2 className="size-4" /> : <Folder className="size-4" />}
+            checked={workspace?.id === entry.id}
+            onSelect={() => onBind(entry.id)}
+          >
+            {entry.name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+interface PermissionChipProps {
+  permissionMode: PermissionMode;
+  busy: boolean;
+  onChange: (mode: PermissionMode) => void;
+}
+
+/** Chip do modo de permissão da sessão (Leitura / Editar / Autônomo). */
+function PermissionChip({ permissionMode, busy, onChange }: PermissionChipProps) {
+  const Icon = PERMISSION_ICONS[permissionMode];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-label={`Modo de permissão: ${PERMISSION_LABELS[permissionMode]}`}
+          title={PERMISSION_DESCRIPTIONS[permissionMode]}
+          disabled={busy}
+          className={chipClassName}
+        >
+          <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+          <span className="truncate">{PERMISSION_LABELS[permissionMode]}</span>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-60">
+        <DropdownMenuLabel>Modo de permissão</DropdownMenuLabel>
+        {PERMISSION_ORDER.map((mode) => {
+          const ModeIcon = PERMISSION_ICONS[mode];
+          return (
+            <DropdownMenuItem
+              key={mode}
+              icon={<ModeIcon className="size-4" />}
+              checked={mode === permissionMode}
+              onSelect={() => onChange(mode)}
+            >
+              {PERMISSION_LABELS[mode]}
+            </DropdownMenuItem>
+          );
+        })}
+        <DropdownMenuSeparator />
+        <p className="px-2 pb-1 text-[11px] leading-relaxed text-foreground-subtle">
+          {PERMISSION_DESCRIPTIONS[permissionMode]}
+        </p>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * Code session chrome (WORKBENCH §4): título, chip do workspace real (branch,
+ * dirty, ações), modo de permissão, chip de plano, toggle do painel e abas das
+ * sessões abertas. Também hospeda o diálogo de confiança da primeira pasta —
+ * o cabeçalho é o único chrome sempre montado no layout Code.
  */
 export function CodeSessionHeader() {
   const activeId = useChatStore((state) => state.activeId);
@@ -41,6 +269,14 @@ export function CodeSessionHeader() {
   const viewportWidth = useViewportWidth();
   /** The docked code panel only exists on wide windows (see CodePanel). */
   const canDock = viewportWidth >= SIDE_PANEL_DOCK_MIN_VIEWPORT;
+
+  const { workspaces, pendingTrust, refreshContext, resolveTrust, cancelTrust } = useWorkspaces();
+
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('edit');
+  const [planMode, setPlanMode] = useState(false);
+  const [permissionBusy, setPermissionBusy] = useState(false);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [trustBusy, setTrustBusy] = useState(false);
 
   // Sessions are separated per layout: the Code tabs only ever mirror Code
   // sessions and Chat sessions explicitly shared with Code (chat-code-sessions).
@@ -92,6 +328,70 @@ export function CodeSessionHeader() {
      tab strip falls back to the synthetic "Nova sessão" tab, so the tablist
      always has exactly one selected tab. */
   const showNewSessionTab = activeConversation === undefined;
+
+  const workspace = activeConversation?.workspaceId
+    ? (workspaces.find((entry) => entry.id === activeConversation.workspaceId) ?? null)
+    : null;
+
+  /* Permission/plan come from the session state; the conversation row is the
+     fallback while the backend snapshot is not available yet. A troca de
+     permissão é otimista: o efeito só re-sincroniza quando a SESSÃO muda (id),
+     nunca quando `refreshConversations` substitui o objeto da conversa. */
+  const activeConversationId = activeConversation?.id;
+  useEffect(() => {
+    if (!activeConversationId) {
+      setPermissionMode('edit');
+      setPlanMode(false);
+      return;
+    }
+    const conversation = useChatStore
+      .getState()
+      .conversations.find((entry) => entry.id === activeConversationId);
+    setPermissionMode(conversation?.permissionMode ?? 'edit');
+    setPlanMode(false);
+    let cancelled = false;
+    if (typeof api.getCodeSessionState === 'function') {
+      void api
+        .getCodeSessionState(activeConversationId)
+        .then((state) => {
+          if (cancelled || !state) return;
+          setPermissionMode(state.permissionMode);
+          setPlanMode(state.planMode);
+        })
+        .catch(() => {
+          /* Snapshot opcional: a sessão continua com o modo da conversa. */
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConversationId]);
+
+  /* Quando o diálogo de confiança fecha (o hook aplica o modo de permissão),
+     a sessão já existe e o efeito acima não roda de novo. Re-sincroniza uma vez
+     para o chip refletir "Leitura" ao abrir em leitura. */
+  const pendingTrustRef = useRef(pendingTrust);
+  useEffect(() => {
+    const hadPending = pendingTrustRef.current !== null;
+    pendingTrustRef.current = pendingTrust;
+    if (!hadPending || pendingTrust !== null || !activeConversationId) return;
+    if (typeof api.getCodeSessionState !== 'function') return;
+    let cancelled = false;
+    void api
+      .getCodeSessionState(activeConversationId)
+      .then((state) => {
+        if (cancelled || !state) return;
+        setPermissionMode(state.permissionMode);
+        setPlanMode(state.planMode);
+      })
+      .catch(() => {
+        /* Snapshot opcional. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingTrust, activeConversationId]);
 
   const selectTab = (id: string) => {
     if (id === NEW_SESSION_ID || id === activeId) return;
@@ -165,6 +465,110 @@ export function CodeSessionHeader() {
     }
   };
 
+  const handlePermissionChange = async (mode: PermissionMode) => {
+    if (!activeConversation || mode === permissionMode || permissionBusy) return;
+    const previous = permissionMode;
+    // Atualização otimista: o chip responde na hora; erro volta ao modo anterior.
+    setPermissionMode(mode);
+    setPermissionBusy(true);
+    try {
+      const state = await api.setPermissionMode(activeConversation.id, mode);
+      if (state?.permissionMode) setPermissionMode(state.permissionMode);
+      await useChatStore.getState().refreshConversations();
+    } catch (error) {
+      setPermissionMode(previous);
+      toast.error('Não foi possível mudar o modo de permissão', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setPermissionBusy(false);
+    }
+  };
+
+  const handlePlanToggle = async () => {
+    if (!activeConversation || planBusy) return;
+    const previous = planMode;
+    setPlanMode(!previous);
+    setPlanBusy(true);
+    try {
+      const state = await api.setPlanMode(activeConversation.id, !previous);
+      if (state) setPlanMode(state.planMode);
+    } catch (error) {
+      setPlanMode(previous);
+      toast.error('Não foi possível alternar o modo Plano', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  const handleBindWorkspace = async (workspaceId: string | null) => {
+    if (!activeConversation || workspaceId === (activeConversation.workspaceId ?? null)) return;
+    try {
+      await api.setConversationWorkspace(activeConversation.id, workspaceId);
+      useUiStore
+        .getState()
+        .openWorkspaceSession(workspaceId ?? NO_WORKSPACE_KEY, activeConversation.id);
+      await useChatStore.getState().refreshConversations();
+      if (workspaceId) useUiStore.getState().setActiveWorkspace(workspaceId);
+    } catch (error) {
+      toast.error('Não foi possível trocar o workspace da sessão', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  const handleOpenFolder = () => {
+    void openFolder({ conversationId: activeConversation?.id ?? null });
+  };
+
+  const handleCopyPath = async () => {
+    if (!workspace) return;
+    if (await copyText(workspace.path)) toast.success('Caminho copiado');
+    else toast.error('Não foi possível copiar o caminho');
+  };
+
+  const handleTrustToggle = () => {
+    if (!workspace) return;
+    const next = !workspace.trusted;
+    setTrustBusy(true);
+    void api
+      .setWorkspaceTrusted(workspace.id, next)
+      .then(async () => {
+        await refreshContext(workspace.id);
+        toast.success(next ? 'Pasta confiada' : 'Confiança revogada', {
+          description: next
+            ? 'O agente pode ler, editar e executar comandos.'
+            : 'O agente volta ao modo leitura neste workspace.',
+        });
+      })
+      .catch((error: unknown) => {
+        toast.error('Não foi possível atualizar a confiança da pasta', {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => setTrustBusy(false));
+  };
+
+  const handleResolveTrust = async (trusted: boolean) => {
+    setTrustBusy(true);
+    try {
+      await resolveTrust(trusted);
+    } finally {
+      setTrustBusy(false);
+    }
+  };
+
+  const handleCancelTrust = async () => {
+    setTrustBusy(true);
+    try {
+      await cancelTrust();
+    } finally {
+      setTrustBusy(false);
+    }
+  };
+
   const panelLabel = codePanelOpen ? 'Ocultar painel de arquivos' : 'Mostrar painel de arquivos';
   const panelButton = (
     <IconButton
@@ -188,13 +592,52 @@ export function CodeSessionHeader() {
         >
           {title}
         </h2>
-        <span
-          className="inline-flex h-6 max-w-44 shrink-0 items-center gap-1.5 rounded-full border border-border px-2 text-[11.5px] text-foreground-muted"
-          title="O workspace do agente chega com o harness de código"
-        >
-          <Folder aria-hidden className="size-3 shrink-0" strokeWidth={1.75} />
-          <span className="truncate">Sem workspace</span>
-        </span>
+
+        <WorkspaceChip
+          workspace={workspace}
+          busy={trustBusy}
+          onRefresh={() => workspace && void refreshContext(workspace.id)}
+          onOpenExplorer={() => workspace && void api.openWorkspaceInExplorer(workspace.id)}
+          onCopyPath={() => void handleCopyPath()}
+          onOpenFolder={handleOpenFolder}
+          onBind={(workspaceId) => void handleBindWorkspace(workspaceId)}
+          onToggleTrust={handleTrustToggle}
+        />
+
+        {activeConversation ? (
+          <>
+            <PermissionChip
+              permissionMode={permissionMode}
+              busy={permissionBusy}
+              onChange={(mode) => void handlePermissionChange(mode)}
+            />
+            <Tooltip
+              content={
+                planMode
+                  ? 'Modo Plano ativo: o agente planeja antes de editar'
+                  : 'Ativar modo Plano (planejar antes de editar)'
+              }
+              side="bottom"
+            >
+              <button
+                type="button"
+                aria-label="Modo Plano"
+                aria-pressed={planMode}
+                title="Modo Plano"
+                disabled={planBusy}
+                onClick={() => void handlePlanToggle()}
+                className={cn(
+                  chipClassName,
+                  planMode && 'border-accent/40 bg-accent-soft text-accent hover:bg-accent-soft',
+                )}
+              >
+                <ListChecks aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+                <span className="hidden truncate sm:inline">Plano</span>
+              </button>
+            </Tooltip>
+          </>
+        ) : null}
+
         <div className="ml-auto flex shrink-0 items-center">
           {canDock ? (
             <Tooltip content={panelLabel} side="bottom">
@@ -290,6 +733,17 @@ export function CodeSessionHeader() {
           </IconButton>
         </Tooltip>
       </div>
+
+      {/* O diálogo de confiança vive aqui: o cabeçalho é o único chrome do Code
+          sempre montado (inclusive quando a sidebar é um drawer fechado). */}
+      <WorkspaceTrustDialog
+        open={pendingTrust !== null}
+        workspace={pendingTrust?.workspace ?? null}
+        busy={trustBusy}
+        onConfirm={() => void handleResolveTrust(true)}
+        onReadOnly={() => void handleResolveTrust(false)}
+        onCancel={() => void handleCancelTrust()}
+      />
     </header>
   );
 }

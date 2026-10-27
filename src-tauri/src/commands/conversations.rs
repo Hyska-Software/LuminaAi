@@ -424,6 +424,7 @@ mod tests {
             summary: Some("Busca concluída".to_string()),
             started_at: None,
             finished_at: None,
+            presentation: None,
         }];
         assistant.citations = vec![Citation {
             id: "cit-1".to_string(),
@@ -451,6 +452,9 @@ mod tests {
                 preview: None,
                 mode: "chat".to_string(),
                 code_linked: false,
+                workspace_id: None,
+                agent_kind: "lumina".to_string(),
+                permission_mode: crate::domain::PermissionMode::Edit,
             },
             messages: vec![user, assistant],
         }
