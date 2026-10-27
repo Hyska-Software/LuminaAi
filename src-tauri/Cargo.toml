@@ -83,13 +83,14 @@ similar = "2"
 tempfile = "3"
 # Caminhos canônicos no Windows (remove prefixo `\\?\` sem perder a canonicalização).
 dunce = "1"
-# Árvore/busca do workspace respeitando `.gitignore` (mesmo motor do ripgrep).
+# Terminal PTY do layout Code (ConPTY no Windows).
+portable-pty = "0.8"
+# Árvore/busca do workspace respeitando .gitignore (mesmo motor do ripgrep).
 ignore = "0.4"
 globset = "0.4"
 
 [profile.dev]
 incremental = true
-
 [profile.dev.package."*"]
 opt-level = 2
 
@@ -99,3 +100,13 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# Windows: Job Object do runner de processos (kill de árvore confiável no
+# cancelamento/timeout; docs/research/workspace-runtime-options.md §3.4).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }

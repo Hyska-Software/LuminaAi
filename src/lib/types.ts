@@ -207,6 +207,41 @@ export interface ApprovalRule {
   createdAt: number;
 }
 
+/* ---- perguntas estruturadas ao usuário (`ask_user`) ---- */
+
+export interface AskOption {
+  label: string;
+  description?: string | null;
+}
+
+export interface AskQuestion {
+  id: string;
+  question: string;
+  header?: string | null;
+  options: AskOption[];
+  multiSelect?: boolean;
+}
+
+export interface AskUserRequest {
+  id: string;
+  conversationId: string;
+  toolCallId: string;
+  questions: AskQuestion[];
+  createdAt: number;
+}
+
+export interface AskUserAnswer {
+  questionId: string;
+  selected: string[];
+  custom?: string | null;
+}
+
+export interface AskUserResponse {
+  requestId: string;
+  answers: AskUserAnswer[];
+  skipped: boolean;
+}
+
 /** Estado git do workspace (branch/upstream/contadores). */
 export interface GitInfo {
   root: string;
@@ -304,6 +339,21 @@ export interface ContextStats {
 
 export type JobStatus = 'running' | 'done' | 'failed' | 'killed';
 
+/** Terminal PTY aberto na sessão de código (layout Code). */
+export interface TerminalInfo {
+  id: string;
+  conversationId: string;
+  title: string;
+  cwd: string;
+  cols: number;
+  rows: number;
+  running: boolean;
+}
+
+export type TerminalEvent =
+  | { type: 'data'; data: string }
+  | { type: 'exit'; code?: number | null };
+
 export interface JobView {
   id: string;
   command: string;
@@ -321,6 +371,7 @@ export type ToolPresentation =
   | { kind: 'todos'; items: TodoItem[] }
   | { kind: 'plan'; plan: PlanView }
   | { kind: 'job'; job: JobView }
+  | { kind: 'answers'; answers: AskUserAnswer[]; skipped: boolean }
   | { kind: 'output'; lines?: number | null; spillId?: string | null }
   | { kind: 'terminal'; sessionId: string; title: string };
 
@@ -337,6 +388,7 @@ export interface CodeSessionState {
   changes?: ChangesSummary | null;
   jobs: JobView[];
   approvals: ApprovalRequest[];
+  questions?: AskUserRequest[];
 }
 
 /** Entrada da árvore de arquivos do workspace (`list_workspace_files`). */
@@ -589,7 +641,9 @@ export type TurnEvent =
   | { type: 'context_stats'; stats: ContextStats }
   | { type: 'compacted'; messages: number; tokensFreed: number }
   | { type: 'job_updated'; job: JobView }
-  | { type: 'profile_changed'; profile: TurnProfile; permissionMode: PermissionMode; planMode: boolean };
+  | { type: 'profile_changed'; profile: TurnProfile; permissionMode: PermissionMode; planMode: boolean }
+  | { type: 'question_requested'; request: AskUserRequest }
+  | { type: 'question_resolved'; requestId: string; answers: AskUserAnswer[]; skipped: boolean };
 
 /* ------------------------------------------------------------------ */
 /* Artifacts                                                           */

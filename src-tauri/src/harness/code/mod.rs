@@ -14,5 +14,6 @@ pub mod compaction;
 pub mod context;
 pub mod observed;
 pub mod prompt;
+pub mod questions;
 pub mod session;
 pub mod tools;

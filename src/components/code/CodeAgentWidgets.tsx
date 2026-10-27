@@ -10,6 +10,7 @@ import { useState } from 'react';
 
 import {
   ApprovalCard,
+  AskUserCard,
   ContextMeter,
   JobsBar,
   PlanCard,
@@ -24,6 +25,7 @@ import type { ApprovalDecision, ApprovalRequest, PlanView } from '@/lib/types';
 export function CodeSessionCards({ conversationId }: { conversationId: string }) {
   const session = useCodeStore((state) => state.byConversation[conversationId]);
   const respondApproval = useCodeStore((state) => state.respondApproval);
+  const respondQuestion = useCodeStore((state) => state.respondQuestion);
   const [responding, setResponding] = useState<string | null>(null);
 
   if (!session) return null;
@@ -32,6 +34,7 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
   if (
     planApprovals.length === 0 &&
     otherApprovals.length === 0 &&
+    session.questions.length === 0 &&
     session.todos.length === 0
   ) {
     return null;
@@ -87,6 +90,36 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
           />
         );
       })}
+      {session.questions.map((request) => (
+        <AskUserCard
+          key={request.id}
+          questions={request.questions.map((question) => ({
+            id: question.id,
+            question: question.question,
+            options: question.options.map((option) => ({
+              label: option.label,
+              description: option.description ?? undefined,
+            })),
+            multi: question.multiSelect ?? false,
+            allowFreeText: true,
+          }))}
+          onSubmit={(answers) => {
+            void respondQuestion(
+              conversationId,
+              request.id,
+              answers.map((answer) => ({
+                questionId: answer.questionId,
+                selected: answer.selected,
+                custom: answer.freeText ?? null,
+              })),
+              false,
+            );
+          }}
+          onSkip={() => {
+            void respondQuestion(conversationId, request.id, [], true);
+          }}
+        />
+      ))}
       {session.todos.length > 0 ? <TodoCard todos={session.todos} /> : null}
     </div>
   );

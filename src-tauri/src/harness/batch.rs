@@ -117,6 +117,7 @@ mod tests {
             approvals: None,
             observed: None,
             jobs: None,
+            questions: None,
         }
     }
 

@@ -128,4 +128,28 @@ pub enum TurnEvent {
         permission_mode: String,
         plan_mode: bool,
     },
+    /// O agente pediu uma decisão/resposta ao usuário (`ask_user`).
+    QuestionRequested {
+        request: crate::domain::AskUserRequest,
+    },
+    /// A pergunta pendente foi respondida (ou pulada).
+    QuestionResolved {
+        request_id: String,
+        answers: Vec<crate::domain::AskUserAnswer>,
+        skipped: bool,
+    },
+}
+
+/// Eventos de streaming de um terminal PTY (layout Code).
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum TerminalEvent {
+    /// Bytes decodificados (UTF-8 lossy) do terminal.
+    Data { data: String },
+    /// O shell do terminal terminou.
+    Exit { code: Option<i32> },
 }

@@ -1182,7 +1182,7 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
 | `git_status`/`git_diff`/`git_log` | git CLI (porcelain v2) somente leitura | leitura livre |
 | `todo_write` | lista de tarefas da sessão (projeção em `code_events`) | Exclusive |
 | `submit_plan` | plano do modo Plano com revisão bloqueante | Ask |
-| `ask_user` | perguntas com opções (stub honesto na v1; card na v1.1) | Ask |
+| `ask_user` | perguntas com opções (single/multi + texto livre); o card da timeline responde via `respond_question` (timeout/cancelamento = pulada) | Ask |
 
 Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested`, comando
 `respond_approval`, timeout de 10 min, falha fechada). "Sempre permitir" cria

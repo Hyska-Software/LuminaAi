@@ -123,6 +123,12 @@ async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSe
             request.conversation_id.is_empty() || request.conversation_id == conversation_id
         })
         .collect();
+    let questions: Vec<crate::domain::AskUserRequest> = state
+        .questions
+        .pending_requests()
+        .into_iter()
+        .filter(|request| request.conversation_id == conversation_id)
+        .collect();
 
     Ok(CodeSessionState {
         conversation_id: conversation_id.to_string(),
@@ -136,6 +142,7 @@ async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSe
         changes,
         jobs: state.jobs.list(conversation_id),
         approvals,
+        questions,
     })
 }
 
@@ -313,6 +320,26 @@ pub async fn set_plan_mode(
         .append_code_event(&conversation_id, None, EVENT_PLAN_MODE, &payload)
         .map_err(map_err)?;
     session_state(&state, &conversation_id).await
+}
+
+/// Responde a uma pergunta pendente do agente (`ask_user`).
+#[tauri::command]
+pub async fn respond_question(
+    state: State<'_, AppState>,
+    request_id: String,
+    answers: Vec<crate::domain::AskUserAnswer>,
+    skipped: Option<bool>,
+) -> Result<bool, String> {
+    let skipped = skipped.unwrap_or(false);
+    let response = crate::domain::AskUserResponse {
+        request_id: request_id.clone(),
+        answers: if skipped { Vec::new() } else { answers },
+        skipped,
+    };
+    if !state.questions.resolve(response) {
+        return Err("QUESTION_NOT_FOUND: esta pergunta já foi resolvida".to_string());
+    }
+    Ok(true)
 }
 
 /// Responde a uma aprovação pendente (falha fechada para id desconhecido).
@@ -757,6 +784,7 @@ pub async fn compact_session(
         approvals: Some(state.approvals.clone()),
         observed: Some(state.observed.clone()),
         jobs: Some(state.jobs.clone()),
+        questions: Some(state.questions.clone()),
     };
     let request = crate::harness::batch::BatchRequest {
         provider_id: &conversation.provider_id,

@@ -17,6 +17,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useReduceMotion } from '@/components/layout/hooks';
+import { ToolPresentationCard } from '@/components/agent/ToolPresentationCard';
 import { Spinner } from '@/components/ui';
 import {
   buildAgentTrace,
@@ -96,6 +97,18 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
     (entry) => entry.kind === 'tools' && entry.group.status === 'running',
   );
   const liveElapsed = useLiveElapsed(streaming, startedAt);
+  // Apresentações persistidas das tools do harness de código (diff/tarefas/
+  // plano/job/respostas) — ficam fora do bloco recolhível para não esconder o
+  // que o agente mudou (WORKBENCH §5.2).
+  const presentations = useMemo(
+    () =>
+      (message.toolCalls ?? [])
+        .map((tool) => tool.presentation)
+        .filter((presentation): presentation is NonNullable<typeof presentation> =>
+          Boolean(presentation),
+        ),
+    [message.toolCalls],
+  );
 
   // Auto-open while the agent works and collapse once the answer is ready
   // (same behavior as the previous reasoning block; the user can reopen).
@@ -135,7 +148,8 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
   const shimmer = working && !reduceMotion;
 
   return (
-    <Collapsible.Root open={open} onOpenChange={setOpen} className={cn('mb-3', className)}>
+    <div className={className}>
+      <Collapsible.Root open={open} onOpenChange={setOpen} className="mb-3">
       <Collapsible.Trigger asChild>
         <button
           type="button"
@@ -213,7 +227,15 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
           </ol>
         </div>
       </Collapsible.Content>
-    </Collapsible.Root>
+      </Collapsible.Root>
+      {presentations.length > 0 ? (
+        <div className="mb-3 flex flex-col gap-2">
+          {presentations.map((presentation, index) => (
+            <ToolPresentationCard key={index} presentation={presentation} />
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

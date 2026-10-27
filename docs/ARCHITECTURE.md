@@ -348,7 +348,9 @@ Mesmo loop do Chat, com `TurnPayload.profile = "code"` (só em sessão do Code).
 3. **Tools do perfil** (`tools/registry.rs` + `tools/code/*`): no máximo ~17 tools —
    `read_file`, `list_dir`, `search_files`, `search_text`, `read_tool_output`,
    `write_file`, `edit_file`, `run_command`, `job_list`/`job_output`/`job_kill`,
-   `git_status`/`git_diff`/`git_log`, `todo_write`, `submit_plan`, `ask_user` (stub honesto).
+   `git_status`/`git_diff`/`git_log`, `todo_write`, `submit_plan`, `ask_user` (perguntas
+estruturadas com opções e texto livre, respondidas pelo card da timeline via
+`respond_question`).
    O modelo **não** recebe commit/push.
 4. **Política e aprovação** (`policy/`): modos `read_only`/`edit`/`autonomous` + overlay Plano
    + regras persistidas. Toda mutação passa por `policy::decide` → `ApprovalRegistry`
@@ -369,7 +371,8 @@ Mesmo loop do Chat, com `TurnPayload.profile = "code"` (só em sessão do Code).
 8. **Contexto**: medidor (`context_stats`), poda de resultados antigos e compactação por resumo
    (`harness/code/compaction.rs`, template de 8 seções, persistido em `session_summaries` e
    aplicado nos turnos seguintes).
-9. **Fecho do turno**: `file_journal` → `workspace_changes`, `context_stats`, `turn/ended` em
+9. **Terminal PTY**: src-tauri/src/terminal/** (portable-pty/ConPTY) com open_terminal/write_terminal/esize_terminal/close_terminal/list_terminals e Channel<TerminalEvent>; o painel abre em xterm.js no cwd do workspace (terminal do usuário; o agente usa un_command/jobs).
+10. **Fecho do turno**: ile_journal → workspace_changes, context_stats, 	urn/ended em
    `code_events` e cancelamento das aprovações pendentes da sessão.
 
 Contratos completos (tools/eventos/comandos/UI): `docs/goals/code-harness/TOOLS.md`,
@@ -620,7 +623,9 @@ get_workspace_changes, get_file_diff, revert_file, revert_turn, compact_session,
 list_jobs, get_job_output, kill_job,
 -- git (painel)
 git_status, git_diff, git_stage, git_unstage, git_discard, git_commit,
-git_branches, git_switch_branch, git_log, suggest_commit_message
+git_branches, git_switch_branch, git_log, suggest_commit_message,
+-- terminal PTY
+open_terminal, write_terminal, resize_terminal, close_terminal, list_terminals
 ```
 
 O login ChatGPT é **em duas fases**: `openai_login_start` devolve

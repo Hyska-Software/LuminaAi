@@ -26,7 +26,7 @@ export type LayoutMode = 'chat' | 'code';
 export type CodeView = 'session' | 'skills';
 
 /** Tabs of the Code right panel (Arquivos | Alterações). */
-export type CodePanelTab = 'files' | 'changes';
+export type CodePanelTab = 'files' | 'changes' | 'terminal';
 
 /**
  * Surface shown by the artifact side panel: the generated-artifact list (the
@@ -220,7 +220,14 @@ export const useUiStore = create<UiState>()(
       setCodePanelOpen: (codePanelOpen) => set({ codePanelOpen }),
       toggleCodePanel: () => set((state) => ({ codePanelOpen: !state.codePanelOpen })),
       setCodePanelTab: (codePanelTab) =>
-        set({ codePanelTab: codePanelTab === 'files' ? 'files' : 'changes' }),
+        set({
+          codePanelTab:
+            codePanelTab === 'files'
+              ? 'files'
+              : codePanelTab === 'terminal'
+                ? 'terminal'
+                : 'changes',
+        }),
       setActiveWorkspace: (activeWorkspaceId) => set({ activeWorkspaceId }),
       openWorkspaceSession: (workspaceId, conversationId) =>
         set((state) => {

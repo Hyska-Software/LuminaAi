@@ -190,6 +190,8 @@ pub struct HarnessDeps {
     pub observed: Option<Arc<crate::harness::code::observed::ObservedFiles>>,
     /// Jobs de processo em background do harness de código (`AppState::jobs`).
     pub jobs: Option<Arc<crate::jobs::JobRegistry>>,
+    /// Perguntas estruturadas pendentes (`ask_user`).
+    pub questions: Option<Arc<crate::harness::code::questions::QuestionRegistry>>,
 }
 
 /// Actionable copy for planned limits. The renderer knows the fixed
@@ -865,6 +867,7 @@ pub async fn run_turn(
             http: deps.search_http.clone(),
             conversation_id: payload.conversation_id.clone(),
             message_id: assistant_message.id.clone(),
+            tool_call_id: String::new(),
             turn_id: tool_turn_id.clone(),
             workspace: code_ctx.workspace_handle(),
             settings: settings.clone(),
@@ -876,6 +879,7 @@ pub async fn run_turn(
             rules: code_rules.clone(),
             plan_mode: code_ctx.plan_mode,
             jobs: deps.jobs.clone(),
+            questions: deps.questions.clone(),
         }),
         _ => None,
     };
@@ -2661,6 +2665,7 @@ mod agent_loop_tests {
             approvals: None,
             observed: None,
             jobs: None,
+            questions: None,
         }
     }
 
@@ -2761,6 +2766,7 @@ mod agent_loop_tests {
             approvals: None,
             observed: None,
             jobs: None,
+            questions: None,
         }
     }
 
@@ -2896,6 +2902,7 @@ mod agent_loop_tests {
             approvals: None,
             observed: None,
             jobs: None,
+            questions: None,
         }
     }
 

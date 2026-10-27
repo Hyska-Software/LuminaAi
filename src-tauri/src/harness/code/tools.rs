@@ -52,12 +52,16 @@ pub async fn execute(ctx: &ToolCtx, call: &ToolCallRecord) -> ToolOutcome {
         Ok(args) => args,
         Err(outcome) => return outcome,
     };
+    // Contexto por chamada: o id da tool call é usado por progresso, aprovação e
+    // apresentação (`presentation`) do card correto.
+    let mut call_ctx = ctx.clone();
+    call_ctx.tool_call_id = call.id.clone();
     // Timeout do contrato aplicado pelo runtime (nunca "decorativo").
     match default_timeout_ms(&call.name) {
         Some(timeout) => {
             match tokio::time::timeout(
                 std::time::Duration::from_millis(timeout),
-                exec.execute(ctx, args),
+                exec.execute(&call_ctx, args),
             )
             .await
             {
@@ -68,7 +72,7 @@ pub async fn execute(ctx: &ToolCtx, call: &ToolCallRecord) -> ToolOutcome {
                 )),
             }
         }
-        None => exec.execute(ctx, args).await,
+        None => exec.execute(&call_ctx, args).await,
     }
 }
 
@@ -143,6 +147,7 @@ mod tests {
             http: reqwest::Client::new(),
             conversation_id: "conv-1".into(),
             message_id: "msg-1".into(),
+            tool_call_id: "call-1".into(),
             turn_id: "turn-1".into(),
             workspace: None,
             settings: crate::domain::Settings::default(),
@@ -151,6 +156,7 @@ mod tests {
             approval: None,
             observed: None,
             jobs: None,
+            questions: None,
             emit: None,
             rules: Vec::new(),
             plan_mode: false,

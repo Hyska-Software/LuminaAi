@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { applyCodeEvent, emptyCodeSession, fromSnapshot, isCodeEvent } from '../codeStore';
 import type {
   ApprovalRequest,
+  AskUserRequest,
   CodeSessionState,
   ContextStats,
   FileChange,
@@ -120,6 +121,35 @@ describe('codeStore reducer', () => {
     expect(applyCodeEvent(state, textEvent)).toBe(state);
   });
 
+  it('tracks pending questions and the answers resolved by the card', () => {
+    const request: AskUserRequest = {
+      id: 'ask-1',
+      conversationId: 'conv-1',
+      toolCallId: 'call-1',
+      questions: [
+        {
+          id: 'db',
+          question: 'Qual banco devo usar?',
+          options: [{ label: 'SQLite' }, { label: 'Postgres' }],
+          multiSelect: false,
+        },
+      ],
+      createdAt: 1,
+    };
+    let state = emptyCodeSession('conv-1');
+    state = applyCodeEvent(state, { type: 'question_requested', request });
+    expect(state.questions).toHaveLength(1);
+    state = applyCodeEvent(state, {
+      type: 'question_resolved',
+      requestId: 'ask-1',
+      answers: [{ questionId: 'db', selected: ['SQLite'], custom: null }],
+      skipped: false,
+    });
+    expect(state.questions).toHaveLength(0);
+    expect(state.questionAnswers['ask-1'].answers[0].selected).toEqual(['SQLite']);
+    expect(state.questionAnswers['ask-1'].skipped).toBe(false);
+    expect(isCodeEvent({ type: 'question_requested', request })).toBe(true);
+  });
   it('restores the authoritative snapshot from the backend', () => {
     const snapshot: CodeSessionState = {
       conversationId: 'conv-1',

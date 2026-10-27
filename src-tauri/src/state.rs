@@ -35,6 +35,10 @@ pub struct AppState {
     pub observed: Arc<crate::harness::code::observed::ObservedFiles>,
     /// Jobs de processo em background do harness de código (F4).
     pub jobs: Arc<crate::jobs::JobRegistry>,
+    /// Terminais PTY abertos no layout Code.
+    pub terminals: Arc<crate::terminal::TerminalRegistry>,
+    /// Perguntas estruturadas pendentes (sk_user).
+    pub questions: Arc<crate::harness::code::questions::QuestionRegistry>,
     dynamic_models: RwLock<HashMap<String, DynamicModels>>,
     turns: Mutex<HashMap<String, CancellationToken>>,
 }
@@ -55,6 +59,8 @@ impl AppState {
             oauth: Arc::new(OAuthState::new()),
             approvals: Arc::new(ApprovalRegistry::new()),
             observed: Arc::new(crate::harness::code::observed::ObservedFiles::new()),
+            terminals: Arc::new(crate::terminal::TerminalRegistry::new()),
+            questions: Arc::new(crate::harness::code::questions::QuestionRegistry::new()),
             jobs: Arc::new(crate::jobs::JobRegistry::new()),
             dynamic_models: RwLock::new(HashMap::new()),
             turns: Mutex::new(HashMap::new()),

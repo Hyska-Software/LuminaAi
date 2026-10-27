@@ -26,7 +26,7 @@ Observação: `cargo` usa um target dir compartilhado. Se aparecer `Blocking wai
 | Contratos compartilhados | `src/lib/types.ts`, `src/lib/api.ts`, `src/lib/catalog.ts`, `src/lib/modelMenu.ts`, `src/lib/utils.ts`, `src/lib/store/**`, `src/lib/genui/**`, `data/catalog.json`, **`data/genui-contract.json`**, **`data/genui-fixtures.json`**, `scripts/**`, `src-tauri/src/{domain,catalog,events,state,http}.rs`, `src-tauri/src/lib.rs`, `src-tauri/src/commands/{mod,turn,models}.rs`, **`src-tauri/src/oauth/**`**, **`src-tauri/src/commands/oauth.rs`**, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `src/App.tsx` | Lead |
 | Provedores | `src-tauri/src/providers/**` | provider-dev |
 | Harness/tools/docs | `src-tauri/src/harness/**`, `src-tauri/src/tools/**`, `src-tauri/src/policy/**`, `src-tauri/src/documents/**`, `src-tauri/src/jobs/**` | harness-dev |
-| Runtime do workspace (código) | `src-tauri/src/workspace/**`, `src-tauri/src/commands/{workspace,code,git}.rs` | code-runtime-dev |
+| Runtime do workspace (código) | `src-tauri/src/workspace/**`, `src-tauri/src/terminal/**`, `src-tauri/src/commands/{workspace,code,git,terminal}.rs` | code-runtime-dev |
 | Skills embutidas | `src-tauri/skills/**` | formats-dev |
 | Persistência/config/commands | `src-tauri/src/db.rs`, `src-tauri/src/config.rs`, `src-tauri/src/commands/{conversations,settings,attachments,artifacts}.rs` | storage-dev |
 | UI núcleo | `src/components/layout/**`, `src/components/chat/**`, `src/components/composer/**` | ui-core |

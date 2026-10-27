@@ -5,6 +5,8 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   ApprovalScope,
+  AskUserAnswer,
+  AskUserRequest,
   ChangesSummary,
   CodeSessionState,
   ContextStats,
@@ -36,6 +38,10 @@ export interface CodeSessionUi {
   changes: ChangesSummary | null;
   jobs: JobView[];
   approvals: ApprovalRequest[];
+  /** Perguntas estruturadas pendentes do agente (`ask_user`). */
+  questions: AskUserRequest[];
+  /** Respostas já dadas (para o card mostrar o estado resolvido). */
+  questionAnswers: Record<string, { answers: AskUserAnswer[]; skipped: boolean }>;
   /** Decisões já tomadas nesta sessão (para o card mostrar o estado resolvido). */
   resolutions: Record<string, { decision: ApprovalDecision; scope?: ApprovalScope | null }>;
   loading: boolean;
@@ -53,6 +59,8 @@ export function emptyCodeSession(conversationId: string): CodeSessionUi {
     changes: null,
     jobs: [],
     approvals: [],
+    questions: [],
+    questionAnswers: {},
     resolutions: {},
     loading: false,
     error: null,
@@ -110,6 +118,20 @@ export function applyCodeEvent(state: CodeSessionUi, event: TurnEvent): CodeSess
         resolutions,
       };
     }
+    case 'question_requested': {
+      const others = state.questions.filter((entry) => entry.id !== event.request.id);
+      return { ...state, questions: [...others, event.request] };
+    }
+    case 'question_resolved': {
+      return {
+        ...state,
+        questions: state.questions.filter((entry) => entry.id !== event.requestId),
+        questionAnswers: {
+          ...state.questionAnswers,
+          [event.requestId]: { answers: event.answers, skipped: event.skipped },
+        },
+      };
+    }
     case 'plan_updated':
       return {
         ...state,
@@ -153,6 +175,8 @@ export function isCodeEvent(event: TurnEvent): boolean {
   switch (event.type) {
     case 'approval_requested':
     case 'approval_resolved':
+    case 'question_requested':
+    case 'question_resolved':
     case 'plan_updated':
     case 'todos_updated':
     case 'context_stats':
@@ -182,6 +206,8 @@ export function fromSnapshot(
     changes: snapshot.changes ?? null,
     jobs: snapshot.jobs ?? [],
     approvals: snapshot.approvals ?? [],
+    questions: snapshot.questions ?? [],
+    questionAnswers: previous?.questionAnswers ?? {},
     resolutions: previous?.resolutions ?? {},
     loading: false,
     error: null,
@@ -199,6 +225,12 @@ interface CodeStoreState {
     approvalId: string,
     decision: ApprovalDecision,
     options?: { scope?: ApprovalScope | null; feedback?: string | null; remember?: boolean },
+  ) => Promise<boolean>;
+  respondQuestion: (
+    conversationId: string,
+    requestId: string,
+    answers: AskUserAnswer[],
+    skipped?: boolean,
   ) => Promise<boolean>;
   setPermissionMode: (conversationId: string, mode: PermissionMode) => Promise<boolean>;
   setPlanMode: (conversationId: string, enabled: boolean) => Promise<boolean>;
@@ -284,6 +316,28 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
       return ok;
     } catch (error) {
       toast.error('Não foi possível responder à aprovação', { description: String(error) });
+      return false;
+    }
+  },
+
+  respondQuestion: async (conversationId, requestId, answers, skipped = false) => {
+    try {
+      const ok = await api.respondQuestion(requestId, answers, skipped);
+      if (ok) {
+        set((state) => ({
+          byConversation: patch(state.byConversation, conversationId, (current) => ({
+            ...current,
+            questions: current.questions.filter((entry) => entry.id !== requestId),
+            questionAnswers: {
+              ...current.questionAnswers,
+              [requestId]: { answers, skipped },
+            },
+          })),
+        }));
+      }
+      return ok;
+    } catch (error) {
+      toast.error('Não foi possível enviar a resposta', { description: String(error) });
       return false;
     }
   },

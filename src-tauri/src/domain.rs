@@ -1068,6 +1068,62 @@ pub struct ApprovalRule {
     pub created_at: i64,
 }
 
+/// Opção de uma pergunta ao usuário (`ask_user`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskOption {
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Uma pergunta ao usuário (até 4 por chamada).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskQuestion {
+    pub id: String,
+    pub question: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
+    #[serde(default)]
+    pub options: Vec<AskOption>,
+    #[serde(default)]
+    pub multi_select: bool,
+}
+
+/// Pedido de resposta ao usuário (evento `question_requested`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskUserRequest {
+    pub id: String,
+    pub conversation_id: String,
+    pub tool_call_id: String,
+    pub questions: Vec<AskQuestion>,
+    pub created_at: i64,
+}
+
+/// Resposta a uma pergunta.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskUserAnswer {
+    pub question_id: String,
+    #[serde(default)]
+    pub selected: Vec<String>,
+    #[serde(default)]
+    pub custom: Option<String>,
+}
+
+/// Resposta completa a um pedido (`respond_question`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskUserResponse {
+    pub request_id: String,
+    #[serde(default)]
+    pub answers: Vec<AskUserAnswer>,
+    #[serde(default)]
+    pub skipped: bool,
+}
+
 /// Workspace = pasta do usuário (git opcional) que agrupa sessões de código.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1290,6 +1346,8 @@ pub struct CodeSessionState {
     pub jobs: Vec<JobView>,
     #[serde(default)]
     pub approvals: Vec<ApprovalRequest>,
+    #[serde(default)]
+    pub questions: Vec<AskUserRequest>,
 }
 
 /// Entrada da árvore de arquivos do workspace (`list_workspace_files`).

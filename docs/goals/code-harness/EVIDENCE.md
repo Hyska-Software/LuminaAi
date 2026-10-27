@@ -76,19 +76,49 @@ Pesquisa (5 documentos em `docs/research/`, ~190 KB): `dsh-harness-map.md` (DSH 
 - `docs/DESIGN.md`: §5 (sidebar/centro/painel do Code reais) e microcopy v1.9.
 - Estado do branch: commits incrementais em `feat/code-harness`.
 
-## 6. Pendências conhecidas (próximas rodadas)
+## 6. Rodada 3 — perguntas estruturadas, cards de apresentação e ids de tool
 
-1. **`ask_user` estruturado** — stub honesto no backend; falta `QuestionRegistry` + eventos
-   `question_requested/resolved` + comando + integração do `AskUserCard` (o card já existe e testado).
-2. **Cards de apresentação por tool na timeline** (`presentation` de diff/todo/plano/job já é
-   persistido e chega em `tool_call_finished`; falta renderizar dentro dos cards de `AgentSteps`).
-3. **Terminal PTY** (F7/v1.1) — `portable-pty` + xterm.js no painel.
-4. **Subagentes, MCP, hooks, checks do projeto** (F8/v1.2) — roadmap do PLAN.
-5. **CSP restritiva** no `tauri.conf.json` — dívida pré-existente, requer validação manual no app
+- **`ask_user` completo**: `domain` (`AskOption/AskQuestion/AskUserRequest/Answer/Response`),
+  eventos `question_requested/resolved`, `harness/code/questions.rs` (`QuestionRegistry`,
+  `request_user_answers`, normalização/validação, cancelamento por sessão), comando
+  `respond_question`, `AppState.questions`, `ToolCtx.questions`, execução real da tool (bloqueia
+  no turno, timeout → `skipped`), testes de registry/normalização/resposta e integração do
+  `AskUserCard` no `CodeSessionCards` (single/multi + texto livre + "Ignorar").
+- **Cards de apresentação na timeline**: `components/agent/ToolPresentationCard.tsx` +
+  integração no `AgentSteps` (fora do bloco recolhível) para `file_change` (diff expansível),
+  `todos`, `plan`, `job`, `answers` e `changes`; o JSON `presentation` já persistido no
+  `ToolCallRecord` agora vira UI.
+- **`ToolProgress` por chamada**: `ToolCtx.tool_call_id` preenchido pelo dispatcher
+  (`harness/code/tools.rs`), usado por `run_command` (progresso), aprovações e apresentação — o
+  card certo recebe a saída ao vivo.
+- Testes: `cargo test --lib` e `pnpm test` (áreas afetadas) verdes; suíte completa registrada no
+  fecho da rodada.
+
+## 7. Pendências conhecidas (próximas rodadas)
+
+1. **Terminal PTY** (F7/v1.1) — `portable-pty` + renderer de terminal no painel.
+2. **Subagentes, MCP, hooks, checks do projeto** (F8/v1.2) — roadmap do PLAN.
+3. **CSP restritiva** no `tauri.conf.json` — dívida pré-existente, requer validação manual no app
    empacotado; documentada em ARCHITECTURE §13.
-6. **`ToolProgress.id`** usa `message_id` no `run_command` (o `ToolCtx` ainda não tem
-   `tool_call_id` por chamada); evolução prevista.
-7. **`/test`, `/review`, `/init`** do composer preenchem prompts (o backend de checks/revisão chega
+4. **`/test`, `/review`, `/init`** do composer preenchem prompts (o backend de checks/revisão chega
    com F8); hoje degradam honestamente.
-8. **`pnpm test` completo**: os 2 flakes de `components/models` precisam ser estabilizados (fora do
+5. **`pnpm test` completo**: os 2 flakes de `components/models` precisam ser estabilizados (fora do
    escopo do harness; registrados para não confundir a verificação final).
+6. **Aprovação de shell no modo Editar**: hoje todo comando pede aprovação; uma allowlist de
+   comandos de leitura ("git status", testes) pode reduzir fadiga — decisão de produto da v1.1.
+
+## 8. Rodada 4 — terminal PTY (F7) e endurecimento do runner
+
+- **Terminal PTY completo**: `src-tauri/src/terminal/mod.rs` (registro por sessão, `portable-pty`/ConPTY,
+  cwd no workspace, env sem segredos, leitura → `Channel<TerminalEvent>`, resize, kill) + comandos
+  `open_terminal`/`write_terminal`/`resize_terminal`/`close_terminal`/`list_terminals` +
+  `AppState.terminals`; renderer com `@xterm/xterm` 6 + `@xterm/addon-fit` no painel (aba
+  **Terminal**, abas por sessão, fit/resize, estados vazio/erro/limite). Testes: registry backend
+  (env scrub, ciclo de vida), `TerminalPanel` (abrir/fechar/erro) e tab nova no `CodePanel`.
+- **Job Object no runner**: `workspace/exec.rs` agora associa o processo a um Job Object
+  (`KILL_ON_JOB_CLOSE`) no Windows, com `taskkill /T` como segunda barreira no cancelamento/timeout.
+  O teste de kill de árvore passou a rodar 10/10 sem flake (antes falhava de forma intermitente).
+- **Dependências**: `@xterm/xterm` + `@xterm/addon-fit` (pnpm 11, store do projeto),
+  `portable-pty 0.8` e `windows 0.62` (features de Job Object).
+- Verificação: `cargo check --all-targets` verde, `pnpm typecheck` verde, `pnpm build` verde,
+  `cargo test --lib`/`pnpm test` conferidos no fecho da rodada.

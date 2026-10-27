@@ -6,6 +6,7 @@ import {
   GitBranch,
   PanelRightClose,
   RefreshCw,
+  SquareTerminal,
   type LucideIcon,
 } from 'lucide-react';
 import { IconButton, Spinner, Tooltip } from '@/components/ui';
@@ -26,6 +27,7 @@ import { cn } from '@/lib/utils';
 import { ChangesPanel } from './ChangesPanel';
 import { FilePreview } from './FilePreview';
 import { FileTree } from './FileTree';
+import { TerminalPanel } from './TerminalPanel';
 import { useWorkspacePanel } from './useWorkspacePanel';
 import { useWorkspaces } from './useWorkspaces';
 
@@ -33,6 +35,7 @@ import { useWorkspaces } from './useWorkspaces';
 const PANEL_TABS: ReadonlyArray<{ id: CodePanelTab; label: string; icon: LucideIcon }> = [
   { id: 'files', label: 'Arquivos', icon: Files },
   { id: 'changes', label: 'Alterações', icon: FileDiff },
+  { id: 'terminal', label: 'Terminal', icon: SquareTerminal },
 ];
 
 /** Single content region controlled by both tabs (only the active one renders). */
@@ -277,6 +280,16 @@ export function CodePanel() {
             title="Nenhum workspace aberto"
             description="Abra uma pasta na barra lateral para o agente ler, editar e rodar comandos aqui."
           />
+        ) : tab === 'terminal' ? (
+          activeId ? (
+            <TerminalPanel conversationId={activeId} className="min-h-0 flex-1" />
+          ) : (
+            <PanelEmptyState
+              icon={SquareTerminal}
+              title="Nenhuma sessão ativa"
+              description="Abra uma sessão para usar o terminal no diretório do workspace."
+            />
+          )
         ) : tab === 'changes' ? (
           <ChangesPanel
             workspaceId={workspaceId}

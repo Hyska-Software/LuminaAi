@@ -90,6 +90,8 @@ pub struct ToolCtx {
     pub http: reqwest::Client,
     pub conversation_id: String,
     pub message_id: String,
+    /// Id da chamada de tool em execução (progresso/apresentação por card).
+    pub tool_call_id: String,
     pub turn_id: String,
     pub workspace: Option<WorkspaceHandle>,
     pub settings: Settings,
@@ -108,6 +110,8 @@ pub struct ToolCtx {
     /// Jobs de processo em background (`AppState::jobs`; `None` em testes que
     /// não exercitam shell).
     pub jobs: Option<Arc<crate::jobs::JobRegistry>>,
+    /// Perguntas estruturadas ao usuário (`ask_user`).
+    pub questions: Option<Arc<crate::harness::code::questions::QuestionRegistry>>,
 }
 
 impl ToolCtx {
@@ -653,6 +657,7 @@ mod tests {
             http: reqwest::Client::new(),
             conversation_id: "conv-1".into(),
             message_id: "msg-1".into(),
+            tool_call_id: "call-1".into(),
             turn_id: "turn-1".into(),
             workspace: Some(WorkspaceHandle {
                 root: std::env::temp_dir(),
@@ -668,6 +673,7 @@ mod tests {
             rules: Vec::new(),
             plan_mode: false,
             jobs: None,
+            questions: None,
         }
     }
 }

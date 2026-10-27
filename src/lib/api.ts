@@ -12,6 +12,7 @@ import type {
   ArtifactContent,
   ArtifactPreview,
   ArtifactThumbnail,
+  AskUserAnswer,
   AttachmentInfo,
   CatalogView,
   CodeEnvironmentStatus,
@@ -30,6 +31,8 @@ import type {
   SettingsView,
   SkillContent,
   SkillSummary,
+  TerminalEvent,
+  TerminalInfo,
   TurnEvent,
   TurnPayload,
   TurnResult,
@@ -200,6 +203,33 @@ export const api = {
   revertTurn: (conversationId: string, turnId: string) =>
     invoke<boolean>('revert_turn', { conversationId, turnId }),
   compactSession: (conversationId: string) => invoke<boolean>('compact_session', { conversationId }),
+
+  respondQuestion: (requestId: string, answers: AskUserAnswer[], skipped = false) =>
+    invoke<boolean>('respond_question', { requestId, answers, skipped }),
+
+  /* -------- terminal PTY (layout Code) -------- */
+  openTerminal: (
+    conversationId: string,
+    cols: number,
+    rows: number,
+    onEvent: (event: TerminalEvent) => void,
+  ) => {
+    const channel = new Channel<TerminalEvent>();
+    channel.onmessage = onEvent;
+    return invoke<TerminalInfo>('open_terminal', {
+      conversationId,
+      cols,
+      rows,
+      onEvent: channel,
+    });
+  },
+  writeTerminal: (id: string, data: string) =>
+    invoke<void>('write_terminal', { id, data }),
+  resizeTerminal: (id: string, cols: number, rows: number) =>
+    invoke<void>('resize_terminal', { id, cols, rows }),
+  closeTerminal: (id: string) => invoke<boolean>('close_terminal', { id }),
+  listTerminals: (conversationId: string) =>
+    invoke<TerminalInfo[]>('list_terminals', { conversationId }),
 
   /* -------- git (painel) -------- */
   gitStatus: (workspaceId: string) => invoke<WorkspaceGitStatus>('git_status', { workspaceId }),

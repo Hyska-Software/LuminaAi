@@ -61,13 +61,56 @@ pub async fn run(ctx: &ToolCtx, exec: ToolExec, args: Value) -> ToolOutcome {
         ToolExec::JobKill => job_kill(ctx, &args).await,
         ToolExec::TodoWrite => todo_write(ctx, &args).await,
         ToolExec::SubmitPlan => submit_plan(ctx, &args).await,
-        ToolExec::AskUser => err("ASK_USER_UNAVAILABLE", "o card de perguntas interativas chega na próxima fase; faça a pergunta em prosa e prossiga com a hipótese mais segura"),
+        ToolExec::AskUser => ask_user(ctx, &args).await,
     }
 }
 
 /* ------------------------------------------------------------------ */
 /* Helpers: erro, args, workspace e spill                              */
 /* ------------------------------------------------------------------ */
+
+/// `ask_user`: pergunta com opções (single/multi + texto livre) e aguarda a
+/// resposta do usuário pelo card da timeline (`respond_question`).
+async fn ask_user(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let Some(registry) = ctx.questions.clone() else {
+        return err(
+            "ASK_USER_UNAVAILABLE",
+            "nenhum canal de perguntas está montado nesta composição",
+        );
+    };
+    let request = match crate::harness::code::questions::normalize_questions(
+        args,
+        &ctx.conversation_id,
+        &ctx.message_id,
+    ) {
+        Ok(request) => request,
+        Err(message) => return ToolOutcome::error(message),
+    };
+    let timeout = std::time::Duration::from_secs(ctx.settings.approval_timeout_secs.max(60) as u64);
+    let response = crate::harness::code::questions::request_user_answers(
+        registry.as_ref(),
+        ctx.emit.clone(),
+        request,
+        timeout,
+        &ctx.cancel,
+    )
+    .await;
+    let content = crate::harness::code::questions::response_content(&response);
+    ToolOutcome {
+        content,
+        summary: Some(if response.skipped {
+            "Pergunta pulada pelo usuário".to_string()
+        } else {
+            format!("Respondeu {} pergunta(s)", response.answers.len())
+        }),
+        presentation: Some(serde_json::json!({
+            "kind": "answers",
+            "answers": response.answers,
+            "skipped": response.skipped,
+        })),
+        ..Default::default()
+    }
+}
 
 fn err(code: &str, message: impl Into<String>) -> ToolOutcome {
     ToolOutcome::error(format!("{code}: {}", message.into()))
@@ -378,7 +421,7 @@ async fn policy_check(
             let request = ApprovalRequest {
                 id: format!("apr-{}", uuid::Uuid::new_v4().simple()),
                 conversation_id: ctx.conversation_id.clone(),
-                tool_call_id: String::new(),
+                tool_call_id: ctx.tool_call_id.clone(),
                 tool: tool.to_string(),
                 title: title.to_string(),
                 detail,
@@ -1335,7 +1378,7 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         cursor = next_cursor;
         if !chunk.is_empty() {
             ctx.emit_event(crate::events::TurnEvent::ToolProgress {
-                id: ctx.message_id.clone(),
+                id: ctx.tool_call_id.clone(),
                 stream: None,
                 delta: chunk,
             });
@@ -1415,7 +1458,7 @@ async fn run_command_direct(
     let (sender, mut receiver) =
         tokio::sync::mpsc::unbounded_channel::<(exec::StreamKind, String)>();
     let emit = ctx.emit.clone();
-    let event_id = ctx.message_id.clone();
+    let event_id = ctx.tool_call_id.clone();
     let progress_task = tokio::spawn(async move {
         while let Some((stream, delta)) = receiver.recv().await {
             if let Some(emit) = &emit {
@@ -1831,7 +1874,7 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let request = ApprovalRequest {
         id: format!("apr-{}", uuid::Uuid::new_v4().simple()),
         conversation_id: ctx.conversation_id.clone(),
-        tool_call_id: String::new(),
+        tool_call_id: ctx.tool_call_id.clone(),
         tool: "submit_plan".to_string(),
         title: "Aprovar plano?".to_string(),
         detail: ApprovalDetail::Other { text: summary_text },
@@ -1963,6 +2006,7 @@ mod tests {
                 http: reqwest::Client::new(),
                 conversation_id: "conv-1".into(),
                 message_id: "msg-1".into(),
+                tool_call_id: "call-1".into(),
                 turn_id: "turn-1".into(),
                 workspace: Some(WorkspaceHandle {
                     root: self.root.clone(),
@@ -1978,6 +2022,7 @@ mod tests {
                 rules: Vec::new(),
                 plan_mode: false,
                 jobs: Some(self.jobs.clone()),
+                questions: None,
             }
         }
 
@@ -2451,12 +2496,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ask_user_is_documented_as_unavailable_until_the_questions_phase() {
+    async fn ask_user_without_a_channel_is_an_actionable_error() {
         let fixture = Fixture::new();
         let ctx = fixture.ctx();
         let outcome = call(&ctx, "ask_user", json!({ "questions": [] })).await;
         assert_eq!(error_code(&outcome), "ASK_USER_UNAVAILABLE");
-        assert!(outcome.content.contains("próxima fase"), "{}", outcome.content);
+    }
+
+    #[tokio::test]
+    async fn ask_user_waits_for_the_user_card_and_returns_the_answers() {
+        use crate::harness::code::questions::QuestionRegistry;
+        let fixture = Fixture::new();
+        let registry = std::sync::Arc::new(QuestionRegistry::new());
+        let mut ctx = fixture.ctx();
+        ctx.questions = Some(registry.clone());
+
+        let registry_for_answer = registry.clone();
+        let answer_handle = tokio::spawn(async move {
+            for _ in 0..200 {
+                let pending = registry_for_answer.pending_requests();
+                if let Some(request) = pending.first() {
+                    let question_id = request.questions[0].id.clone();
+                    let _ = registry_for_answer.resolve(crate::domain::AskUserResponse {
+                        request_id: request.id.clone(),
+                        answers: vec![crate::domain::AskUserAnswer {
+                            question_id,
+                            selected: vec!["SQLite".to_string()],
+                            custom: None,
+                        }],
+                        skipped: false,
+                    });
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            panic!("a pergunta nunca foi registrada");
+        });
+
+        let outcome = call(
+            &ctx,
+            "ask_user",
+            json!({
+                "questions": [{
+                    "id": "db",
+                    "question": "Qual banco devo usar?",
+                    "options": [{ "label": "SQLite" }, { "label": "Postgres" }]
+                }]
+            }),
+        )
+        .await;
+        let _ = answer_handle.await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("SQLite"), "{}", outcome.content);
+        let presentation = outcome.presentation.expect("presentation");
+        assert_eq!(presentation["kind"], "answers");
+        assert_eq!(presentation["skipped"], false);
     }
 
     #[tokio::test]

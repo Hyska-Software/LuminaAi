@@ -10,5 +10,6 @@ pub mod models;
 pub mod oauth;
 pub mod settings;
 pub mod skills;
+pub mod terminal;
 pub mod turn;
 pub mod workspace;

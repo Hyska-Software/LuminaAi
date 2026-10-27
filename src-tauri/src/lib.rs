@@ -24,6 +24,7 @@ mod oauth;
 mod policy;
 mod providers;
 mod state;
+mod terminal;
 mod tools;
 mod workspace;
 
@@ -116,6 +117,7 @@ pub fn run() {
             commands::code::set_permission_mode,
             commands::code::set_plan_mode,
             commands::code::respond_approval,
+            commands::code::respond_question,
             commands::code::list_approval_rules,
             commands::code::save_approval_rule,
             commands::code::delete_approval_rule,
@@ -139,6 +141,12 @@ pub fn run() {
             commands::git::git_switch_branch,
             commands::git::git_log,
             commands::git::suggest_commit_message,
+            /* -------- terminal PTY -------- */
+            commands::terminal::open_terminal,
+            commands::terminal::write_terminal,
+            commands::terminal::resize_terminal,
+            commands::terminal::close_terminal,
+            commands::terminal::list_terminals,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lumina");

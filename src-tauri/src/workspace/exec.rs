@@ -125,6 +125,11 @@ pub async fn run(
         ))
     })?;
     let pid = child.id().unwrap_or(0);
+    // Windows: coloca o processo em um Job Object com KILL_ON_JOB_CLOSE. Fechar
+    // o handle no cancelamento/timeout mata a árvore inteira de forma confiável
+    // (inclusive netos que o `taskkill /T` pode perder numa corrida).
+    #[cfg(windows)]
+    let _job = attach_kill_on_close_job(&child);
 
     let stdout_task = tokio::spawn(read_stream(
         child.stdout.take(),
@@ -166,6 +171,10 @@ pub async fn run(
     drop(wait);
 
     if timed_out || cancelled {
+        // Fecha o Job Object (mata a árvore) e mantém o `taskkill /T` como
+        // segunda barreira para processos que escaparam do job.
+        #[cfg(windows)]
+        drop(_job);
         kill_process_tree(pid).await;
         let _ = child.start_kill();
         status = child.wait().await.ok();
@@ -544,6 +553,61 @@ async fn join_stream(task: tokio::task::JoinHandle<(Vec<u8>, bool)>) -> (String,
             (text, truncated)
         }
         _ => (String::new(), true),
+    }
+}
+
+/// Job Object do Windows com `KILL_ON_JOB_CLOSE`: fechar o handle mata todos os
+/// processos da árvore (netos incluídos). Fecha no `Drop`.
+#[cfg(windows)]
+struct JobHandle(windows::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+unsafe impl Send for JobHandle {}
+#[cfg(windows)]
+unsafe impl Sync for JobHandle {}
+
+#[cfg(windows)]
+impl Drop for JobHandle {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = windows::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+/// Cria o Job Object e associa o processo recém-spawnado.
+#[cfg(windows)]
+fn attach_kill_on_close_job(child: &tokio::process::Child) -> Option<JobHandle> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    unsafe {
+        let job = CreateJobObjectW(None, PCWSTR::null()).ok()?;
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )
+        .is_err()
+        {
+            let _ = windows::Win32::Foundation::CloseHandle(job);
+            return None;
+        }
+        let process = HANDLE(child.raw_handle().unwrap_or(std::ptr::null_mut()));
+        if AssignProcessToJobObject(job, process).is_err() {
+            let _ = windows::Win32::Foundation::CloseHandle(job);
+            return None;
+        }
+        Some(JobHandle(job))
     }
 }
 

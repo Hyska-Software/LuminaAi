@@ -224,7 +224,7 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
     expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Alterações' }));
 
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Alterações' }), { key: 'End' });
-    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Alterações' }));
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Terminal' }));
 
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Alterações' }), { key: 'Home' });
     expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Arquivos' }));
