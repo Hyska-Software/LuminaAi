@@ -134,7 +134,7 @@ async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSe
         project,
         context,
         changes,
-        jobs: Vec::new(),
+        jobs: state.jobs.list(conversation_id),
         approvals,
     })
 }
@@ -701,11 +701,147 @@ pub async fn revert_turn(
     Ok(reverted > 0)
 }
 
-/// Compactação manual do contexto (v1.5: ainda não implementada no loop Code).
+/// Compactação manual do contexto (`/compact`): resume o trecho antigo da
+/// conversa com uma chamada auxiliar e o aplica aos próximos turnos do modelo.
 #[tauri::command]
 pub async fn compact_session(
-    _state: State<'_, AppState>,
-    _conversation_id: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    conversation_id: String,
 ) -> Result<bool, String> {
-    Err("a compactação automática ainda não está disponível nesta versão".to_string())
+    let conversation = state
+        .db
+        .get_conversation(&conversation_id)
+        .map_err(map_err)?
+        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))?;
+    let messages = state
+        .db
+        .list_messages(&conversation_id)
+        .map_err(map_err)?;
+    if messages.len() < 8 {
+        return Err("conversa curta demais para compactar".to_string());
+    }
+    // Converte para o vocabulário do histórico neutro e escolhe o corte.
+    let history: Vec<crate::providers::HistoryMessage> = messages
+        .iter()
+        .map(|message| match message.role {
+            crate::domain::MessageRole::User => {
+                crate::providers::HistoryMessage::user(message.content.clone())
+            }
+            crate::domain::MessageRole::Assistant => {
+                crate::providers::HistoryMessage::assistant(message.content.clone())
+            }
+            crate::domain::MessageRole::System => {
+                crate::providers::HistoryMessage::system(message.content.clone())
+            }
+        })
+        .collect();
+    let Some(cut) = crate::harness::code::compaction::cut_index(&history) else {
+        return Err("não há trecho antigo suficiente para compactar".to_string());
+    };
+    let transcript = crate::harness::code::compaction::transcript(&history, cut);
+    let settings = crate::config::load_settings(&app);
+    let deps = crate::harness::HarnessDeps {
+        app: Some(app.clone()),
+        db: state.db.clone(),
+        http: state.http.clone(),
+        search_http: state.search_http.clone(),
+        catalog: state.catalog.clone(),
+        streamer: None,
+        credential_override: None,
+        refresh_override: None,
+        model_source: None,
+        api_key_override: None,
+        data_dir: Some(state.data_dir.clone()),
+        skills_roots: Some(Vec::new()),
+        approvals: Some(state.approvals.clone()),
+        observed: Some(state.observed.clone()),
+        jobs: Some(state.jobs.clone()),
+    };
+    let request = crate::harness::batch::BatchRequest {
+        provider_id: &conversation.provider_id,
+        model_id: &conversation.model_id,
+        system_prompt: crate::harness::code::compaction::summary_system_prompt(),
+        user_text: &format!("Resuma o transcript abaixo:\n\n{transcript}"),
+        max_output_tokens: 1_200,
+        temperature: None,
+    };
+    let summary = tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        crate::harness::batch::complete_text(&deps, request),
+    )
+    .await
+    .map_err(|_| "a compactação excedeu o tempo limite".to_string())?
+    .map_err(|error| format!("falha ao compactar: {error:#}"))?;
+    let covered = i64::try_from(cut).unwrap_or(1).max(1);
+    state
+        .db
+        .insert_session_summary(&conversation_id, 1, covered, &summary, None)
+        .map_err(map_err)?;
+    let payload = serde_json::json!({
+        "manual": true,
+        "coveredMessages": covered,
+        "summaryChars": summary.chars().count(),
+    })
+    .to_string();
+    state
+        .db
+        .append_code_event(&conversation_id, None, EVENT_CONTEXT_STATS, &payload)
+        .map_err(map_err)?;
+    let _ = settings;
+    Ok(true)
+}
+
+/* ------------------------------------------------------------------ */
+/* Jobs em background (F4)                                             */
+/* ------------------------------------------------------------------ */
+
+/// PÃ¡gina de saÃ­da de um job em background (`get_job_output`).
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobOutputPage {
+    pub output: String,
+    pub next_cursor: usize,
+    pub job: crate::domain::JobView,
+}
+
+/// Jobs de processo da sessÃ£o (painel e cards).
+#[tauri::command]
+pub async fn list_jobs(
+    state: State<'_, AppState>,
+    conversation_id: String,
+) -> Result<Vec<crate::domain::JobView>, String> {
+    Ok(state.jobs.list(&conversation_id))
+}
+
+/// SaÃ­da incremental de um job a partir de um cursor absoluto.
+#[tauri::command]
+pub async fn get_job_output(
+    state: State<'_, AppState>,
+    job_id: String,
+    cursor: Option<usize>,
+) -> Result<JobOutputPage, String> {
+    let (output, next_cursor, job) = state
+        .jobs
+        .output(&job_id, cursor.unwrap_or(0))
+        .map_err(map_err)?;
+    Ok(JobOutputPage {
+        output,
+        next_cursor,
+        job,
+    })
+}
+
+/// Encerra um job (processo + Ã¡rvore) e devolve o estado final.
+#[tauri::command]
+pub async fn kill_job(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> Result<crate::domain::JobView, String> {
+    state.jobs.kill(&job_id).map_err(map_err)?;
+    state
+        .jobs
+        .wait(&job_id, std::time::Duration::from_millis(1_500))
+        .await
+        .map_err(map_err)
 }

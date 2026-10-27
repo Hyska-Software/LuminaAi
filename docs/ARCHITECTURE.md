@@ -43,16 +43,19 @@ Lumina é um aplicativo desktop de conversação com LLMs, construído em **Taur
 ```
 
 O renderer tem dois layouts (`uiStore.layoutMode`): **Chat** (sidebar de conversas, Biblioteca,
-Skills, painéis de artefatos/fontes) e **Code** (sidebar de sessões, cabeçalho/abas de agente,
-painel Arquivos/Alterações; sem Biblioteca). Os dois compartilham a mesma instância de `ChatView`
-e o mesmo `TitleBar` com o seletor Chat/Code. **As sessões são separadas por layout** (`conversations.mode`):
-uma sessão do Chat nunca aparece no Code e vice-versa; uma sessão do Chat pode ser marcada como
-compartilhada com o Code (`code_linked`), passando a aparecer nos dois e sendo a mesma conversa. O
-harness de código ainda não existe nesta fase (layout em docs/goals/chat-code-layout/PLAN.md e
-sessões em docs/goals/chat-code-sessions/PLAN.md); o planejamento completo do harness de código —
-workspaces, tools de FS/shell/git, permissões, contexto e UI de revisão — está em
-**`docs/goals/code-harness/PLAN.md`** (+ `HARNESS.md`, `TOOLS.md`, `WORKBENCH.md` e
-`docs/research/`).
+Skills, painéis de artefatos/fontes) e **Code** (sidebar de workspaces/sessões, cabeçalho/abas de
+agente, painel Arquivos/Alterações/commit; sem Biblioteca). Os dois compartilham a mesma instância de
+`ChatView` e o mesmo `TitleBar` com o seletor Chat/Code. **As sessões são separadas por layout**
+(`conversations.mode`): uma sessão do Chat nunca aparece no Code e vice-versa; uma sessão do Chat
+pode ser marcada como compartilhada com o Code (`code_linked`), passando a aparecer nos dois e sendo
+a mesma conversa.
+
+O **harness de código** é real neste app (v1.9): sessões do Code apontam para um `workspaces`
+(pasta do usuário, git opcional), rodam o perfil `Code` do mesmo loop de agente (prompt próprio,
+tools de FS/shell/git/plano, política de permissões com aprovação, journal reversível, jobs e
+compactação de contexto) e fecham em revisão de diff + commit no painel. Contrato/desenho:
+**`docs/goals/code-harness/`** (`PLAN.md`, `HARNESS.md`, `TOOLS.md`, `WORKBENCH.md`,
+`EVIDENCE.md`) e pesquisa em `docs/research/`.
 
 ## 4. Fluxo de um turno
 
@@ -74,7 +77,17 @@ UI: send()
   └─ eventos chegam por Channel e atualizam o estado incrementalmente
 ```
 
-Eventos (`TurnEvent`): `turn_started`, `step_started`, `reasoning_delta`, `reasoning_done`, `text_delta`, `tool_call_started`, `tool_call_args`, `tool_call_finished`, `artifact_created`, `usage`, `message_updated`, `title_updated`, `done`, `cancelled`, `error`.
+Eventos (`TurnEvent`): `turn_started`, `step_started`, `reasoning_delta`, `reasoning_done`,
+`text_delta`, `tool_call_started`, `tool_call_args`, `tool_call_finished` (com
+`presentation`), `artifact_created`, `usage`, `message_updated`, `title_updated`, `done`,
+`cancelled`, `error` e os eventos do harness de código: `approval_requested/resolved`,
+`tool_progress`, `file_changed`, `workspace_changes`, `todos_updated`, `plan_updated`,
+`context_stats`, `compacted`, `job_updated`, `profile_changed`.
+
+**Perfis de turno.** `TurnPayload.profile` (`chat` | `code`, default `chat`) seleciona o perfil do
+mesmo loop: prompt, catálogo de tools, política e orçamentos. O perfil `code` só é aceito em sessão
+do Code (nativa ou `code_linked`) e, a cada passo, passa por: compactação de contexto (se
+necessário), política/aprovação por tool, journal de arquivos e emissão de eventos de sessão.
 
 ## 5. Modelo de dados
 
@@ -82,7 +95,7 @@ Eventos (`TurnEvent`): `turn_started`, `step_started`, `reasoning_delta`, `reaso
 
 ```sql
 conversations(id PK, title, created_at, updated_at, pinned, provider_id, model_id, message_count, preview,
-              mode, code_linked)
+              mode, code_linked, workspace_id NULL, agent_kind, permission_mode)
 messages(id PK, conversation_id, role, content, reasoning, status, tool_calls JSON,
          citations JSON, attachments JSON, model_id, provider_id, usage JSON,
          provider_state JSON, created_at, seq, trace JSON)
@@ -90,6 +103,13 @@ attachments(id PK, name, mime_type, size, kind, text, page_count, width, height,
 artifacts(id PK, conversation_id NULL, message_id, name, mime_type, kind, language, size,
          created_at, path, favorite)
 usage_log(id, conversation_id, message_id, provider_id, model_id, tokens..., cost, created_at)
+-- harness de código (v1.9, docs/goals/code-harness/HARNESS.md §11)
+workspaces(id PK, name, path UNIQUE, created_at, updated_at, last_opened_at, pinned, trusted)
+code_events(id PK, conversation_id, turn_id NULL, seq, kind, payload JSON, created_at)
+file_journal(id PK, conversation_id, turn_id, path, change_kind, before_hash, after_hash,
+             added, removed, created_at)
+session_summaries(id PK, conversation_id, from_seq, to_seq, content, tokens, created_at)
+approval_rules(id PK, scope, scope_id NULL, tool, matcher, pattern, decision, created_at)
 meta(key PK, value)
 ```
 
@@ -121,8 +141,20 @@ continuam devolvendo todas as sessões com os dois campos.
   secrets.json         # API keys (nunca enviadas ao renderer)
   attachments/<id>.<ext>
   artifacts/<id>/<nome>
+  checkpoints/objects/<sha256>   # journal do harness de código (conteúdo por hash)
+  spill/<conversa>/<id>.txt      # saída completa de tool acima do limite inline
   lumina.db
 ```
+
+`workspaces.path` aponta para uma pasta real do usuário (nada é copiado para o app-data);
+`conversations.workspace_id` é nulo em sessões sem workspace, e `conversations.agent_kind`
+(`lumina`) deixa a porta aberta para agentes externos via ACP no futuro.
+`conversations.permission_mode` (`read_only` | `edit` | `autonomous`) é o modo de permissões da
+sessão de código. `code_events` é o log append-only dos fatos da sessão (permissões, plano,
+tarefas, contexto, aprovações, alterações, reversões, turno encerrado); `file_journal` guarda as
+capturas por turno (hash antes/depois) que dão o diff e o "reverter turno/arquivo";
+`session_summaries` guarda os resumos de compactação; `approval_rules` guarda as regras
+"sempre permitir/negar".
 
 ## 6. Catálogo de modelos
 
@@ -301,6 +333,47 @@ desativadas (`Settings.disabled_skills`) são filtradas do prompt, de
 `list_skills` e de `read_skill`; a gestão (ativar/desativar; excluir apenas as
 do Lumina) fica na sidebar e em Configurações → Ferramentas. Desenho completo,
 limites e segurança: **`docs/FILES.md`**.
+
+### 8.3 Harness de código (perfil `code`)
+
+Mesmo loop do Chat, com `TurnPayload.profile = "code"` (só em sessão do Code). O que muda:
+
+1. **Contexto do turno** (`harness/code/context.rs`): workspace da sessão, git (branch/ahead/
+   behind/dirty), perfil do projeto (comandos de test/lint/build detectados), `AGENTS.md`
+   (raiz + `.lumina/instructions.md`, cap 32 KiB), árvore resumida (2 níveis) e estado da
+   sessão (plano/tarefas/contexto) projetado de `code_events`.
+2. **Prompt próprio** (`harness/code/prompt.rs`): identidade de agente de código, ambiente,
+   política de permissões, orientações das tools (geradas do registry — fonte única),
+   regras de edição/verificação, projeto e formato de resposta.
+3. **Tools do perfil** (`tools/registry.rs` + `tools/code/*`): no máximo ~17 tools —
+   `read_file`, `list_dir`, `search_files`, `search_text`, `read_tool_output`,
+   `write_file`, `edit_file`, `run_command`, `job_list`/`job_output`/`job_kill`,
+   `git_status`/`git_diff`/`git_log`, `todo_write`, `submit_plan`, `ask_user` (stub honesto).
+   O modelo **não** recebe commit/push.
+4. **Política e aprovação** (`policy/`): modos `read_only`/`edit`/`autonomous` + overlay Plano
+   + regras persistidas. Toda mutação passa por `policy::decide` → `ApprovalRegistry`
+   (evento `approval_requested`, card na timeline, `respond_approval`) ou negação com código
+   estável. Timeout/cancelamento resolvem como falha fechada.
+5. **Confinamento e journal** (`workspace/`): todo path resolve contra a raiz do workspace
+   (`safe_path`: `..`, symlink/junction, UNC, device paths); leitura antes da escrita por hash
+   (`FS_NOT_OBSERVED`/`FS_STALE_VERSION`); escrita atômica com EOL/BOM preservados; journal
+   por turno no object store (`checkpoints/objects/<sha256>`) → diff, "Reverter arquivo" e
+   "Reverter turno". Execução de processos com `CREATE_NO_WINDOW`, env higienizado, timeout,
+   kill de árvore (`taskkill /T`) e streaming de saída.
+6. **Git**: CLI do usuário (`git status --porcelain=v2 -z`, `diff`, `log`, `stage`,
+   `unstage`, `commit`, `branches`), sem libgit2. Operações mutantes são ações do usuário no
+   painel, nunca tools do modelo.
+7. **Jobs**: `run_command` pode rodar em background (`JobRegistry` com ring buffer 256 KB,
+   limite 8 por sessão, cursor de saída, `JobUpdated`); foreground que estoura o timeout é
+   promovido a job em vez de morto.
+8. **Contexto**: medidor (`context_stats`), poda de resultados antigos e compactação por resumo
+   (`harness/code/compaction.rs`, template de 8 seções, persistido em `session_summaries` e
+   aplicado nos turnos seguintes).
+9. **Fecho do turno**: `file_journal` → `workspace_changes`, `context_stats`, `turn/ended` em
+   `code_events` e cancelamento das aprovações pendentes da sessão.
+
+Contratos completos (tools/eventos/comandos/UI): `docs/goals/code-harness/TOOLS.md`,
+`HARNESS.md` e `WORKBENCH.md`.
 
 ### 8.1 Markdown do chat
 
@@ -534,7 +607,20 @@ rename_artifact, set_artifact_favorite, get_artifact_thumbnail,
 get_artifact_content, get_artifact_preview,
 save_artifact, open_artifact, delete_artifact, get_code_environment,
 open_skills_dir, get_skills, set_skill_enabled, delete_skill, get_skill_content,
-run_turn, cancel_turn
+run_turn, cancel_turn,
+-- harness de código (v1.9): workspace
+pick_workspace_folder, add_workspace, list_workspaces, get_workspace_context,
+rename_workspace, remove_workspace, set_workspace_trusted,
+set_conversation_workspace, open_workspace_in_explorer, list_workspace_files,
+search_workspace_files, read_workspace_file,
+-- sessão de código
+get_code_session_state, set_permission_mode, set_plan_mode, respond_approval,
+list_approval_rules, save_approval_rule, delete_approval_rule,
+get_workspace_changes, get_file_diff, revert_file, revert_turn, compact_session,
+list_jobs, get_job_output, kill_job,
+-- git (painel)
+git_status, git_diff, git_stage, git_unstage, git_discard, git_commit,
+git_branches, git_switch_branch, git_log, suggest_commit_message
 ```
 
 O login ChatGPT é **em duas fases**: `openai_login_start` devolve
@@ -555,7 +641,17 @@ encerra. `refresh_provider_models` devolve o `CatalogView` mesclado
   mantém apenas o mapping conta/`client_id`. Tokens nunca vão para URL, log,
   localStorage ou mensagens; `id_token_hint` só aparece na URL de authorize
   (redigida em diagnósticos).
-- CSP restritiva em produção; sem `eval`, sem imports remotos em runtime.
+- **Harness de código**: confinamento de path ao workspace (`safe_path`), leitura antes da
+  escrita com CAS por hash, aprovação interativa para mutações/comandos/segredos, classificação
+  de comandos destrutivos (pedem aprovação até no modo Autônomo), env higienizado
+  (`*API_KEY*`/`*TOKEN*`/`*SECRET*` removidos), timeout e kill de árvore, auditoria em
+  `code_events`, journal reversível e commit apenas pelo usuário. **Não é sandbox de SO**: no
+  Windows não prometemos isolamento de processo/arquivo fora do workspace — a barreira é
+  política + confinamento + aprovação (HARNESS.md §4/§13).
+- **CSP**: `tauri.conf.json` ainda está com `csp: null` (dívida pré-existente, registrada em
+  `docs/goals/code-harness/EVIDENCE.md`); a mitigação atual é não injetar conteúdo remoto no
+  webview (arquivos são renderizados como texto sanitizado e HTML/SVG sempre em iframe sandbox).
+  Endurecer a CSP é item de hardening separado, com validação manual no app empacotado.
 - HTML/SVG de artefatos e blocos `html` rodam em iframe `sandbox="allow-scripts"` sem acesso ao IPC (sem `allow-same-origin`).
 - Links externos abrem no navegador padrão via plugin-opener, nunca no webview.
 - Markdown com HTML cru passa por sanitizador allowlist (`rehypeSafeHtml`): sem `script`/`style`/`iframe`/eventos/`style` inline, classes e `data-*` fora da allowlist, e URLs restritas a `http(s)`, `mailto:` e âncoras internas. React nunca injeta o markdown via `innerHTML`.
@@ -611,3 +707,9 @@ texto de um artefato de outra conversa chega ao modelo).
 | 15 | Biblioteca de artefatos com **escopo de usuário** (todas as conversas) | escopo por conversa (v1 inicial) | pedido do produto: o usuário precisa reaproveitar arquivos criados em outras conversas como contexto; a exposição é limitada a artefatos/metadados (mensagens de outras conversas continuam privadas) e a leitura é local/read-only |
 | 16 | **Página Biblioteca** no lugar do chat (como Skills) + upload do usuário para a biblioteca (`conversation_id NULL` no mesmo `artifacts`) + favoritos/rename | página separada de "arquivos enviados" com tabela própria; pastas/coleções | o usuário precisa de uma visão única dos seus arquivos e o agente precisa do mesmo caminho de leitura; usar a tabela existente evita segunda fonte de verdade, e `Option<conversation_id>` preserva a proveniência sem inventar conversa sintética. Pastas/edição de conteúdo ficam para v2 (pedido não as exige) |
 | 17 | **Sessões separadas por layout** (`conversations.mode`) + vínculo explicitamente compartilhado (`code_linked`) | uma única lista de conversas filtrada por “origem” no renderer sem coluna nova / workspace tables | os modos são produto distintos: o Chat não deve ver sessões do Code e vice-versa, mas o usuário precisa poder promover uma sessão do Chat ao Code compartilhando a **mesma** conversa; duas colunas aditivas guardam a intenção sem duplicar mensagens/artefatos e a migração deixa todo o histórico existente no Chat (docs/goals/chat-code-sessions/PLAN.md) |
+| 18 | **Harness de código nativo** (perfil `code` do mesmo loop), não orquestração de CLIs externos | daemon + Codex/Claude Code (modelo Paseo) | o Lumina já é dono do loop/histórico/provedores; um runtime próprio evita dependência de CLIs instalados e mantém o estado (SQLite + `provider_state`) sob controle. O seam `agent_kind` deixa a porta aberta para ACP no futuro (docs/goals/code-harness/PLAN.md §3 D1) |
+| 19 | **Workspace = pasta real do usuário**, git opcional, 1 workspace ↔ N sessões | pasta gerenciada no app-data / worktree por tarefa | ninguém trabalha num repo espelhado; o journal cobre diff/revert sem git e worktrees ficam para v2 (Windows + build compartilhado desencorajam paralelismo no mesmo repo) |
+| 20 | **Permissões por modos + regras**, confinamento de path e aprovação interativa; **sem prometer sandbox de SO** no Windows | AppContainer/token restrito como requisito da v1 | Windows não tem equivalente barato a Seatbelt/Landlock; a barreira honesta é política + path jail + auditoria + kill de processo. Sandbox nativo (token/ACL/AppContainer) é spike de v2 (docs/research/workspace-runtime-options.md §4) |
+| 21 | **Git via CLI do usuário** (porcelain v2) com trait futuro para backend nativo | libgit2/gix como backend principal | hooks, filtros, LFS, `core.autocrlf`, credential manager e worktrees se comportam como o usuário espera, sem dependência nativa; o painel usa o mesmo status/diff do terminal |
+| 22 | **Journal de arquivos por hash** (checkpoint por turno) + commit só pelo usuário | auto-commit a cada edição (Aider) / snapshot completo do workspace | reversibilidade sem poluir o histórico do git e com custo proporcional aos arquivos tocados; o commit continua sendo uma decisão humana no painel (HARNESS.md §7.4/§9) |
+| 23 | **Compromisso de docs/evidência**: toda fase do harness entra com testes e `EVIDENCE.md` atualizado | implementar sem registrar decisões | o repo usa TDD e evidência por objetivo; o harness mexe em dinheiro/arquivos do usuário, então cada incremento precisa de prova executável |

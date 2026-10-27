@@ -151,7 +151,9 @@ impl JobInner {
                     state.append(b"\n[timed out after the configured limit]\n");
                 }
                 if output.truncated {
-                    state.append(b"\n[truncated: saída excedeu o limite; cauda preservada]\n");
+                    state.append(
+                        "[truncated: saída excedeu o limite; cauda preservada]\n".as_bytes(),
+                    );
                 }
                 state.duration_ms = output.duration_ms;
                 state.exit_code = output.exit_code;

@@ -26,6 +26,7 @@ use crate::providers::{
 };
 use crate::tools::{self, ToolOutcome, ToolRuntime};
 
+pub mod batch;
 pub mod code;
 pub mod prompt;
 
@@ -743,15 +744,39 @@ pub async fn run_turn(
 
     let supports_images = supports_images(&model);
     let messages = deps.db.list_messages(&payload.conversation_id)?;
-    let mut history = build_history(
-        &deps,
-        &messages,
-        &assistant_message.id,
-        &provider.id,
-        &settings,
-        &model,
-        supports_images,
-    );
+    // Perfil Code: aplica o último resumo de compactação persistido antes de
+    // montar o histórico (o transcript real continua no banco; o modelo vê o
+    // resumo no lugar das mensagens cobertas — HARNESS.md §10.3).
+    let stored_summary = match profile {
+        TurnProfile::Code => {
+            code::compaction::apply_stored_summary(&deps.db, &conversation.id, &messages)
+        }
+        TurnProfile::Chat => None,
+    };
+    let mut history = match stored_summary {
+        Some((summary, cut)) => {
+            let mut compacted = vec![code::compaction::summary_message(&summary)];
+            compacted.extend(build_history(
+                &deps,
+                &messages[cut.min(messages.len())..],
+                &assistant_message.id,
+                &provider.id,
+                &settings,
+                &model,
+                supports_images,
+            ));
+            compacted
+        }
+        None => build_history(
+            &deps,
+            &messages,
+            &assistant_message.id,
+            &provider.id,
+            &settings,
+            &model,
+            supports_images,
+        ),
+    };
     // `<app-data>` backs artifacts, `run_code` workspaces and the skills
     // catalog. Production resolves it from the app handle; tests inject a
     // temporary directory through `HarnessDeps::data_dir`.
@@ -876,6 +901,26 @@ pub async fn run_turn(
         if cancel.is_cancelled() {
             cancelled = true;
             break;
+        }
+        // Contexto do perfil Code: compacta o histórico antigo quando a janela
+        // aperta (resumo por chamada auxiliar; falha não derruba o turno).
+        if profile == TurnProfile::Code && settings.auto_compact {
+            let covered = u32::try_from(messages.len()).unwrap_or(u32::MAX);
+            let _ = code::compaction::maybe_compact(
+                &deps,
+                &provider.id,
+                &model.id,
+                &conversation.id,
+                &tool_turn_id,
+                covered,
+                &mut history,
+                &system_prompt,
+                model.context_window,
+                model.max_output.clamp(1_024, 32_768),
+                &on_event,
+                &cancel,
+            )
+            .await;
         }
         step_number += 1;
         emit(&on_event, TurnEvent::StepStarted { step: step_number });

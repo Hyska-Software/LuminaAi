@@ -1,75 +1,94 @@
-# EVIDENCE — planejamento do harness de código (fase de planejamento)
+# EVIDENCE — harness de código do Lumina
 
-> **Data:** 2026-10-27 · **Natureza:** planejamento + pesquisa. **Nenhuma linha de código de
-> produção foi alterada** (só `docs/`). Portanto não se aplicam `cargo test`, `pnpm test`,
-> `pnpm typecheck` ou build — a verificação desta fase é de **conteúdo, rastreabilidade e
-> consistência**, descrita abaixo.
+> **Fase 1 (planejamento, 2026-10-27):** pesquisa + plano completo.
+> **Fase 2 (implementação, branch `feat/code-harness`):** implementação real com testes; evidência
+> por etapa abaixo. Este arquivo é atualizado a cada rodada.
+
+---
+
+# PARTE I — Planejamento (concluído)
+
+> **Natureza:** planejamento + pesquisa; nenhuma linha de código foi alterada naquela fase.
 
 ## 1. Entregáveis
-
-### Plano (novo diretório `docs/goals/code-harness/`)
 
 | Arquivo | Conteúdo |
 | --- | --- |
 | `GOAL.md` | pedido, ponto de partida, decisões de produto, escopo, critérios de pronto |
-| `PLAN.md` | resumo, auditoria, decisões D1–D14, arquitetura, contratos, fases F0–F8, paralelização/ownership, deps, verificação, riscos, docs, decisões a confirmar, não-objetivos |
-| `HARNESS.md` | loop/perfis, checkpoints, pipeline de tools, política de permissões, workspace/FS seguro, execução/jobs/terminal, git, contexto/compactação, persistência SQL, eventos/IPC, segurança |
-| `TOOLS.md` | convenções, catálogo v1.0 (18 tools: schema, semântica, limites, política, UI, testes), `ToolSpec`, orçamentos, matriz de testes, códigos de erro |
-| `WORKBENCH.md` | anatomia do layout, sidebar/header/abas/transcript/painel/composer, fluxos, estados, a11y, motion, microcopy pt-BR, matriz de testes de UI, não-objetivos |
+| `PLAN.md` | decisões D1–D14, arquitetura, contratos, fases F0–F8, ownership, deps, riscos |
+| `HARNESS.md` | loop/perfis, checkpoints, pipeline de tools, permissões, workspace/FS, execução, git, contexto, persistência, eventos, segurança |
+| `TOOLS.md` | catálogo de tools, convenções, orçamentos, erros estáveis, testes |
+| `WORKBENCH.md` | anatomia do layout, fluxos, estados, a11y, microcopy, testes de UI |
 
-### Pesquisa (`docs/research/`, 5 documentos, ~190 KB)
+Pesquisa (5 documentos em `docs/research/`, ~190 KB): `dsh-harness-map.md` (DSH empacotado),
+`paseo-workbench.md` (Paseo), `agent-harness-patterns.md` (benchmark de 8 harnesses + protocolos),
+`workspace-runtime-options.md` (viabilidade Rust/Windows), `lumina-harness-integration-map.md`
+(mapa do código, `arquivo:linha`).
 
-| Arquivo | Origem | Método |
+---
+
+# PARTE II — Implementação (branch `feat/code-harness`)
+
+## 2. Backend Rust — o que está implementado
+
+| Área | Arquivos | Testes |
 | --- | --- | --- |
-| `dsh-harness-map.md` | DeepSeek Harness empacotado (`app.asar`, 307 pacotes `@deepseek-ai/*`) | extração própria do ASAR (`.research/tools/extract-asar.mjs`) → 5.054 arquivos; leitura dos READMEs oficiais de 26 pacotes de tools + loop/sessão/sandbox/compactação/workspace/UI; 736 linhas com evidências por caminho |
-| `paseo-workbench.md` | Paseo 0.13/0.14 (site, docs, README, changelog) + capturas locais | `web_fetch` em fontes primárias (o `web_search` estava indisponível), `read_image` nos recortes; tabela de ~32 features com veredito e URLs |
-| `agent-harness-patterns.md` | Codex, Claude Code, opencode, Aider, Cursor, Zed, Cline, OpenHands + MCP/ACP/AGENTS.md/Agent Skills | 40 referências com URL; matriz em 6 tabelas com marcação [D]/[I]/[NC]; catálogo de 22 tools; 8 convergências e 8 divergências |
-| `workspace-runtime-options.md` | Viabilidade Rust/Windows | decisões de crate/API com versões verificadas (git CLI, notify 8, portable-pty 0.9, ripgrep crates, rusqlite 0.40, rmcp 3.8), armadilhas do Windows, 12 spikes com critério de aceite, lista de dependências e MSRV |
-| `lumina-harness-integration-map.md` | Código atual do Lumina | leitura somente-leitura com `arquivo:linha` (loop, tools, eventos, DB, UI do Code), tabela capacidade × status, pontos de extensão, contratos intocáveis, riscos R1–R20, 25 decisões com recomendação |
+| Contratos | `domain.rs` (`TurnProfile`, `PermissionMode`, `Workspace`, `ApprovalRequest/Rule`, `TodoItem`, `PlanView`, `ContextStats`, `FileChange/ChangesSummary`, `JobView`, `CodeSessionState`, `WorkspaceFileEntry/Content`, `WorkspaceGitStatus/Commit`, `ToolCallRecord.presentation`), `events.rs` (12 eventos novos), `state.rs` (`approvals`, `observed`, `jobs`, dirs), `lib.rs` (registro dos comandos) | contrato/serde |
+| Migrações/CRUD | `db.rs`: `workspaces`, `code_events`, `file_journal`, `session_summaries`, `approval_rules` + 3 colunas em `conversations`; ~20 funções CRUD; `config.rs` com clamps e parse tolerante | db 44, config 34 |
+| Runtime | `workspace/{safe_path,exec,project,git,journal}.rs` — confinamento de path, runner de processos (timeout/cancel/kill-tree/env saneado/streaming), perfil de projeto, git CLI (porcelain v2), object store + diff | 39 |
+| Política | `policy/mod.rs` (matriz de decisão, regras, glob, modo Plano), `policy/approval.rs` (registry, `request_interactive`, cancelamento por sessão) | 15 |
+| Tools | `tools/registry.rs` (ToolSpec/ToolCtx/catálogo Chat 9 + Code 17), `tools/pipeline.rs` (scheduler Safe/PathLocked/Exclusive, anti-repetição), `tools/code/*` (execução real: fs, shell, jobs, git read, todo, plano, spill, observação/CAS, journal, aprovação) | tools 227 (inclui 54 de `tools::code`) |
+| Harness Code | `harness/code/{prompt,context,session,observed,compaction,tools}.rs`; `harness/batch.rs`; `harness/mod.rs` (dispatch por perfil, prompt com contexto, registry no wire, aprovação, journal, `ToolProgress`, medidor, compactação automática, `WorkspaceChanges`, `turn/ended`, cancelamento de aprovações) | integração 2 (perfil Code real com `read_file`; recusa de sessão Chat) + compaction 5 + batch 2 |
+| Comandos | `commands/workspace.rs` (12), `commands/code.rs` (16: sessão, permissões, aprovações, regras, diff, revert, compactação, jobs), `commands/git.rs` (10 + sugestão de commit por IA com fallback local) | testes de mapeamento |
+| Jobs | `jobs/mod.rs` (ring buffer 256 KB, cursor, limite 8/conversa, promoção de foreground, kill) | 6 |
 
-## 2. Como o plano foi construído (rastreabilidade)
+## 3. Renderer — o que está implementado
 
-1. **Código atual** (mapa `lumina-harness-integration-map.md`): confirma que o loop/streaming/
-   replay/DB/UI do Code são reaproveitáveis e que faltam workspace, FS, shell, git, aprovações,
-   plano, contexto e `@`/`/`.
-2. **Referências**: DSH (event log, pipeline de tools, observation policy, sandbox modes, inbox,
-   compaction/spill, projeções, UI de workbench) e Paseo (workspace como contêiner, árvore→diff→
-   commit, turno com tempo/tokens, composer-console) + benchmark (modos de permissão, plan gate,
-   checkpoints, AGENTS.md/MCP/hooks).
-3. **Viabilidade**: cada promessa técnica do plano foi cruzada com `workspace-runtime-options.md`;
-   o que é incerto virou **spike** (S1–S6 no PLAN §11.2) e o que o Windows não entrega (sandbox de
-   SO) foi **explicitamente não prometido**.
-4. **Decisões**: cada bifurcação virou D1–D14 com alternativa descartada e consequência
-   (`PLAN.md` §3); o que depende do usuário está em §14.
+| Área | Arquivos | Testes |
+| --- | --- | --- |
+| Contratos | `types.ts` (+~40 tipos e 12 eventos), `api.ts` (~37 wrappers), `store/uiStore.ts` (workspace ativo + abas persistidas), `store/chatStore.ts` (perfil do turno, eventos de código, progresso de tool, refresh pós-turno), `store/codeStore.ts` (projeções, aprovações, plano, tarefas, contexto, jobs, revert/compact) | store 6 |
+| Workspaces | `components/code/{useWorkspaces,WorkspaceTrustDialog,CodeSidebar,CodeSessionHeader,CodeWelcomeScreen}` | 154 (code) |
+| Painel direito | `components/code/{FileTree,FilePreview,DiffView,ChangesPanel,CommitBar,useWorkspacePanel}` + `CodePanel` integrado | 59 (code) + 12 (panel) |
+| Cards | `components/agent/*` (ApprovalCard, PlanCard, TodoCard, AskUserCard, ContextMeter, JobsBar, TurnFooter) + `CodeAgentWidgets` (container na timeline/header/composer) | 47 |
+| Composer | `components/composer/{commands,mentions,MentionMenu,SlashMenu,MentionChips,Composer}` — `@arquivos`, `/comandos`, chips, foco | 25 |
+| Integração | `ChatView` (cards de sessão + jobs), `CodeSessionHeader` (medidor), `WorkspaceCenter`/`App` mantidos | — |
 
-## 3. Verificações executadas nesta fase
+## 4. Verificação executada
 
-| Verificação | Resultado |
+| Comando | Resultado |
 | --- | --- |
-| Extração do ASAR do DSH (307 pacotes) | OK — 5.054 arquivos; falha de entradas `link` corrigida no extrator e re-extração completa |
-| Coerência de nomes entre docs (tools, tabelas, eventos, comandos, fases) | OK após revisão: 18 tools na v1.0, 5 tabelas + 3 colunas, 11 eventos, ~37 comandos na v1.0, fases F0–F8 |
-| Links internos (`docs/research/*` citados em GOAL/PLAN/HARNESS/TOOLS/WORKBENCH) | OK — os 5 arquivos existem e estão completos |
-| Referências ao que já existe (arquivos/linhas citados) | OK — citações vêm do mapa de integração (leitura direta do código) |
-| Números do plano (deps, MSRV, crates) | Cruzados com `workspace-runtime-options.md` (§0/§14) e `src-tauri/Cargo.toml` (rust-version 1.77 → 1.89) |
-| Código de produção alterado | **Nenhum** (`git status` só mostra `docs/`) |
-| Build/testes | Não aplicáveis (nenhuma compilação envolvida) |
+| `cd src-tauri && cargo check --all-targets` | **verde** |
+| `cd src-tauri && cargo test --lib` | **678 passed, 0 failed, 10 ignored** |
+| `pnpm typecheck` | **verde** |
+| `pnpm build` | **verde** (Vite/Rolldown) |
+| `pnpm test` (suíte completa) | 1708/1710; as **2 falhas são os flakes pré-existentes de `ModelPickerDialog.edge`** (passam isolados: 14/14 — confirmado nesta rodada; não foram tocados) |
+| `pnpm test -- src/components/code` | 13/13 arquivos verdes |
+| `cargo test --lib code_profile` | 2/2 (turno Code de ponta a ponta + recusa de sessão Chat) |
 
-## 4. Limitações e riscos desta fase
+## 5. Docs atualizados nesta rodada
 
-- **Não houve implementação nem spike executado**: os spikes S1–S6 (ConPTY, Job Objects, git CLI,
-  watcher, escrita atômica, busca em repo grande) são pré-requisitos de promessa das fases
-  correspondentes e estão registrados com critério de aceite.
-- **Estimativas** são ordens de grandeza para 1 dev sênior; com time paralelo, o caminho crítico é a
-  Fase 0 (contratos) e os spikes.
-- **Paseo**: a pesquisa externa usou `web_fetch` (o `web_search` estava sem API key na sessão do
-  analista); lacunas estão marcadas no §9 do documento.
-- **DSH**: o mapa é baseado nos READMEs oficiais dos pacotes extraídos do app instalado; não houve
-  execução do DSH para observar comportamento em runtime (o que não era necessário: o contrato
-  documentado é detalhado).
-- **Decisões pendentes do usuário** (`PLAN.md` §14): seguem as recomendações registradas até que
-  sejam confirmadas; nenhuma delas bloqueia o início da Fase 0 (que é agnóstica a todas).
+- `AGENTS.md`: novas áreas/donos (`policy`, `jobs`, `workspace` + `commands/{workspace,code,git}`,
+  `components/agent`) e `tauri.conf.json` como arquivo do Lead.
+- `docs/ARCHITECTURE.md`: §3 (harness real), §4 (perfis de turno/eventos), §5 (tabelas, arquivos,
+  workspace), §8.3 (harness de código), §12 (comandos novos), §13 (segurança honesta, CSP dívida),
+  §16 (decisões 18–23).
+- `docs/FILES.md`: §14 v1.9 + §16 (contrato de workspace/tools/permissões/journal/contexto).
+- `docs/DESIGN.md`: §5 (sidebar/centro/painel do Code reais) e microcopy v1.9.
+- Estado do branch: commits incrementais em `feat/code-harness`.
 
-## 5. Próximo passo
+## 6. Pendências conhecidas (próximas rodadas)
 
-Confirmar `PLAN.md` §14 → iniciar **Fase 0** (`PLAN.md` §7) com o primeiro PR em 8 passos
-(`PLAN.md` §9.3), criando as tasks compartilhadas por área e mantendo Chat/Code verdes a cada PR.
+1. **`ask_user` estruturado** — stub honesto no backend; falta `QuestionRegistry` + eventos
+   `question_requested/resolved` + comando + integração do `AskUserCard` (o card já existe e testado).
+2. **Cards de apresentação por tool na timeline** (`presentation` de diff/todo/plano/job já é
+   persistido e chega em `tool_call_finished`; falta renderizar dentro dos cards de `AgentSteps`).
+3. **Terminal PTY** (F7/v1.1) — `portable-pty` + xterm.js no painel.
+4. **Subagentes, MCP, hooks, checks do projeto** (F8/v1.2) — roadmap do PLAN.
+5. **CSP restritiva** no `tauri.conf.json` — dívida pré-existente, requer validação manual no app
+   empacotado; documentada em ARCHITECTURE §13.
+6. **`ToolProgress.id`** usa `message_id` no `run_command` (o `ToolCtx` ainda não tem
+   `tool_call_id` por chamada); evolução prevista.
+7. **`/test`, `/review`, `/init`** do composer preenchem prompts (o backend de checks/revisão chega
+   com F8); hoje degradam honestamente.
+8. **`pnpm test` completo**: os 2 flakes de `components/models` precisam ser estabilizados (fora do
+   escopo do harness; registrados para não confundir a verificação final).

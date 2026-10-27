@@ -35,6 +35,7 @@ pub async fn run_turn(
         skills_roots: None,
         approvals: Some(state.approvals.clone()),
         observed: Some(state.observed.clone()),
+        jobs: Some(state.jobs.clone()),
         streamer: None,
         api_key_override: None,
         // Produção resolve credencial/modelos pelo `AppState` (OAuth refresh,

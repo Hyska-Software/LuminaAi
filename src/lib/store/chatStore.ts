@@ -455,6 +455,23 @@ export const useChatStore = create<ChatState>()((set, get) => {
             ),
           }));
           break;
+        case 'tool_progress': {
+          // Saída incremental de shell/job no card da tool em execução.
+          patchMessage(context.conversationId, context.assistantId, (message) => {
+            const target = message.toolCalls.some((tool) => tool.id === event.id)
+              ? event.id
+              : [...message.toolCalls].reverse().find((tool) => tool.status === 'running')?.id;
+            return {
+              ...message,
+              toolCalls: message.toolCalls.map((tool) =>
+                tool.id === target
+                  ? { ...tool, result: `${tool.result ?? ''}${event.delta}` }
+                  : tool,
+              ),
+            };
+          });
+          break;
+        }
         case 'tool_call_finished':
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,

@@ -251,9 +251,14 @@ pub async fn git_log(
         .collect())
 }
 
-/// Sugestão de mensagem de commit (heurística local; IA entra na F6).
+/// Sugestão de mensagem de commit.
+///
+/// Usa o modelo padrão configurado (request curto, não-streaming) com o status e
+/// o diff do working tree. Se o provedor falhar, cai numa heurística local
+/// honesta — sugerir nunca bloqueia o commit do usuário (`HARNESS.md` §9).
 #[tauri::command]
 pub async fn suggest_commit_message(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     workspace_id: String,
 ) -> Result<String, String> {
@@ -263,19 +268,98 @@ pub async fn suggest_commit_message(
         .staged
         .iter()
         .chain(status.unstaged.iter())
-        .map(|file| file.path.clone())
-        .chain(status.untracked.iter().cloned())
+        .map(|file| format!("{} {}", file.status, file.path))
+        .chain(status.untracked.iter().map(|path| format!("? {path}")))
         .collect();
     if files.is_empty() {
         return Err("não há alterações para descrever".to_string());
     }
-    let first = files.first().cloned().unwrap_or_default();
-    let scope = first.split('/').next().unwrap_or(&first);
-    let action = if status.staged.is_empty() && status.unstaged.is_empty() {
+
+    let settings = crate::config::load_settings(&app);
+    let diff = crate::workspace::git::diff(&root, &[], false, 1, 12_000)
+        .await
+        .unwrap_or_default();
+    let user_text = format!(
+        "Arquivos alterados:\n{}\n\nDiff (resumo de 1 linha de contexto):\n{}",
+        files.join("\n"),
+        if diff.trim().is_empty() {
+            "(sem diff textual — arquivos novos ou binários)".to_string()
+        } else {
+            diff
+        }
+    );
+    let deps = crate::harness::HarnessDeps {
+        app: Some(app.clone()),
+        db: state.db.clone(),
+        http: state.http.clone(),
+        search_http: state.search_http.clone(),
+        catalog: state.catalog.clone(),
+        streamer: None,
+        credential_override: None,
+        refresh_override: None,
+        model_source: None,
+        api_key_override: None,
+        data_dir: Some(state.data_dir.clone()),
+        skills_roots: Some(Vec::new()),
+        approvals: None,
+        observed: None,
+        jobs: None,
+    };
+    let request = crate::harness::batch::BatchRequest {
+        provider_id: &settings.default_provider,
+        model_id: &settings.default_model,
+        system_prompt: "Você escreve mensagens de commit objetivas em português do Brasil. \
+                        Responda APENAS a mensagem, em uma linha, no formato \
+                        `tipo(escopo): descrição`, com no máximo 72 caracteres, no imperativo. \
+                        Tipos: feat, fix, refactor, test, docs, chore, perf. Não use ponto final, \
+                        aspas, Markdown nem explicações.",
+        user_text: &user_text,
+        max_output_tokens: 200,
+        temperature: Some(0.2),
+    };
+    match crate::harness::batch::complete_text(&deps, request).await {
+        Ok(text) => {
+            let line = text
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or("")
+                .trim_matches('"')
+                .trim_end_matches('.')
+                .chars()
+                .take(72)
+                .collect::<String>();
+            if line.is_empty() {
+                Ok(heuristic_commit_message(&status, &files))
+            } else {
+                Ok(line)
+            }
+        }
+        Err(error) => {
+            eprintln!("lumina: sugestão de commit pela IA falhou, usando heurística: {error:#}");
+            Ok(heuristic_commit_message(&status, &files))
+        }
+    }
+}
+
+/// Fallback local (sem modelo) para a sugestão de commit.
+fn heuristic_commit_message(
+    status: &crate::workspace::git::GitStatus,
+    files: &[String],
+) -> String {
+    let first = files
+        .first()
+        .map(|entry| entry.trim_start_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '/'))
+        .unwrap_or("arquivos");
+    let scope = first.split(['/', ' ']).next().unwrap_or(first);
+    let action = if status.untracked.len() == files.len() {
         "Adiciona"
-    } else if status.untracked.len() == files.len() {
-        "Adiciona"
-    } else if status.staged.iter().chain(status.unstaged.iter()).any(|file| file.status == "D") {
+    } else if status
+        .staged
+        .iter()
+        .chain(status.unstaged.iter())
+        .any(|file| file.status == "D")
+    {
         "Remove"
     } else {
         "Atualiza"
@@ -285,7 +369,7 @@ pub async fn suggest_commit_message(
     } else {
         String::new()
     };
-    Ok(format!("{action} {scope}{suffix}"))
+    format!("{action} {scope}{suffix}")
 }
 
 #[cfg(test)]

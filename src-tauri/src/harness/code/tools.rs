@@ -150,6 +150,7 @@ mod tests {
             data_dir: std::env::temp_dir().join("lumina-code-tools-test"),
             approval: None,
             observed: None,
+            jobs: None,
             emit: None,
             rules: Vec::new(),
             plan_mode: false,

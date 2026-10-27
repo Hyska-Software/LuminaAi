@@ -1130,3 +1130,90 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
     (`conversationTitle: null`) e são lidos por `read_artifact`; um banco
     antigo migra sem perder artefatos; `cargo test --lib`, `pnpm typecheck`,
     `pnpm test` e `pnpm build` verdes.
+
+15. **v1.9 — harness de código (layout Code)**: o modo Code ganhou um agente real.
+    Sessões apontam para `workspaces` (pasta do usuário, git opcional) e rodam o
+    perfil `code` do loop (`harness/code/**`): prompt próprio com ambiente,
+    política, orientações das tools e contexto do projeto (AGENTS.md, árvore,
+    perfil, git); tools de leitura/edição (`read_file`, `list_dir`,
+    `search_files`, `search_text`, `read_tool_output`, `write_file`, `edit_file`),
+    shell (`run_command` + jobs `job_*`), git somente leitura, `todo_write`,
+    `submit_plan` (revisão bloqueante) e confinamento de path com leitura antes da
+    escrita (CAS por hash); política de permissões (`read_only`/`edit`/
+    `autonomous` + Plano) com aprovação interativa e regras persistidas; journal
+    de arquivos por turno (`checkpoints/objects/<sha256>`) com reverter
+    arquivo/turno; medidor e compactação de contexto (resumo em 8 seções);
+    painel Arquivos/Alterações real (árvore, diff, stage/unstage, commit com
+    sugestão de IA) e composer `@arquivos`/`/comandos`. Nada disso roda em
+    sandbox de SO: a barreira é workspace + política + aprovação + auditoria
+    (`docs/goals/code-harness/`). Evidência em
+    `docs/goals/code-harness/EVIDENCE.md`; `cargo test --lib`, `pnpm typecheck`,
+    `pnpm test` e `pnpm build` verdes.
+
+## 16. Harness de código — contrato de arquivos, tools e permissões (v1.9)
+
+> Desenho completo: `docs/goals/code-harness/{HARNESS,TOOLS,WORKBENCH}.md`. Esta seção
+> resume o que é estável para quem for manter o harness.
+
+### 16.1 Workspace
+
+- `workspaces(id, name, path UNIQUE, …trusted)`; a pasta é do usuário (nada é copiado).
+- `conversations.workspace_id` (nulo = sem workspace), `agent_kind` (`lumina`),
+  `permission_mode` (`read_only` | `edit` | `autonomous`).
+- Confinamento: `workspace/safe_path.rs` resolve todo path contra a raiz, rejeita `..`,
+  symlink/junction para fora, device paths e caminhos relativos de drive; leitura fora do
+  workspace exige aprovação; escrita fora é negada no modo Leitura.
+- Primeira abertura pede "Confiar nesta pasta?" (workspace não confiável não recebe escrita).
+
+### 16.2 Tools do perfil Code (17)
+
+| Tool | Papel | Política |
+| --- | --- | --- |
+| `read_file` | leitura com offset/limit, encoding detectado, binário recusado, observação (CAS) | leitura livre (segredo → aprovação) |
+| `read_image` | (não exposta na v1; imagens do workspace via `read_file`) | — |
+| `list_dir` | árvore com `ignore` (`.gitignore`), depth e cap 400 | leitura livre |
+| `search_files` | glob (`globset`) sobre paths | leitura livre |
+| `search_text` | regex/contexto via `ignore` + `regex`, cap 200 | leitura livre |
+| `read_tool_output` | página de spill de saída longa (≤20k/caracteres) | leitura livre |
+| `write_file` | cria/substitui com escrita atômica e EOL/BOM preservados | MutateWorkspace (Ask no Leitura/Plano) |
+| `edit_file` | substituição literal única (`replace_all`) | MutateWorkspace |
+| `run_command` | shell da plataforma, env higienizado, timeout 120 s–10 min, streaming, background/promoção | ExecuteCommand (Ask no Editar; destrutivo sempre Ask) |
+| `job_list`/`job_output`/`job_kill` | jobs em background (ring 256 KB, cursor, limite 8/sessão) | leitura livre; kill = Shell |
+| `git_status`/`git_diff`/`git_log` | git CLI (porcelain v2) somente leitura | leitura livre |
+| `todo_write` | lista de tarefas da sessão (projeção em `code_events`) | Exclusive |
+| `submit_plan` | plano do modo Plano com revisão bloqueante | Ask |
+| `ask_user` | perguntas com opções (stub honesto na v1; card na v1.1) | Ask |
+
+Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested`, comando
+`respond_approval`, timeout de 10 min, falha fechada). "Sempre permitir" cria
+`approval_rules` com escopo sessão/workspace/global e matcher exato/prefixo/glob
+(negação vence). Toda decisão é auditada em `code_events`.
+
+### 16.3 Alterações, checkpoints e git
+
+- Antes da primeira mutação de cada path no turno, o conteúdo anterior vai para o object store
+  por sha256; ao fim do turno o estado final é capturado e o diff (`similar`) calculado.
+- `get_workspace_changes` combina journal da sessão + git working tree; `get_file_diff` usa o
+  git (ou o journal quando aplicável); `revert_file`/`revert_turn` restauram do object store e
+  recusam quando o arquivo mudou por fora (`FS_STALE_VERSION`).
+- Git: `status --porcelain=v2 -z`, `diff --no-color --no-ext-diff`, `log`, `stage`,
+  `unstage`, `discard` (`git restore`), `commit` (mensagem obrigatória, sugestão de IA
+  opcional) e `switch`. Commit/push nunca são tools do modelo.
+
+### 16.4 Contexto
+
+- `context_stats` por turno (heurística `chars/4` + overhead) persistido em `code_events`,
+  visível no header.
+- Compactação automática ao passar de ~75% da janela: resumo por chamada auxiliar
+  (template de 8 seções), persistido em `session_summaries` e aplicado como primeira
+  mensagem do histórico nos turnos seguintes; `compacted` é emitido para a UI.
+- Saídas acima de 24k chars vão para `spill/` com paginação por `read_tool_output`.
+
+### 16.5 Segurança (limites honestos)
+
+- Execução de processos roda com as permissões do usuário (não é sandbox de SO), com env
+  sem segredos, timeout, kill de árvore e auditoria; aprovações e confinamento reduzem o
+  dano, não o eliminam.
+- Arquivos de segredo (`.env`, `*.pem`, `*.key`, credenciais) exigem aprovação explícita.
+- Conteúdo de repositório/páginas é dado não confiável no prompt; instruções de projeto
+  (`AGENTS.md`) valem abaixo da política e do pedido direto do usuário.

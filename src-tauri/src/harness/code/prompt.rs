@@ -219,6 +219,9 @@ fn editing_section() -> &'static str {
     "# Como editar e verificar\n\n\
      - **Leia antes de editar**: nunca sobrescreva um arquivo que você não leu nesta sessão; o \
        backend recusa (`FS_NOT_OBSERVED`/`FS_STALE_VERSION`) e a correção é reler e reaplicar.\n\
+     - **Marcadores de arquivo**: quando a mensagem do usuário contiver `[arquivo: caminho]`, \
+       leia o arquivo com `read_file` (e a faixa de linhas indicada, se houver) antes de responder \
+       ou editar.\n\
      - **Mudança mínima**: prefira `edit_file` (substituição literal única) a reescrever o \
        arquivo inteiro; preserve estilo, indentação, EOL e comentários existentes; não \
        reformate código não relacionado à tarefa.\n\

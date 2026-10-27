@@ -10,6 +10,7 @@
 //!
 //! Preenchimento incremental (docs/goals/code-harness/PLAN.md §7–§8).
 
+pub mod compaction;
 pub mod context;
 pub mod observed;
 pub mod prompt;

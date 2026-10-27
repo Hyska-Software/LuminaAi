@@ -2,37 +2,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const apiMock = vi.hoisted(() => ({
-  listWorkspaces: vi.fn(async () => []),
-  listWorkspaceFiles: vi.fn(async () => []),
-  gitStatus: vi.fn(async () => ({
-    isRepo: false,
-    staged: [],
-    unstaged: [],
-    untracked: [],
-    conflicted: [],
-  })),
-  gitLog: vi.fn(async () => []),
-  readWorkspaceFile: vi.fn(async () => ({
-    path: 'src/app.ts',
-    text: 'export const a = 1;',
-    truncated: false,
-    size: 20,
-    binary: false,
-    encoding: null,
-  })),
-  getFileDiff: vi.fn(async () => ''),
-  gitStage: vi.fn(async () => null),
-  gitUnstage: vi.fn(async () => null),
-  gitDiscard: vi.fn(async () => null),
-  gitCommit: vi.fn(async () => null),
-  suggestCommitMessage: vi.fn(async () => ''),
-  revertFile: vi.fn(async () => true),
-  getWorkspaceChanges: vi.fn(async () => []),
+vi.mock('@/lib/api', () => ({
+  api: {
+    listWorkspaces: vi.fn(),
+    listWorkspaceFiles: vi.fn(),
+    gitStatus: vi.fn(),
+    gitLog: vi.fn(),
+    readWorkspaceFile: vi.fn(),
+    getFileDiff: vi.fn(),
+    gitStage: vi.fn(),
+    gitUnstage: vi.fn(),
+    gitDiscard: vi.fn(),
+    gitCommit: vi.fn(),
+    suggestCommitMessage: vi.fn(),
+    revertFile: vi.fn(),
+    getWorkspaceChanges: vi.fn(),
+  },
 }));
 
-vi.mock('@/lib/api', () => ({ api: apiMock }));
-
+import { api } from '@/lib/api';
 import {
   SIDE_PANEL_WIDTH_DEFAULT,
   SIDE_PANEL_WIDTH_MAX,
@@ -44,6 +32,8 @@ import {
 import type { Conversation, Workspace } from '@/lib/types';
 import { __resetWorkspacesForTests } from './useWorkspaces';
 import { CodePanel } from './CodePanel';
+
+const apiMock = vi.mocked(api);
 
 const originalInnerWidth = window.innerWidth;
 
