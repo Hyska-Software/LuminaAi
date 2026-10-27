@@ -1,24 +1,35 @@
-import { useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   FileDiff,
   Files,
+  FolderOpen,
   GitBranch,
   PanelRightClose,
+  RefreshCw,
   type LucideIcon,
 } from 'lucide-react';
-import { Button, IconButton, Tooltip } from '@/components/ui';
+import { IconButton, Spinner, Tooltip } from '@/components/ui';
 import { PanelResizer } from '@/components/layout/PanelResizer';
+import { api } from '@/lib/api';
 import {
   SIDE_PANEL_WIDTH_DEFAULT,
   SIDE_PANEL_WIDTH_MIN,
   SIDE_PANEL_WIDTH_STEP,
+  useChatStore,
+  useCodeStore,
   useUiStore,
   type CodePanelTab,
 } from '@/lib/store';
 import { resolveSidePanelLayout, useViewportWidth } from '@/lib/sidePanel';
+import type { FileChange, WorkspaceFileContent } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { ChangesPanel } from './ChangesPanel';
+import { FilePreview } from './FilePreview';
+import { FileTree } from './FileTree';
+import { useWorkspacePanel } from './useWorkspacePanel';
+import { useWorkspaces } from './useWorkspaces';
 
-/** Tabs of the Code right panel (PLAN §3.4). */
+/** Tabs of the Code right panel (WORKBENCH §7). */
 const PANEL_TABS: ReadonlyArray<{ id: CodePanelTab; label: string; icon: LucideIcon }> = [
   { id: 'files', label: 'Arquivos', icon: Files },
   { id: 'changes', label: 'Alterações', icon: FileDiff },
@@ -46,11 +57,11 @@ function PanelEmptyState({ icon: Icon, title, description }: EmptyStateProps) {
 }
 
 /**
- * Code right panel (PLAN §3.4): docked Arquivos/Alterações tabs with the
- * workspace/branch bar and an honest harness-empty state. Width shares the
- * persisted right-panel width and the accessible divider of the Chat panels;
- * it is only rendered on windows wide enough for the docked layout, so the
- * conversation always keeps at least 480px.
+ * Code right panel: real Arquivos/Alterações tabs for the active session's
+ * workspace (`WORKBENCH.md` §7). Width shares the persisted right-panel width
+ * and the accessible divider of the Chat panels; it is only rendered on
+ * windows wide enough for the docked layout, so the conversation always keeps
+ * at least 480px.
  */
 export function CodePanel() {
   const open = useUiStore((state) => state.codePanelOpen);
@@ -62,6 +73,24 @@ export function CodePanel() {
   const persistedWidth = useUiStore((state) => state.sidePanelWidth);
   const setSidePanelWidth = useUiStore((state) => state.setSidePanelWidth);
   const viewportWidth = useViewportWidth();
+
+  const activeId = useChatStore((state) => state.activeId);
+  const conversation = useChatStore((state) =>
+    state.conversations.find((entry) => entry.id === state.activeId),
+  );
+  const workspaceId = conversation?.workspaceId ?? null;
+  const panel = useWorkspacePanel(workspaceId);
+  const { workspaces } = useWorkspaces();
+  const workspace = workspaces.find((entry) => entry.id === workspaceId) ?? null;
+  const sessionChangeFiles = useCodeStore((state) =>
+    activeId ? (state.byConversation[activeId]?.changes?.files ?? null) : null,
+  );
+  const refreshSession = useCodeStore((state) => state.refresh);
+
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [preview, setPreview] = useState<WorkspaceFileContent | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   /** Width previewed while dragging; `null` means "use the persisted width". */
   const [previewWidth, setPreviewWidth] = useState<number | null>(null);
@@ -79,6 +108,41 @@ export function CodePanel() {
       }),
     [viewportWidth, sidebarOpen, sidebarWidth, persistedWidth, previewWidth],
   );
+
+  const selectFile = useCallback(
+    async (path: string) => {
+      setSelectedPath(path);
+      if (!workspaceId) return;
+      setPreviewLoading(true);
+      setPreviewError(null);
+      try {
+        const content = await api.readWorkspaceFile(workspaceId, path);
+        setPreview(content);
+      } catch (error) {
+        setPreview(null);
+        setPreviewError(String(error));
+      } finally {
+        setPreviewLoading(false);
+      }
+    },
+    [workspaceId],
+  );
+
+  const refreshAll = useCallback(() => {
+    void panel.refresh();
+    if (activeId) void refreshSession(activeId);
+  }, [panel, activeId, refreshSession]);
+
+  const sessionChanges: FileChange[] | null = useMemo(() => {
+    if (!sessionChangeFiles || sessionChangeFiles.length === 0) return null;
+    return sessionChangeFiles.map((file) => ({
+      path: file.path,
+      kind: file.kind,
+      added: file.added ?? 0,
+      removed: file.removed ?? 0,
+      diff: null,
+    }));
+  }, [sessionChangeFiles]);
 
   /* All hooks above run unconditionally; visibility is decided afterwards. */
   if (!open || !layout.canDock) return null;
@@ -127,6 +191,8 @@ export function CodePanel() {
     if (next) selectTab(next.id);
   };
 
+  const branch = panel.gitStatus?.branch ?? workspace?.git?.branch ?? null;
+
   return (
     <aside
       aria-label="Painel de arquivos e alterações"
@@ -173,6 +239,11 @@ export function CodePanel() {
           })}
         </div>
 
+        <Tooltip content="Atualizar" side="bottom">
+          <IconButton label="Atualizar painel" size="sm" onClick={refreshAll}>
+            <RefreshCw aria-hidden className="size-3.5" />
+          </IconButton>
+        </Tooltip>
         <Tooltip content="Recolher painel" side="bottom">
           <IconButton label="Recolher painel" size="sm" onClick={() => setOpen(false)}>
             <PanelRightClose className="size-4" />
@@ -182,45 +253,73 @@ export function CodePanel() {
 
       <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border px-3 text-[12px] text-foreground-muted">
         <GitBranch aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-        <span className="truncate">Sem workspace</span>
-      </div>
-
-      {tab === 'changes' ? (
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
-          <span className="text-[12px] text-foreground-muted">Sem commit</span>
-          <span className="flex items-center gap-1.5 text-[11.5px] tabular-nums">
-            <span className="text-success">+0</span>
-            <span className="text-danger">−0</span>
+        <span className="truncate">
+          {workspace ? workspace.name : 'Sem workspace'}
+          {branch ? ` · ${branch}` : ''}
+        </span>
+        {panel.gitStatus?.isRepo ? (
+          <span className="ml-auto shrink-0 text-[11px] tabular-nums">
+            {panel.gitStatus.ahead ? `↑${panel.gitStatus.ahead}` : ''}
+            {panel.gitStatus.behind ? ` ↓${panel.gitStatus.behind}` : ''}
           </span>
-          <Tooltip content="Disponível com o harness de código" side="bottom">
-            {/* Disabled buttons swallow pointer events: the wrapper carries the hint. */}
-            <span className="ml-auto inline-flex" title="Disponível com o harness de código">
-              <Button size="sm" variant="primary" disabled>
-                Commit
-              </Button>
-            </span>
-          </Tooltip>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       <div
         role="tabpanel"
         id={PANEL_BODY_ID}
         aria-labelledby={`code-panel-tab-${tab}`}
-        className="min-h-0 flex-1 overflow-y-auto"
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
-        {tab === 'changes' ? (
+        {!workspaceId ? (
           <PanelEmptyState
-            icon={FileDiff}
-            title="Nenhuma alteração pendente"
-            description="As mudanças do agente aparecerão aqui para revisão e commit."
+            icon={FolderOpen}
+            title="Nenhum workspace aberto"
+            description="Abra uma pasta na barra lateral para o agente ler, editar e rodar comandos aqui."
+          />
+        ) : tab === 'changes' ? (
+          <ChangesPanel
+            workspaceId={workspaceId}
+            conversationId={activeId}
+            gitStatus={panel.gitStatus}
+            gitLoading={panel.gitLoading}
+            gitError={panel.gitError}
+            sessionChanges={sessionChanges}
+            sessionLoading={false}
+            sessionError={null}
+            onRefresh={refreshAll}
+            className="min-h-0 flex-1"
           />
         ) : (
-          <PanelEmptyState
-            icon={Files}
-            title="Nenhum arquivo para mostrar"
-            description="A árvore do workspace aparece aqui quando o harness estiver ativo."
-          />
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className={cn('min-h-0 overflow-y-auto', selectedPath ? 'flex-[1.1]' : 'flex-1')}>
+              <FileTree
+                entries={panel.files}
+                loading={panel.filesLoading}
+                error={panel.filesError}
+                selectedPath={selectedPath ?? undefined}
+                totalCount={panel.files.length}
+                onSelectFile={(path) => {
+                  void selectFile(path);
+                }}
+                onToggleDir={() => {
+                  /* Árvore já vem expandida por profundidade; recarregar é feito pelo refresh. */
+                }}
+              />
+            </div>
+            {selectedPath ? (
+              <div className="min-h-0 flex-1 border-t border-border">
+                <FilePreview
+                  content={preview}
+                  loading={previewLoading}
+                  error={previewError}
+                  onOpenExternal={() => {
+                    if (workspaceId) void api.openWorkspaceInExplorer(workspaceId);
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
         )}
       </div>
 

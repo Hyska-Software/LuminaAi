@@ -82,11 +82,8 @@ pub struct WorkspaceHandle {
 /// Contexto de execução de uma tool.
 ///
 /// Evolução de [`crate::tools::ToolRuntime`] para o perfil Code: mesma base
-/// (DB, HTTP, ids, settings, cancelamento, data dir) + workspace opcional e o
-/// `turn_id` estável do turno (usado por aprovação/jobs/presentação).
-///
-/// TODO(F1): somar `approval: Arc<ApprovalRegistry>` e `jobs` quando o loop
-/// Code for cabeado (dono: Lead).
+/// (DB, HTTP, ids, settings, cancelamento, data dir) + workspace opcional,
+/// `turn_id` estável, aprovação/observação/eventos e o registro de jobs.
 #[derive(Clone)]
 pub struct ToolCtx {
     pub db: Arc<Db>,
@@ -108,6 +105,9 @@ pub struct ToolCtx {
     pub rules: Vec<crate::domain::ApprovalRule>,
     /// Modo Plano ativo (mutação negada pela política).
     pub plan_mode: bool,
+    /// Jobs de processo em background (`AppState::jobs`; `None` em testes que
+    /// não exercitam shell).
+    pub jobs: Option<Arc<crate::jobs::JobRegistry>>,
 }
 
 impl ToolCtx {
@@ -296,7 +296,7 @@ pub static CHAT_SPECS: [ToolSpec; 9] = [
 /* ------------------------------------------------------------------ */
 
 /// Ordem estável do catálogo Code (a ordem entra no prompt: não reordene).
-static CODE_SPECS: [&ToolSpec; 14] = [
+static CODE_SPECS: [&ToolSpec; 17] = [
     &code::fs_read::READ_FILE_SPEC,
     &code::fs_read::LIST_DIR_SPEC,
     &code::fs_read::SEARCH_FILES_SPEC,
@@ -308,6 +308,9 @@ static CODE_SPECS: [&ToolSpec; 14] = [
     &code::fs_write::WRITE_FILE_SPEC,
     &code::fs_write::EDIT_FILE_SPEC,
     &code::shell::RUN_COMMAND_SPEC,
+    &code::jobs::JOB_LIST_SPEC,
+    &code::jobs::JOB_OUTPUT_SPEC,
+    &code::jobs::JOB_KILL_SPEC,
     &code::plan::TODO_WRITE_SPEC,
     &code::plan::SUBMIT_PLAN_SPEC,
     &code::plan::ASK_USER_SPEC,
@@ -409,6 +412,9 @@ pub enum ToolExec {
     WriteFile,
     EditFile,
     RunCommand,
+    JobList,
+    JobOutput,
+    JobKill,
     TodoWrite,
     SubmitPlan,
     AskUser,
@@ -429,6 +435,9 @@ impl ToolExec {
             "write_file" => Self::WriteFile,
             "edit_file" => Self::EditFile,
             "run_command" => Self::RunCommand,
+            "job_list" => Self::JobList,
+            "job_output" => Self::JobOutput,
+            "job_kill" => Self::JobKill,
             "todo_write" => Self::TodoWrite,
             "submit_plan" => Self::SubmitPlan,
             "ask_user" => Self::AskUser,
@@ -449,6 +458,9 @@ impl ToolExec {
             Self::WriteFile => "write_file",
             Self::EditFile => "edit_file",
             Self::RunCommand => "run_command",
+            Self::JobList => "job_list",
+            Self::JobOutput => "job_output",
+            Self::JobKill => "job_kill",
             Self::TodoWrite => "todo_write",
             Self::SubmitPlan => "submit_plan",
             Self::AskUser => "ask_user",
@@ -489,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn code_catalog_lists_the_fourteen_v1_tools_in_order() {
+    fn code_catalog_lists_the_seventeen_tools_in_order() {
         assert_eq!(
             names(&code_spec_refs()),
             vec![
@@ -504,12 +516,15 @@ mod tests {
                 "write_file",
                 "edit_file",
                 "run_command",
+                "job_list",
+                "job_output",
+                "job_kill",
                 "todo_write",
                 "submit_plan",
                 "ask_user",
             ]
         );
-        assert_eq!(code_specs().len(), 14);
+        assert_eq!(code_specs().len(), 17);
     }
 
     #[test]
@@ -593,7 +608,7 @@ mod tests {
     #[test]
     fn code_definitions_expose_wire_fields_only() {
         let definitions = definitions_for(TurnProfile::Code);
-        assert_eq!(definitions.len(), 14);
+        assert_eq!(definitions.len(), 17);
         for definition in &definitions {
             assert!(!definition.description.is_empty(), "{}", definition.name);
             assert_eq!(definition.parameters["type"], "object", "{}", definition.name);
@@ -652,6 +667,7 @@ mod tests {
             emit: None,
             rules: Vec::new(),
             plan_mode: false,
+            jobs: None,
         }
     }
 }

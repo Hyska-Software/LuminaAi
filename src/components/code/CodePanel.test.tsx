@@ -1,15 +1,48 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-vi.mock('@/lib/api', () => ({ api: {} }));
+const apiMock = vi.hoisted(() => ({
+  listWorkspaces: vi.fn(async () => []),
+  listWorkspaceFiles: vi.fn(async () => []),
+  gitStatus: vi.fn(async () => ({
+    isRepo: false,
+    staged: [],
+    unstaged: [],
+    untracked: [],
+    conflicted: [],
+  })),
+  gitLog: vi.fn(async () => []),
+  readWorkspaceFile: vi.fn(async () => ({
+    path: 'src/app.ts',
+    text: 'export const a = 1;',
+    truncated: false,
+    size: 20,
+    binary: false,
+    encoding: null,
+  })),
+  getFileDiff: vi.fn(async () => ''),
+  gitStage: vi.fn(async () => null),
+  gitUnstage: vi.fn(async () => null),
+  gitDiscard: vi.fn(async () => null),
+  gitCommit: vi.fn(async () => null),
+  suggestCommitMessage: vi.fn(async () => ''),
+  revertFile: vi.fn(async () => true),
+  getWorkspaceChanges: vi.fn(async () => []),
+}));
+
+vi.mock('@/lib/api', () => ({ api: apiMock }));
 
 import {
   SIDE_PANEL_WIDTH_DEFAULT,
   SIDE_PANEL_WIDTH_MAX,
   SIDE_PANEL_WIDTH_STEP,
+  useChatStore,
+  useCodeStore,
   useUiStore,
 } from '@/lib/store';
+import type { Conversation, Workspace } from '@/lib/types';
+import { __resetWorkspacesForTests } from './useWorkspaces';
 import { CodePanel } from './CodePanel';
 
 const originalInnerWidth = window.innerWidth;
@@ -34,10 +67,56 @@ function resetPanelState(): void {
   });
 }
 
+function conversation(overrides: Partial<Conversation> = {}): Conversation {
+  return {
+    id: 'conv-1',
+    title: 'Sessão de código',
+    createdAt: 1,
+    updatedAt: 2,
+    pinned: false,
+    providerId: 'opencode-go',
+    modelId: 'deepseek-v4.1-flash',
+    messageCount: 0,
+    preview: null,
+    mode: 'code',
+    codeLinked: false,
+    workspaceId: null,
+    agentKind: 'lumina',
+    permissionMode: 'edit',
+    ...overrides,
+  };
+}
+
+function workspace(overrides: Partial<Workspace> = {}): Workspace {
+  return {
+    id: 'ws-1',
+    name: 'lumina',
+    path: 'C:/projetos/lumina',
+    createdAt: 1,
+    updatedAt: 2,
+    trusted: true,
+    git: { root: 'C:/projetos/lumina', branch: 'main', ahead: 0, behind: 0, dirty: true },
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  apiMock.listWorkspaces.mockResolvedValue([]);
+  apiMock.listWorkspaceFiles.mockResolvedValue([]);
+  apiMock.gitStatus.mockResolvedValue({
+    isRepo: false,
+    staged: [],
+    unstaged: [],
+    untracked: [],
+    conflicted: [],
+  });
+  apiMock.gitLog.mockResolvedValue([]);
   setViewport(1440);
   resetPanelState();
+  __resetWorkspacesForTests();
+  useChatStore.setState({ conversations: [], activeId: null });
+  useCodeStore.setState({ byConversation: {} });
 });
 
 afterEach(() => {
@@ -80,42 +159,67 @@ describe('CodePanel — visibilidade', () => {
 });
 
 describe('CodePanel — abas Arquivos / Alterações', () => {
-  it('abre em Alterações com a barra de commit em estado vazio', () => {
+  it('abre em Alterações sem workspace e explica o que falta (estado honesto)', () => {
     render(<CodePanel />);
 
     expect(screen.getByRole('tab', { name: 'Alterações' }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('tab', { name: 'Arquivos' }).getAttribute('aria-selected')).toBe('false');
 
     expect(screen.getByText('Sem workspace')).toBeTruthy();
-    expect(screen.getByText('Sem commit')).toBeTruthy();
-    expect(screen.getByText('+0')).toBeTruthy();
-    expect(screen.getByText('−0')).toBeTruthy();
-
-    expect(screen.getByText('Nenhuma alteração pendente')).toBeTruthy();
+    expect(screen.getByText('Nenhum workspace aberto')).toBeTruthy();
     expect(
-      screen.getByText('As mudanças do agente aparecerão aqui para revisão e commit.'),
+      screen.getByText(
+        'Abra uma pasta na barra lateral para o agente ler, editar e rodar comandos aqui.',
+      ),
     ).toBeTruthy();
+    // Nenhum botão de commit morto: sem workspace, o Commit nem é renderizado.
+    expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull();
   });
 
-  it('o botão Commit fica desabilitado e explica que depende do harness', () => {
-    render(<CodePanel />);
-
-    const commit = screen.getByRole('button', { name: 'Commit' }) as HTMLButtonElement;
-    expect(commit.disabled).toBe(true);
-    expect(screen.getByTitle('Disponível com o harness de código')).toBeTruthy();
-  });
-
-  it('troca para Arquivos e mostra o estado vazio da árvore do workspace', () => {
+  it('troca para Arquivos e mantém o estado vazio honesto sem workspace', () => {
     render(<CodePanel />);
 
     fireEvent.click(screen.getByRole('tab', { name: 'Arquivos' }));
 
     expect(useUiStore.getState().codePanelTab).toBe('files');
-    expect(screen.getByText('Nenhum arquivo para mostrar')).toBeTruthy();
-    expect(
-      screen.getByText('A árvore do workspace aparece aqui quando o harness estiver ativo.'),
-    ).toBeTruthy();
-    expect(screen.queryByText('Nenhuma alteração pendente')).toBeNull();
+    expect(screen.getByText('Nenhum workspace aberto')).toBeTruthy();
+  });
+
+  it('com workspace aberto mostra a árvore real e a prévia ao selecionar o arquivo', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ workspaceId: 'ws-1' })],
+      activeId: 'conv-1',
+    });
+    apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    apiMock.listWorkspaceFiles.mockResolvedValue([
+      {
+        path: 'src',
+        name: 'src',
+        isDir: true,
+        depth: 0,
+        children: [
+          {
+            path: 'src/app.ts',
+            name: 'app.ts',
+            isDir: false,
+            depth: 1,
+            size: 20,
+          },
+        ],
+      },
+    ]);
+    useUiStore.setState({ codePanelTab: 'files' });
+
+    render(<CodePanel />);
+
+    expect(await screen.findByText('app.ts')).toBeTruthy();
+    fireEvent.click(screen.getByText('app.ts'));
+
+    await waitFor(() => {
+      expect(apiMock.readWorkspaceFile).toHaveBeenCalledWith('ws-1', 'src/app.ts');
+    });
+    expect(apiMock.listWorkspaceFiles).toHaveBeenCalledWith('ws-1', '.', 2);
+    expect(screen.getByText(/lumina/)).toBeTruthy();
   });
 
   it('respeita o estado persistido e navega com as setas do teclado', () => {

@@ -187,6 +187,8 @@ pub struct HarnessDeps {
     pub approvals: Option<Arc<crate::policy::approval::ApprovalRegistry>>,
     /// Arquivos observados nesta execução do app (read-before-write/CAS).
     pub observed: Option<Arc<crate::harness::code::observed::ObservedFiles>>,
+    /// Jobs de processo em background do harness de código (`AppState::jobs`).
+    pub jobs: Option<Arc<crate::jobs::JobRegistry>>,
 }
 
 /// Actionable copy for planned limits. The renderer knows the fixed
@@ -848,6 +850,7 @@ pub async fn run_turn(
             emit: Some(on_event.clone()),
             rules: code_rules.clone(),
             plan_mode: code_ctx.plan_mode,
+            jobs: deps.jobs.clone(),
         }),
         _ => None,
     };
@@ -2612,6 +2615,7 @@ mod agent_loop_tests {
             skills_roots: Some(Vec::new()),
             approvals: None,
             observed: None,
+            jobs: None,
         }
     }
 
@@ -2711,6 +2715,7 @@ mod agent_loop_tests {
             skills_roots: Some(Vec::new()),
             approvals: None,
             observed: None,
+            jobs: None,
         }
     }
 
@@ -2845,6 +2850,7 @@ mod agent_loop_tests {
             skills_roots: Some(Vec::new()),
             approvals: None,
             observed: None,
+            jobs: None,
         }
     }
 
@@ -5045,5 +5051,172 @@ mod agent_loop_tests {
         assert_eq!(headers, &anthropic_provider().static_headers());
         assert_eq!(*temperature, None, "Claude não aceita temperature");
         assert_eq!(*profile, RequestProfile::Standard);
+    }
+
+    /// Perfil Code de ponta a ponta: workspace real, prompt de código, tool
+    /// `read_file` executada pelo registry, eventos de sessão e journal do turno.
+    #[tokio::test]
+    async fn code_profile_reads_workspace_through_the_tool_registry() {
+        let temp = TempDb::new();
+        let workspace_dir = std::env::temp_dir().join(format!(
+            "lumina-code-workspace-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
+        std::fs::write(
+            workspace_dir.join("src/app.ts"),
+            "export const a = 1;\nexport const b = 2;\n",
+        )
+        .expect("criar arquivo");
+
+        let workspace = temp
+            .db
+            .create_workspace("demo", &workspace_dir.to_string_lossy())
+            .expect("workspace");
+        temp.db
+            .set_workspace_trusted(&workspace.id, true)
+            .expect("confiar");
+        let conversation = temp
+            .db
+            .create_conversation_with_mode(
+                "Sessão de código",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa code");
+        temp.db
+            .set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("vincular workspace");
+
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                requests.lock().expect("requests lock").push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    if current == 0 {
+                        let arguments = serde_json::json!({ "path": "src/app.ts" }).to_string();
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallStart {
+                                index: 0,
+                                id: "call-read".to_string(),
+                                name: "read_file".to_string(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallArgsDelta {
+                                index: 0,
+                                delta: arguments.clone(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallDone {
+                                index: 0,
+                                arguments,
+                            },
+                        );
+                        emit(&sink, ProviderEvent::Done);
+                    } else {
+                        text_stream(&sink, "O arquivo tem duas constantes exportadas.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.observed = Some(Arc::new(code::observed::ObservedFiles::new()));
+        let (channel, events) = channel();
+        let mut payload = payload(&conversation, 4);
+        payload.profile = TurnProfile::Code;
+        payload.content = "Leia src/app.ts e diga o que há nele.".to_string();
+
+        let result = run_turn(
+            harness,
+            payload,
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno code completo");
+
+        // Prompt de código (não o do Chat) e tools do perfil Code no wire.
+        let requests = requests.lock().expect("requests lock").clone();
+        assert_eq!(requests.len(), 2, "um request por passo do loop");
+        assert!(requests[0].system_prompt.contains("# Política de permissões"));
+        assert!(requests[0].system_prompt.contains("# Workspace"));
+        assert!(requests[0].system_prompt.contains("demo"));
+        let tool_names: Vec<&str> = requests[0]
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect();
+        assert!(tool_names.contains(&"read_file"));
+        assert!(tool_names.contains(&"edit_file"));
+        assert!(!tool_names.contains(&"validate_ui"), "tools do Chat não entram no Code");
+
+        // A tool leu o arquivo e o resultado chegou ao modelo no 2º passo.
+        let tool_message = requests[1]
+            .history
+            .iter()
+            .rev()
+            .find(|message| message.role == HistoryRole::Tool)
+            .expect("resultado da tool no histórico");
+        assert_eq!(tool_message.tool_name.as_deref(), Some("read_file"));
+        assert!(tool_message.text.contains("export const a = 1;"));
+        assert!(result.assistant_message.content.contains("duas constantes"));
+        assert_eq!(result.assistant_message.tool_calls.len(), 1);
+        assert_eq!(result.assistant_message.tool_calls[0].status, ToolCallStatus::Done);
+
+        // Eventos do harness de código emitidos no turno.
+        let raw = events.lock().expect("events lock").clone();
+        let joined = raw.join("\n");
+        assert!(joined.contains("\"type\":\"profile_changed\""));
+        assert!(joined.contains("\"type\":\"context_stats\""));
+        assert!(
+            temp.db
+                .latest_code_event(&conversation.id, code::session::KIND_TURN_ENDED)
+                .expect("evento do turno")
+                .is_some(),
+            "o turno Code grava `turn/ended` no log da sessão"
+        );
+        let context = code::session::context_stats(&temp.db, &conversation.id);
+        assert!(context.is_some(), "medidor de contexto persistido");
+
+        let _ = workspace_dir;
+    }
+
+    /// Perfil Code recusa um turno `code` em sessão do Chat (sem `code_linked`).
+    #[tokio::test]
+    async fn code_profile_refuses_chat_sessions() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversa chat");
+        let streamer: ProviderStreamer =
+            Arc::new(|_request, _sink| Box::pin(async { Ok(()) }));
+        let harness = deps(temp.db.clone(), streamer);
+        let (channel, _events) = channel();
+        let mut payload = payload(&conversation, 2);
+        payload.profile = TurnProfile::Code;
+        let error = run_turn(
+            harness,
+            payload,
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("perfil code exige sessão do Code");
+        assert!(format!("{error:#}").contains("CONVERSATION_NOT_CODE"));
     }
 }

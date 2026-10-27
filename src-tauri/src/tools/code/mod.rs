@@ -13,6 +13,7 @@ pub mod exec;
 pub mod fs_read;
 pub mod fs_write;
 pub mod git_read;
+pub mod jobs;
 pub mod plan;
 pub mod shell;
 

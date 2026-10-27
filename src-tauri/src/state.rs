@@ -33,6 +33,8 @@ pub struct AppState {
     pub approvals: Arc<ApprovalRegistry>,
     /// Arquivos observados nesta execução (read-before-write/CAS do harness).
     pub observed: Arc<crate::harness::code::observed::ObservedFiles>,
+    /// Jobs de processo em background do harness de código (F4).
+    pub jobs: Arc<crate::jobs::JobRegistry>,
     dynamic_models: RwLock<HashMap<String, DynamicModels>>,
     turns: Mutex<HashMap<String, CancellationToken>>,
 }
@@ -53,6 +55,7 @@ impl AppState {
             oauth: Arc::new(OAuthState::new()),
             approvals: Arc::new(ApprovalRegistry::new()),
             observed: Arc::new(crate::harness::code::observed::ObservedFiles::new()),
+            jobs: Arc::new(crate::jobs::JobRegistry::new()),
             dynamic_models: RwLock::new(HashMap::new()),
             turns: Mutex::new(HashMap::new()),
         };

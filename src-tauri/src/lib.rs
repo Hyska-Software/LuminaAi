@@ -19,6 +19,7 @@ mod domain;
 mod events;
 mod harness;
 mod http;
+mod jobs;
 mod oauth;
 mod policy;
 mod providers;
@@ -123,6 +124,10 @@ pub fn run() {
             commands::code::revert_file,
             commands::code::revert_turn,
             commands::code::compact_session,
+            /* -------- harness de código: jobs em background -------- */
+            commands::code::list_jobs,
+            commands::code::get_job_output,
+            commands::code::kill_job,
             /* -------- harness de código: git -------- */
             commands::git::git_status,
             commands::git::git_diff,

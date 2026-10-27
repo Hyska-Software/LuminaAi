@@ -1,4 +1,6 @@
 export { useAppStore, MAX_STEPS_DEFAULT, MAX_STEPS_LIMIT } from './appStore';
+export { useCodeStore, emptyCodeSession, applyCodeEvent, isCodeEvent } from './codeStore';
+export type { CodeSessionUi } from './codeStore';
 export {
   useChatStore,
   selectActiveConversation,

@@ -55,6 +55,9 @@ pub async fn run(ctx: &ToolCtx, exec: ToolExec, args: Value) -> ToolOutcome {
         ToolExec::WriteFile => write_file(ctx, &args).await,
         ToolExec::EditFile => edit_file(ctx, &args).await,
         ToolExec::RunCommand => run_command(ctx, &args).await,
+        ToolExec::JobList => job_list(ctx, &args).await,
+        ToolExec::JobOutput => job_output(ctx, &args).await,
+        ToolExec::JobKill => job_kill(ctx, &args).await,
         ToolExec::TodoWrite => todo_write(ctx, &args).await,
         ToolExec::SubmitPlan => submit_plan(ctx, &args).await,
         ToolExec::AskUser => err("ASK_USER_UNAVAILABLE", "o card de perguntas interativas chega na próxima fase; faça a pergunta em prosa e prossiga com a hipótese mais segura"),
@@ -1235,12 +1238,6 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Ok(value) => value,
         Err(outcome) => return outcome,
     };
-    if opt_bool(args, "run_in_background").unwrap_or(false) {
-        return err(
-            "JOB_UNAVAILABLE",
-            "comandos em background chegam na próxima fase; rode em foreground com timeout",
-        );
-    }
     let description = opt_str(args, "description").unwrap_or_else(|| "executar comando".to_string());
     let root = match writable_root(ctx) {
         Ok(root) => root,
@@ -1278,6 +1275,7 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let timeout_ms = opt_u32(args, "timeout_ms")
         .map(|value| value.clamp(1_000, 600_000))
         .unwrap_or(120_000);
+    let background = opt_bool(args, "run_in_background").unwrap_or(false);
     let (program, program_args) = exec::shell_for(&command);
     let request = exec::ExecRequest {
         program,
@@ -1289,6 +1287,130 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         max_output_bytes: 1024 * 1024,
     };
 
+    let Some(jobs) = ctx.jobs.clone() else {
+        if background {
+            return err(
+                "JOB_UNAVAILABLE",
+                "o registro de jobs não está disponível nesta composição; rode em foreground",
+            );
+        }
+        return run_command_direct(ctx, request, description, command).await;
+    };
+    let Some(emit) = ctx.emit.clone() else {
+        if background {
+            return err(
+                "JOB_UNAVAILABLE",
+                "não há canal de eventos para publicar os jobs; rode em foreground",
+            );
+        }
+        return run_command_direct(ctx, request, description, command).await;
+    };
+
+    let view = match jobs.start(&ctx.conversation_id, command.clone(), request, emit) {
+        Ok(view) => view,
+        Err(error) => return err(error.code, error.message),
+    };
+    if background {
+        return finish(
+            ctx,
+            format!(
+                "started background job {}\n{command}\nUse job_output(job_id=\"{}\", cursor=0) para acompanhar ou job_kill para encerrar.\n",
+                view.id, view.id
+            ),
+            Some(format!("Job {} · {}", view.id, description)),
+            Some(json!({ "kind": "job", "job": view })),
+        );
+    }
+
+    // Foreground: espera o término até o timeout; se estourar, promove o job
+    // (o processo continua vivo em vez de ser morto).
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms as u64);
+    let mut cursor = 0usize;
+    loop {
+        let (chunk, next_cursor, current) = match jobs.output(&view.id, cursor) {
+            Ok(page) => page,
+            Err(error) => return err(error.code, error.message),
+        };
+        cursor = next_cursor;
+        if !chunk.is_empty() {
+            ctx.emit_event(crate::events::TurnEvent::ToolProgress {
+                id: ctx.message_id.clone(),
+                stream: None,
+                delta: chunk,
+            });
+        }
+        if current.status != crate::domain::JobStatus::Running {
+            let (output, _next, settled) = match jobs.output(&view.id, 0) {
+                Ok(page) => page,
+                Err(error) => return err(error.code, error.message),
+            };
+            jobs.remove(&view.id);
+            return command_result(ctx, output, settled, description);
+        }
+        if std::time::Instant::now() >= deadline {
+            return promoted_to_job(&jobs, &view.id, timeout_ms, description);
+        }
+        tokio::select! {
+            _ = ctx.cancel.cancelled() => {
+                return promoted_to_job(&jobs, &view.id, timeout_ms, description);
+            }
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+        }
+    }
+}
+
+/// Resultado normal de um comando de foreground (exit ≠ 0 continua sendo resultado).
+fn command_result(ctx: &ToolCtx, output: String, settled: crate::domain::JobView, description: String) -> ToolOutcome {
+    let mut content = String::new();
+    match settled.exit_code {
+        Some(code) => content.push_str(&format!("[exit code: {code}]\n")),
+        None => content.push_str("[exit code: ?]\n"),
+    }
+    content.push_str(&output);
+    if !output.is_empty() && !output.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str(&format!("(duração: {} ms)\n", settled.duration_ms));
+    finish(
+        ctx,
+        content,
+        Some(description),
+        Some(json!({ "kind": "output", "exitCode": settled.exit_code, "durationMs": settled.duration_ms })),
+    )
+}
+
+/// Mensagem de promoção: o job continua vivo e pode ser acompanhado pelas tools.
+fn promoted_to_job(
+    jobs: &Arc<crate::jobs::JobRegistry>,
+    job_id: &str,
+    timeout_ms: u32,
+    description: String,
+) -> ToolOutcome {
+    let view = jobs
+        .output(job_id, usize::MAX)
+        .map(|(_, _, view)| view)
+        .ok();
+    let mut outcome = ToolOutcome {
+        content: format!(
+            "[still running after {timeout_ms} ms; moved to background job {job_id}]\nUse job_output(job_id=\"{job_id}\", cursor=0) para acompanhar a saída ou job_kill para encerrar.\n"
+        ),
+        summary: Some(format!("Job {job_id} · {description}")),
+        ..Default::default()
+    };
+    if let Some(view) = view {
+        outcome.presentation = Some(json!({ "kind": "job", "job": view }));
+    }
+    outcome
+}
+
+/// Caminho sem `JobRegistry` (composições antigas/testes): executa direto com
+/// timeout do executor (comportamento anterior, sem promoção).
+async fn run_command_direct(
+    ctx: &ToolCtx,
+    request: exec::ExecRequest,
+    description: String,
+    command: String,
+) -> ToolOutcome {
     let (sender, mut receiver) =
         tokio::sync::mpsc::unbounded_channel::<(exec::StreamKind, String)>();
     let emit = ctx.emit.clone();
@@ -1304,7 +1426,6 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             }
         }
     });
-
     let output = match exec::run(request, Some(sender)).await {
         Ok(output) => output,
         Err(error) => {
@@ -1313,7 +1434,6 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         }
     };
     progress_task.abort();
-
     let mut content = String::new();
     match output.exit_code {
         Some(code) => content.push_str(&format!("[exit code: {code}]\n")),
@@ -1342,11 +1462,165 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         content.push_str("[truncated: saída excedeu o limite; cauda preservada]\n");
     }
     content.push_str(&format!("(duração: {} ms)\n", output.duration_ms));
+    let _ = command;
     finish(
         ctx,
         content,
         Some(description),
         Some(json!({ "kind": "output", "exitCode": output.exit_code, "durationMs": output.duration_ms })),
+    )
+}
+
+/* ------------------------------------------------------------------ */
+/* Jobs em background: job_list, job_output e job_kill                */
+/* ------------------------------------------------------------------ */
+
+fn jobs_registry(ctx: &ToolCtx) -> Result<Arc<crate::jobs::JobRegistry>, ToolOutcome> {
+    ctx.jobs.clone().ok_or_else(|| {
+        err(
+            "JOB_UNAVAILABLE",
+            "o registro de jobs não está disponível nesta composição",
+        )
+    })
+}
+
+fn job_line(view: &crate::domain::JobView) -> String {
+    let status = match view.status {
+        crate::domain::JobStatus::Running => "running",
+        crate::domain::JobStatus::Done => "done",
+        crate::domain::JobStatus::Failed => "failed",
+        crate::domain::JobStatus::Killed => "killed",
+    };
+    let exit = view
+        .exit_code
+        .map(|code| format!(" exit={code}"))
+        .unwrap_or_default();
+    format!(
+        "{} · {status}{exit} · {} ms · {}\n",
+        view.id, view.duration_ms, view.command
+    )
+}
+
+async fn job_list(ctx: &ToolCtx, _args: &Value) -> ToolOutcome {
+    let jobs = match jobs_registry(ctx) {
+        Ok(jobs) => jobs,
+        Err(outcome) => return outcome,
+    };
+    let views = jobs.list(&ctx.conversation_id);
+    let mut content = String::new();
+    if views.is_empty() {
+        content.push_str("(nenhum job em background nesta sessão)\n");
+    } else {
+        content.push_str(&format!("{} job(s) nesta sessão:\n", views.len()));
+        for view in &views {
+            content.push_str(&job_line(view));
+            if let Some(preview) = view.output_preview.as_deref() {
+                let snippet: String = preview.chars().take(160).collect();
+                content.push_str(&format!("  saída: {snippet}\n"));
+            }
+        }
+    }
+    finish(
+        ctx,
+        content,
+        Some(format!("Jobs · {} job(s)", views.len())),
+        Some(json!({ "kind": "jobs", "count": views.len() })),
+    )
+}
+
+async fn job_output(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let jobs = match jobs_registry(ctx) {
+        Ok(jobs) => jobs,
+        Err(outcome) => return outcome,
+    };
+    let job_id = match arg_str(args, "job_id") {
+        Ok(value) => value,
+        Err(outcome) => return outcome,
+    };
+    let cursor = opt_u32(args, "cursor").unwrap_or(0) as usize;
+    let wait = opt_bool(args, "wait").unwrap_or(false);
+    let timeout_ms = opt_u32(args, "timeout_ms")
+        .unwrap_or(30_000)
+        .clamp(1_000, 600_000);
+    if wait {
+        if let Err(error) = jobs.wait(&job_id, Duration::from_millis(timeout_ms as u64)).await {
+            return err(error.code, error.message);
+        }
+    }
+    let (output, next_cursor, view) = match jobs.output(&job_id, cursor) {
+        Ok(page) => page,
+        Err(error) => return err(error.code, error.message),
+    };
+    let status = job_line(&view);
+    let mut content = format!("[status: {}]\n", status.trim_end());
+    if output.is_empty() {
+        content.push_str("(sem saída nova desde o cursor)\n");
+    } else {
+        content.push_str(&output);
+        if !output.ends_with('\n') {
+            content.push('\n');
+        }
+    }
+    content.push_str(&format!("(next_cursor: {next_cursor})\n"));
+    finish(
+        ctx,
+        content,
+        Some(format!("Job {} · cursor {cursor} → {next_cursor}", view.id)),
+        Some(json!({ "kind": "job", "job": view })),
+    )
+}
+
+async fn job_kill(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let jobs = match jobs_registry(ctx) {
+        Ok(jobs) => jobs,
+        Err(outcome) => return outcome,
+    };
+    let job_id = match arg_str(args, "job_id") {
+        Ok(value) => value,
+        Err(outcome) => return outcome,
+    };
+    let reason = opt_str(args, "reason").unwrap_or_else(|| "encerrado pelo agente".to_string());
+    if let Err(outcome) = policy_check(
+        ctx,
+        "job_kill",
+        RiskClass::Shell,
+        true,
+        Some(job_id.as_str()),
+        false,
+        None,
+        ApprovalDetail::Other {
+            text: format!("encerrar {job_id}: {reason}"),
+        },
+        "Encerrar job em background?",
+    )
+    .await
+    {
+        return outcome;
+    }
+    if let Err(error) = jobs.kill(&job_id) {
+        return err(error.code, error.message);
+    }
+    // Dá ao runner a chance de fechar o processo e reportar o estado terminal.
+    let view = jobs
+        .wait(&job_id, Duration::from_millis(1_500))
+        .await
+        .unwrap_or_else(|_| crate::domain::JobView {
+            id: job_id.clone(),
+            command: String::new(),
+            status: crate::domain::JobStatus::Killed,
+            started_at: 0,
+            duration_ms: 0,
+            exit_code: None,
+            output_preview: None,
+        });
+    finish(
+        ctx,
+        format!(
+            "Job {job_id} encerrado (status {}).\n",
+            job_line(&view).trim_end()
+        ),
+        Some(format!("Encerrar job {job_id}")),
+        Some(json!({ "kind": "job", "job": view })),
     )
 }
 
@@ -1658,6 +1932,7 @@ mod tests {
         db: Arc<Db>,
         observed: Arc<ObservedFiles>,
         approvals: Arc<ApprovalRegistry>,
+        jobs: Arc<crate::jobs::JobRegistry>,
         recorder: Arc<Recorder>,
     }
 
@@ -1675,6 +1950,7 @@ mod tests {
                 db: Arc::new(Db::open_in_memory().expect("db em memória")),
                 observed: Arc::new(ObservedFiles::new()),
                 approvals: Arc::new(ApprovalRegistry::new()),
+                jobs: Arc::new(crate::jobs::JobRegistry::new()),
                 recorder: Arc::new(Recorder::default()),
             }
         }
@@ -1700,6 +1976,7 @@ mod tests {
                 emit: Some(emit),
                 rules: Vec::new(),
                 plan_mode: false,
+                jobs: Some(self.jobs.clone()),
             }
         }
 
@@ -1962,7 +2239,18 @@ mod tests {
             json!({ "command": "echo x", "description": "bg", "run_in_background": true }),
         )
         .await;
-        assert_eq!(error_code(&background), "JOB_UNAVAILABLE");
+        assert!(!background.is_error, "{}", background.content);
+        assert!(background.content.contains("started background job"), "{}", background.content);
+        assert_eq!(background.presentation.as_ref().expect("presentation")["kind"], "job");
+        if let Some(job_id) = background
+            .presentation
+            .as_ref()
+            .and_then(|value| value.get("job"))
+            .and_then(|job| job.get("id"))
+            .and_then(Value::as_str)
+        {
+            let _ = fixture.jobs.kill(job_id);
+        }
     }
 
     #[tokio::test]
@@ -2185,4 +2473,109 @@ mod tests {
         assert_eq!(todos.len(), 1);
         assert_eq!(todos[0].status, TodoStatus::Pending);
     }
+    #[tokio::test]
+    async fn background_jobs_can_be_listed_read_and_killed() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.workspace.as_mut().expect("workspace").permission_mode = PermissionMode::Autonomous;
+        let started = call(
+            &ctx,
+            "run_command",
+            json!({ "command": "echo job-ok", "description": "bg", "run_in_background": true }),
+        )
+        .await;
+        if error_code(&started) == "EXEC_SPAWN" || error_code(&started) == "EXEC_FAILED" {
+            eprintln!("shell indisponível neste ambiente: teste pulado");
+            return;
+        }
+        assert!(!started.is_error, "{}", started.content);
+        assert!(started.content.contains("started background job"), "{}", started.content);
+        let job_id = started
+            .presentation
+            .as_ref()
+            .and_then(|value| value.get("job"))
+            .and_then(|job| job.get("id"))
+            .and_then(Value::as_str)
+            .expect("id do job no presentation")
+            .to_string();
+
+        // Espera o job assentar (echo termina rápido).
+        for _ in 0..200 {
+            let settled = fixture
+                .jobs
+                .list("conv-1")
+                .into_iter()
+                .find(|view| view.id == job_id)
+                .map(|view| view.status != crate::domain::JobStatus::Running)
+                .unwrap_or(false);
+            if settled {
+                break;
+            }
+            let _ = fixture.jobs.wait(&job_id, Duration::from_millis(25)).await;
+        }
+
+        let listed = call(&ctx, "job_list", json!({})).await;
+        assert!(!listed.is_error, "{}", listed.content);
+        assert!(listed.content.contains(&job_id), "{}", listed.content);
+
+        let output = call(&ctx, "job_output", json!({ "job_id": job_id })).await;
+        assert!(!output.is_error, "{}", output.content);
+        assert!(output.content.contains("job-ok"), "{}", output.content);
+        assert!(output.content.contains("next_cursor"), "{}", output.content);
+
+        let killed = call(&ctx, "job_kill", json!({ "job_id": job_id })).await;
+        assert!(!killed.is_error, "{}", killed.content);
+        fixture.jobs.remove(&job_id);
+    }
+
+    #[tokio::test]
+    async fn foreground_timeout_promotes_the_job_instead_of_killing_it() {
+        #[cfg(windows)]
+        let script = "Start-Sleep -Seconds 20";
+        #[cfg(not(windows))]
+        let script = "sleep 20";
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.workspace.as_mut().expect("workspace").permission_mode = PermissionMode::Autonomous;
+        let outcome = call(
+            &ctx,
+            "run_command",
+            json!({ "command": script, "description": "longo", "timeout_ms": 1_000 }),
+        )
+        .await;
+        if error_code(&outcome) == "EXEC_SPAWN" || error_code(&outcome) == "EXEC_FAILED" {
+            eprintln!("shell indisponível neste ambiente: teste pulado");
+            return;
+        }
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("still running after"), "{}", outcome.content);
+        assert!(outcome.content.contains("moved to background job"), "{}", outcome.content);
+        let presentation = outcome.presentation.as_ref().expect("presentation");
+        assert_eq!(presentation["kind"], "job");
+        let job_id = presentation["job"]["id"]
+            .as_str()
+            .expect("id do job")
+            .to_string();
+        let _ = fixture.jobs.kill(&job_id);
+        let _ = fixture.jobs.wait(&job_id, Duration::from_millis(2_000)).await;
+        fixture.jobs.remove(&job_id);
+    }
+
+    #[tokio::test]
+    async fn job_tools_require_a_registry_and_kill_asks_without_approval() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.jobs = None;
+        let unavailable = call(&ctx, "job_list", json!({})).await;
+        assert_eq!(error_code(&unavailable), "JOB_UNAVAILABLE");
+        let missing = call(&ctx, "job_kill", json!({ "job_id": "job-nope" })).await;
+        assert_eq!(error_code(&missing), "JOB_UNAVAILABLE");
+
+        // Em modo Editar, job_kill é Shell → pede aprovação; sem canal = falha fechada.
+        let mut no_approval = fixture.ctx();
+        no_approval.approval = None;
+        let ask = call(&no_approval, "job_kill", json!({ "job_id": "job-nope" })).await;
+        assert_eq!(error_code(&ask), "APPROVAL_UNAVAILABLE");
+    }
+
 }

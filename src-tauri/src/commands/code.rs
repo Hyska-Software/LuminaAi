@@ -494,7 +494,7 @@ pub async fn delete_approval_rule(state: State<'_, AppState>, id: String) -> Res
 pub async fn get_workspace_changes(
     state: State<'_, AppState>,
     conversation_id: String,
-) -> Result<ChangesSummary, String> {
+) -> Result<Vec<crate::domain::FileChange>, String> {
     let conversation = state
         .db
         .get_conversation(&conversation_id)
@@ -504,14 +504,25 @@ pub async fn get_workspace_changes(
     if let Some(workspace_id) = conversation.workspace_id.as_deref() {
         workspace = state.db.get_workspace(workspace_id).map_err(map_err)?;
     }
-    Ok(collect_changes(&state, &conversation_id, workspace.as_ref())
+    let summary = collect_changes(&state, &conversation_id, workspace.as_ref())
         .await
         .unwrap_or(ChangesSummary {
             turn_id: None,
             files: Vec::new(),
             added: 0,
             removed: 0,
-        }))
+        });
+    Ok(summary
+        .files
+        .into_iter()
+        .map(|file| crate::domain::FileChange {
+            path: file.path,
+            kind: file.kind,
+            added: file.added,
+            removed: file.removed,
+            diff: None,
+        })
+        .collect())
 }
 
 /// Diff de um arquivo: journal da sessão quando existe, senão git.

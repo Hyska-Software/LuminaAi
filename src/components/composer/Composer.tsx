@@ -1,14 +1,38 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ArrowUp, FilePlus, Globe, Plus, Square, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { credentialGateMessage } from '@/components/chat/turnError';
 import { useReduceMotion } from '@/components/layout/hooks';
 import { ModelPill } from '@/components/models/ModelPill';
-import { Button, IconButton } from '@/components/ui';
+import {
+  Button,
+  IconButton,
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from '@/components/ui';
+import { api } from '@/lib/api';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { AttachmentChips } from './AttachmentChips';
+import { filterSlashCommands, type SlashCommand } from './commands';
+import { MentionChips } from './MentionChips';
+import {
+  MENTION_LISTBOX_ID,
+  MentionMenu,
+  mentionOptionId,
+} from './MentionMenu';
+import { addMention, composeMessage, withoutMention, type MentionedFile } from './mentions';
+import { SLASH_LISTBOX_ID, SlashMenu, slashOptionId } from './SlashMenu';
 import { ToolsToggle } from './ToolsToggle';
 
 /** Native picker filters: images and the documents `documents::extract` handles. */
@@ -21,15 +45,35 @@ const ATTACHMENT_FILTERS = [
 /** The textarea grows up to ten lines before scrolling (DESIGN §7). */
 const MAX_LINES = 10;
 
+/** Debounce da busca de arquivos do `@` (WORKBENCH §6). */
+const MENTION_DEBOUNCE_MS = 120;
+
+/** Menu aberto do composer (menção `@` ou comando `/`). */
+type ComposerMenu =
+  | { kind: 'mention'; query: string; start: number; end: number; active: number }
+  | { kind: 'slash'; query: string; start: number; end: number; active: number };
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
 /** Message composer pinned to the bottom of the chat column. */
 export function Composer() {
   const [value, setValue] = useState('');
   const [attaching, setAttaching] = useState(false);
+  const [mentioned, setMentioned] = useState<MentionedFile[]>([]);
+  const [menu, setMenu] = useState<ComposerMenu | null>(null);
+  const [mentionResults, setMentionResults] = useState<string[]>([]);
+  const [mentionLoading, setMentionLoading] = useState(false);
+  const [mentionError, setMentionError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const reduceMotion = useReduceMotion();
 
   const streaming = useChatStore((state) => state.streaming);
   const pendingAttachments = useChatStore((state) => state.pendingAttachments);
+  const activeConversationId = useChatStore((state) => state.activeId);
+  const conversations = useChatStore((state) => state.conversations);
   const sendKey = useAppStore((state) => state.settings.sendKey);
   const webSearchEnabled = useAppStore((state) => state.settings.webSearchEnabled);
   const fileCreationEnabled = useAppStore((state) => state.settings.fileCreationEnabled);
@@ -45,12 +89,29 @@ export function Composer() {
   const openSettings = useUiStore((state) => state.openSettings);
   // Only the copy changes in the Code layout; sending/attachments/streaming are shared.
   const layoutMode = useUiStore((state) => state.layoutMode);
+  const activeWorkspaceId = useUiStore((state) => state.activeWorkspaceId);
   const isCodeLayout = layoutMode === 'code';
+
+  const activeConversation = activeConversationId
+    ? conversations.find((conversation) => conversation.id === activeConversationId)
+    : undefined;
+  const workspaceId = activeConversation?.workspaceId || activeWorkspaceId || null;
+  /** `@` menções e `/` comandos só existem no modo Code com workspace. */
+  const codeMenusEnabled = isCodeLayout && Boolean(workspaceId);
 
   const isStreaming = streaming !== null;
   const providerBlocked = selectedProvider !== undefined && !providerReady;
   const canSend =
-    !isStreaming && !providerBlocked && (value.trim().length > 0 || pendingAttachments.length > 0);
+    !isStreaming &&
+    !providerBlocked &&
+    (value.trim().length > 0 || mentioned.length > 0 || pendingAttachments.length > 0);
+
+  const slashQuery = menu?.kind === 'slash' ? menu.query : '';
+  const slashCommands = useMemo(() => filterSlashCommands(slashQuery), [slashQuery]);
+  const mentionQuery = menu?.kind === 'mention' ? menu.query : null;
+  const optionCount =
+    menu?.kind === 'mention' ? mentionResults.length : menu?.kind === 'slash' ? slashCommands.length : 0;
+  const activeIndex = menu ? Math.min(menu.active, Math.max(0, optionCount - 1)) : 0;
 
   const resizeTextarea = useCallback(() => {
     const element = textareaRef.current;
@@ -73,6 +134,7 @@ export function Composer() {
       const detail = (event as CustomEvent<unknown>).detail;
       if (typeof detail !== 'string') return;
       setValue(detail);
+      setMenu(null);
       requestAnimationFrame(() => {
         const element = textareaRef.current;
         if (!element) return;
@@ -93,17 +155,289 @@ export function Composer() {
     };
   }, [resizeTextarea]);
 
+  /* Ctrl/Cmd+L foca o composer (padrão Paseo) — só no modo Code. Local ao
+     componente: nenhum atalho global novo, o Chat mantém o comportamento. */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== 'l') return;
+      if (useUiStore.getState().layoutMode !== 'code') return;
+      event.preventDefault();
+      textareaRef.current?.focus();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  /* Fecha os menus quando o contexto deixa de existir (troca para Chat ou
+     sessão sem workspace). */
+  useEffect(() => {
+    if (!codeMenusEnabled && menu) setMenu(null);
+  }, [codeMenusEnabled, menu]);
+
+  /* Busca de arquivos do `@`: debounce 120 ms, resultado sempre do workspace
+     resolvido no momento (guard contra resposta atrasada). */
+  useEffect(() => {
+    if (mentionQuery === null || !workspaceId) return;
+    let cancelled = false;
+    setMentionLoading(true);
+    setMentionError(null);
+    const timer = window.setTimeout(() => {
+      if (typeof api.searchWorkspaceFiles !== 'function') {
+        if (cancelled) return;
+        setMentionLoading(false);
+        setMentionError('A busca de arquivos não está disponível nesta versão.');
+        return;
+      }
+      void api
+        .searchWorkspaceFiles(workspaceId, mentionQuery, 20)
+        .then((paths) => {
+          if (cancelled) return;
+          setMentionResults(paths);
+          setMentionLoading(false);
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return;
+          setMentionLoading(false);
+          setMentionError(describeError(error));
+        });
+    }, MENTION_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [mentionQuery, workspaceId]);
+
+  const focusTextareaAt = useCallback(
+    (caret: number) => {
+      requestAnimationFrame(() => {
+        const element = textareaRef.current;
+        if (!element) return;
+        element.focus();
+        const position = Math.max(0, Math.min(caret, element.value.length));
+        element.setSelectionRange(position, position);
+        resizeTextarea();
+      });
+    },
+    [resizeTextarea],
+  );
+
+  /** Detecta `@arquivo` ou `/comando` na posição do cursor. */
+  const analyzeTrigger = useCallback(
+    (next: string, caret: number) => {
+      if (!codeMenusEnabled) {
+        setMenu(null);
+        return;
+      }
+      const before = next.slice(0, caret);
+      const mentionMatch = /(^|\s)@([^\s@]*)$/.exec(before);
+      if (mentionMatch) {
+        const query = mentionMatch[2] ?? '';
+        setMenu({
+          kind: 'mention',
+          query,
+          start: caret - query.length - 1,
+          end: caret,
+          active: 0,
+        });
+        return;
+      }
+      const slashMatch = /(^|\s)\/([^\s]*)$/.exec(before);
+      if (slashMatch) {
+        const query = slashMatch[2] ?? '';
+        setMenu({
+          kind: 'slash',
+          query,
+          start: caret - query.length - 1,
+          end: caret,
+          active: 0,
+        });
+        return;
+      }
+      setMenu(null);
+    },
+    [codeMenusEnabled],
+  );
+
+  const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const next = event.target.value;
+    setValue(next);
+    analyzeTrigger(next, event.target.selectionStart ?? next.length);
+  };
+
+  const selectMention = useCallback(
+    (path: string) => {
+      if (!menu || menu.kind !== 'mention') return;
+      const next = value.slice(0, menu.start) + value.slice(menu.end);
+      setValue(next);
+      setMentioned((previous) => addMention(previous, path));
+      setMenu(null);
+      focusTextareaAt(menu.start);
+    },
+    [focusTextareaAt, menu, value],
+  );
+
+  const runInvoke = useCallback(
+    (command: SlashCommand) => {
+      const conversationId = useChatStore.getState().activeId;
+      switch (command.invoke) {
+        case 'compact': {
+          if (!conversationId) {
+            toast.info('Nenhuma sessão ativa para compactar', {
+              description: 'Abra uma sessão de código para compactar o contexto.',
+            });
+            return;
+          }
+          void api
+            .compactSession(conversationId)
+            .then(() => toast.success('Contexto compactado'))
+            .catch((error: unknown) => {
+              // O backend do harness ainda não implementa `/compact`: o toast
+              // precisa ser honesto em vez de fingir que a compactação ocorreu.
+              toast.error('Compactação ainda não disponível', {
+                description: describeError(error),
+              });
+            });
+          return;
+        }
+        case 'commit': {
+          const ui = useUiStore.getState();
+          ui.setCodePanelTab('changes');
+          ui.setCodePanelOpen(true);
+          return;
+        }
+        case 'permissoes': {
+          toast.info('Modo de permissão fica no cabeçalho', {
+            description: 'Use o chip Leitura / Editar / Autônomo ao lado do workspace.',
+          });
+          return;
+        }
+        case 'novo': {
+          void useChatStore.getState().startNewConversation('code');
+          return;
+        }
+        case 'limpar': {
+          setValue('');
+          setMentioned([]);
+          requestAnimationFrame(resizeTextarea);
+          textareaRef.current?.focus();
+          return;
+        }
+        case 'plan-off': {
+          if (!conversationId) {
+            toast.info('Nenhuma sessão ativa', {
+              description: 'Abra uma sessão de código para desativar o modo Plano.',
+            });
+            return;
+          }
+          void api
+            .setPlanMode(conversationId, false)
+            .then(() => toast.success('Modo Plano desativado'))
+            .catch((error: unknown) => {
+              toast.error('Não foi possível desativar o modo Plano', {
+                description: describeError(error),
+              });
+            });
+          return;
+        }
+        default:
+          return;
+      }
+    },
+    [resizeTextarea],
+  );
+
+  const selectSlash = useCallback(
+    (command: SlashCommand) => {
+      if (!menu || menu.kind !== 'slash') return;
+      const start = menu.start;
+      const end = menu.end;
+      setMenu(null);
+      const rest = value.slice(end);
+      if (command.action === 'fill' && command.fill) {
+        setValue(value.slice(0, start) + command.fill + rest);
+        focusTextareaAt(start + command.fill.length);
+        return;
+      }
+      setValue(value.slice(0, start) + rest);
+      focusTextareaAt(start);
+      runInvoke(command);
+    },
+    [focusTextareaAt, menu, runInvoke, value],
+  );
+
+  const selectActiveOption = useCallback(() => {
+    if (!menu) return;
+    if (menu.kind === 'mention') {
+      const path = mentionResults[activeIndex];
+      if (path) selectMention(path);
+      return;
+    }
+    const command = slashCommands[activeIndex];
+    if (command) selectSlash(command);
+  }, [activeIndex, menu, mentionResults, selectMention, selectSlash, slashCommands]);
+
+  const moveActiveOption = useCallback(
+    (delta: 1 | -1) => {
+      if (!menu || optionCount === 0) return;
+      const next = (activeIndex + delta + optionCount) % optionCount;
+      setMenu({ ...menu, active: next });
+    },
+    [activeIndex, menu, optionCount],
+  );
+
   const submit = useCallback(() => {
     if (!canSend) return;
-    const text = value.trim();
+    const text = composeMessage(value, mentioned);
+    if (!text && pendingAttachments.length === 0) return;
     setValue('');
+    setMentioned([]);
+    setMenu(null);
     requestAnimationFrame(resizeTextarea);
     window.dispatchEvent(new CustomEvent('lumina:scroll-bottom'));
     void useChatStore.getState().send(text);
-  }, [canSend, resizeTextarea, value]);
+  }, [canSend, mentioned, pendingAttachments.length, resizeTextarea, value]);
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;
+
+    /* Menus de `@`/`/`: o textarea mantém o foco e a opção ativa é exposta por
+       `aria-activedescendant`. Tab/Enter confirmam, Esc fecha. */
+    if (menu) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMenu(null);
+        return;
+      }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        moveActiveOption(1);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        moveActiveOption(-1);
+        return;
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        selectActiveOption();
+        return;
+      }
+    }
+
+    /* Backspace com o textarea vazio remove o último chip de menção. */
+    if (
+      event.key === 'Backspace' &&
+      value.length === 0 &&
+      (event.currentTarget.selectionStart ?? 0) === 0 &&
+      mentioned.length > 0
+    ) {
+      event.preventDefault();
+      setMentioned((previous) => previous.slice(0, -1));
+      return;
+    }
+
     if (event.key !== 'Enter') return;
     const withModifier = event.metaKey || event.ctrlKey;
     const shouldSend = sendKey === 'ctrl+enter' ? withModifier : withModifier || !event.shiftKey;
@@ -137,6 +471,24 @@ export function Composer() {
   const toggleFileCreation = () => {
     void useAppStore.getState().saveSettings({ fileCreationEnabled: !fileCreationEnabled });
   };
+
+  const placeholder = !isCodeLayout
+    ? 'Pergunte alguma coisa…'
+    : codeMenusEnabled
+      ? 'Descreva a tarefa… @ para arquivos, / para comandos'
+      : 'Descreva a tarefa para o agente…';
+
+  const menuControls = menu
+    ? menu.kind === 'mention'
+      ? MENTION_LISTBOX_ID
+      : SLASH_LISTBOX_ID
+    : undefined;
+  const activeDescendant =
+    menu && optionCount > 0
+      ? menu.kind === 'mention'
+        ? mentionOptionId(activeIndex)
+        : slashOptionId(activeIndex)
+      : undefined;
 
   return (
     <div>
@@ -174,33 +526,92 @@ export function Composer() {
           </div>
         ) : null}
 
-        <div className="px-3 pb-1 pt-3">
-          {pendingAttachments.length > 0 ? (
-            <AttachmentChips
-              attachments={pendingAttachments}
-              onRemove={(id) => void useChatStore.getState().removeAttachment(id)}
-              className="mb-2"
-            />
-          ) : null}
+        <Popover
+          open={menu !== null}
+          onOpenChange={(open) => {
+            if (!open) setMenu(null);
+          }}
+        >
+          <PopoverAnchor asChild>
+            <div className="px-3 pb-1 pt-3">
+              {mentioned.length > 0 ? (
+                <MentionChips
+                  mentions={mentioned}
+                  onRemove={(path) => {
+                    setMentioned((previous) => withoutMention(previous, path));
+                    textareaRef.current?.focus();
+                  }}
+                  className="mb-2"
+                />
+              ) : null}
 
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={1}
-            placeholder={
-              isCodeLayout ? 'Descreva a tarefa para o agente…' : 'Pergunte alguma coisa…'
-            }
-            aria-label={isCodeLayout ? 'Tarefa para o agente' : 'Mensagem para o Lumina'}
-            aria-describedby={providerBlocked ? 'composer-credential-notice' : undefined}
-            className={cn(
-              'block max-h-[220px] w-full resize-none bg-transparent px-1.5 py-0.5',
-              'text-[15px] leading-relaxed text-foreground placeholder:text-foreground-subtle',
-              'focus:outline-none',
-            )}
-          />
-        </div>
+              {pendingAttachments.length > 0 ? (
+                <AttachmentChips
+                  attachments={pendingAttachments}
+                  onRemove={(id) => void useChatStore.getState().removeAttachment(id)}
+                  className="mb-2"
+                />
+              ) : null}
+
+              <textarea
+                ref={textareaRef}
+                value={value}
+                onChange={handleChange}
+                onKeyDown={handleKeyDown}
+                rows={1}
+                placeholder={placeholder}
+                aria-label={isCodeLayout ? 'Tarefa para o agente' : 'Mensagem para o Lumina'}
+                aria-describedby={providerBlocked ? 'composer-credential-notice' : undefined}
+                aria-expanded={menu ? true : undefined}
+                aria-controls={menuControls}
+                aria-activedescendant={activeDescendant}
+                aria-autocomplete={codeMenusEnabled ? 'list' : undefined}
+                className={cn(
+                  'block max-h-[220px] w-full resize-none bg-transparent px-1.5 py-0.5',
+                  'text-[15px] leading-relaxed text-foreground placeholder:text-foreground-subtle',
+                  'focus:outline-none',
+                )}
+              />
+            </div>
+          </PopoverAnchor>
+
+          <PopoverContent
+            side="top"
+            align="start"
+            sideOffset={8}
+            collisionPadding={12}
+            className="w-[min(30rem,calc(100vw-2rem))] p-1"
+            onOpenAutoFocus={(event) => {
+              // O foco continua no textarea: os menus são navegados por
+              // aria-activedescendant, como um combobox.
+              event.preventDefault();
+            }}
+            onEscapeKeyDown={(event) => {
+              event.preventDefault();
+              setMenu(null);
+              textareaRef.current?.focus();
+            }}
+          >
+            {menu?.kind === 'mention' ? (
+              <MentionMenu
+                query={menu.query}
+                results={mentionResults}
+                loading={mentionLoading}
+                error={mentionError}
+                activeIndex={activeIndex}
+                onSelect={selectMention}
+                onHoverIndex={(index) => setMenu({ ...menu, active: index })}
+              />
+            ) : menu?.kind === 'slash' ? (
+              <SlashMenu
+                commands={slashCommands}
+                activeIndex={activeIndex}
+                onSelect={selectSlash}
+                onHoverIndex={(index) => setMenu({ ...menu, active: index })}
+              />
+            ) : null}
+          </PopoverContent>
+        </Popover>
 
         <div className="flex items-center gap-1 px-2 pb-2 pt-1">
           <IconButton

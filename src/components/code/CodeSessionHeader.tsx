@@ -34,6 +34,7 @@ import type { Conversation, PermissionMode, Workspace } from '@/lib/types';
 import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel';
 import { cn, copyText } from '@/lib/utils';
 import { WorkspaceTrustDialog } from './WorkspaceTrustDialog';
+import { CodeContextMeterChip } from './CodeAgentWidgets';
 import { NO_WORKSPACE_KEY, openFolder, useWorkspaces } from './useWorkspaces';
 
 /** Synthetic tab shown when the Code layout has no active conversation. */
@@ -638,7 +639,10 @@ export function CodeSessionHeader() {
           </>
         ) : null}
 
-        <div className="ml-auto flex shrink-0 items-center">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {activeConversation ? (
+            <CodeContextMeterChip conversationId={activeConversation.id} />
+          ) : null}
           {canDock ? (
             <Tooltip content={panelLabel} side="bottom">
               {panelButton}

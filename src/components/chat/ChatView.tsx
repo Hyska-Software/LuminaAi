@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown } from 'lucide-react';
+import { CodeJobsBar, CodeSessionCards } from '@/components/code/CodeAgentWidgets';
 import { Composer } from '@/components/composer/Composer';
 import { useReduceMotion } from '@/components/layout/hooks';
 import { providerSupportsPlan } from '@/lib/catalog';
@@ -134,6 +135,9 @@ export function ChatView({ welcome }: { welcome?: ReactNode } = {}) {
         ) : (
           <div className="mx-auto w-full max-w-3xl px-6 pb-10 pt-6">
             <MessageList messages={messages} streaming={streaming} />
+            {layoutMode === 'code' && activeId ? (
+              <CodeSessionCards conversationId={activeId} />
+            ) : null}
           </div>
         )}
       </div>
@@ -144,6 +148,9 @@ export function ChatView({ welcome }: { welcome?: ReactNode } = {}) {
           className="pointer-events-none absolute inset-x-0 -top-10 bottom-0 bg-linear-to-t from-background via-background/90 to-transparent"
         />
         <div className="relative mx-auto w-full max-w-3xl">
+          {layoutMode === 'code' && activeId ? (
+            <CodeJobsBar conversationId={activeId} />
+          ) : null}
           {showTurnError ? (
             <TurnErrorBanner
               code={errorCode}
