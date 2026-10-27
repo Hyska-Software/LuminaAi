@@ -810,23 +810,18 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
           </div>
         </section>
 
-        <section
-          aria-labelledby="code-unassigned-heading"
-          className="shrink-0 border-t border-border px-2 pb-1 pt-2"
-        >
-          <h2
-            id="code-unassigned-heading"
-            className="px-1 text-[11px] font-medium tracking-tight text-foreground-subtle"
+        {unassignedSessions.length > 0 ? (
+          <section
+            aria-labelledby="code-unassigned-heading"
+            className="shrink-0 border-t border-border px-2 pb-1 pt-2"
           >
-            Sem workspace
-          </h2>
-          <div className="mt-1 max-h-44 overflow-y-auto overscroll-contain pb-1">
-            {unassignedSessions.length === 0 ? (
-              <p className="px-1 py-1.5 text-[11.5px] leading-relaxed text-foreground-subtle">
-                Nenhuma sessão sem workspace. As sessões do Code aparecem aqui se você abrir uma pasta
-                depois de criá-las.
-              </p>
-            ) : (
+            <h2
+              id="code-unassigned-heading"
+              className="px-1 text-[11px] font-medium tracking-tight text-foreground-subtle"
+            >
+              Sem workspace
+            </h2>
+            <div className="mt-1 max-h-44 overflow-y-auto overscroll-contain pb-1">
               <div className="flex flex-col gap-0.5">
                 {unassignedSessions.map((conversation) => (
                   <SessionRow
@@ -838,9 +833,9 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                   />
                 ))}
               </div>
-            )}
-          </div>
-        </section>
+            </div>
+          </section>
+        ) : null}
       </div>
 
       <div className="border-t border-border px-2 py-2">

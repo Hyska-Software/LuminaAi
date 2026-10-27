@@ -398,6 +398,18 @@ describe('CodeSidebar — Workspaces reais', () => {
     expect(screen.getByRole('button', { name: 'Sessão órfã' })).toBeTruthy();
   });
 
+  it('esconde o grupo "Sem workspace" quando não há sessões órfãs', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Sessão do workspace', workspaceId: 'ws-1' })],
+    });
+    renderSidebar();
+
+    await screen.findByRole('button', { name: 'Sessão do workspace' });
+    expect(screen.queryByRole('heading', { name: 'Sem workspace' })).toBeNull();
+    expect(screen.queryByText(/Nenhuma sessão sem workspace/)).toBeNull();
+  });
+
   it('abre a conversa ao clicar na sessão e registra a aba do workspace', async () => {
     mocks.listWorkspaces.mockResolvedValue([workspace()]);
     useChatStore.setState({
