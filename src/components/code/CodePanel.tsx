@@ -254,27 +254,51 @@ export function CodePanel() {
         </Tooltip>
       </div>
 
-      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border px-3 text-[12px] text-foreground-muted">
-        <GitBranch aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-        <span className="truncate">
-          {workspace ? workspace.name : 'Sem workspace'}
-          {branch ? ` · ${branch}` : ''}
-        </span>
-        {panel.gitStatus?.isRepo ? (
-          <span className="ml-auto shrink-0 text-[11px] tabular-nums">
-            {panel.gitStatus.ahead ? `↑${panel.gitStatus.ahead}` : ''}
-            {panel.gitStatus.behind ? ` ↓${panel.gitStatus.behind}` : ''}
-          </span>
-        ) : null}
-      </div>
-
       <div
         role="tabpanel"
         id={PANEL_BODY_ID}
         aria-labelledby={`code-panel-tab-${tab}`}
         className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
-        {!workspaceId ? (
+        {tab === 'changes' ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            {/* Workspace + branch só na aba Alterações (as abas Arquivos/Terminal
+                já têm o próprio contexto no cabeçalho/título). */}
+            <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border px-3 text-[12px] text-foreground-muted">
+              <GitBranch aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+              <span className="truncate">
+                {workspace ? workspace.name : 'Sem workspace'}
+                {branch ? ` · ${branch}` : ''}
+              </span>
+              {panel.gitStatus?.isRepo ? (
+                <span className="ml-auto shrink-0 text-[11px] tabular-nums">
+                  {panel.gitStatus.ahead ? `↑${panel.gitStatus.ahead}` : ''}
+                  {panel.gitStatus.behind ? ` ↓${panel.gitStatus.behind}` : ''}
+                </span>
+              ) : null}
+            </div>
+            {workspaceId ? (
+              <ChangesPanel
+                workspaceId={workspaceId}
+                conversationId={activeId}
+                gitStatus={panel.gitStatus}
+                gitLoading={panel.gitLoading}
+                gitError={panel.gitError}
+                sessionChanges={sessionChanges}
+                sessionLoading={false}
+                sessionError={null}
+                onRefresh={refreshAll}
+                className="min-h-0 flex-1"
+              />
+            ) : (
+              <PanelEmptyState
+                icon={FolderOpen}
+                title="Nenhum workspace aberto"
+                description="Abra uma pasta na barra lateral para o agente ler, editar e rodar comandos aqui."
+              />
+            )}
+          </div>
+        ) : !workspaceId ? (
           <PanelEmptyState
             icon={FolderOpen}
             title="Nenhum workspace aberto"
@@ -290,19 +314,6 @@ export function CodePanel() {
               description="Abra uma sessão para usar o terminal no diretório do workspace."
             />
           )
-        ) : tab === 'changes' ? (
-          <ChangesPanel
-            workspaceId={workspaceId}
-            conversationId={activeId}
-            gitStatus={panel.gitStatus}
-            gitLoading={panel.gitLoading}
-            gitError={panel.gitError}
-            sessionChanges={sessionChanges}
-            sessionLoading={false}
-            sessionError={null}
-            onRefresh={refreshAll}
-            className="min-h-0 flex-1"
-          />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
             <div className={cn('min-h-0 overflow-y-auto', selectedPath ? 'flex-[1.1]' : 'flex-1')}>

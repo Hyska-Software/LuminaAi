@@ -209,7 +209,27 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
       expect(apiMock.readWorkspaceFile).toHaveBeenCalledWith('ws-1', 'src/app.ts');
     });
     expect(apiMock.listWorkspaceFiles).toHaveBeenCalledWith('ws-1', '.', 2);
-    expect(screen.getByText(/lumina/)).toBeTruthy();
+    // A barra workspace · branch vive só na aba Alterações.
+    fireEvent.click(screen.getByRole('tab', { name: 'Alterações' }));
+    expect(await screen.findByText(/lumina/)).toBeTruthy();
+  });
+
+  it('mostra workspace e branch somente na aba Alterações', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ workspaceId: 'ws-1' })],
+      activeId: 'conv-1',
+    });
+    apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    useUiStore.setState({ codePanelTab: 'files' });
+
+    render(<CodePanel />);
+
+    expect(screen.queryByText(/lumina · main/)).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Alterações' }));
+    expect(await screen.findByText(/lumina · main/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Terminal' }));
+    expect(screen.queryByText(/lumina · main/)).toBeNull();
   });
 
   it('respeita o estado persistido e navega com as setas do teclado', () => {
