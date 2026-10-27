@@ -73,6 +73,7 @@ export function CodePanel() {
   const setTab = useUiStore((state) => state.setCodePanelTab);
   const setOpen = useUiStore((state) => state.setCodePanelOpen);
   const openCodeDiff = useUiStore((state) => state.openCodeDiff);
+  const openCodeCommits = useUiStore((state) => state.openCodeCommits);
   // Padrão de fábrica: diff abre como aba do chat; pode ser trocado em
   // Configurações → Ferramentas (Settings.diffOpenMode).
   const diffOpenMode = useAppStore((state) => state.settings.diffOpenMode ?? 'tab');
@@ -293,6 +294,9 @@ export function CodePanel() {
                 sessionLoading={false}
                 sessionError={null}
                 onRefresh={refreshAll}
+                onOpenCommits={
+                  workspaceId ? () => openCodeCommits(workspaceId) : null
+                }
                 onOpenDiffTab={
                   diffOpenMode === 'panel'
                     ? null

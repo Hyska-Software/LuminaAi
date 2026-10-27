@@ -4,6 +4,7 @@ import {
   CircleAlert,
   FileDiff,
   GitBranch,
+  History,
   Minus,
   Plus,
   TriangleAlert,
@@ -59,6 +60,8 @@ export interface ChangesPanelProps {
   sessionError?: string | null;
   /** Called after stage/unstage/revert/commit so the container reloads the data. */
   onRefresh?: () => void;
+  /** Abre a aba central de histórico de commits (lista + diff completo). */
+  onOpenCommits?: (() => void) | null;
   /**
    * Abre o diff como aba central em vez do detalhe inline do painel
    * (`Settings.diffOpenMode`, padrão `tab`). Quando definido, clicar numa linha
@@ -183,6 +186,7 @@ export function ChangesPanel({
   sessionLoading = false,
   sessionError = null,
   onRefresh,
+  onOpenCommits = null,
   onOpenDiffTab = null,
   className,
 }: ChangesPanelProps) {
@@ -316,6 +320,24 @@ export function ChangesPanel({
   /* The detail view and the list share the same footer (CommitBar keeps its
      message/history state while a diff is open). No modo "aba" o detalhe inline
      não é usado: o diff abre no centro. */
+  const commitsButton = isRepo && onOpenCommits ? (
+    <div className="sticky top-0 z-10 flex h-8 shrink-0 items-center gap-2 border-b border-border bg-surface px-3">
+      <span className="text-[10.5px] font-medium uppercase tracking-wider text-foreground-subtle">
+        Alterações
+      </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="ml-auto h-6 px-2 text-[11px]"
+        leftIcon={<History className="size-3.5" strokeWidth={1.75} />}
+        onClick={onOpenCommits}
+        aria-label="Ver histórico de commits"
+      >
+        Histórico
+      </Button>
+    </div>
+  ) : null;
+
   const detail = selected && !onOpenDiffTab ? (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-1.5">
@@ -338,6 +360,7 @@ export function ChangesPanel({
     <div className={cn('flex h-full min-h-0 flex-col', className)}>
       {detail ?? (
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {commitsButton}
         {gitError ? (
           <div
             role="alert"

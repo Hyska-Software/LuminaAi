@@ -193,6 +193,218 @@ pub async fn branches(root: &Path) -> Result<Vec<String>, ExecError> {
         .map(str::to_string)
         .collect())
 }
+/* ------------------------------------------------------------------ */
+/* Histórico: um commit completo (metadados + arquivos + patch)        */
+/* ------------------------------------------------------------------ */
+
+/// Arquivo alterado por um commit (patch completo por arquivo).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitCommitFile {
+    pub path: String,
+    /// Caminho anterior quando o commit renomeia/copia.
+    pub old_path: Option<String>,
+    /// `A` | `M` | `D` | `R` | `C` | `T`.
+    pub status: String,
+    pub added: u32,
+    pub removed: u32,
+    pub binary: bool,
+    pub diff: String,
+}
+
+/// Commit completo para a aba de histórico do Code (estilo Zed).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitCommitDetail {
+    pub hash: String,
+    pub author: String,
+    pub email: String,
+    pub date: String,
+    pub subject: String,
+    pub body: String,
+    pub files: Vec<GitCommitFile>,
+    /// `true` quando o patch passou do teto de saída (a UI avisa).
+    pub truncated: bool,
+}
+
+/// Aceita apenas hashes hexadecimais curtos/completos (7..=40) — nunca flags.
+fn valid_revision(rev: &str) -> bool {
+    let rev = rev.trim();
+    (7..=40).contains(&rev.len()) && rev.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+/// Remove aspas de caminhos git (`"a/b\tc"`).
+fn unquote_path(raw: &str) -> String {
+    let raw = raw.trim();
+    if let Some(stripped) = raw.strip_prefix('"').and_then(|value| value.strip_suffix('"')) {
+        let mut out = String::with_capacity(stripped.len());
+        let mut chars = stripped.chars();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                match chars.next() {
+                    Some('n') => out.push('\n'),
+                    Some('t') => out.push('\t'),
+                    Some('r') => out.push('\r'),
+                    Some('"') => out.push('"'),
+                    Some('\\') => out.push('\\'),
+                    Some(other) => out.push(other),
+                    None => break,
+                }
+            } else {
+                out.push(ch);
+            }
+        }
+        return out;
+    }
+    raw.to_string()
+}
+
+/// Divide o patch de um commit em seções por arquivo e extrai status/contagens.
+fn parse_commit_patch(patch: &str, truncated: bool) -> Vec<GitCommitFile> {
+    let mut files: Vec<GitCommitFile> = Vec::new();
+    let mut current: Vec<&str> = Vec::new();
+    let mut flush = |section: &Vec<&str>, out: &mut Vec<GitCommitFile>| {
+        if section.is_empty() {
+            return;
+        }
+        let mut path = String::new();
+        let mut old_path = None;
+        let mut status = "M".to_string();
+        let mut binary = false;
+        for line in section {
+            if line.starts_with("+++ b/") {
+                path = unquote_path(&line["+++ b/".len()..]);
+            } else if line.starts_with("+++ \"b/") {
+                path = unquote_path(&line["+++ ".len()..]);
+                path = path.strip_prefix("b/").unwrap_or(&path).to_string();
+            } else if line.starts_with("--- a/") && path.is_empty() {
+                path = unquote_path(&line["--- a/".len()..]);
+            } else if line.starts_with("rename to ") {
+                path = unquote_path(&line["rename to ".len()..]);
+                status = "R".to_string();
+            } else if line.starts_with("rename from ") {
+                old_path = Some(unquote_path(&line["rename from ".len()..]));
+                status = "R".to_string();
+            } else if line.starts_with("copy to ") {
+                path = unquote_path(&line["copy to ".len()..]);
+                status = "C".to_string();
+            } else if line.starts_with("new file mode") {
+                status = "A".to_string();
+            } else if line.starts_with("deleted file mode") {
+                status = "D".to_string();
+            } else if line.starts_with("Binary files ") || *line == "GIT binary patch" {
+                binary = true;
+            }
+        }
+        // `+++ /dev/null` em arquivo removido: mantém o caminho de `--- a/`.
+        if path == "/dev/null" || path.is_empty() {
+            for line in section {
+                if let Some(rest) = line.strip_prefix("--- a/") {
+                    path = unquote_path(rest);
+                    break;
+                }
+            }
+        }
+        if path.is_empty() || path == "/dev/null" {
+            return;
+        }
+        let mut added = 0u32;
+        let mut removed = 0u32;
+        for line in section {
+            if line.starts_with("+") && !line.starts_with("+++") {
+                added = added.saturating_add(1);
+            } else if line.starts_with("-") && !line.starts_with("---") {
+                removed = removed.saturating_add(1);
+            }
+        }
+        out.push(GitCommitFile {
+            path,
+            old_path,
+            status,
+            added,
+            removed,
+            binary,
+            diff: section.join("\n"),
+        });
+    };
+    for line in patch.lines() {
+        if line.starts_with("diff --git ") {
+            flush(&current, &mut files);
+            current = vec![line];
+        } else if !current.is_empty() {
+            current.push(line);
+        }
+    }
+    flush(&current, &mut files);
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    if truncated && !files.is_empty() {
+        if let Some(last) = files.last_mut() {
+            last.diff.push_str("\n[commit truncado pelo limite de saída]\n");
+        }
+    }
+    files
+}
+
+/// Metadados + arquivos + patch completo de um commit (aba de histórico).
+pub async fn commit_detail(
+    root: &Path,
+    revision: &str,
+    max_bytes: usize,
+) -> Result<GitCommitDetail, ExecError> {
+    if !valid_revision(revision) {
+        return Err(ExecError::failed(
+            "revisão inválida (esperado hash hexadecimal de 7 a 40 caracteres)",
+            None,
+        ));
+    }
+    let rev = revision.trim();
+    let meta = run_git_checked(
+        root,
+        &[
+            "show",
+            "-s",
+            "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b",
+            rev,
+        ],
+        TEXT_CAP,
+    )
+    .await?;
+    let meta = meta.stdout.trim_end_matches(['\n', '\r']);
+    let mut fields = meta.split('\x1f');
+    let hash = fields.next().unwrap_or_default().to_string();
+    let author = fields.next().unwrap_or_default().to_string();
+    let email = fields.next().unwrap_or_default().to_string();
+    let date = fields.next().unwrap_or_default().to_string();
+    let subject = fields.next().unwrap_or_default().to_string();
+    let body = fields.next().unwrap_or_default().trim().to_string();
+
+    let cap = if max_bytes == 0 { DIFF_CAP } else { max_bytes };
+    let patch = run_git_checked(
+        root,
+        &[
+            "show",
+            "--format=",
+            "--patch",
+            "--no-color",
+            "--no-ext-diff",
+            "--find-renames",
+            "--unified=3",
+            rev,
+        ],
+        cap,
+    )
+    .await?;
+    let files = parse_commit_patch(&patch.stdout, patch.truncated);
+    Ok(GitCommitDetail {
+        hash,
+        author,
+        email,
+        date,
+        subject,
+        body,
+        files,
+        truncated: patch.truncated,
+    })
+}
+
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -517,6 +729,92 @@ mod tests {
         assert!(status.staged.is_empty() && status.unstaged.is_empty());
     }
 
+    #[test]
+    fn parses_commit_patch_into_files_with_counts_and_status() {
+        let patch = concat!(
+            "diff --git a/a.txt b/a.txt\n",
+            "index 1111111..2222222 100644\n",
+            "--- a/a.txt\n",
+            "+++ b/a.txt\n",
+            "@@ -1 +1,2 @@\n",
+            " linha1\n",
+            "+linha2\n",
+            "diff --git a/novo.txt b/novo.txt\n",
+            "new file mode 100644\n",
+            "--- /dev/null\n",
+            "+++ b/novo.txt\n",
+            "@@ -0,0 +1 @@\n",
+            "+ola\n",
+            "diff --git a/velho.txt b/velho.txt\n",
+            "deleted file mode 100644\n",
+            "--- a/velho.txt\n",
+            "+++ /dev/null\n",
+            "@@ -1 +0,0 @@\n",
+            "-tchau\n",
+            "diff --git a/antes.txt b/depois.txt\n",
+            "similarity index 100%\n",
+            "rename from antes.txt\n",
+            "rename to depois.txt\n"
+        );
+        let files = parse_commit_patch(patch, false);
+        assert_eq!(files.len(), 4);
+        let modified = files.iter().find(|file| file.path == "a.txt").expect("a.txt");
+        assert_eq!(modified.status, "M");
+        assert_eq!(modified.added, 1);
+        assert_eq!(modified.removed, 0);
+        let created = files.iter().find(|file| file.path == "novo.txt").expect("novo");
+        assert_eq!(created.status, "A");
+        assert_eq!(created.added, 1);
+        let deleted = files.iter().find(|file| file.path == "velho.txt").expect("velho");
+        assert_eq!(deleted.status, "D");
+        assert_eq!(deleted.removed, 1);
+        let renamed = files.iter().find(|file| file.path == "depois.txt").expect("depois");
+        assert_eq!(renamed.status, "R");
+        assert_eq!(renamed.old_path.as_deref(), Some("antes.txt"));
+    }
+
+    #[test]
+    fn commit_revision_must_be_a_hex_hash() {
+        assert!(valid_revision("abcdef0"));
+        assert!(valid_revision(&"a".repeat(40)));
+        assert!(!valid_revision("HEAD"));
+        assert!(!valid_revision("--help"));
+        assert!(!valid_revision("main; rm -rf /"));
+        assert!(!valid_revision("abc"));
+    }
+
+    #[tokio::test]
+    async fn commit_detail_returns_metadata_files_and_patch() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        fs::write(temp.path().join("a.txt"), "linha1\nlinha2\n").expect("modificar a");
+        fs::write(temp.path().join("novo.txt"), "ola\n").expect("criar novo");
+        assert!(run_git(temp.path(), &["add", "."]));
+        assert!(run_git(temp.path(), &["commit", "-m", "altera a e cria novo"]));
+
+        let commits = log(temp.path(), 1).await.expect("log");
+        let head = commits[0].hash.clone();
+        let detail = commit_detail(temp.path(), &head, 0).await.expect("detalhe");
+        assert_eq!(detail.hash, head);
+        assert_eq!(detail.subject, "altera a e cria novo");
+        assert_eq!(detail.author, "Teste Lumina");
+        assert_eq!(detail.email, "teste@lumina.local");
+        assert!(!detail.date.is_empty());
+        assert_eq!(detail.files.len(), 2);
+
+        let modified = detail.files.iter().find(|file| file.path == "a.txt").expect("a.txt");
+        assert_eq!(modified.status, "M");
+        assert!(modified.diff.contains("+linha2"), "diff: {}", modified.diff);
+        assert_eq!(modified.added, 1);
+        let created = detail.files.iter().find(|file| file.path == "novo.txt").expect("novo");
+        assert_eq!(created.status, "A");
+        assert!(created.diff.contains("+ola"), "diff: {}", created.diff);
+
+        assert!(!detail.truncated);
+        assert!(commit_detail(temp.path(), "HEAD", 0).await.is_err());
+    }
     #[test]
     fn parses_porcelain_v2_fixture() {
         let raw = concat!(

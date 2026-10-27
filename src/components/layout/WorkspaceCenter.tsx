@@ -1,5 +1,10 @@
 import { ChatView } from '@/components/chat/ChatView';
-import { CodeSessionHeader, CodeWelcomeScreen, CodeDiffView } from '@/components/code';
+import {
+  CodeCommitHistoryView,
+  CodeDiffView,
+  CodeSessionHeader,
+  CodeWelcomeScreen,
+} from '@/components/code';
 import { LibraryView } from '@/components/library';
 import { SkillsView } from '@/components/skills';
 import { useUiStore } from '@/lib/store';
@@ -21,6 +26,8 @@ export function WorkspaceCenter() {
   const layoutMode = useUiStore((state) => state.layoutMode);
   const codeView = useUiStore((state) => state.codeView);
   const codeDiffTab = useUiStore((state) => state.codeDiffTab);
+  const codeCommitsTab = useUiStore((state) => state.codeCommitsTab);
+  const selectCodeCommit = useUiStore((state) => state.selectCodeCommit);
   const activeView = useUiStore((state) => state.activeView);
   const setActiveView = useUiStore((state) => state.setActiveView);
   const setCodeView = useUiStore((state) => state.setCodeView);
@@ -29,7 +36,8 @@ export function WorkspaceCenter() {
   const showSkills = isCode ? codeView === 'skills' : activeView === 'skills';
   const showLibrary = !isCode && activeView === 'library';
   const showDiff = isCode && codeView === 'diff' && codeDiffTab !== null;
-  const showChat = !showSkills && !showLibrary && !showDiff;
+  const showCommits = isCode && codeView === 'commits' && codeCommitsTab !== null;
+  const showChat = !showSkills && !showLibrary && !showDiff && !showCommits;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -38,9 +46,9 @@ export function WorkspaceCenter() {
           header stays mounted while the Code Skills page is open so the open
           session tabs are not lost when coming back (PLAN §3.3). */}
       <div
-        className={cn('shrink-0', !(isCode && (showChat || showDiff)) && 'hidden')}
-        aria-hidden={isCode && !(showChat || showDiff) ? true : undefined}
-        inert={isCode && !(showChat || showDiff) ? true : undefined}
+        className={cn('shrink-0', !(isCode && (showChat || showDiff || showCommits)) && 'hidden')}
+        aria-hidden={isCode && !(showChat || showDiff || showCommits) ? true : undefined}
+        inert={isCode && !(showChat || showDiff || showCommits) ? true : undefined}
       >
         {isCode ? <CodeSessionHeader /> : null}
       </div>
@@ -53,6 +61,17 @@ export function WorkspaceCenter() {
       >
         <ChatView welcome={isCode ? <CodeWelcomeScreen /> : undefined} />
       </div>
+
+      {showCommits && codeCommitsTab ? (
+        <div
+          id="code-commits-panel"
+          role="region"
+          aria-label="Histórico de commits"
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <CodeCommitHistoryView target={codeCommitsTab} onSelect={selectCodeCommit} />
+        </div>
+      ) : null}
 
       {showDiff && codeDiffTab ? (
         <div

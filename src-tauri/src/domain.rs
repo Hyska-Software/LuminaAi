@@ -1436,6 +1436,38 @@ pub struct WorkspaceGitCommit {
     pub date: String,
 }
 
+/// Um arquivo alterado por um commit (patch completo por arquivo).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCommitFile {
+    pub path: String,
+    #[serde(default)]
+    pub old_path: Option<String>,
+    /// `A` | `M` | `D` | `R` | `C` | `T`.
+    pub status: String,
+    pub added: u32,
+    pub removed: u32,
+    #[serde(default)]
+    pub binary: bool,
+    pub diff: String,
+}
+
+/// Commit completo para a aba de histórico do Code (metadados + arquivos).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCommitDetail {
+    pub hash: String,
+    pub author: String,
+    pub email: String,
+    pub date: String,
+    pub subject: String,
+    #[serde(default)]
+    pub body: String,
+    pub files: Vec<WorkspaceCommitFile>,
+    #[serde(default)]
+    pub truncated: bool,
+}
+
 impl ToolCallRecord {
     /// Constrói o record com apresentação estruturada (diff/todo/plano/job).
     pub fn with_presentation(mut self, presentation: Option<Value>) -> Self {

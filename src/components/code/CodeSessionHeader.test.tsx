@@ -751,3 +751,26 @@ describe('CodeSessionHeader — troca de aba com diff aberto', () => {
     expect(useUiStore.getState().codeDiffTab?.path).toBe('src/app.ts');
   });
 });
+
+describe('CodeSessionHeader — aba de histórico de commits', () => {
+  it('mostra a aba de commits, ativa e fecha pelo X', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Sessão aberta' })],
+      activeId: 'c-1',
+    });
+
+    render(<CodeSessionHeader />);
+
+    act(() => {
+      useUiStore.getState().openCodeCommits('ws-1');
+    });
+
+    const commitsTab = await screen.findByRole('tab', { name: 'Histórico de commits' });
+    expect(commitsTab.getAttribute('aria-selected')).toBe('true');
+    expect(tab('Sessão aberta').getAttribute('aria-selected')).toBe('false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar histórico de commits' }));
+    expect(useUiStore.getState().codeCommitsTab).toBeNull();
+    expect(useUiStore.getState().codeView).toBe('session');
+  });
+});

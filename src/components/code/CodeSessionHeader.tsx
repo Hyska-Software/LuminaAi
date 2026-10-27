@@ -7,6 +7,7 @@ import {
   FolderGit2,
   FolderOpen,
   GitBranch,
+  History,
   ListChecks,
   PanelRight,
   Plus,
@@ -43,6 +44,8 @@ const NEW_SESSION_ID = '__new_session__';
 const NEW_SESSION_TITLE = 'Nova sessão';
 /** Synthetic center tab for an open file diff (WORKBENCH §7.2). */
 const CODE_DIFF_TAB_ID = '__code_diff__';
+/** Synthetic center tab for the commit history (WORKBENCH §7.2). */
+const CODE_COMMITS_TAB_ID = '__code_commits__';
 
 /**
  * Id of the conversation surface the session tabs control. `WorkspaceCenter`
@@ -273,6 +276,8 @@ export function CodeSessionHeader() {
   const codeView = useUiStore((state) => state.codeView);
   const codeDiffTab = useUiStore((state) => state.codeDiffTab);
   const closeCodeDiff = useUiStore((state) => state.closeCodeDiff);
+  const codeCommitsTab = useUiStore((state) => state.codeCommitsTab);
+  const closeCodeCommits = useUiStore((state) => state.closeCodeCommits);
   const viewportWidth = useViewportWidth();
   /** The docked code panel only exists on wide windows (see CodePanel). */
   const canDock = viewportWidth >= SIDE_PANEL_DOCK_MIN_VIEWPORT;
@@ -405,6 +410,10 @@ export function CodeSessionHeader() {
       useUiStore.getState().setCodeView('diff');
       return;
     }
+    if (id === CODE_COMMITS_TAB_ID) {
+      useUiStore.getState().setCodeView('commits');
+      return;
+    }
     if (id === NEW_SESSION_ID) return;
     const isActiveConversation = id === activeId;
     // Clicar na aba da conversa que JÁ está ativa é no-op… exceto quando o
@@ -418,6 +427,11 @@ export function CodeSessionHeader() {
     if (id === NEW_SESSION_ID) return;
     if (id === CODE_DIFF_TAB_ID) {
       closeCodeDiff();
+      focusTab(activeId ?? undefined);
+      return;
+    }
+    if (id === CODE_COMMITS_TAB_ID) {
+      closeCodeCommits();
       focusTab(activeId ?? undefined);
       return;
     }
@@ -701,7 +715,7 @@ export function CodeSessionHeader() {
             </div>
           ) : (
             tabs.map((tab) => {
-              const selected = tab.id === activeId && codeView !== 'diff';
+              const selected = tab.id === activeId && codeView === 'session';
               return (
                 <div
                   key={tab.id}
@@ -792,6 +806,50 @@ export function CodeSessionHeader() {
               </button>
             </div>
           ) : null}
+          {codeCommitsTab ? (
+            <div
+              role="presentation"
+              className={cn(
+                'group flex h-8 max-w-44 shrink-0 items-center rounded-lg border transition-colors duration-150',
+                codeView === 'commits'
+                  ? 'border-border bg-surface-raised text-foreground shadow-sm'
+                  : 'border-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+              )}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-label="Histórico de commits"
+                aria-selected={codeView === 'commits'}
+                aria-controls="code-commits-panel"
+                title="Histórico de commits"
+                tabIndex={codeView === 'commits' ? 0 : -1}
+                ref={addTabRef(CODE_COMMITS_TAB_ID)}
+                onClick={() => selectTab(CODE_COMMITS_TAB_ID)}
+                onKeyDown={(event) => handleTabKeyDown(event, CODE_COMMITS_TAB_ID)}
+                className={cn(
+                  'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                  'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                )}
+              >
+                <History aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+                <span className="truncate">Commits</span>
+              </button>
+              <button
+                type="button"
+                aria-label="Fechar histórico de commits"
+                tabIndex={-1}
+                onClick={() => closeTab(CODE_COMMITS_TAB_ID)}
+                className={cn(
+                  'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                  'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                )}
+              >
+                <X aria-hidden className="size-3.5" />
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <Tooltip content="Nova sessão" side="bottom">
@@ -816,3 +874,4 @@ export function CodeSessionHeader() {
 }
 
 export default CodeSessionHeader;
+

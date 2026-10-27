@@ -24,7 +24,7 @@ export type LayoutMode = 'chat' | 'code';
  * (Biblioteca/Skills) and vice versa. `diff` mostra o diff de um arquivo em uma
  * aba central (WORKBENCH §7.2); o alvo vive em `codeDiffTab`.
  */
-export type CodeView = 'session' | 'skills' | 'diff';
+export type CodeView = 'session' | 'skills' | 'diff' | 'commits';
 
 /** Diff aberto como aba central (alvo é volátil; não persiste entre sessões). */
 export interface CodeDiffTab {
@@ -96,6 +96,9 @@ interface UiState {
   codeView: CodeView;
   /** Diff aberto como aba central (`null` = nenhum; só existe com `codeView: 'diff'`). */
   codeDiffTab: CodeDiffTab | null;
+  /** Aba central de histórico de commits (
+ull = fechada). */
+  codeCommitsTab: { workspaceId: string; revision: string | null } | null;
   /** Whether the Code layout shows its right panel (Arquivos/Alterações). */
   codePanelOpen: boolean;
   /** Active tab of the Code right panel. */
@@ -137,6 +140,13 @@ interface UiState {
   openCodeDiff: (target: CodeDiffTab) => void;
   /** Fecha a aba de diff e volta para a sessão. */
   closeCodeDiff: () => void;
+  /** Abre a aba de histórico de commits (lista do workspace). */
+  openCodeCommits: (workspaceId: string) => void;
+  /** Mostra um commit (
+ull volta para a lista). */
+  selectCodeCommit: (revision: string | null) => void;
+  /** Fecha a aba de commits e volta para a sessão. */
+  closeCodeCommits: () => void;
   setCodePanelOpen: (open: boolean) => void;
   toggleCodePanel: () => void;
   setCodePanelTab: (tab: CodePanelTab) => void;
@@ -208,6 +218,7 @@ export const useUiStore = create<UiState>()(
       layoutMode: 'chat',
       codeView: 'session',
       codeDiffTab: null,
+      codeCommitsTab: null,
       codePanelOpen: true,
       codePanelTab: 'changes',
       activeWorkspaceId: null,
@@ -236,10 +247,26 @@ export const useUiStore = create<UiState>()(
       setCodeView: (codeView) =>
         set({
           codeView:
-            codeView === 'skills' ? 'skills' : codeView === 'diff' ? 'diff' : 'session',
+            codeView === 'skills'
+              ? 'skills'
+              : codeView === 'diff'
+                ? 'diff'
+                : codeView === 'commits'
+                  ? 'commits'
+                  : 'session',
         }),
       openCodeDiff: (codeDiffTab) => set({ codeDiffTab, codeView: 'diff' }),
       closeCodeDiff: () => set({ codeDiffTab: null, codeView: 'session' }),
+      openCodeCommits: (workspaceId) =>
+        set({ codeCommitsTab: { workspaceId, revision: null }, codeView: 'commits' }),
+      selectCodeCommit: (revision) =>
+        set((state) => ({
+          codeCommitsTab: state.codeCommitsTab
+            ? { ...state.codeCommitsTab, revision }
+            : state.codeCommitsTab,
+          codeView: 'commits',
+        })),
+      closeCodeCommits: () => set({ codeCommitsTab: null, codeView: 'session' }),
       setCodePanelOpen: (codePanelOpen) => set({ codePanelOpen }),
       toggleCodePanel: () => set((state) => ({ codePanelOpen: !state.codePanelOpen })),
       setCodePanelTab: (codePanelTab) =>

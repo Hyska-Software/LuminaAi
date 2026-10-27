@@ -1224,7 +1224,14 @@ Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested
 - Syntax highlighting: `DiffView` tokeniza cada linha visível com o Prism/tema compartilhado (`src/lib/highlight`), preservando fundos de adição/remoção; guarda de custo em 4.000 linhas e `memo` por linha.`n- `Settings.diffOpenMode` (`tab` | `panel`, padrão `tab`) é normalizado no backend e configurável em **Configurações → Ferramentas → Workbench de código**; `panel` mantém o detalhe inline antigo do painel.
 - Alvo volátil em `uiStore.codeDiffTab` (não persistido); evento nenhum no backend (usa `get_file_diff`/journal).
 
-### 16.7 Hooks do projeto e allowlist de leitura
+### 16.7 Histórico de commits (aba central)
+
+- A aba **Alterações** tem o botão **Histórico** (`onOpenCommits`, só em repositório git) que abre uma aba central `Commits` (como o diff).
+- Lista: `git_log` (até 100 commits) com SHA curto, assunto, autor e data.
+- Commit: novo comando `git_commit_detail` → metadados (SHA cheio, autor, e-mail, data, assunto, corpo) + arquivos com status `A/M/D/R/C/T`, `+N −M`, binário e **patch completo**; cada arquivo expande no `DiffView` (syntax highlight do tema) e “Expandir/Recolher diffs” abre todos. Revisão validada como hash hex (7–40) — nunca flags.
+- O alvo vive em `uiStore.codeCommitsTab` (workspace/revision), então fechar/reabrir a aba preserva a seleção na sessão; aba fechável e navegável por teclado como o diff.
+
+### 16.8 Hooks do projeto e allowlist de leitura
 
 - **Hooks** (`<workspace>/.lumina/hooks.json`): `{ "postWrite": ["npm run lint --fix", { "command": "npx prettier --write {path}" }] }`
   roda até 4 comandos após cada escrita/edição bem-sucedida, no diretório do workspace, com env

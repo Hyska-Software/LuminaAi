@@ -142,6 +142,7 @@ pub fn run() {
             commands::git::git_branches,
             commands::git::git_switch_branch,
             commands::git::git_log,
+            commands::git::git_commit_detail,
             commands::git::suggest_commit_message,
             /* -------- terminal PTY -------- */
             commands::terminal::open_terminal,

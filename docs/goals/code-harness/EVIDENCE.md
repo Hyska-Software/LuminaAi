@@ -203,3 +203,9 @@ configuração para MCP/servidores e "Verificações" no painel (backend exposto
 - Linguagem inferida do caminho (`languageForPath`) com fallback para texto puro quando não há gramática; guarda de custo em 4.000 linhas (hunks grandes recolhidos + "ver mais") e `memo` por linha para não re-tokenizar em interações (copiar, expandir).
 - Vale para o diff inline do painel e para o diff como aba central (`CodeDiffView` reutiliza `DiffView`).
 - Testes: linhas com tokens (keyword/número), arquivo sem gramática em texto puro, contagens/fundos preservados e estados honestos. Verificação: 227 testes afetados verdes, `pnpm typecheck` e `pnpm build` verdes.
+## 15. Histórico de commits como aba central (estilo Zed)
+
+- **Botão na aba Alterações**: “Histórico” (só em repo git) abre uma aba central `Commits` (`uiStore.codeCommitsTab`), no mesmo padrão da aba de diff (fechável, teclado, header montado, chat preservado).
+- **Lista**: `git_log` até 100 commits (SHA curto, assunto, autor, data) com estados de carregando/erro/vazio.
+- **Commit completo**: novo `workspace::git::commit_detail` + comando `git_commit_detail` devolvem metadados (SHA/autor/e-mail/data/assunto/corpo) e arquivos com status, `+N −M`, binário e patch por arquivo; o parser divide o `git show` em seções (`A/M/D/R`), valida a revisão como hash hex (7–40, sem flags) e marca truncamento. UI: autor/e-mail/data, SHA copiável, arquivos expansíveis com `DiffView` (syntax highlight do tema), “Expandir/Recolher diffs” e corpo do commit.
+- **Testes**: parser do patch (modified/added/deleted/renamed), revisão inválida, integração com repo git real (metadados + arquivos + patch), validação do comando, store (abrir/selecionar/fechar), botão na aba Alterações, aba no header, view no centro e a tela de lista/commit/expandir/erro. Verificação: `cargo test --lib` 714 verdes, 198 testes de renderer afetados, `pnpm typecheck`/`pnpm build` verdes.

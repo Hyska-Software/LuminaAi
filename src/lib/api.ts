@@ -37,6 +37,7 @@ import type {
   TurnPayload,
   TurnResult,
   Workspace,
+  WorkspaceCommitDetail,
   WorkspaceContext,
   WorkspaceFileContent,
   WorkspaceFileEntry,
@@ -249,6 +250,8 @@ export const api = {
     invoke<WorkspaceGitStatus>('git_switch_branch', { workspaceId, branch }),
   gitLog: (workspaceId: string, limit = 20) =>
     invoke<WorkspaceGitCommit[]>('git_log', { workspaceId, limit }),
+  gitCommitDetail: (workspaceId: string, revision: string) =>
+    invoke<WorkspaceCommitDetail>('git_commit_detail', { workspaceId, revision }),
   suggestCommitMessage: (workspaceId: string) =>
     invoke<string>('suggest_commit_message', { workspaceId }),
 

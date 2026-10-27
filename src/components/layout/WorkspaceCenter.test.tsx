@@ -11,6 +11,9 @@ vi.mock('@/components/chat/ChatView', () => ({
 vi.mock('@/components/code', () => ({
   CodeSessionHeader: () => <div data-testid="code-session-header" />,
   CodeWelcomeScreen: () => <div data-testid="code-welcome" />,
+  CodeCommitHistoryView: ({ target }: { target: { revision: string | null } }) => (
+    <div data-testid="code-commits-view">{target.revision ?? 'lista'}</div>
+  ),
   CodeDiffView: ({ target }: { target: { path: string } }) => (
     <div data-testid="code-diff-view">{target.path}</div>
   ),
@@ -144,5 +147,21 @@ describe('WorkspaceCenter — modo Code', () => {
 
     expect(screen.getByTestId('chat-view')).toBe(chat);
     expect(screen.getByTestId('custom-welcome')).toBeTruthy();
+  });
+});
+
+describe('WorkspaceCenter — histórico de commits', () => {
+  it('mostra a aba de commits no centro mantendo header e chat montados', () => {
+    useUiStore.setState({
+      layoutMode: 'code',
+      codeView: 'commits',
+      codeCommitsTab: { workspaceId: 'ws-1', revision: null },
+    });
+
+    render(<WorkspaceCenter />);
+
+    expect(screen.getByTestId('code-commits-view').textContent).toContain('lista');
+    expect(screen.getByTestId('code-session-header')).toBeTruthy();
+    expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
   });
 });

@@ -13,7 +13,10 @@ use std::time::Duration;
 use tauri::State;
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::{WorkspaceGitCommit, WorkspaceGitFile, WorkspaceGitStatus};
+use crate::domain::{
+    WorkspaceCommitDetail, WorkspaceCommitFile, WorkspaceGitCommit, WorkspaceGitFile,
+    WorkspaceGitStatus,
+};
 use crate::state::AppState;
 use crate::workspace::exec::{self, ExecRequest};
 
@@ -249,6 +252,41 @@ pub async fn git_log(
             date: commit.date,
         })
         .collect())
+}
+
+/// Metadados + arquivos/patch completo de um commit (aba de histórico do Code).
+#[tauri::command]
+pub async fn git_commit_detail(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    revision: String,
+) -> Result<WorkspaceCommitDetail, String> {
+    let root = workspace_path(&state, &workspace_id)?;
+    let detail = crate::workspace::git::commit_detail(&root, &revision, GIT_OUTPUT_CAP)
+        .await
+        .map_err(|error| format!("{}: {}", error.code, error.message))?;
+    Ok(WorkspaceCommitDetail {
+        hash: detail.hash,
+        author: detail.author,
+        email: detail.email,
+        date: detail.date,
+        subject: detail.subject,
+        body: detail.body,
+        files: detail
+            .files
+            .into_iter()
+            .map(|file| WorkspaceCommitFile {
+                path: file.path,
+                old_path: file.old_path,
+                status: file.status,
+                added: file.added,
+                removed: file.removed,
+                binary: file.binary,
+                diff: file.diff,
+            })
+            .collect(),
+        truncated: detail.truncated,
+    })
 }
 
 /// Sugestão de mensagem de commit.

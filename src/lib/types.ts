@@ -460,6 +460,30 @@ export interface WorkspaceGitCommit {
   date: string;
 }
 
+/** Um arquivo alterado por um commit (patch completo por arquivo). */
+export interface WorkspaceCommitFile {
+  path: string;
+  oldPath?: string | null;
+  /** `A` | `M` | `D` | `R` | `C` | `T`. */
+  status: string;
+  added: number;
+  removed: number;
+  binary: boolean;
+  diff: string;
+}
+
+/** Commit completo para a aba de histórico do Code (metadados + arquivos). */
+export interface WorkspaceCommitDetail {
+  hash: string;
+  author: string;
+  email: string;
+  date: string;
+  subject: string;
+  body: string;
+  files: WorkspaceCommitFile[];
+  truncated: boolean;
+}
+
 
 export interface Citation {
   id: string;

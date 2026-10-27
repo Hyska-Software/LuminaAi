@@ -19,6 +19,9 @@ export { CodeWelcomeScreen } from './CodeWelcomeScreen';
 export { CodeDiffView } from './CodeDiffView';
 export type { CodeDiffViewProps } from './CodeDiffView';
 
+export { CodeCommitHistoryView } from './CodeCommitHistoryView';
+export type { CodeCommitHistoryViewProps, CodeCommitsTabTarget } from './CodeCommitHistoryView';
+
 export { WorkspaceTrustDialog } from './WorkspaceTrustDialog';
 export type { WorkspaceTrustDialogProps } from './WorkspaceTrustDialog';
 
