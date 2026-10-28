@@ -1,25 +1,15 @@
 import { useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import {
   CircleAlert,
-  File,
-  FileArchive,
-  FileBraces,
-  FileCode,
-  FileCog,
-  FileImage,
-  FileLock,
-  FileSpreadsheet,
-  FileTerminal,
-  FileText,
   Folder,
   FolderOpen,
   Search,
   X,
-  type LucideIcon,
 } from 'lucide-react';
 import { Input, Spinner } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import type { WorkspaceFileEntry } from '@/lib/types';
+import { FileIcon } from './FileIcon';
 
 /** Row of the flattened tree rendered by `FileTree`. */
 interface TreeRow {
@@ -61,35 +51,6 @@ const GIT_BADGES: Record<string, { label: string; className: string }> = {
   '?': { label: 'Não rastreado', className: 'text-foreground-subtle' },
   '!': { label: 'Ignorado', className: 'text-foreground-subtle' },
 };
-
-const CODE_EXTENSIONS = new Set([
-  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'py', 'rs', 'go', 'java', 'kt', 'kts', 'rb', 'php', 'cs',
-  'c', 'h', 'cc', 'cpp', 'hpp', 'swift', 'scala', 'dart', 'lua', 'pl', 'r', 'ex', 'exs', 'hs', 'clj',
-  'vue', 'svelte', 'astro', 'html', 'htm', 'css', 'scss', 'sass', 'less', 'sql', 'graphql', 'proto',
-]);
-const DATA_EXTENSIONS = new Set(['json', 'jsonc', 'json5', 'yml', 'yaml', 'toml', 'ini', 'cfg', 'conf']);
-const TEXT_EXTENSIONS = new Set(['md', 'mdx', 'txt', 'text', 'log', 'diff', 'patch']);
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif']);
-const ARCHIVE_EXTENSIONS = new Set(['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar']);
-const SHELL_EXTENSIONS = new Set(['sh', 'bash', 'zsh', 'ps1', 'pwsh', 'bat', 'cmd']);
-const SHEET_EXTENSIONS = new Set(['csv', 'tsv', 'xls', 'xlsx', 'ods']);
-
-/** Best-effort icon by extension; folders get the open/closed pair. */
-function iconFor(entry: WorkspaceFileEntry, expanded: boolean): LucideIcon {
-  if (entry.isDir) return expanded ? FolderOpen : Folder;
-  const name = entry.name.toLowerCase();
-  if (name.endsWith('.lock') || name === 'package-lock.json') return FileLock;
-  const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : '';
-  if (CODE_EXTENSIONS.has(ext)) return FileCode;
-  if (DATA_EXTENSIONS.has(ext)) return FileBraces;
-  if (TEXT_EXTENSIONS.has(ext)) return FileText;
-  if (IMAGE_EXTENSIONS.has(ext)) return FileImage;
-  if (ARCHIVE_EXTENSIONS.has(ext)) return FileArchive;
-  if (SHELL_EXTENSIONS.has(ext)) return FileTerminal;
-  if (SHEET_EXTENSIONS.has(ext)) return FileSpreadsheet;
-  if (ext === 'env' || name.startsWith('.env')) return FileCog;
-  return File;
-}
 
 /** Recursively flattens the tree into rows; handles nested `children` and flat depth lists. */
 function flatten(
@@ -348,7 +309,6 @@ export function FileTree({
             const hasChildren = !!entry.children?.length;
             const isSelected = !entry.isDir && selected === entry.path;
             const badge = entry.gitStatus ? GIT_BADGES[entry.gitStatus] : undefined;
-            const Icon = iconFor(entry, expanded);
             return (
               <div
                 key={entry.path}
@@ -394,11 +354,15 @@ export function FileTree({
                 ) : (
                   <span aria-hidden className="w-3.5 shrink-0" />
                 )}
-                <Icon
-                  aria-hidden
-                  className={cn('size-3.5 shrink-0', entry.isDir ? 'text-accent' : 'text-foreground-subtle')}
-                  strokeWidth={1.75}
-                />
+                {entry.isDir ? (
+                  expanded ? (
+                    <FolderOpen aria-hidden className="size-4 shrink-0 text-accent" strokeWidth={1.75} />
+                  ) : (
+                    <Folder aria-hidden className="size-4 shrink-0 text-accent" strokeWidth={1.75} />
+                  )
+                ) : (
+                  <FileIcon path={entry.path} className="size-4" />
+                )}
                 <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                 {badge ? (
                   <span

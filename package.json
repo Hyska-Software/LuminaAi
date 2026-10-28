@@ -47,6 +47,7 @@
     "clsx": "^2.1.1",
     "katex": "^0.19.1",
     "lucide-react": "^1.61.0",
+    "material-icon-theme": "5.40.0",
     "mermaid": "^12.2.0",
     "motion": "^14.6.0",
     "pdfjs-dist": "^6.4.299",

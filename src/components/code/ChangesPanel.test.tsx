@@ -101,6 +101,32 @@ describe('ChangesPanel', () => {
     expect(rowButton('src/a.ts').textContent).not.toContain('agente');
   });
 
+  it('marks each file row with the real file-type icon', () => {
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status({
+          staged: [],
+          unstaged: [
+            { path: 'src/main.rs', status: 'M' },
+            { path: 'docs/manual.pdf', status: 'M' },
+          ],
+          untracked: ['novo.ts'],
+        })}
+        sessionChanges={[]}
+      />,
+    );
+
+    const iconKey = (path: string) =>
+      rowButton(path).querySelector('[data-file-icon]')?.getAttribute('data-file-icon');
+    expect(iconKey('src/main.rs')).toBe('rust');
+    expect(iconKey('docs/manual.pdf')).toBe('pdf');
+    expect(iconKey('novo.ts')).toBe('typescript');
+    // Status letter and path remain part of the row.
+    expect(rowButton('src/main.rs').textContent).toContain('M');
+    expect(rowButton('src/main.rs').textContent).toContain('src/main.rs');
+  });
+
   it('opens the known session diff in place and goes back', async () => {
     render(<ChangesPanel workspaceId="ws-1" gitStatus={status()} sessionChanges={sessionChanges} />);
     fireEvent.click(rowButton('src/b.ts'));

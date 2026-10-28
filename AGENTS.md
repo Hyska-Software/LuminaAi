@@ -54,7 +54,7 @@ Observação: `cargo` usa um target dir compartilhado. Se aparecer `Blocking wai
 - Import alias: `@/` → `src/`, `@data/` → `data/`.
 - Estilo: componentes funcionais, hooks no topo, sem classes; `cn()` para classes condicionais.
 - Cores/espaçamentos **somente** via tokens do Tailwind definidos em `src/styles/globals.css` (`bg-background`, `text-foreground-muted`, `border-border`, `bg-accent-soft`, …). Nada de hex solto.
-- Ícones: `lucide-react` (stroke 1.75–2), tamanho 16/18/20.
+- Ícones: `lucide-react` (stroke 1.75–2), tamanho 16/18/20. Exceção: glifos **coloridos** de tipo de arquivo do workbench de Code (`src/lib/fileIconAssets.ts`, Material Icon Theme MIT, sem tint/`text-*`, renderizados por `FileIcon`) — mapa em `docs/FILE_ICONS.md`.
 - Texto da interface em **português brasileiro**.
 - Acessibilidade obrigatória: `aria-label` em ícones-botão, foco visível, roles corretas.
 

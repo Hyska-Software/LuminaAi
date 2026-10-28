@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 import type { FileChange, FileChangeKind, WorkspaceGitStatus } from '@/lib/types';
 import { CommitBar } from './CommitBar';
 import { DiffView } from './DiffView';
+import { FileIcon } from './FileIcon';
 
 export type ChangeGroup = 'staged' | 'unstaged' | 'untracked' | 'session';
 export type ChangeOrigin = 'session' | 'git' | 'both';
@@ -436,6 +437,7 @@ export function ChangesPanel({
                             >
                               {row.status}
                             </span>
+                            <FileIcon path={row.path} className="size-3.5" />
                             <span className="min-w-0 flex-1 truncate text-[12px] text-foreground-muted group-hover:text-foreground">
                               {row.path}
                             </span>

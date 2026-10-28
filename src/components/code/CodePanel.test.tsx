@@ -404,3 +404,64 @@ describe('CodePanel — árvore lazy', () => {
     );
   });
 });
+describe('CodePanel — árvore lazy (3º nível)', () => {
+  it('abre diretório de 3º nível carregando os filhos e mostra os arquivos', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-1', workspaceId: 'ws-1' })],
+      activeId: 'conv-1',
+    });
+    apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    // Estrutura realista como a do app: apps > desktop > public/src/src-tauri,
+    // onde o 3º nível chega SEM children (a listagem inicial cobre 3 níveis).
+    const rootTree = [
+      {
+        path: 'apps',
+        name: 'apps',
+        isDir: true,
+        depth: 0,
+        children: [
+          {
+            path: 'apps/desktop',
+            name: 'desktop',
+            isDir: true,
+            depth: 1,
+            children: [
+              { path: 'apps/desktop/public', name: 'public', isDir: true, depth: 2, children: [] },
+              { path: 'apps/desktop/index.html', name: 'index.html', isDir: false, depth: 2, size: 10 },
+            ],
+          },
+        ],
+      },
+    ];
+    apiMock.listWorkspaceFiles.mockImplementation(async (_workspaceId: string, path = '.') => {
+      if (path === '.') return rootTree;
+      if (path === 'apps/desktop/public') {
+        return [
+          { path: 'apps/desktop/public/logo.svg', name: 'logo.svg', isDir: false, depth: 0, size: 4 },
+        ];
+      }
+      return [];
+    });
+    useUiStore.setState({ codePanelTab: 'files' });
+
+    render(<CodePanel />);
+
+    expect(await screen.findByRole('treeitem', { name: 'public' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('treeitem', { name: 'public' }));
+
+    await waitFor(() =>
+      expect(apiMock.listWorkspaceFiles).toHaveBeenCalledWith('ws-1', 'apps/desktop/public', 2),
+    );
+    expect(await screen.findByRole('treeitem', { name: 'logo.svg' })).toBeTruthy();
+
+    // Abrir/fechar de novo é local: não refaz a chamada de rede.
+    fireEvent.click(screen.getByRole('treeitem', { name: 'public' }));
+    expect(screen.queryByRole('treeitem', { name: 'logo.svg' })).toBeNull();
+    fireEvent.click(screen.getByRole('treeitem', { name: 'public' }));
+    expect(await screen.findByRole('treeitem', { name: 'logo.svg' })).toBeTruthy();
+    const publicCalls = (apiMock.listWorkspaceFiles.mock.calls as unknown[][]).filter(
+      (call) => call[1] === 'apps/desktop/public',
+    );
+    expect(publicCalls).toHaveLength(1);
+  });
+});

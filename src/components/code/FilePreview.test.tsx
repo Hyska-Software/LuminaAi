@@ -44,6 +44,18 @@ describe('FilePreview', () => {
     expect(screen.getByText(/3 linhas/)).toBeTruthy();
   });
 
+  it('shows the file-type icon before the path in the header', () => {
+    render(<FilePreview content={content()} />);
+    const pathLabel = screen.getByText('src/app.ts');
+    expect(pathLabel.previousElementSibling?.getAttribute('data-file-icon')).toBe('typescript');
+  });
+
+  it('uses the type icon in the binary preview header', () => {
+    render(<FilePreview content={content({ path: 'docs/doc.pdf', binary: true, text: '', size: 2048 })} />);
+    const pathLabel = screen.getByText('docs/doc.pdf');
+    expect(pathLabel.previousElementSibling?.getAttribute('data-file-icon')).toBe('pdf');
+  });
+
   it('copies the path and gives feedback', async () => {
     render(<FilePreview content={content()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Copiar caminho' }));

@@ -44,17 +44,38 @@ const PANEL_TABS: ReadonlyArray<{ id: CodePanelTab; label: string; icon: LucideI
 /** Single content region controlled by both tabs (only the active one renders). */
 const PANEL_BODY_ID = 'code-panel-body';
 
-/** Mescla os filhos carregados sob demanda (lazy) na árvore do backend. */
+/**
+ * Mescla os filhos carregados sob demanda (lazy) na árvore do backend.
+ *
+ * A recursão precisa descer **sempre**, mesmo quando o diretório atual não tem
+ * cache próprio: no caso real (apps > desktop > public) o cache existe num
+ * neto ('apps/desktop/public'); retornar cedo no primeiro nível sem cache
+ * descartava esse carregamento e o clique parecia não fazer nada.
+ */
 function withLazyChildren(
   entries: WorkspaceFileEntry[],
   cache: Record<string, WorkspaceFileEntry[]>,
 ): WorkspaceFileEntry[] {
   return entries.map((entry) => {
     if (!entry.isDir) return entry;
-    const cached = cache[entry.path];
-    if (cached === undefined) return entry;
-    return { ...entry, children: withLazyChildren(cached, cache) };
+    const source = cache[entry.path] ?? entry.children ?? [];
+    return { ...entry, children: withLazyChildren(source, cache) };
   });
+}
+
+/** Procura um nó da árvore pelo path (para saber se os filhos já estão carregados). */
+function findTreeEntry(
+  entries: WorkspaceFileEntry[],
+  path: string,
+): WorkspaceFileEntry | null {
+  for (const entry of entries) {
+    if (entry.path === path) return entry;
+    if (entry.children?.length) {
+      const found = findTreeEntry(entry.children, path);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 interface EmptyStateProps {
@@ -412,8 +433,12 @@ export function CodePanel() {
                   void selectFile(path);
                 }}
                 onToggleDir={(path) => {
-                  // Sem filhos em cache = primeiro clique para abrir: busca no backend.
-                  if (lazyChildren[path] === undefined) void loadDirectory(path);
+                  // Só busca quando o diretório ainda não tem filhos carregados;
+                  // abrir/colapsar diretórios já carregados é só estado local.
+                  if (lazyChildren[path] !== undefined) return;
+                  const node = findTreeEntry(treeEntries, path);
+                  if (!node || node.children?.length) return;
+                  void loadDirectory(path);
                 }}
               />
             </div>

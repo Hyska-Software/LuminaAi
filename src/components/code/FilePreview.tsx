@@ -12,6 +12,7 @@ import { cn, copyText, formatBytes } from '@/lib/utils';
 import type { WorkspaceFileContent } from '@/lib/types';
 import { Highlight } from 'prism-react-renderer';
 import { toast } from 'sonner';
+import { FileIcon } from './FileIcon';
 
 export interface FilePreviewProps {
   /** File content returned by `api.readWorkspaceFile`. */
@@ -230,6 +231,7 @@ export function FilePreview({ content, loading, error, onOpenExternal, className
 function PreviewHeader({ path, children }: { path: string; children?: ReactNode }) {
   return (
     <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
+      <FileIcon path={path} className="size-3.5" />
       <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground" title={path}>
         {path}
       </span>

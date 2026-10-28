@@ -14,6 +14,8 @@ const entries: WorkspaceFileEntry[] = [
     children: [
       { path: 'src/app.ts', name: 'app.ts', isDir: false, depth: 1, gitStatus: 'M' },
       { path: 'src/util.ts', name: 'util.ts', isDir: false, depth: 1 },
+      { path: 'src/main.rs', name: 'main.rs', isDir: false, depth: 1 },
+      { path: 'src/types.d.ts', name: 'types.d.ts', isDir: false, depth: 1 },
       {
         path: 'src/components',
         name: 'components',
@@ -24,6 +26,8 @@ const entries: WorkspaceFileEntry[] = [
     ],
   },
   { path: 'README.md', name: 'README.md', isDir: false, depth: 0, gitStatus: '?' },
+  { path: 'doc.pdf', name: 'doc.pdf', isDir: false, depth: 0 },
+  { path: 'blob.qqq', name: 'blob.qqq', isDir: false, depth: 0 },
 ];
 
 function renderTree(overrides: Partial<ComponentProps<typeof FileTree>> = {}) {
@@ -91,6 +95,31 @@ describe('FileTree', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Limpar filtro' }));
     expect(screen.getByRole('treeitem', { name: /README\.md/ })).toBeTruthy();
+  });
+
+  it('uses the real colored file-type icon on files and keeps lucide folders', () => {
+    renderTree();
+    const iconKey = (name: string | RegExp) =>
+      row(name).querySelector('[data-file-icon]')?.getAttribute('data-file-icon');
+
+    expect(iconKey(/app\.ts/)).toBe('typescript');
+    expect(iconKey(/main\.rs/)).toBe('rust');
+    expect(iconKey(/doc\.pdf/)).toBe('pdf');
+    expect(iconKey(/README\.md/)).toBe('readme');
+    expect(iconKey(/types\.d\.ts/)).toBe('typescript-def');
+    expect(iconKey(/blob\.qqq/)).toBe('file');
+    expect(iconKey(/Button\.tsx/)).toBe('react_ts');
+
+    // Folders keep the lucide pair instead of the colored file glyphs.
+    expect(row('src').querySelector('[data-file-icon]')).toBeNull();
+    expect(row('src').querySelector('.lucide-folder-open')).toBeTruthy();
+    // Both icons share the same 16px box so names stay aligned.
+    expect(row(/app\.ts/).querySelector('[data-file-icon]')?.className).toContain('size-4');
+    expect(row('src').querySelector('.lucide-folder-open')?.getAttribute('class')).toContain('size-4');
+
+    fireEvent.click(row('src'));
+    expect(row('src').querySelector('.lucide-folder')).toBeTruthy();
+    expect(row('src').querySelector('.lucide-folder-open')).toBeNull();
   });
 
   it('shows git state badges with accessible labels', () => {
