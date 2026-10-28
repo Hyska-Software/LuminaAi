@@ -238,18 +238,3 @@ describe('ChangesPanel', () => {
     expect(screen.getByText('journal indisponível')).toBeTruthy();
   });
 });
-
-  it('mostra o botão de histórico de commits quando o workspace é um repo', () => {
-    const onOpenCommits = vi.fn();
-    const { unmount } = render(
-      <ChangesPanel workspaceId="ws-1" gitStatus={status()} onOpenCommits={onOpenCommits} />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Ver histórico de commits' }));
-    expect(onOpenCommits).toHaveBeenCalledTimes(1);
-    unmount();
-
-    // Fora de um repo (ou sem callback) o botão não aparece.
-    render(<ChangesPanel workspaceId="ws-1" gitStatus={status({ isRepo: false })} onOpenCommits={onOpenCommits} />);
-    expect(screen.queryByRole('button', { name: 'Ver histórico de commits' })).toBeNull();
-  });

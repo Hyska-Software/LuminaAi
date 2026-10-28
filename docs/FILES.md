@@ -1226,7 +1226,7 @@ Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested
 
 ### 16.7 Histórico de commits (aba central)
 
-- A aba **Alterações** tem o botão **Histórico** (`onOpenCommits`, só em repositório git) que abre uma aba central `Commits` (como o diff).
+- A **barra workspace · branch** da aba Alterações (o elemento do topo) tem o botão **Histórico** ao lado do nome/branch (só em repositório git), que abre uma aba central `Commits` (como o diff); a linha redundante "ALTERAÇÕES" foi removida.
 - Lista: `git_log` (até 100 commits) com SHA curto, assunto, autor e data.
 - Commit: novo comando `git_commit_detail` → metadados (SHA cheio, autor, e-mail, data, assunto, corpo) + arquivos com status `A/M/D/R/C/T`, `+N −M`, binário e **patch completo**; cada arquivo expande no `DiffView` (syntax highlight do tema) e “Expandir/Recolher diffs” abre todos. Revisão validada como hash hex (7–40) — nunca flags.
 - O alvo vive em `uiStore.codeCommitsTab` (workspace/revision), então fechar/reabrir a aba preserva a seleção na sessão; aba fechável e navegável por teclado como o diff.`n- **Rolagem**: o detalhe do commit é um único contêiner com `overflow-y-auto` (cabeçalho + arquivos juntos), a mensagem tem `max-h-40` com rolagem própria e cada diff expandido rola dentro — commit com mensagem longa ou muitos arquivos nunca “trava” a rolagem.

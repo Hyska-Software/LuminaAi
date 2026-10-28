@@ -214,3 +214,7 @@ configuração para MCP/servidores e "Verificações" no painel (backend exposto
 - Causa: o cabeçalho do commit era `shrink-0` e crescia sem limite (mensagem/corpo longos); o restante era `flex-1 min-h-0` com o `overflow-y-auto`, então o cabeçalho consumia a altura e a lista de arquivos/diffs ficava com altura zero — sem nenhum contêiner rolável.
 - Correção: o **detalhe do commit** virou um único contêiner rolável (`role="region"` “Detalhes do commit”, `overflow-y-auto overscroll-contain`) contendo cabeçalho e lista; a mensagem passou a ter `max-h-40 overflow-y-auto` (não empurra os arquivos) e cada arquivo expandido mantém a rolagem interna do `DiffView`.
 - Teste de regressão: commit com 80 linhas de mensagem e 12 arquivos garante que cabeçalho e arquivos estão no **mesmo** contêiner rolável e que o corpo tem limite/rolagem. Suíte afetada 199/199, `pnpm typecheck` e `pnpm build` verdes.
+## 17. Ajuste — botão de histórico no elemento do topo
+
+- O botão **Histórico** saiu da linha redundante “ALTERAÇÕES” (removida) e passou para a barra **workspace · branch** da aba Alterações, ao lado do nome/branch e dos contadores ↑/↓; só aparece em repositório git. `ChangesPanel` deixou de receber `onOpenCommits` (a ação vive no `CodePanel`, que conhece workspace/git).
+- Testes: `CodePanel` abre o histórico pelo botão (estado `codeCommitsTab`/`codeView`) e não renderiza o botão fora de repo; suíte de `components/code` verde, `pnpm typecheck`/`pnpm build` verdes.

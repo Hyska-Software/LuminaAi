@@ -311,3 +311,54 @@ describe('CodePanel — redimensionamento', () => {
     expect(useUiStore.getState().sidePanelWidth).toBe(SIDE_PANEL_WIDTH_MAX);
   });
 });
+
+describe('CodePanel — histórico de commits', () => {
+  it('abre o histórico pelo botão ao lado do workspace · branch', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-1', workspaceId: 'ws-1' })],
+      activeId: 'conv-1',
+    });
+    apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    apiMock.gitStatus.mockResolvedValue({
+      isRepo: true,
+      root: 'C:/projetos/lumina',
+      branch: 'main',
+      staged: [],
+      unstaged: [],
+      untracked: [],
+      conflicted: [],
+      ahead: 0,
+      behind: 0,
+    });
+
+    render(<CodePanel />);
+
+    const button = await screen.findByRole('button', { name: 'Ver histórico de commits' });
+    // O botão vive na barra workspace · branch (sem a linha "ALTERAÇÕES").
+    expect(screen.queryByText('Alterações')).toBeTruthy(); // tab do painel, não a barra removida
+    fireEvent.click(button);
+
+    expect(useUiStore.getState().codeView).toBe('commits');
+    expect(useUiStore.getState().codeCommitsTab).toEqual({ workspaceId: 'ws-1', revision: null });
+  });
+
+  it('não mostra o botão de histórico fora de um repositório git', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-1', workspaceId: 'ws-1' })],
+      activeId: 'conv-1',
+    });
+    apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    apiMock.gitStatus.mockResolvedValue({
+      isRepo: false,
+      staged: [],
+      unstaged: [],
+      untracked: [],
+      conflicted: [],
+    });
+
+    render(<CodePanel />);
+
+    await screen.findByRole('tab', { name: 'Alterações' });
+    expect(screen.queryByRole('button', { name: 'Ver histórico de commits' })).toBeNull();
+  });
+});

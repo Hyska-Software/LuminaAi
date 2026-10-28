@@ -4,12 +4,13 @@ import {
   Files,
   FolderOpen,
   GitBranch,
+  History,
   PanelRightClose,
   RefreshCw,
   SquareTerminal,
   type LucideIcon,
 } from 'lucide-react';
-import { IconButton, Spinner, Tooltip } from '@/components/ui';
+import { Button, IconButton, Spinner, Tooltip } from '@/components/ui';
 import { PanelResizer } from '@/components/layout/PanelResizer';
 import { api } from '@/lib/api';
 import {
@@ -276,8 +277,20 @@ export function CodePanel() {
                 {workspace ? workspace.name : 'Sem workspace'}
                 {branch ? ` · ${branch}` : ''}
               </span>
+              {workspaceId && panel.gitStatus?.isRepo ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-6 shrink-0 px-2 text-[11px]"
+                  leftIcon={<History className="size-3.5" strokeWidth={1.75} />}
+                  onClick={() => openCodeCommits(workspaceId)}
+                  aria-label="Ver histórico de commits"
+                >
+                  Histórico
+                </Button>
+              ) : null}
               {panel.gitStatus?.isRepo ? (
-                <span className="ml-auto shrink-0 text-[11px] tabular-nums">
+                <span className={cn('shrink-0 text-[11px] tabular-nums', !workspaceId && 'ml-auto')}>
                   {panel.gitStatus.ahead ? `↑${panel.gitStatus.ahead}` : ''}
                   {panel.gitStatus.behind ? ` ↓${panel.gitStatus.behind}` : ''}
                 </span>
@@ -294,9 +307,6 @@ export function CodePanel() {
                 sessionLoading={false}
                 sessionError={null}
                 onRefresh={refreshAll}
-                onOpenCommits={
-                  workspaceId ? () => openCodeCommits(workspaceId) : null
-                }
                 onOpenDiffTab={
                   diffOpenMode === 'panel'
                     ? null
