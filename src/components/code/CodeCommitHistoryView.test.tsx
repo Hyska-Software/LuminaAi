@@ -161,5 +161,7 @@ describe('CodeCommitHistoryView — commit longo rolável', () => {
     const body = within(scrollArea).getByText(/linha 80 da mensagem/);
     expect(body.className).toContain('max-h-40');
     expect(body.className).toContain('overflow-y-auto');
+    // Mesmo fundo do restante do cabeçalho (sem caixa destacada).
+    expect(body.className).not.toContain('bg-');
   });
 });
