@@ -187,4 +187,13 @@ describe('Composer — variant por layoutMode (Chat | Code)', () => {
     expect(textarea.value).toBe('Corrigir o build');
     expect(sendButton().disabled).toBe(false);
   });
+
+  it('no modo Chat mantém os pills de ferramentas e não mostra os controles da sessão', () => {
+    render(<Composer />);
+
+    expect(screen.getByRole('button', { name: 'Busca web' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Criar arquivos' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Modo de permissão/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Modo Plano' })).toBeNull();
+  });
 });

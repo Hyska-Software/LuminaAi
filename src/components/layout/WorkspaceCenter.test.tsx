@@ -17,6 +17,11 @@ vi.mock('@/components/code', () => ({
   CodeDiffView: ({ target }: { target: { path: string } }) => (
     <div data-testid="code-diff-view">{target.path}</div>
   ),
+  CodeFileView: ({ target, className }: { target: { path: string }; className?: string }) => (
+    <div data-testid="code-file-view" className={className}>
+      {target.path}
+    </div>
+  ),
 }));
 
 vi.mock('@/components/skills', () => ({
@@ -41,6 +46,9 @@ beforeEach(() => {
     layoutMode: 'chat',
     codeView: 'session',
     activeView: 'chat',
+    codeDiffTab: null,
+    codeCommitsTab: null,
+    codeFileTab: null,
   });
 });
 
@@ -163,5 +171,47 @@ describe('WorkspaceCenter — histórico de commits', () => {
     expect(screen.getByTestId('code-commits-view').textContent).toContain('lista');
     expect(screen.getByTestId('code-session-header')).toBeTruthy();
     expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
+  });
+});
+
+describe('WorkspaceCenter — aba central de arquivo', () => {
+  it('mostra o arquivo no centro com header visível e chat montado/oculto', () => {
+    useUiStore.setState({
+      layoutMode: 'code',
+      codeView: 'file',
+      codeFileTab: { workspaceId: 'ws-1', path: 'src/app.ts' },
+    });
+
+    render(<WorkspaceCenter />);
+
+    const panel = screen.getByRole('region', { name: 'Arquivo src/app.ts' });
+    expect(panel.id).toBe('code-file-panel');
+    expect(panel.className).toContain('flex');
+    expect(panel.className).toContain('min-h-0');
+    expect(panel.className).toContain('flex-1');
+
+    const fileView = screen.getByTestId('code-file-view');
+    expect(fileView.textContent).toContain('src/app.ts');
+    expect(fileView.className).toContain('flex');
+    expect(fileView.className).toContain('min-h-0');
+    expect(fileView.className).toContain('flex-1');
+
+    // O header das sessões continua montado/visível para trocar de aba.
+    const header = screen.getByTestId('code-session-header');
+    expect(header.parentElement?.className).not.toContain('hidden');
+    expect(header.parentElement?.getAttribute('aria-hidden')).toBeNull();
+
+    // O chat compartilhado segue montado (estado preservado), só oculto.
+    expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
+    expect(screen.queryByTestId('library-view')).toBeNull();
+  });
+
+  it('volta ao chat quando codeView é file sem alvo aberto', () => {
+    useUiStore.setState({ layoutMode: 'code', codeView: 'file' });
+
+    render(<WorkspaceCenter />);
+
+    expect(screen.queryByTestId('code-file-view')).toBeNull();
+    expect(screen.getByTestId('chat-view').parentElement?.className).not.toContain('hidden');
   });
 });

@@ -407,11 +407,11 @@ export interface WorkspaceFileEntry {
   children?: WorkspaceFileEntry[];
 }
 
-/** Conteúdo de um arquivo do workspace para prévia read-only. */
+/** Conteúdo de um arquivo do workspace para prévia read-only (aba central). */
 export interface WorkspaceFileContent {
   path: string;
   text: string;
-  /** `true` quando o backend truncou o conteúdo. */
+  /** `true` quando o backend truncou o conteúdo textual. */
   truncated: boolean;
   /** Tamanho total em bytes. */
   size: number;
@@ -419,6 +419,18 @@ export interface WorkspaceFileContent {
   binary?: boolean;
   /** Encoding detectado quando não UTF-8. */
   encoding?: string | null;
+  /**
+   * MIME inferido pela extensão para prévias binárias suportadas (imagem/PDF).
+   * Ausente para arquivos textuais e binários sem prévia.
+   */
+  mimeType?: string | null;
+  /**
+   * Payload base64 (sem o prefixo `data:`) de imagens/PDF até o limite inline
+   * de prévia; usado pelo visualizador da aba central.
+   */
+  dataBase64?: string | null;
+  /** Payload binário omitido por exceder o limite de prévia inline. */
+  previewOmitted?: boolean;
 }
 
 /** Entrada para criar/editar uma regra de aprovação. */

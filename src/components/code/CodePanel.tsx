@@ -24,11 +24,10 @@ import {
   type CodePanelTab,
 } from '@/lib/store';
 import { resolveSidePanelLayout, useViewportWidth } from '@/lib/sidePanel';
-import type { FileChange, WorkspaceFileContent, WorkspaceFileEntry } from '@/lib/types';
+import type { FileChange, WorkspaceFileEntry } from '@/lib/types';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ChangesPanel } from './ChangesPanel';
-import { FilePreview } from './FilePreview';
 import { FileTree } from './FileTree';
 import { TerminalPanel } from './TerminalPanel';
 import { useWorkspacePanel } from './useWorkspacePanel';
@@ -110,6 +109,8 @@ export function CodePanel() {
   const setOpen = useUiStore((state) => state.setCodePanelOpen);
   const openCodeDiff = useUiStore((state) => state.openCodeDiff);
   const openCodeCommits = useUiStore((state) => state.openCodeCommits);
+  const openCodeFile = useUiStore((state) => state.openCodeFile);
+  const codeFileTab = useUiStore((state) => state.codeFileTab);
   // Padrão de fábrica: diff abre como aba do chat; pode ser trocado em
   // Configurações → Ferramentas (Settings.diffOpenMode).
   const diffOpenMode = useAppStore((state) => state.settings.diffOpenMode ?? 'tab');
@@ -131,11 +132,6 @@ export function CodePanel() {
     activeId ? (state.byConversation[activeId]?.changes?.files ?? null) : null,
   );
   const refreshSession = useCodeStore((state) => state.refresh);
-
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [preview, setPreview] = useState<WorkspaceFileContent | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
 
   /** Width previewed while dragging; `null` means "use the persisted width". */
   const [previewWidth, setPreviewWidth] = useState<number | null>(null);
@@ -188,24 +184,10 @@ export function CodePanel() {
     [viewportWidth, sidebarOpen, sidebarWidth, persistedWidth, previewWidth],
   );
 
-  const selectFile = useCallback(
-    async (path: string) => {
-      setSelectedPath(path);
-      if (!workspaceId) return;
-      setPreviewLoading(true);
-      setPreviewError(null);
-      try {
-        const content = await api.readWorkspaceFile(workspaceId, path);
-        setPreview(content);
-      } catch (error) {
-        setPreview(null);
-        setPreviewError(String(error));
-      } finally {
-        setPreviewLoading(false);
-      }
-    },
-    [workspaceId],
-  );
+  /* O clique na árvore abre a aba central de arquivo (`openCodeFile`); a
+     seleção destacada na árvore espelha o arquivo aberto no centro. */
+  const selectedFilePath =
+    workspaceId && codeFileTab?.workspaceId === workspaceId ? codeFileTab.path : undefined;
 
   const refreshAll = useCallback(() => {
     // Recarrega a raiz e descarta os filhos carregados sob demanda (podem ter
@@ -420,41 +402,26 @@ export function CodePanel() {
             />
           )
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className={cn('min-h-0 overflow-y-auto', selectedPath ? 'flex-[1.1]' : 'flex-1')}>
-              <FileTree
-                entries={treeEntries}
-                loading={panel.filesLoading}
-                error={panel.filesError}
-                selectedPath={selectedPath ?? undefined}
-                totalCount={panel.files.length}
-                loadingPaths={lazyLoading}
-                onSelectFile={(path) => {
-                  void selectFile(path);
-                }}
-                onToggleDir={(path) => {
-                  // Só busca quando o diretório ainda não tem filhos carregados;
-                  // abrir/colapsar diretórios já carregados é só estado local.
-                  if (lazyChildren[path] !== undefined) return;
-                  const node = findTreeEntry(treeEntries, path);
-                  if (!node || node.children?.length) return;
-                  void loadDirectory(path);
-                }}
-              />
-            </div>
-            {selectedPath ? (
-              <div className="min-h-0 flex-1 border-t border-border">
-                <FilePreview
-                  content={preview}
-                  loading={previewLoading}
-                  error={previewError}
-                  onOpenExternal={() => {
-                    if (workspaceId) void api.openWorkspaceInExplorer(workspaceId);
-                  }}
-                />
-              </div>
-            ) : null}
-          </div>
+          <FileTree
+            entries={treeEntries}
+            loading={panel.filesLoading}
+            error={panel.filesError}
+            selectedPath={selectedFilePath}
+            totalCount={panel.files.length}
+            loadingPaths={lazyLoading}
+            onSelectFile={(path) => {
+              if (workspaceId) openCodeFile({ workspaceId, path });
+            }}
+            onToggleDir={(path) => {
+              // Só busca quando o diretório ainda não tem filhos carregados;
+              // abrir/colapsar diretórios já carregados é só estado local.
+              if (lazyChildren[path] !== undefined) return;
+              const node = findTreeEntry(treeEntries, path);
+              if (!node || node.children?.length) return;
+              void loadDirectory(path);
+            }}
+            className="min-h-0 flex-1"
+          />
         )}
       </div>
 

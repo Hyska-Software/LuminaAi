@@ -24,6 +24,7 @@ import { api } from '@/lib/api';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { AttachmentChips } from './AttachmentChips';
+import { CodeSessionControls } from './CodeSessionControls';
 import { filterSlashCommands, type SlashCommand } from './commands';
 import { MentionChips } from './MentionChips';
 import {
@@ -95,6 +96,13 @@ export function Composer() {
   const activeConversation = activeConversationId
     ? conversations.find((conversation) => conversation.id === activeConversationId)
     : undefined;
+  /** Sessão do Code (nativa ou compartilhada do Chat): hospeda os controles de sessão. */
+  const codeSessionConversation =
+    isCodeLayout &&
+    activeConversation &&
+    (activeConversation.mode === 'code' || activeConversation.codeLinked)
+      ? activeConversation
+      : undefined;
   const workspaceId = activeConversation?.workspaceId || activeWorkspaceId || null;
   /** `@` menções e `/` comandos só existem no modo Code com workspace. */
   const codeMenusEnabled = isCodeLayout && Boolean(workspaceId);
@@ -307,8 +315,8 @@ export function Composer() {
           return;
         }
         case 'permissoes': {
-          toast.info('Modo de permissão fica no cabeçalho', {
-            description: 'Use o chip Leitura / Editar / Autônomo ao lado do workspace.',
+          toast.info('Modo de permissão fica no campo de mensagem', {
+            description: 'Use o chip Leitura / Editar / Autônomo ao lado do anexo.',
           });
           return;
         }
@@ -624,13 +632,24 @@ export function Composer() {
             <Plus className="size-4" />
           </IconButton>
 
-          <ToolsToggle icon={Globe} label="Busca web" active={webSearchEnabled} onToggle={toggleWebSearch} />
-          <ToolsToggle
-            icon={FilePlus}
-            label="Criar arquivos"
-            active={fileCreationEnabled}
-            onToggle={toggleFileCreation}
-          />
+          {codeSessionConversation ? (
+            <CodeSessionControls conversationId={codeSessionConversation.id} />
+          ) : isCodeLayout ? null : (
+            <>
+              <ToolsToggle
+                icon={Globe}
+                label="Busca web"
+                active={webSearchEnabled}
+                onToggle={toggleWebSearch}
+              />
+              <ToolsToggle
+                icon={FilePlus}
+                label="Criar arquivos"
+                active={fileCreationEnabled}
+                onToggle={toggleFileCreation}
+              />
+            </>
+          )}
 
           <div className="ml-auto flex items-center gap-1.5">
             <ModelPill onClick={() => setModelPickerOpen(true)} />

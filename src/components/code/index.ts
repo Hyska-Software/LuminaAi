@@ -19,6 +19,9 @@ export { CodeWelcomeScreen } from './CodeWelcomeScreen';
 export { CodeDiffView } from './CodeDiffView';
 export type { CodeDiffViewProps } from './CodeDiffView';
 
+export { CodeFileView } from './CodeFileView';
+export type { CodeFileViewProps } from './CodeFileView';
+
 export { CodeCommitHistoryView } from './CodeCommitHistoryView';
 export type { CodeCommitHistoryViewProps, CodeCommitsTabTarget } from './CodeCommitHistoryView';
 

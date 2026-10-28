@@ -37,7 +37,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     id: 'plan',
     command: '/plan',
     title: 'Planejar antes de editar',
-    description: 'Insere um pedido de plano; o modo Plano fica no cabeçalho.',
+    description: 'Insere um pedido de plano; o modo Plano fica no campo de mensagem.',
     group: 'Plano',
     action: 'fill',
     fill: 'Planeje a solução para esta tarefa antes de alterar arquivos:\n',

@@ -22,9 +22,11 @@ export type LayoutMode = 'chat' | 'code';
  * Surface shown inside the Code layout's center column. The Code workbench has
  * its own view state so switching layouts never loses the Chat surface's page
  * (Biblioteca/Skills) and vice versa. `diff` mostra o diff de um arquivo em uma
- * aba central (WORKBENCH §7.2); o alvo vive em `codeDiffTab`.
+ * aba central (WORKBENCH §7.2); `file` mostra a prévia de um arquivo do
+ * workspace na mesma faixa de abas (código, imagem ou PDF). Os alvos vivem em
+ * `codeDiffTab`/`codeFileTab`.
  */
-export type CodeView = 'session' | 'skills' | 'diff' | 'commits';
+export type CodeView = 'session' | 'skills' | 'diff' | 'commits' | 'file';
 
 /** Diff aberto como aba central (alvo é volátil; não persiste entre sessões). */
 export interface CodeDiffTab {
@@ -34,6 +36,23 @@ export interface CodeDiffTab {
   staged: boolean;
   /** Diff já conhecido pelo journal da sessão (evita a chamada de API). */
   knownDiff?: string | null;
+}
+
+/**
+ * Arquivo aberto como aba central (alvo volátil; não persiste entre sessões).
+ * A prévia inline do painel Arquivos foi substituída por estas abas: cada
+ * clique na árvore abre (ou ativa) uma aba e o conteúdo é carregado por
+ * `read_workspace_file`.
+ */
+export interface CodeFileTab {
+  workspaceId: string;
+  /** Caminho relativo ao workspace, sempre com `/`. */
+  path: string;
+}
+
+/** Chave estável de uma aba de arquivo (workspace + caminho relativo). */
+export function codeFileTabKey(tab: CodeFileTab): string {
+  return `${tab.workspaceId}\u0000${tab.path}`;
 }
 
 /** Tabs of the Code right panel (Arquivos | Alterações). */
@@ -94,10 +113,15 @@ interface UiState {
   layoutMode: LayoutMode;
   /** Center surface inside the Code layout; reset to `session` on demand. */
   codeView: CodeView;
-  /** Diff aberto como aba central (`null` = nenhum; só existe com `codeView: 'diff'`). */
+  /** Diff aberto como aba central (`null` = nenhum; pode ficar em segundo plano). */
   codeDiffTab: CodeDiffTab | null;
-  /** Aba central de histórico de commits (
-ull = fechada). */
+  /** Arquivos abertos nas abas centrais, na ordem de abertura (volátil). */
+  codeFileTabs: CodeFileTab[];
+  /** Aba de arquivo ativa (`null` = nenhuma; sempre presente em `codeFileTabs`). */
+  codeFileTab: CodeFileTab | null;
+  /** Quebra de linha dos arquivos — global, persistida e aplicada a todas as abas. */
+  codeFileWrap: boolean;
+  /** Aba central de histórico de commits (`null` = fechada). */
   codeCommitsTab: { workspaceId: string; revision: string | null } | null;
   /** Whether the Code layout shows its right panel (Arquivos/Alterações). */
   codePanelOpen: boolean;
@@ -138,14 +162,22 @@ ull = fechada). */
   setCodeView: (view: CodeView) => void;
   /** Abre o diff de um arquivo como aba central (codeView vira diff). */
   openCodeDiff: (target: CodeDiffTab) => void;
-  /** Fecha a aba de diff e volta para a sessão. */
+  /** Fecha a aba de diff; se ela era a ativa, volta para a sessão. */
   closeCodeDiff: () => void;
+  /** Abre (ou ativa) o arquivo em uma aba central (acumula abas; codeView vira file). */
+  openCodeFile: (target: CodeFileTab) => void;
+  /**
+   * Fecha a aba do arquivo (por padrão, a ativa). Se a aba fechada era a ativa,
+   * ativa a vizinha; sem abas restantes, o centro volta para a sessão.
+   */
+  closeCodeFile: (target?: CodeFileTab) => void;
+  /** Liga/desliga a quebra de linha de todas as abas de arquivo (persistida). */
+  setCodeFileWrap: (enabled: boolean) => void;
   /** Abre a aba de histórico de commits (lista do workspace). */
   openCodeCommits: (workspaceId: string) => void;
-  /** Mostra um commit (
-ull volta para a lista). */
+  /** Mostra um commit (`null` volta para a lista). */
   selectCodeCommit: (revision: string | null) => void;
-  /** Fecha a aba de commits e volta para a sessão. */
+  /** Fecha a aba de commits; se ela era a ativa, volta para a sessão. */
   closeCodeCommits: () => void;
   setCodePanelOpen: (open: boolean) => void;
   toggleCodePanel: () => void;
@@ -190,6 +222,21 @@ ull volta para a lista). */
   applyTheme: () => void;
 }
 
+/** Aba central aberta no centro (as três abas convivem na faixa de abas). */
+type CentralCodeView = Extract<CodeView, 'diff' | 'file' | 'commits'>;
+
+/**
+ * Fechar uma aba central em **segundo plano** (o usuário está lendo outra aba)
+ * não pode puxar o centro para a sessão. A view só volta para `session` quando
+ * a aba fechada era a que estava ativa; caso contrário, permanece na atual.
+ */
+function keepCenterViewUnlessActive(
+  state: UiState,
+  closed: CentralCodeView,
+): Pick<UiState, 'codeView'> {
+  return { codeView: state.codeView === closed ? 'session' : state.codeView };
+}
+
 /**
  * Canonical artifact order, identical to `db::list_artifacts`
  * (`ORDER BY created_at, id`). Keeping it here means the live events, the
@@ -218,6 +265,9 @@ export const useUiStore = create<UiState>()(
       layoutMode: 'chat',
       codeView: 'session',
       codeDiffTab: null,
+      codeFileTabs: [],
+      codeFileTab: null,
+      codeFileWrap: false,
       codeCommitsTab: null,
       codePanelOpen: true,
       codePanelTab: 'changes',
@@ -253,10 +303,47 @@ export const useUiStore = create<UiState>()(
                 ? 'diff'
                 : codeView === 'commits'
                   ? 'commits'
-                  : 'session',
+                  : codeView === 'file'
+                    ? 'file'
+                    : 'session',
         }),
       openCodeDiff: (codeDiffTab) => set({ codeDiffTab, codeView: 'diff' }),
-      closeCodeDiff: () => set({ codeDiffTab: null, codeView: 'session' }),
+      closeCodeDiff: () =>
+        set((state) => ({ codeDiffTab: null, ...keepCenterViewUnlessActive(state, 'diff') })),
+      openCodeFile: (target) =>
+        set((state) => {
+          const key = codeFileTabKey(target);
+          const alreadyOpen = state.codeFileTabs.some((tab) => codeFileTabKey(tab) === key);
+          return {
+            /* Abrir outro arquivo ADICIONA uma aba (não substitui a atual); abrir
+               um arquivo já aberto apenas o ativa. */
+            codeFileTabs: alreadyOpen ? state.codeFileTabs : [...state.codeFileTabs, target],
+            codeFileTab: target,
+            codeView: 'file',
+          };
+        }),
+      closeCodeFile: (target) =>
+        set((state) => {
+          const closing = target ?? state.codeFileTab;
+          if (!closing) return {};
+          const closingKey = codeFileTabKey(closing);
+          const index = state.codeFileTabs.findIndex((tab) => codeFileTabKey(tab) === closingKey);
+          if (index < 0) return {};
+          const remaining = state.codeFileTabs.filter((_, tabIndex) => tabIndex !== index);
+          const activeKey = state.codeFileTab ? codeFileTabKey(state.codeFileTab) : null;
+          if (activeKey !== closingKey) {
+            /* Aba em segundo plano: mantém a ativa e a view atual. */
+            return { codeFileTabs: remaining };
+          }
+          /* Aba ativa: vizinha da direita e, na falta dela, a da esquerda. */
+          const neighbor = remaining[Math.min(index, remaining.length - 1)] ?? null;
+          return {
+            codeFileTabs: remaining,
+            codeFileTab: neighbor,
+            codeView: neighbor === null && state.codeView === 'file' ? 'session' : state.codeView,
+          };
+        }),
+      setCodeFileWrap: (codeFileWrap) => set({ codeFileWrap }),
       openCodeCommits: (workspaceId) =>
         set({ codeCommitsTab: { workspaceId, revision: null }, codeView: 'commits' }),
       selectCodeCommit: (revision) =>
@@ -266,7 +353,8 @@ export const useUiStore = create<UiState>()(
             : state.codeCommitsTab,
           codeView: 'commits',
         })),
-      closeCodeCommits: () => set({ codeCommitsTab: null, codeView: 'session' }),
+      closeCodeCommits: () =>
+        set((state) => ({ codeCommitsTab: null, ...keepCenterViewUnlessActive(state, 'commits') })),
       setCodePanelOpen: (codePanelOpen) => set({ codePanelOpen }),
       toggleCodePanel: () => set((state) => ({ codePanelOpen: !state.codePanelOpen })),
       setCodePanelTab: (codePanelTab) =>
@@ -397,6 +485,7 @@ export const useUiStore = create<UiState>()(
         sidePanelMode: state.sidePanelMode,
         activeWorkspaceId: state.activeWorkspaceId,
         openSessionsByWorkspace: state.openSessionsByWorkspace,
+        codeFileWrap: state.codeFileWrap,
       }),
       /**
        * Rehydrated layouts may carry an out-of-range width (manually edited
@@ -428,6 +517,8 @@ export const useUiStore = create<UiState>()(
           sidePanelMode: stored.sidePanelMode === 'docked' ? 'docked' : 'overlay',
           activeWorkspaceId: validWorkspaceId(stored.activeWorkspaceId),
           openSessionsByWorkspace: validSessions(stored.openSessionsByWorkspace),
+          codeFileWrap:
+            typeof stored.codeFileWrap === 'boolean' ? stored.codeFileWrap : current.codeFileWrap,
         };
       },
     },

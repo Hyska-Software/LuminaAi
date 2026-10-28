@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { useChatStore, useUiStore } from '@/lib/store';
+import { useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import type { Workspace, WorkspaceContext } from '@/lib/types';
 
 /**
@@ -186,6 +186,9 @@ export async function resolvePendingTrust(trusted: boolean): Promise<void> {
     await api.setWorkspaceTrusted(pending.workspace.id, trusted);
     if (pending.conversationId) {
       await api.setPermissionMode(pending.conversationId, trusted ? 'edit' : 'read_only');
+      // Espelha o novo modo no snapshot da sessão: os chips de permissão/Plano
+      // ficam no composer e precisam refletir "Leitura"/"Editar" na hora.
+      void useCodeStore.getState().refresh(pending.conversationId);
     }
     emit({ pendingTrust: null });
     await Promise.all([load(true), useChatStore.getState().refreshConversations()]);

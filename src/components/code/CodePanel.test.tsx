@@ -54,6 +54,8 @@ function resetPanelState(): void {
     sidePanelWidth: SIDE_PANEL_WIDTH_DEFAULT,
     sidebarOpen: true,
     sidebarWidth: 272,
+    codeView: 'session',
+    codeFileTab: null,
   });
 }
 
@@ -175,7 +177,7 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
     expect(screen.getByText('Nenhum workspace aberto')).toBeTruthy();
   });
 
-  it('com workspace aberto mostra a árvore real e a prévia ao selecionar o arquivo', async () => {
+  it('abre o arquivo em aba central sem carregar prévia inline', async () => {
     useChatStore.setState({
       conversations: [conversation({ workspaceId: 'ws-1' })],
       activeId: 'conv-1',
@@ -205,13 +207,59 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
     expect(await screen.findByText('app.ts')).toBeTruthy();
     fireEvent.click(screen.getByText('app.ts'));
 
+    // O clique abre a aba central (`openCodeFile`); o painel não lê o arquivo
+    // nem renderiza mais a prévia inline.
     await waitFor(() => {
-      expect(apiMock.readWorkspaceFile).toHaveBeenCalledWith('ws-1', 'src/app.ts');
+      expect(useUiStore.getState().codeFileTab).toEqual({
+        workspaceId: 'ws-1',
+        path: 'src/app.ts',
+      });
     });
+    expect(useUiStore.getState().codeView).toBe('file');
+    expect(apiMock.readWorkspaceFile).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Conteúdo de src/app.ts')).toBeNull();
+    expect(screen.queryByRole('status', { name: 'Carregando arquivo' })).toBeNull();
+    // O arquivo aberto fica destacado na árvore.
+    expect(screen.getByRole('treeitem', { name: 'app.ts' }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
     expect(apiMock.listWorkspaceFiles).toHaveBeenCalledWith('ws-1', '.', 2);
     // A barra workspace · branch vive só na aba Alterações.
     fireEvent.click(screen.getByRole('tab', { name: 'Alterações' }));
     expect(await screen.findByText(/lumina/)).toBeTruthy();
+  });
+
+  it('destaca na árvore o arquivo que já está aberto na aba central', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ workspaceId: 'ws-1' })],
+      activeId: 'conv-1',
+    });
+    apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    apiMock.listWorkspaceFiles.mockResolvedValue([
+      {
+        path: 'src',
+        name: 'src',
+        isDir: true,
+        depth: 0,
+        children: [
+          { path: 'src/app.ts', name: 'app.ts', isDir: false, depth: 1, size: 20 },
+          { path: 'src/main.ts', name: 'main.ts', isDir: false, depth: 1, size: 20 },
+        ],
+      },
+    ]);
+    useUiStore.setState({
+      codePanelTab: 'files',
+      codeView: 'file',
+      codeFileTab: { workspaceId: 'ws-1', path: 'src/main.ts' },
+    });
+
+    render(<CodePanel />);
+
+    const selected = await screen.findByRole('treeitem', { name: 'main.ts' });
+    expect(selected.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('treeitem', { name: 'app.ts' }).getAttribute('aria-selected')).toBe(
+      'false',
+    );
   });
 
   it('mostra workspace e branch somente na aba Alterações', async () => {
@@ -378,14 +426,6 @@ describe('CodePanel — árvore lazy', () => {
       }
       return [];
     });
-    apiMock.readWorkspaceFile.mockResolvedValue({
-      path: 'apps/index.html',
-      text: '<html></html>',
-      truncated: false,
-      size: 13,
-      binary: false,
-      encoding: 'utf-8',
-    });
     useUiStore.setState({ codePanelTab: 'files' });
 
     render(<CodePanel />);
@@ -399,9 +439,14 @@ describe('CodePanel — árvore lazy', () => {
     const file = await screen.findByRole('treeitem', { name: 'index.html' });
     fireEvent.click(file);
 
+    // Abrir o arquivo é só estado de UI: quem carrega o conteúdo é a CodeFileView.
     await waitFor(() =>
-      expect(apiMock.readWorkspaceFile).toHaveBeenCalledWith('ws-1', 'apps/index.html'),
+      expect(useUiStore.getState().codeFileTab).toEqual({
+        workspaceId: 'ws-1',
+        path: 'apps/index.html',
+      }),
     );
+    expect(apiMock.readWorkspaceFile).not.toHaveBeenCalled();
   });
 });
 describe('CodePanel — árvore lazy (3º nível)', () => {

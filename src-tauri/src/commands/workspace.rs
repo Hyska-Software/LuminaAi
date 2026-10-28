@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use base64::Engine as _;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
@@ -21,6 +22,11 @@ use crate::workspace::{project, safe_path, safe_path::Access};
 const MAX_TREE_ENTRIES: usize = 6_000;
 /// Limite de texto devolvido pela prévia de arquivo.
 const MAX_PREVIEW_BYTES: usize = 512 * 1024;
+/// Teto do payload base64 inline de imagem/PDF (24 MiB) — o mesmo teto de
+/// `commands::artifacts::MAX_INLINE_MEDIA_BYTES` (constante local para manter as
+/// áreas independentes). Acima disso a UI recebe `previewOmitted` e mostra um
+/// cartão com o tamanho, em vez de trafegar dezenas de MB pelo IPC.
+const MAX_INLINE_PREVIEW_BYTES: u64 = 24 * 1024 * 1024;
 /// Limite de arquivos varridos em `search_workspace_files`.
 const MAX_SEARCH_ENTRIES: usize = 20_000;
 
@@ -506,44 +512,143 @@ pub async fn search_workspace_files(
         .collect())
 }
 
-/// Prévia read-only de um arquivo do workspace (para o painel).
-#[tauri::command]
-pub async fn read_workspace_file(
-    state: State<'_, AppState>,
-    workspace_id: String,
+/* ------------------------------------------------------------------ */
+/* Prévia binária (imagem/PDF)                                         */
+/* ------------------------------------------------------------------ */
+
+/// MIME que o WebView2 desenha inline e que a prévia entrega em base64.
+///
+/// O match é explícito (e não `mime_guess`) para o conjunto ficar restrito ao
+/// que o renderer sabe exibir: SVG continua no caminho de texto (não é payload
+/// binário) e TIFF/HEIC não são inline (o `<img>` não os abre; viram `binary`
+/// com `mimeType` e sem payload).
+fn preview_mime(path: &Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "pdf" => Some("application/pdf"),
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" | "jpe" | "jfif" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        "gif" => Some("image/gif"),
+        "avif" => Some("image/avif"),
+        "bmp" => Some("image/bmp"),
+        "ico" => Some("image/x-icon"),
+        _ => None,
+    }
+}
+
+/// MIME inferido pela extensão para binários **sem** prévia inline (zip, exe,
+/// tiff…). `mime_guess` devolve `&'static str` da tabela embutida.
+fn mime_for_path(path: &Path) -> Option<&'static str> {
+    mime_guess::from_path(path).first_raw()
+}
+
+/// Decisão do payload de uma prévia binária, separada do IO para o limite de
+/// 24 MiB ser testável sem criar um fixture desse tamanho.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewPayload {
+    /// Bytes embutidos em base64 neste IPC.
+    Inline,
+    /// Acima do teto: só metadados (`previewOmitted`), sem ler o arquivo.
+    Omitted,
+}
+
+fn preview_payload_for_size(size: u64) -> PreviewPayload {
+    if size <= MAX_INLINE_PREVIEW_BYTES {
+        PreviewPayload::Inline
+    } else {
+        PreviewPayload::Omitted
+    }
+}
+
+/// DTO de prévia binária suportada (imagem/PDF).
+///
+/// `payload == None` significa "omitido pelo limite", nunca "arquivo vazio":
+/// bytes reais vazios entram como `Some(&[])`.
+fn build_preview_content(
     path: String,
-) -> Result<WorkspaceFileContent, String> {
-    let root = workspace_path(&state, &workspace_id)?;
-    let file_path = safe_path::resolve(&root, &path, Access::Read).map_err(map_err)?;
+    size: u64,
+    mime_type: &str,
+    payload: Option<&[u8]>,
+) -> WorkspaceFileContent {
+    WorkspaceFileContent {
+        path,
+        text: String::new(),
+        truncated: false,
+        size,
+        binary: true,
+        encoding: None,
+        mime_type: Some(mime_type.to_string()),
+        data_base64: payload.map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes)),
+        preview_omitted: payload.is_none(),
+    }
+}
+
+/// DTO de binário sem prévia inline: mantém o comportamento anterior (sem
+/// texto) e só enriquece o MIME quando a extensão diz algo.
+fn build_binary_content(
+    path: String,
+    size: u64,
+    truncated: bool,
+    mime_type: Option<&str>,
+) -> WorkspaceFileContent {
+    WorkspaceFileContent {
+        path,
+        text: String::new(),
+        truncated,
+        size,
+        binary: true,
+        encoding: None,
+        mime_type: mime_type.map(str::to_string),
+        data_base64: None,
+        preview_omitted: false,
+    }
+}
+
+/// Lê e monta a prévia read-only de um arquivo do workspace.
+///
+/// Fica fora do comando (que só resolve o workspace) para os testes exercitarem
+/// leitura, limites e confinamento sem `AppState`/Tauri.
+fn read_file_content(root: &Path, requested: &str) -> Result<WorkspaceFileContent, String> {
+    let file_path = safe_path::resolve(root, requested, Access::Read).map_err(map_err)?;
     let metadata = std::fs::metadata(&file_path)
-        .map_err(|error| format!("não foi possível ler `{path}`: {error}"))?;
+        .map_err(|error| format!("não foi possível ler `{requested}`: {error}"))?;
     if !metadata.is_file() {
-        return Err(format!("`{path}` não é um arquivo"));
+        return Err(format!("`{requested}` não é um arquivo"));
     }
     let size = metadata.len();
-    let relative = safe_path::to_relative(&root, &file_path);
+    let relative = safe_path::to_relative(root, &file_path);
+
+    // 1) Imagem/PDF: a prévia binária decide antes dos limites de texto — uma
+    // foto JPEG real costuma passar de 4 MiB e ainda cabe no teto inline.
+    if let Some(mime) = preview_mime(&file_path) {
+        if preview_payload_for_size(size) == PreviewPayload::Omitted {
+            // Acima do teto: não lê o arquivo (pode ter centenas de MB).
+            return Ok(build_preview_content(relative, size, mime, None));
+        }
+        let bytes = std::fs::read(&file_path)
+            .map_err(|error| format!("não foi possível abrir `{requested}`: {error}"))?;
+        return Ok(build_preview_content(relative, size, mime, Some(&bytes)));
+    }
+
+    // 2) Grande demais para qualquer prévia (e sem preview inline): metadados.
+    // Sem MIME aqui porque o conteúdo não foi inspecionado (um `.txt` enorme
+    // também cai neste ramo e a UI o trata como binário sem prévia).
     if size > MAX_PREVIEW_BYTES as u64 * 8 {
-        return Ok(WorkspaceFileContent {
-            path: relative,
-            text: String::new(),
-            truncated: true,
-            size,
-            binary: true,
-            encoding: None,
-        });
+        return Ok(build_binary_content(relative, size, true, None));
     }
     let bytes = std::fs::read(&file_path)
-        .map_err(|error| format!("não foi possível abrir `{path}`: {error}"))?;
+        .map_err(|error| format!("não foi possível abrir `{requested}`: {error}"))?;
+    // 3) Binário sem prévia inline: o MIME da extensão ajuda a UI a ser honesta.
     if bytes.iter().take(8_000).any(|byte| *byte == 0) {
-        return Ok(WorkspaceFileContent {
-            path: relative,
-            text: String::new(),
-            truncated: false,
+        return Ok(build_binary_content(
+            relative,
             size,
-            binary: true,
-            encoding: None,
-        });
+            false,
+            mime_for_path(&file_path),
+        ));
     }
+    // 4) Texto: caminho inalterado (truncamento + detecção de encoding).
     let (text, encoding) = match std::str::from_utf8(&bytes) {
         Ok(text) => (text.to_string(), None),
         Err(_) => {
@@ -572,12 +677,45 @@ pub async fn read_workspace_file(
         size,
         binary: false,
         encoding,
+        mime_type: None,
+        data_base64: None,
+        preview_omitted: false,
     })
+}
+
+/// Prévia read-only de um arquivo do workspace (para a aba central).
+#[tauri::command]
+pub async fn read_workspace_file(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: String,
+) -> Result<WorkspaceFileContent, String> {
+    let root = workspace_path(&state, &workspace_id)?;
+    read_file_content(&root, &path)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine as _;
+
+    /// PNG 1x1 real (RGBA transparente, 70 bytes) usado para provar o
+    /// round-trip do payload base64 (o backend não decodifica imagem).
+    const TINY_PNG_BASE64: &str =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
+
+    fn tiny_png() -> Vec<u8> {
+        base64::engine::general_purpose::STANDARD
+            .decode(TINY_PNG_BASE64)
+            .expect("fixture PNG")
+    }
+
+    fn temp_workspace() -> (tempfile::TempDir, PathBuf) {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("ws");
+        std::fs::create_dir_all(&root).expect("criar workspace");
+        (temp, root)
+    }
 
     #[test]
     fn tree_builder_nests_and_sorts_dirs_first() {
@@ -634,5 +772,205 @@ mod tests {
         assert_eq!(info.kind, "rust");
         assert!(!info.checks.is_empty());
         assert!(info.checks.iter().any(|check| check.command.contains("cargo")));
+    }
+
+    #[test]
+    fn preview_mime_supports_pdf_and_webview_images_only() {
+        for (name, expected) in [
+            ("arquivo.pdf", "application/pdf"),
+            ("foto.png", "image/png"),
+            ("foto.JPG", "image/jpeg"),
+            ("foto.jpeg", "image/jpeg"),
+            ("foto.jfif", "image/jpeg"),
+            ("foto.webp", "image/webp"),
+            ("foto.gif", "image/gif"),
+            ("foto.avif", "image/avif"),
+            ("foto.bmp", "image/bmp"),
+            ("icone.ico", "image/x-icon"),
+        ] {
+            assert_eq!(preview_mime(Path::new(name)), Some(expected), "{name}");
+        }
+        // SVG é texto; TIFF/HEIC o WebView não abre; código, arquivo sem
+        // extensão e arquivos compactados continuam no caminho antigo.
+        for name in [
+            "vetor.svg",
+            "scan.tiff",
+            "scan.tif",
+            "foto.heic",
+            "main.rs",
+            "notas.txt",
+            "pacote.zip",
+            "sem_extensao",
+        ] {
+            assert_eq!(preview_mime(Path::new(name)), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn inline_payload_limit_is_24_mib() {
+        assert_eq!(MAX_INLINE_PREVIEW_BYTES, 24 * 1024 * 1024);
+        assert_eq!(preview_payload_for_size(0), PreviewPayload::Inline);
+        assert_eq!(
+            preview_payload_for_size(MAX_INLINE_PREVIEW_BYTES),
+            PreviewPayload::Inline
+        );
+        assert_eq!(
+            preview_payload_for_size(MAX_INLINE_PREVIEW_BYTES + 1),
+            PreviewPayload::Omitted
+        );
+        assert_eq!(
+            preview_payload_for_size(MAX_INLINE_PREVIEW_BYTES * 4),
+            PreviewPayload::Omitted
+        );
+    }
+
+    #[test]
+    fn omitted_preview_keeps_metadata_without_payload() {
+        let content =
+            build_preview_content("scan.pdf".to_string(), 30_000_000, "application/pdf", None);
+        assert!(content.binary);
+        assert!(content.text.is_empty());
+        assert!(!content.truncated);
+        assert!(content.preview_omitted);
+        assert!(content.data_base64.is_none());
+        assert!(content.encoding.is_none());
+        assert_eq!(content.mime_type.as_deref(), Some("application/pdf"));
+        assert_eq!(content.size, 30_000_000);
+    }
+
+    #[test]
+    fn png_preview_ships_inline_base64() {
+        let (_temp, root) = temp_workspace();
+        let png = tiny_png();
+        std::fs::write(root.join("pixel.png"), &png).expect("criar png");
+        let content = read_file_content(&root, "pixel.png").expect("prévia png");
+        assert_eq!(content.path, "pixel.png");
+        assert!(content.binary);
+        assert!(content.text.is_empty());
+        assert!(!content.truncated);
+        assert!(!content.preview_omitted);
+        assert!(content.encoding.is_none());
+        assert_eq!(content.size, png.len() as u64);
+        assert_eq!(content.mime_type.as_deref(), Some("image/png"));
+        let payload = content.data_base64.expect("payload inline");
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .expect("base64 deve decodificar");
+        assert_eq!(decoded, png);
+    }
+
+    #[test]
+    fn pdf_preview_ships_inline_base64() {
+        let (_temp, root) = temp_workspace();
+        let pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n";
+        std::fs::write(root.join("manual.PDF"), pdf).expect("criar pdf");
+        let content = read_file_content(&root, "manual.PDF").expect("prévia pdf");
+        assert_eq!(content.path, "manual.PDF");
+        assert!(content.binary);
+        assert!(!content.preview_omitted);
+        assert_eq!(content.mime_type.as_deref(), Some("application/pdf"));
+        assert_eq!(content.size, pdf.len() as u64);
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(content.data_base64.expect("payload inline"))
+            .expect("base64 deve decodificar");
+        assert_eq!(decoded, pdf);
+    }
+
+    #[test]
+    fn text_preview_keeps_text_path_without_payload() {
+        let (_temp, root) = temp_workspace();
+        std::fs::create_dir_all(root.join("src")).expect("criar src");
+        std::fs::write(root.join("src").join("main.rs"), "fn main() {}\n").expect("criar rs");
+        std::fs::write(root.join("notas.txt"), "olá\n").expect("criar txt");
+        for (relative, expected) in [("src/main.rs", "fn main() {}\n"), ("notas.txt", "olá\n")] {
+            let content = read_file_content(&root, relative).expect("prévia texto");
+            assert_eq!(content.path, relative);
+            assert!(!content.binary);
+            assert_eq!(content.text, expected);
+            assert!(!content.truncated);
+            assert!(content.mime_type.is_none());
+            assert!(content.data_base64.is_none());
+            assert!(!content.preview_omitted);
+            assert!(content.encoding.is_none());
+        }
+    }
+
+    #[test]
+    fn unsupported_binary_preview_reports_mime_without_payload() {
+        let (_temp, root) = temp_workspace();
+        let zip = b"PK\x03\x04\x14\x00\x00\x00\x00\x00".to_vec();
+        std::fs::write(root.join("pacote.zip"), &zip).expect("criar zip");
+        let content = read_file_content(&root, "pacote.zip").expect("prévia zip");
+        assert!(content.binary);
+        assert!(content.text.is_empty());
+        assert!(!content.truncated);
+        assert!(!content.preview_omitted);
+        assert_eq!(content.mime_type.as_deref(), Some("application/zip"));
+        assert!(content.data_base64.is_none());
+        assert_eq!(content.size, zip.len() as u64);
+    }
+
+    #[test]
+    fn tiff_preview_is_binary_without_inline_payload() {
+        let (_temp, root) = temp_workspace();
+        // Cabeçalho TIFF little-endian válido (`II*\0` + offset do primeiro IFD).
+        let tiff = b"II*\x00\x08\x00\x00\x00".to_vec();
+        std::fs::write(root.join("scan.tiff"), &tiff).expect("criar tiff");
+        let content = read_file_content(&root, "scan.tiff").expect("prévia tiff");
+        assert!(content.binary);
+        assert!(content.text.is_empty());
+        assert_eq!(content.mime_type.as_deref(), Some("image/tiff"));
+        assert!(content.data_base64.is_none());
+        assert!(!content.preview_omitted);
+        assert_eq!(content.size, tiff.len() as u64);
+    }
+
+    #[test]
+    fn svg_stays_in_the_text_path() {
+        let (_temp, root) = temp_workspace();
+        std::fs::write(
+            root.join("vetor.svg"),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+        )
+        .expect("criar svg");
+        let content = read_file_content(&root, "vetor.svg").expect("prévia svg");
+        assert!(!content.binary);
+        assert!(content.text.contains("<svg"));
+        assert!(content.mime_type.is_none());
+        assert!(content.data_base64.is_none());
+        assert!(!content.preview_omitted);
+    }
+
+    #[test]
+    fn supported_image_above_text_cutoff_is_still_read_inline() {
+        // Regressão do contrato: a prévia de imagem/PDF decide ANTES do corte
+        // textual de 4 MiB (fotos reais passam de 4 MiB e continuam inline).
+        let (_temp, root) = temp_workspace();
+        let mut png = tiny_png();
+        png.resize(MAX_PREVIEW_BYTES * 8 + 1, 0);
+        std::fs::write(root.join("foto.png"), &png).expect("criar png grande");
+        let content = read_file_content(&root, "foto.png").expect("prévia png grande");
+        assert!(content.binary);
+        assert!(!content.truncated);
+        assert!(!content.preview_omitted);
+        assert_eq!(content.mime_type.as_deref(), Some("image/png"));
+        assert_eq!(content.size, png.len() as u64);
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(content.data_base64.expect("payload inline"))
+            .expect("base64 deve decodificar");
+        assert_eq!(decoded, png);
+    }
+
+    #[test]
+    fn read_file_content_keeps_confinement_errors() {
+        let (temp, root) = temp_workspace();
+        let outside = temp.path().join("fora.txt");
+        std::fs::write(&outside, "x").expect("criar fora");
+        let escaped =
+            read_file_content(&root, &outside.to_string_lossy()).expect_err("fora do workspace");
+        assert!(escaped.contains("FS_OUTSIDE_WORKSPACE"), "{escaped}");
+        std::fs::create_dir_all(root.join("dir")).expect("criar dir");
+        let directory = read_file_content(&root, "dir").expect_err("diretório");
+        assert!(directory.contains("FS_NOT_A_FILE"), "{directory}");
     }
 }

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   searchWorkspaceFiles: vi.fn(),
   compactSession: vi.fn(),
   setPlanMode: vi.fn(),
+  setPermissionMode: vi.fn(),
   createConversation: vi.fn(),
   listConversations: vi.fn(),
   listArtifacts: vi.fn(),
@@ -33,7 +34,7 @@ vi.mock('@/components/models/ModelPill', () => ({
 
 // Imported after the mocks above.
 import { toast } from 'sonner';
-import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { emptyCodeSession, useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import { Composer } from './Composer';
 
 function conversation(overrides: Partial<Conversation> = {}): Conversation {
@@ -98,6 +99,14 @@ beforeEach(() => {
     jobs: [],
     approvals: [],
   });
+  mocks.setPermissionMode.mockResolvedValue({
+    conversationId: 'c-1',
+    permissionMode: 'edit',
+    planMode: false,
+    todos: [],
+    jobs: [],
+    approvals: [],
+  });
   mocks.createConversation.mockResolvedValue(conversation({ id: 'c-new' }));
   useAppStore.setState({
     providers: [providerFixture()],
@@ -118,6 +127,7 @@ beforeEach(() => {
     errorCode: null,
     errorHint: null,
   });
+  useCodeStore.setState({ byConversation: {} });
   useUiStore.setState({
     layoutMode: 'code',
     activeWorkspaceId: 'ws-1',
@@ -155,6 +165,31 @@ describe('Composer — placeholder e atalho no modo Code', () => {
     fireEvent.keyDown(window, { key: 'l', ctrlKey: true });
 
     expect(document.activeElement).toBe(textarea());
+  });
+});
+
+describe('Composer — controles de sessão no layout Code', () => {
+  it('troca os pills de ferramentas pelos controles de permissão e Plano', () => {
+    render(<Composer />);
+
+    expect(screen.getByRole('button', { name: 'Modo de permissão: Editar' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Modo Plano' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Busca web' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Criar arquivos' })).toBeNull();
+  });
+
+  it('reflete o snapshot da sessão carregado no codeStore', () => {
+    useCodeStore.setState({
+      byConversation: {
+        'c-1': { ...emptyCodeSession('c-1'), permissionMode: 'read_only', planMode: true },
+      },
+    });
+    render(<Composer />);
+
+    expect(screen.getByRole('button', { name: 'Modo de permissão: Leitura' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Modo Plano' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
   });
 });
 

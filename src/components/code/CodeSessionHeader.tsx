@@ -8,15 +8,11 @@ import {
   FolderOpen,
   GitBranch,
   History,
-  ListChecks,
   PanelRight,
   Plus,
   RefreshCw,
-  Shield,
-  ShieldAlert,
   ShieldCheck,
   X,
-  type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -31,12 +27,13 @@ import {
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { filterConversationsForLayout } from '@/lib/conversations';
-import { useChatStore, useUiStore } from '@/lib/store';
-import type { Conversation, PermissionMode, Workspace } from '@/lib/types';
+import { codeFileTabKey, useChatStore, useUiStore, type CodeFileTab } from '@/lib/store';
+import type { Conversation, Workspace } from '@/lib/types';
 import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel';
 import { cn, copyText } from '@/lib/utils';
 import { WorkspaceTrustDialog } from './WorkspaceTrustDialog';
 import { CodeContextMeterChip } from './CodeAgentWidgets';
+import { FileIcon } from './FileIcon';
 import { NO_WORKSPACE_KEY, openFolder, useWorkspaces } from './useWorkspaces';
 
 /** Synthetic tab shown when the Code layout has no active conversation. */
@@ -46,6 +43,28 @@ const NEW_SESSION_TITLE = 'Nova sessão';
 const CODE_DIFF_TAB_ID = '__code_diff__';
 /** Synthetic center tab for the commit history (WORKBENCH §7.2). */
 const CODE_COMMITS_TAB_ID = '__code_commits__';
+/**
+ * Prefixo dos ids das abas centrais de arquivo (§7.1) — cada arquivo aberto tem
+ * a própria aba. O sufixo é a chave estável `codeFileTabKey` codificada para o
+ * DOM (o `\0` interno vira `%00`, então nenhum atributo carrega NUL).
+ */
+const CODE_FILE_TAB_PREFIX = '__code_file__:';
+
+/** DOM id da aba de um arquivo aberto. */
+function codeFileTabDomId(tab: CodeFileTab): string {
+  return `${CODE_FILE_TAB_PREFIX}${encodeURIComponent(codeFileTabKey(tab))}`;
+}
+
+/** Localiza a aba de arquivo de um id do DOM (ou `null` se não estiver aberta). */
+function findCodeFileTab(id: string): CodeFileTab | null {
+  if (!id.startsWith(CODE_FILE_TAB_PREFIX)) return null;
+  return useUiStore.getState().codeFileTabs.find((tab) => codeFileTabDomId(tab) === id) ?? null;
+}
+
+/** Nome curto da aba (o aria/title levam o caminho completo). */
+function codeFileTabName(tab: CodeFileTab): string {
+  return tab.path.split('/').pop() || tab.path;
+}
 
 /**
  * Id of the conversation surface the session tabs control. `WorkspaceCenter`
@@ -53,26 +72,6 @@ const CODE_COMMITS_TAB_ID = '__code_commits__';
  * `aria-controls` points at a real region.
  */
 const SESSION_PANEL_ID = 'code-session-panel';
-
-const PERMISSION_LABELS: Record<PermissionMode, string> = {
-  read_only: 'Leitura',
-  edit: 'Editar',
-  autonomous: 'Autônomo',
-};
-
-const PERMISSION_DESCRIPTIONS: Record<PermissionMode, string> = {
-  read_only: 'O agente só pode ler arquivos e consultar o workspace.',
-  edit: 'O agente pode editar arquivos; comandos pedem aprovação.',
-  autonomous: 'O agente pode editar e executar comandos com menos confirmações.',
-};
-
-const PERMISSION_ICONS: Record<PermissionMode, LucideIcon> = {
-  read_only: Shield,
-  edit: ShieldCheck,
-  autonomous: ShieldAlert,
-};
-
-const PERMISSION_ORDER: PermissionMode[] = ['read_only', 'edit', 'autonomous'];
 
 const chipClassName =
   'inline-flex h-7 max-w-60 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 ' +
@@ -214,59 +213,11 @@ function WorkspaceChip({
   );
 }
 
-interface PermissionChipProps {
-  permissionMode: PermissionMode;
-  busy: boolean;
-  onChange: (mode: PermissionMode) => void;
-}
-
-/** Chip do modo de permissão da sessão (Leitura / Editar / Autônomo). */
-function PermissionChip({ permissionMode, busy, onChange }: PermissionChipProps) {
-  const Icon = PERMISSION_ICONS[permissionMode];
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-haspopup="menu"
-          aria-label={`Modo de permissão: ${PERMISSION_LABELS[permissionMode]}`}
-          title={PERMISSION_DESCRIPTIONS[permissionMode]}
-          disabled={busy}
-          className={chipClassName}
-        >
-          <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-          <span className="truncate">{PERMISSION_LABELS[permissionMode]}</span>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-60">
-        <DropdownMenuLabel>Modo de permissão</DropdownMenuLabel>
-        {PERMISSION_ORDER.map((mode) => {
-          const ModeIcon = PERMISSION_ICONS[mode];
-          return (
-            <DropdownMenuItem
-              key={mode}
-              icon={<ModeIcon className="size-4" />}
-              checked={mode === permissionMode}
-              onSelect={() => onChange(mode)}
-            >
-              {PERMISSION_LABELS[mode]}
-            </DropdownMenuItem>
-          );
-        })}
-        <DropdownMenuSeparator />
-        <p className="px-2 pb-1 text-[11px] leading-relaxed text-foreground-subtle">
-          {PERMISSION_DESCRIPTIONS[permissionMode]}
-        </p>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 /**
  * Code session chrome (WORKBENCH §4): título, chip do workspace real (branch,
- * dirty, ações), modo de permissão, chip de plano, toggle do painel e abas das
- * sessões abertas. Também hospeda o diálogo de confiança da primeira pasta —
- * o cabeçalho é o único chrome sempre montado no layout Code.
+ * dirty, ações), medidor de contexto, toggle do painel e abas das sessões
+ * abertas. Também hospeda o diálogo de confiança da primeira pasta — o
+ * cabeçalho é o único chrome sempre montado no layout Code.
  */
 export function CodeSessionHeader() {
   const activeId = useChatStore((state) => state.activeId);
@@ -278,16 +229,15 @@ export function CodeSessionHeader() {
   const closeCodeDiff = useUiStore((state) => state.closeCodeDiff);
   const codeCommitsTab = useUiStore((state) => state.codeCommitsTab);
   const closeCodeCommits = useUiStore((state) => state.closeCodeCommits);
+  const codeFileTabs = useUiStore((state) => state.codeFileTabs);
+  const codeFileTab = useUiStore((state) => state.codeFileTab);
+  const closeCodeFile = useUiStore((state) => state.closeCodeFile);
   const viewportWidth = useViewportWidth();
   /** The docked code panel only exists on wide windows (see CodePanel). */
   const canDock = viewportWidth >= SIDE_PANEL_DOCK_MIN_VIEWPORT;
 
   const { workspaces, pendingTrust, refreshContext, resolveTrust, cancelTrust } = useWorkspaces();
 
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>('edit');
-  const [planMode, setPlanMode] = useState(false);
-  const [permissionBusy, setPermissionBusy] = useState(false);
-  const [planBusy, setPlanBusy] = useState(false);
   const [trustBusy, setTrustBusy] = useState(false);
 
   // Sessions are separated per layout: the Code tabs only ever mirror Code
@@ -345,67 +295,14 @@ export function CodeSessionHeader() {
     ? (workspaces.find((entry) => entry.id === activeConversation.workspaceId) ?? null)
     : null;
 
-  /* Permission/plan come from the session state; the conversation row is the
-     fallback while the backend snapshot is not available yet. A troca de
-     permissão é otimista: o efeito só re-sincroniza quando a SESSÃO muda (id),
-     nunca quando `refreshConversations` substitui o objeto da conversa. */
-  const activeConversationId = activeConversation?.id;
-  useEffect(() => {
-    if (!activeConversationId) {
-      setPermissionMode('edit');
-      setPlanMode(false);
+  const selectTab = (id: string) => {
+    if (id.startsWith(CODE_FILE_TAB_PREFIX)) {
+      /* Ativar a aba de arquivo (sem duplicar: `openCodeFile` só ativa se já
+         estiver aberto) e mostrar o arquivo no centro. */
+      const fileTarget = findCodeFileTab(id);
+      if (fileTarget) useUiStore.getState().openCodeFile(fileTarget);
       return;
     }
-    const conversation = useChatStore
-      .getState()
-      .conversations.find((entry) => entry.id === activeConversationId);
-    setPermissionMode(conversation?.permissionMode ?? 'edit');
-    setPlanMode(false);
-    let cancelled = false;
-    if (typeof api.getCodeSessionState === 'function') {
-      void api
-        .getCodeSessionState(activeConversationId)
-        .then((state) => {
-          if (cancelled || !state) return;
-          setPermissionMode(state.permissionMode);
-          setPlanMode(state.planMode);
-        })
-        .catch(() => {
-          /* Snapshot opcional: a sessão continua com o modo da conversa. */
-        });
-    }
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConversationId]);
-
-  /* Quando o diálogo de confiança fecha (o hook aplica o modo de permissão),
-     a sessão já existe e o efeito acima não roda de novo. Re-sincroniza uma vez
-     para o chip refletir "Leitura" ao abrir em leitura. */
-  const pendingTrustRef = useRef(pendingTrust);
-  useEffect(() => {
-    const hadPending = pendingTrustRef.current !== null;
-    pendingTrustRef.current = pendingTrust;
-    if (!hadPending || pendingTrust !== null || !activeConversationId) return;
-    if (typeof api.getCodeSessionState !== 'function') return;
-    let cancelled = false;
-    void api
-      .getCodeSessionState(activeConversationId)
-      .then((state) => {
-        if (cancelled || !state) return;
-        setPermissionMode(state.permissionMode);
-        setPlanMode(state.planMode);
-      })
-      .catch(() => {
-        /* Snapshot opcional. */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingTrust, activeConversationId]);
-
-  const selectTab = (id: string) => {
     if (id === CODE_DIFF_TAB_ID) {
       useUiStore.getState().setCodeView('diff');
       return;
@@ -425,6 +322,17 @@ export function CodeSessionHeader() {
 
   const closeTab = (id: string) => {
     if (id === NEW_SESSION_ID) return;
+    if (id.startsWith(CODE_FILE_TAB_PREFIX)) {
+      const fileTarget = findCodeFileTab(id);
+      if (!fileTarget) return;
+      closeCodeFile(fileTarget);
+      /* Devolve o foco: nova aba ativa (a vizinha, quando a fechada era ativa),
+         senão a aba da sessão ativa, senão o botão "+" (padrão de `focusTab`). */
+      const nextFileTab = useUiStore.getState().codeFileTab;
+      if (nextFileTab) focusTab(codeFileTabDomId(nextFileTab));
+      else focusTab(activeId ?? undefined);
+      return;
+    }
     if (id === CODE_DIFF_TAB_ID) {
       closeCodeDiff();
       focusTab(activeId ?? undefined);
@@ -496,44 +404,6 @@ export function CodeSessionHeader() {
         break;
       default:
         break;
-    }
-  };
-
-  const handlePermissionChange = async (mode: PermissionMode) => {
-    if (!activeConversation || mode === permissionMode || permissionBusy) return;
-    const previous = permissionMode;
-    // Atualização otimista: o chip responde na hora; erro volta ao modo anterior.
-    setPermissionMode(mode);
-    setPermissionBusy(true);
-    try {
-      const state = await api.setPermissionMode(activeConversation.id, mode);
-      if (state?.permissionMode) setPermissionMode(state.permissionMode);
-      await useChatStore.getState().refreshConversations();
-    } catch (error) {
-      setPermissionMode(previous);
-      toast.error('Não foi possível mudar o modo de permissão', {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setPermissionBusy(false);
-    }
-  };
-
-  const handlePlanToggle = async () => {
-    if (!activeConversation || planBusy) return;
-    const previous = planMode;
-    setPlanMode(!previous);
-    setPlanBusy(true);
-    try {
-      const state = await api.setPlanMode(activeConversation.id, !previous);
-      if (state) setPlanMode(state.planMode);
-    } catch (error) {
-      setPlanMode(previous);
-      toast.error('Não foi possível alternar o modo Plano', {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setPlanBusy(false);
     }
   };
 
@@ -638,40 +508,6 @@ export function CodeSessionHeader() {
           onToggleTrust={handleTrustToggle}
         />
 
-        {activeConversation ? (
-          <>
-            <PermissionChip
-              permissionMode={permissionMode}
-              busy={permissionBusy}
-              onChange={(mode) => void handlePermissionChange(mode)}
-            />
-            <Tooltip
-              content={
-                planMode
-                  ? 'Modo Plano ativo: o agente planeja antes de editar'
-                  : 'Ativar modo Plano (planejar antes de editar)'
-              }
-              side="bottom"
-            >
-              <button
-                type="button"
-                aria-label="Modo Plano"
-                aria-pressed={planMode}
-                title="Modo Plano"
-                disabled={planBusy}
-                onClick={() => void handlePlanToggle()}
-                className={cn(
-                  chipClassName,
-                  planMode && 'border-accent/40 bg-accent-soft text-accent hover:bg-accent-soft',
-                )}
-              >
-                <ListChecks aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-                <span className="hidden truncate sm:inline">Plano</span>
-              </button>
-            </Tooltip>
-          </>
-        ) : null}
-
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {activeConversation ? (
             <CodeContextMeterChip conversationId={activeConversation.id} />
@@ -762,6 +598,59 @@ export function CodeSessionHeader() {
               );
             })
           )}
+          {codeFileTabs.map((fileTab) => {
+            const id = codeFileTabDomId(fileTab);
+            const name = codeFileTabName(fileTab);
+            const selected =
+              codeView === 'file' &&
+              codeFileTab !== null &&
+              codeFileTabKey(codeFileTab) === codeFileTabKey(fileTab);
+            return (
+              <div
+                key={id}
+                role="presentation"
+                className={cn(
+                  'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
+                  selected
+                    ? 'bg-surface-raised text-foreground shadow-sm'
+                    : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                )}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-label={`Arquivo ${fileTab.path}`}
+                  aria-selected={selected}
+                  aria-controls="code-file-panel"
+                  title={`Arquivo ${fileTab.path}`}
+                  tabIndex={selected ? 0 : -1}
+                  ref={addTabRef(id)}
+                  onClick={() => selectTab(id)}
+                  onKeyDown={(event) => handleTabKeyDown(event, id)}
+                  className={cn(
+                    'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                    'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                  )}
+                >
+                  <FileIcon path={fileTab.path} className="size-3.5" />
+                  <span className="truncate">{name}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Fechar ${name}`}
+                  tabIndex={-1}
+                  onClick={() => closeTab(id)}
+                  className={cn(
+                    'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                    'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                  )}
+                >
+                  <X aria-hidden className="size-3.5" />
+                </button>
+              </div>
+            );
+          })}
           {codeDiffTab ? (
             <div
               role="presentation"

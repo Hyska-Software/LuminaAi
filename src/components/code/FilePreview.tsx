@@ -5,14 +5,21 @@ import {
   ExternalLink,
   FileExclamationPoint,
   FileQuestionMark,
+  FileWarning,
+  RefreshCw,
+  WrapText,
 } from 'lucide-react';
-import { Badge, IconButton, Spinner, Tooltip } from '@/components/ui';
+import { Badge, Button, IconButton, SegmentedControl, Spinner, Tooltip } from '@/components/ui';
+import { Markdown } from '@/components/chat/Markdown';
 import { languageLabel, normalizeLanguage, prism, SYNTAX_THEME } from '@/lib/highlight';
+import { useUiStore } from '@/lib/store';
 import { cn, copyText, formatBytes } from '@/lib/utils';
 import type { WorkspaceFileContent } from '@/lib/types';
 import { Highlight } from 'prism-react-renderer';
 import { toast } from 'sonner';
 import { FileIcon } from './FileIcon';
+import { FilePreviewImage } from './FilePreviewImage';
+import { FilePreviewPdf } from './FilePreviewPdf';
 
 export interface FilePreviewProps {
   /** File content returned by `api.readWorkspaceFile`. */
@@ -21,8 +28,18 @@ export interface FilePreviewProps {
   error?: string | null;
   /** Opens the file in the user's external editor (container owns the action). */
   onOpenExternal?: (path: string) => void;
+  /** Re-reads the file from the backend (reload button in the header / retry). */
+  onReload?: () => void;
   className?: string;
 }
+
+/** Modo do ramo Markdown: documento renderizado (padrão) ou fonte. */
+type MarkdownViewMode = 'document' | 'code';
+
+const MARKDOWN_VIEW_OPTIONS = [
+  { value: 'document', label: 'Documento' },
+  { value: 'code', label: 'Código' },
+];
 
 /** Maps a path extension to a Prism language id. */
 export function languageForPath(path: string): string {
@@ -37,16 +54,31 @@ export function languageForPath(path: string): string {
 }
 
 /**
- * Read-only workspace file preview for the Code panel (WORKBENCH §7.1/§15).
+ * Read-only workspace file preview for the Code center tab (WORKBENCH §7.1).
  *
  * Renders highlighted source with line numbers (shared Prism instance of
- * `src/lib/highlight`), and honest states for binary/truncated/non-UTF-8
- * files, loading and read errors. Copy path and "abrir no editor externo"
- * live in the header; the external action is delegated to the container.
+ * `src/lib/highlight`); images and PDFs get the real visualização (checkerboard
+ * image viewer / pdf.js), and binary, oversized-preview (`previewOmitted`) and
+ * unsupported-format files keep honest cards. Copy path, "abrir no editor
+ * externo" and the optional reload live in the header; both external actions
+ * are delegated to the container.
  */
-export function FilePreview({ content, loading, error, onOpenExternal, className }: FilePreviewProps) {
+export function FilePreview({
+  content,
+  loading,
+  error,
+  onOpenExternal,
+  onReload,
+  className,
+}: FilePreviewProps) {
   const [copied, setCopied] = useState(false);
+  /** Ramo Markdown: documento renderizado por padrão, estado local à aba. */
+  const [mdView, setMdView] = useState<MarkdownViewMode>('document');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* Quebra de linha é uma preferência GLOBAL do workbench (persistida no
+     `uiStore`): vale para todas as abas de arquivo, não só para a atual. */
+  const codeFileWrap = useUiStore((state) => state.codeFileWrap);
+  const setCodeFileWrap = useUiStore((state) => state.setCodeFileWrap);
 
   useEffect(
     () => () => {
@@ -55,9 +87,11 @@ export function FilePreview({ content, loading, error, onOpenExternal, className
     [],
   );
 
-  /* A new file resets the transient "copiado" feedback. */
+  /* A new file resets the transient "copiado" feedback and the Markdown mode
+     (each aba always starts at Documento). */
   useEffect(() => {
     setCopied(false);
+    setMdView('document');
   }, [content?.path]);
 
   const path = content?.path ?? '';
@@ -81,7 +115,7 @@ export function FilePreview({ content, loading, error, onOpenExternal, className
 
   if (loading) {
     return (
-      <div className={cn('flex h-full flex-col', className)}>
+      <div className={cn('flex h-full min-h-0 flex-col', className)}>
         <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
           <div className="h-3 w-40 animate-pulse rounded bg-surface-hover motion-reduce:animate-none" />
           <Spinner size="xs" label="Carregando arquivo" className="ml-auto" />
@@ -103,7 +137,7 @@ export function FilePreview({ content, loading, error, onOpenExternal, className
     return (
       <div
         className={cn(
-          'flex h-full flex-col items-center justify-center gap-2 px-6 py-8 text-center',
+          'flex h-full min-h-0 flex-col items-center justify-center gap-2 px-6 py-8 text-center',
           className,
         )}
       >
@@ -112,6 +146,11 @@ export function FilePreview({ content, loading, error, onOpenExternal, className
         </span>
         <p className="text-[12.5px] font-medium text-foreground">Não foi possível abrir o arquivo</p>
         <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">{error}</p>
+        {onReload ? (
+          <Button size="sm" variant="secondary" className="mt-1" onClick={onReload}>
+            Tentar novamente
+          </Button>
+        ) : null}
       </div>
     );
   }
@@ -120,7 +159,7 @@ export function FilePreview({ content, loading, error, onOpenExternal, className
     return (
       <div
         className={cn(
-          'flex h-full flex-col items-center justify-center gap-1.5 px-6 py-8 text-center',
+          'flex h-full min-h-0 flex-col items-center justify-center gap-1.5 px-6 py-8 text-center',
           className,
         )}
       >
@@ -133,36 +172,129 @@ export function FilePreview({ content, loading, error, onOpenExternal, className
     );
   }
 
+  const mimeType = content.mimeType?.trim().toLowerCase() ?? '';
+  const payload = content.dataBase64 ?? '';
+  const isImage = mimeType.startsWith('image/');
+  const isPdf = mimeType === 'application/pdf';
+  const headerActionProps = {
+    path: content.path,
+    copied,
+    onCopy: () => void handleCopyPath(),
+    onOpenExternal,
+    onReload,
+  };
+  const headerActions = <HeaderActions {...headerActionProps} />;
+  /* A quebra de linha só faz sentido no ramo de texto/código: imagem, PDF,
+     binário e prévia omitida não ganham o botão. */
+  const textHeaderActions = (
+    <HeaderActions
+      {...headerActionProps}
+      wrap={codeFileWrap}
+      onToggleWrap={() => setCodeFileWrap(!codeFileWrap)}
+    />
+  );
+  /* `.md`/`.markdown`/`.mdx` (mapa de `src/lib/highlight/languages.ts`) podem
+     alternar entre o documento renderizado e a fonte; o padrão é Documento. */
+  const isMarkdown = language === 'markdown';
+  const showMarkdownDocument = isMarkdown && mdView === 'document';
+
+  /* Imagem com payload: o visualizador real (xadrez, zoom, fit/1:1). */
+  if (isImage && payload) {
+    return (
+      <div className={cn('flex h-full min-h-0 flex-col', className)}>
+        <PreviewHeader path={content.path}>{headerActions}</PreviewHeader>
+        <FilePreviewImage
+          path={content.path}
+          mimeType={mimeType}
+          dataBase64={payload}
+          className="min-h-0 flex-1"
+        />
+      </div>
+    );
+  }
+
+  /* PDF com payload: pdf.js (páginas + zoom) dentro da mesma aba. */
+  if (isPdf && payload) {
+    return (
+      <div className={cn('flex h-full min-h-0 flex-col', className)}>
+        <PreviewHeader path={content.path}>
+          <Badge tone="neutral" size="sm" className="shrink-0">
+            PDF
+          </Badge>
+          {headerActions}
+        </PreviewHeader>
+        <FilePreviewPdf path={content.path} dataBase64={payload} className="min-h-0 flex-1" />
+      </div>
+    );
+  }
+
+  /* Payload binário omitido por tamanho: cartão honesto, sem prometer prévia. */
+  if (content.previewOmitted) {
+    return (
+      <div className={cn('flex h-full min-h-0 flex-col', className)}>
+        <PreviewHeader path={content.path}>{headerActions}</PreviewHeader>
+        <PreviewNotice
+          icon={<FileWarning aria-hidden className="size-4" strokeWidth={1.75} />}
+          title="Prévia não disponível"
+          description={`O arquivo tem ${formatBytes(content.size)} — grande demais para a prévia inline. Abra no editor externo para visualizar.`}
+        />
+      </div>
+    );
+  }
+
+  /* Imagem/PDF conhecidos sem payload: formato sem prévia no visualizador.
+     Quando o backend manda texto (ex.: SVG pelo caminho de texto), o ramo de
+     código abaixo continua sendo o honesto — não escondemos o conteúdo. */
+  if ((isImage || isPdf) && !content.text) {
+    return (
+      <div className={cn('flex h-full min-h-0 flex-col', className)}>
+        <PreviewHeader path={content.path}>{headerActions}</PreviewHeader>
+        <PreviewNotice
+          icon={<FileWarning aria-hidden className="size-4" strokeWidth={1.75} />}
+          title="Formato sem prévia no visualizador"
+          description={`Este formato (${formatBytes(content.size)}) não tem visualização embutida. Abra no editor externo para inspecionar o conteúdo.`}
+        />
+      </div>
+    );
+  }
+
   if (content.binary) {
     return (
-      <div className={cn('flex h-full flex-col', className)}>
-        <PreviewHeader path={content.path}>
-          <HeaderActions path={content.path} copied={copied} onCopy={handleCopyPath} onOpenExternal={onOpenExternal} />
-        </PreviewHeader>
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-8 text-center">
-          <span className="flex size-9 items-center justify-center rounded-xl border border-border bg-surface-hover text-foreground-muted">
-            <FileExclamationPoint aria-hidden className="size-4" strokeWidth={1.75} />
-          </span>
-          <p className="text-[12.5px] font-medium text-foreground">Arquivo binário</p>
-          <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">
-            Não há prévia de texto para este arquivo ({formatBytes(content.size)}). Abra no editor
-            externo para inspecionar o conteúdo.
-          </p>
-        </div>
+      <div className={cn('flex h-full min-h-0 flex-col', className)}>
+        <PreviewHeader path={content.path}>{headerActions}</PreviewHeader>
+        <PreviewNotice
+          icon={<FileExclamationPoint aria-hidden className="size-4" strokeWidth={1.75} />}
+          title="Arquivo binário"
+          description={`Não há prévia de texto para este arquivo (${formatBytes(content.size)}). Abra no editor externo para inspecionar o conteúdo.`}
+        />
       </div>
     );
   }
 
   return (
-    <div className={cn('flex h-full flex-col', className)}>
+    <div className={cn('flex h-full min-h-0 flex-col', className)}>
       <PreviewHeader path={content.path}>
-        <Badge tone="neutral" size="sm" className="shrink-0 font-mono">
-          {languageLabel(language)}
-        </Badge>
-        <span className="shrink-0 text-[11px] tabular-nums text-foreground-subtle">
-          {lines.length} {lines.length === 1 ? 'linha' : 'linhas'} · {formatBytes(content.size)}
-        </span>
-        <HeaderActions path={content.path} copied={copied} onCopy={handleCopyPath} onOpenExternal={onOpenExternal} />
+        {isMarkdown ? (
+          <SegmentedControl
+            size="sm"
+            ariaLabel="Modo de visualização do Markdown"
+            options={MARKDOWN_VIEW_OPTIONS}
+            value={mdView}
+            onChange={(value) => setMdView(value === 'code' ? 'code' : 'document')}
+            className="shrink-0"
+          />
+        ) : (
+          <>
+            <Badge tone="neutral" size="sm" className="shrink-0 font-mono">
+              {languageLabel(language)}
+            </Badge>
+            <span className="shrink-0 text-[11px] tabular-nums text-foreground-subtle">
+              {lines.length} {lines.length === 1 ? 'linha' : 'linhas'} ·{' '}
+              {formatBytes(content.size)}
+            </span>
+          </>
+        )}
+        {showMarkdownDocument ? headerActions : textHeaderActions}
       </PreviewHeader>
 
       {content.encoding && !/^utf-?8$/i.test(content.encoding) ? (
@@ -184,12 +316,36 @@ export function FilePreview({ content, loading, error, onOpenExternal, className
         </p>
       ) : null}
 
-      {lines.length === 0 ? (
+      {showMarkdownDocument ? (
+        content.text.trim().length === 0 ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-8 text-center text-[12px] text-foreground-muted">
+            Markdown vazio.
+          </div>
+        ) : (
+          <div
+            role="region"
+            aria-label="Prévia do Markdown"
+            className="min-h-0 flex-1 overflow-auto bg-background"
+          >
+            {/* Mesmo pipeline GFM/KaTeX + sanitização da conversa. */}
+            <div className="mx-auto w-full max-w-3xl px-6 py-5">
+              <Markdown content={content.text} />
+            </div>
+          </div>
+        )
+      ) : lines.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-6 py-8 text-center text-[12px] text-foreground-muted">
           Arquivo vazio.
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div
+          className={cn(
+            'min-h-0 flex-1 bg-background',
+            /* Com quebra ligada não existe rolagem horizontal: a linha quebra
+               dentro do espaço. Desligada, a rolagem horizontal é a esperada. */
+            codeFileWrap ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto',
+          )}
+        >
           <Highlight prism={prism} theme={SYNTAX_THEME} language={language} code={content.text}>
             {({ tokens, getLineProps, getTokenProps }) => (
               <pre
@@ -206,12 +362,24 @@ export function FilePreview({ content, loading, error, onOpenExternal, className
                     >
                       <span
                         aria-hidden
-                        className="sticky left-0 w-10 shrink-0 select-none pr-3 text-right text-[11px] tabular-nums text-foreground-subtle"
-                        style={{ backgroundColor: 'var(--surface-raised)' }}
+                        className={cn(
+                          'sticky left-0 w-10 shrink-0 select-none pr-3 text-right text-[11px] tabular-nums text-foreground-subtle',
+                          /* Mesmo fundo do código: sem faixa mais clara no gutter. */
+                          'bg-background',
+                        )}
                       >
                         {lineIndex + 1}
                       </span>
-                      <span className="min-w-0 whitespace-pre pr-4">
+                      <span
+                        className={cn(
+                          'min-w-0 pr-4',
+                          /* Wrap global: a linha quebra dentro do espaço (sem
+                             rolagem horizontal); desligado mantém `pre`. */
+                          codeFileWrap
+                            ? 'flex-1 whitespace-pre-wrap break-words'
+                            : 'whitespace-pre',
+                        )}
+                      >
                         {line.map((token, tokenIndex) => (
                           <span key={tokenIndex} {...getTokenProps({ token })} />
                         ))}
@@ -224,6 +392,27 @@ export function FilePreview({ content, loading, error, onOpenExternal, className
           </Highlight>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Cartão central honesto para binário/omitido/sem prévia (mesma moldura do binário). */
+function PreviewNotice({
+  icon,
+  title,
+  description,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 py-8 text-center">
+      <span className="flex size-9 items-center justify-center rounded-xl border border-border bg-surface-hover text-foreground-muted">
+        {icon}
+      </span>
+      <p className="text-[12.5px] font-medium text-foreground">{title}</p>
+      <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">{description}</p>
     </div>
   );
 }
@@ -245,23 +434,53 @@ function HeaderActions({
   copied,
   onCopy,
   onOpenExternal,
+  onReload,
+  wrap,
+  onToggleWrap,
 }: {
   path: string;
   copied: boolean;
   onCopy: () => void;
   onOpenExternal?: (path: string) => void;
+  onReload?: () => void;
+  /** Estado global de quebra de linha (só o ramo de texto/código passa isto). */
+  wrap?: boolean;
+  onToggleWrap?: () => void;
 }) {
   return (
     <div className="flex shrink-0 items-center gap-0.5">
+      {wrap !== undefined && onToggleWrap ? (
+        <Tooltip
+          content={wrap ? 'Quebra de linha ativada' : 'Quebra de linha'}
+          side="bottom"
+        >
+          <IconButton
+            label="Quebra de linha"
+            size="sm"
+            active={wrap}
+            aria-pressed={wrap}
+            onClick={onToggleWrap}
+          >
+            <WrapText aria-hidden className="size-4" strokeWidth={1.75} />
+          </IconButton>
+        </Tooltip>
+      ) : null}
       <Tooltip content={copied ? 'Caminho copiado' : 'Copiar caminho'} side="bottom">
         <IconButton
           label={copied ? 'Caminho copiado' : 'Copiar caminho'}
           size="sm"
-          onClick={() => void onCopy()}
+          onClick={onCopy}
         >
           <Copy aria-hidden className={cn('size-3.5', copied && 'text-success')} strokeWidth={1.75} />
         </IconButton>
       </Tooltip>
+      {onReload ? (
+        <Tooltip content="Recarregar arquivo" side="bottom">
+          <IconButton label="Recarregar arquivo" size="sm" onClick={onReload}>
+            <RefreshCw aria-hidden className="size-3.5" strokeWidth={1.75} />
+          </IconButton>
+        </Tooltip>
+      ) : null}
       {onOpenExternal ? (
         <Tooltip content="Abrir no editor externo" side="bottom">
           <IconButton label="Abrir no editor externo" size="sm" onClick={() => onOpenExternal(path)}>

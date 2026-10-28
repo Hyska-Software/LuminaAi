@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   addWorkspace: vi.fn(),
   setWorkspaceTrusted: vi.fn(),
   setPermissionMode: vi.fn(),
-  setPlanMode: vi.fn(),
   removeWorkspace: vi.fn(),
   renameWorkspace: vi.fn(),
   getWorkspace: vi.fn(),
@@ -168,6 +167,8 @@ beforeEach(() => {
   useUiStore.setState({
     layoutMode: 'code',
     codeView: 'session',
+    codeFileTab: null,
+    codeFileTabs: [],
     codePanelOpen: true,
     codePanelTab: 'changes',
     activeWorkspaceId: null,
@@ -369,89 +370,21 @@ describe('CodeSessionHeader — confiança da pasta', () => {
   });
 });
 
-describe('CodeSessionHeader — modo de permissão e Plano', () => {
-  it('mostra o modo da conversa e permite mudar de forma otimista', async () => {
-    mocks.setPermissionMode.mockResolvedValue(sessionState({ permissionMode: 'autonomous' }));
+describe('CodeSessionHeader — sem chips de permissão/Plano', () => {
+  it('com conversa ativa não renderiza os controles de permissão nem de Plano', () => {
     useChatStore.setState({
-      conversations: [conversation({ id: 'c-1', permissionMode: 'edit' })],
-      activeId: 'c-1',
-    });
-
-    render(<CodeSessionHeader />);
-    const chip = screen.getByRole('button', { name: 'Modo de permissão: Editar' });
-    openMenu(chip);
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Autônomo' }));
-
-    // Otimista: o chip muda antes da resposta.
-    expect(
-      screen.getByRole('button', { name: 'Modo de permissão: Autônomo' }),
-    ).toBeTruthy();
-    await waitFor(() =>
-      expect(mocks.setPermissionMode).toHaveBeenCalledWith('c-1', 'autonomous'),
-    );
-  });
-
-  it('reverte o modo de permissão quando o backend falha', async () => {
-    mocks.setPermissionMode.mockRejectedValue(new Error('negado'));
-    useChatStore.setState({
-      conversations: [conversation({ id: 'c-1', permissionMode: 'edit' })],
-      activeId: 'c-1',
-    });
-
-    render(<CodeSessionHeader />);
-    openMenu(screen.getByRole('button', { name: 'Modo de permissão: Editar' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Autônomo' }));
-
-    await waitFor(() =>
-      expect(mocks.setPermissionMode).toHaveBeenCalledWith('c-1', 'autonomous'),
-    );
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Modo de permissão: Editar' })).toBeTruthy(),
-    );
-  });
-
-  it('o estado da sessão sincroniza permissão e Plano ao abrir', async () => {
-    mocks.getCodeSessionState.mockResolvedValue(
-      sessionState({ permissionMode: 'read_only', planMode: true }),
-    );
-    useChatStore.setState({
-      conversations: [conversation({ id: 'c-1' })],
+      conversations: [conversation({ id: 'c-1', title: 'Sessão ativa', permissionMode: 'edit' })],
       activeId: 'c-1',
     });
 
     render(<CodeSessionHeader />);
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Modo de permissão: Leitura' })).toBeTruthy(),
-    );
-    const plan = screen.getByRole('button', { name: 'Modo Plano' });
-    expect(plan.getAttribute('aria-pressed')).toBe('true');
-  });
-
-  it('o chip Plano alterna com atualização otimista', async () => {
-    mocks.setPlanMode.mockResolvedValue(sessionState({ planMode: true }));
-    useChatStore.setState({
-      conversations: [conversation({ id: 'c-1' })],
-      activeId: 'c-1',
-    });
-
-    render(<CodeSessionHeader />);
-    const plan = screen.getByRole('button', { name: 'Modo Plano' });
-    expect(plan.getAttribute('aria-pressed')).toBe('false');
-
-    fireEvent.click(plan);
-
-    expect(screen.getByRole('button', { name: 'Modo Plano' }).getAttribute('aria-pressed')).toBe(
-      'true',
-    );
-    await waitFor(() => expect(mocks.setPlanMode).toHaveBeenCalledWith('c-1', true));
-  });
-
-  it('não mostra os chips de sessão quando não há conversa ativa', () => {
-    render(<CodeSessionHeader />);
-
+    // Os controles de sessão foram para o composer: o cabeçalho não os duplica.
+    expect(screen.getByRole('heading', { name: 'Sessão ativa' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Modo de permissão/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Modo Plano' })).toBeNull();
+    expect(screen.queryByText(/Modo de permissão/)).toBeNull();
+    expect(screen.queryByText('Modo Plano')).toBeNull();
   });
 });
 
@@ -772,5 +705,213 @@ describe('CodeSessionHeader — aba de histórico de commits', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Fechar histórico de commits' }));
     expect(useUiStore.getState().codeCommitsTab).toBeNull();
     expect(useUiStore.getState().codeView).toBe('session');
+  });
+});
+
+describe('CodeSessionHeader — aba central de arquivo', () => {
+  function openFile(path: string): void {
+    act(() => {
+      useUiStore.getState().openCodeFile({ workspaceId: 'ws-1', path });
+    });
+  }
+
+  beforeEach(() => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Sessão aberta' })],
+      activeId: 'c-1',
+    });
+  });
+
+  it('mostra a aba do arquivo com ícone do tipo, nome curto e caminho completo', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta').getAttribute('aria-selected')).toBe('true'));
+
+    openFile('src/app.ts');
+
+    const fileTab = await screen.findByRole('tab', { name: 'Arquivo src/app.ts' });
+    expect(fileTab.getAttribute('aria-selected')).toBe('true');
+    expect(fileTab.getAttribute('aria-controls')).toBe('code-file-panel');
+    expect(fileTab.getAttribute('title')).toBe('Arquivo src/app.ts');
+    expect(fileTab.textContent).toBe('app.ts');
+    expect(
+      fileTab.querySelector('[data-file-icon]')?.getAttribute('data-file-icon'),
+    ).toBe('typescript');
+    // Enquanto o arquivo está no centro, a aba da sessão não parece ativa.
+    expect(tab('Sessão aberta').getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('fecha a aba pelo X, volta para a sessão e devolve o foco à aba ativa', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta')).toBeTruthy());
+    openFile('src/app.ts');
+    const fileTab = await screen.findByRole('tab', { name: 'Arquivo src/app.ts' });
+    fileTab.focus();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar app.ts' }));
+
+    expect(useUiStore.getState().codeFileTab).toBeNull();
+    expect(useUiStore.getState().codeView).toBe('session');
+    expect(screen.queryByRole('tab', { name: 'Arquivo src/app.ts' })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(tab('Sessão aberta')));
+  });
+
+  it('clicar na aba do arquivo reabre o arquivo; a aba da sessão volta para a conversa', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta')).toBeTruthy());
+    openFile('src/app.ts');
+    const fileTab = await screen.findByRole('tab', { name: 'Arquivo src/app.ts' });
+
+    fireEvent.click(tab('Sessão aberta'));
+
+    expect(useUiStore.getState().codeView).toBe('session');
+    expect(useUiStore.getState().codeFileTab).toEqual({ workspaceId: 'ws-1', path: 'src/app.ts' });
+    expect(fileTab.getAttribute('aria-selected')).toBe('false');
+
+    fireEvent.click(fileTab);
+
+    expect(useUiStore.getState().codeView).toBe('file');
+    expect(fileTab.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('entra na navegação por teclado (setas) e fecha a aba com Delete', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta')).toBeTruthy());
+    openFile('src/app.ts');
+    const fileTab = await screen.findByRole('tab', { name: 'Arquivo src/app.ts' });
+
+    tab('Sessão aberta').focus();
+    fireEvent.keyDown(tab('Sessão aberta'), { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(fileTab);
+
+    fireEvent.keyDown(fileTab, { key: 'Delete' });
+
+    expect(useUiStore.getState().codeFileTab).toBeNull();
+    expect(useUiStore.getState().codeView).toBe('session');
+  });
+
+  it('a aba de arquivo fica entre as abas de sessão e o diff', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta')).toBeTruthy());
+
+    act(() => {
+      useUiStore.getState().openCodeFile({ workspaceId: 'ws-1', path: 'src/app.ts' });
+      useUiStore.getState().openCodeDiff({
+        workspaceId: 'ws-1',
+        path: 'src/app.ts',
+        staged: false,
+        knownDiff: '@@ -1 +1 @@\n-a\n+b',
+      });
+    });
+
+    const fileTab = await screen.findByRole('tab', { name: 'Arquivo src/app.ts' });
+    const diffTab = await screen.findByRole('tab', { name: 'Diff de src/app.ts' });
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.indexOf(fileTab)).toBeLessThan(tabs.indexOf(diffTab));
+    expect(tabs.indexOf(fileTab)).toBeGreaterThan(tabs.indexOf(tab('Sessão aberta')));
+    // O diff ficou como view ativa (último alvo aberto), não o arquivo.
+    expect(useUiStore.getState().codeView).toBe('diff');
+    expect(fileTab.getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('permite várias abas de arquivo, na ordem de abertura', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta')).toBeTruthy());
+
+    openFile('src/app.ts');
+    openFile('src/main.ts');
+
+    const first = await screen.findByRole('tab', { name: 'Arquivo src/app.ts' });
+    const second = await screen.findByRole('tab', { name: 'Arquivo src/main.ts' });
+    const allTabs = screen.getAllByRole('tab');
+    expect(allTabs.indexOf(first)).toBeLessThan(allTabs.indexOf(second));
+    expect(useUiStore.getState().codeFileTabs).toHaveLength(2);
+    expect(second.getAttribute('aria-selected')).toBe('true');
+    expect(first.getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('clicar numa aba de arquivo ativa o arquivo sem duplicar a aba', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta')).toBeTruthy());
+    openFile('src/app.ts');
+    openFile('src/main.ts');
+    const first = await screen.findByRole('tab', { name: 'Arquivo src/app.ts' });
+
+    fireEvent.click(first);
+
+    expect(useUiStore.getState().codeFileTabs).toHaveLength(2);
+    expect(useUiStore.getState().codeFileTab).toEqual({ workspaceId: 'ws-1', path: 'src/app.ts' });
+    expect(useUiStore.getState().codeView).toBe('file');
+    expect(first.getAttribute('aria-selected')).toBe('true');
+    expect(tab('Arquivo src/main.ts').getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('abrir o mesmo arquivo de novo só ativa a aba que já existe', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta')).toBeTruthy());
+
+    openFile('src/app.ts');
+    openFile('src/app.ts');
+
+    expect(useUiStore.getState().codeFileTabs).toHaveLength(1);
+    expect(screen.getAllByRole('tab', { name: 'Arquivo src/app.ts' })).toHaveLength(1);
+  });
+
+  it('X na aba ativa ativa e foca a vizinha da direita', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta')).toBeTruthy());
+    openFile('src/a.ts');
+    openFile('src/b.ts');
+    openFile('src/c.ts');
+    const middle = await screen.findByRole('tab', { name: 'Arquivo src/b.ts' });
+
+    fireEvent.click(middle);
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar b.ts' }));
+
+    const right = screen.getByRole('tab', { name: 'Arquivo src/c.ts' });
+    expect(useUiStore.getState().codeFileTabs).toHaveLength(2);
+    expect(useUiStore.getState().codeFileTab).toEqual({ workspaceId: 'ws-1', path: 'src/c.ts' });
+    expect(right.getAttribute('aria-selected')).toBe('true');
+    await waitFor(() => expect(document.activeElement).toBe(right));
+  });
+
+  it('X numa aba de segundo plano mantém a aba ativa e a view', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta')).toBeTruthy());
+    openFile('src/a.ts');
+    openFile('src/b.ts');
+    await screen.findByRole('tab', { name: 'Arquivo src/b.ts' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar a.ts' }));
+
+    expect(useUiStore.getState().codeFileTabs).toHaveLength(1);
+    expect(useUiStore.getState().codeFileTab).toEqual({ workspaceId: 'ws-1', path: 'src/b.ts' });
+    expect(useUiStore.getState().codeView).toBe('file');
+    await waitFor(() => expect(document.activeElement).toBe(tab('Arquivo src/b.ts')));
+  });
+
+  it('o teclado atravessa as abas de arquivo na ordem e para no diff', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta')).toBeTruthy());
+    openFile('src/a.ts');
+    openFile('src/b.ts');
+    const first = await screen.findByRole('tab', { name: 'Arquivo src/a.ts' });
+    const second = await screen.findByRole('tab', { name: 'Arquivo src/b.ts' });
+    act(() => {
+      useUiStore.getState().openCodeDiff({
+        workspaceId: 'ws-1',
+        path: 'src/a.ts',
+        staged: false,
+        knownDiff: '@@ -1 +1 @@\n-a\n+b',
+      });
+    });
+    const diff = await screen.findByRole('tab', { name: 'Diff de src/a.ts' });
+
+    tab('Sessão aberta').focus();
+    fireEvent.keyDown(tab('Sessão aberta'), { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(second);
+    fireEvent.keyDown(second, { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(diff);
   });
 });

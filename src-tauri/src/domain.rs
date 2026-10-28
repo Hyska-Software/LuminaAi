@@ -1378,13 +1378,13 @@ pub struct WorkspaceFileEntry {
     pub children: Vec<WorkspaceFileEntry>,
 }
 
-/// Conteúdo de um arquivo do workspace para prévia read-only.
+/// Conteúdo de um arquivo do workspace para prévia read-only (aba central).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileContent {
     pub path: String,
     pub text: String,
-    /// O backend truncou o conteúdo (arquivo maior que o limite de prévia).
+    /// O backend truncou o conteúdo textual (arquivo maior que o limite de prévia).
     pub truncated: bool,
     /// Tamanho total em bytes.
     pub size: u64,
@@ -1393,6 +1393,16 @@ pub struct WorkspaceFileContent {
     /// Encoding detectado quando o conteúdo não era UTF-8.
     #[serde(default)]
     pub encoding: Option<String>,
+    /// MIME inferido pela extensão para prévias binárias suportadas
+    /// (imagem/PDF). `None` para texto e binários sem prévia.
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    /// Payload base64 (sem prefixo `data:`) de imagens/PDF até o limite inline.
+    #[serde(default)]
+    pub data_base64: Option<String>,
+    /// Payload binário omitido por exceder o limite de prévia inline.
+    #[serde(default)]
+    pub preview_omitted: bool,
 }
 
 /// Arquivo no status do git (painel Alterações).

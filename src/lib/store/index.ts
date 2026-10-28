@@ -14,6 +14,7 @@ export {
   useUiStore,
   resolveDark,
   sortArtifacts,
+  codeFileTabKey,
   clampSidebarWidth,
   SIDEBAR_WIDTH_MIN,
   SIDEBAR_WIDTH_MAX,
@@ -28,6 +29,7 @@ export {
 export type {
   ArtifactPanelView,
   CodeDiffTab,
+  CodeFileTab,
   CodePanelTab,
   CodeView,
   LayoutMode,

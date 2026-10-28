@@ -79,10 +79,10 @@ O sidebar nunca lista sessões de outro workspace fora do grupo dele.
 
 - **Linha 1 (44 px)**: título da sessão (truncado), chip do workspace
   (`📁 lumina-core · ⎇ main* · ▤ 2 alterações`; clique abre menu: trocar workspace, abrir pasta,
-  copiar caminho, atualizar git), **chip de modo de permissão** (`Leitura` / `Editar` /
-  `Autônomo`, com ícone de escudo e tooltip explicando o que está liberado), chip **Plano** quando
-  ativo, **medidor de contexto** (anel/barrinha: `38% · ~72k/200k`, clique abre popover com
-  detalhes e botão "Compactar agora"), botão ligar/desligar painel (`aria-pressed`).
+  copiar caminho, atualizar git), **medidor de contexto** (anel/barrinha: `38% · ~72k/200k`, clique
+  abre popover com detalhes e botão "Compactar agora"), botão ligar/desligar painel
+  (`aria-pressed`). Os controles de **modo de permissão** e **Plano** não ficam mais no cabeçalho:
+  vivem no composer (§6).
 - **Linha 2 (36 px)**: abas das sessões abertas no Code (`role="tablist"`), `+` nova sessão, `X`
   fechar (mínimo: fecha aba, não apaga sessão). Estado persistido por workspace (localStorage via
   `uiStore`) — resolve a limitação conhecida da fase 1.
@@ -164,8 +164,10 @@ Reaproveita o `Composer` atual (draft, anexos, model picker, envio/parada) com:
 2. **`/` comandos**: popover com comandos do harness (catálogo §12), agrupados em
    *Sessão* / *Plano* / *Git* / *Contexto*. Começam como atalho de intenção (preenchem o composer)
    ou ação direta (`/compact`, `/commit`, `/review`, `/test`, `/init`, `/plan`, `/permissoes`).
-3. **Controles**: modelo (existente), **modo de permissão** (escudo: Leitura/Editar/Autônomo),
-   **Plano** (toggle), anexos (existente), enviar/parar. Tudo com `aria-label` e navegável.
+3. **Controles**: modelo (existente), anexos (existente), enviar/parar e, no lugar dos pills globais
+   de ferramentas do Chat (`Busca web`/`Criar arquivos`), os **controles da sessão**: **modo de
+   permissão** (chip/escudo: Leitura/Editar/Autônomo, menu com a descrição de cada modo e atualização
+   otimista com rollback) e **Plano** (toggle com `aria-pressed`). Tudo com `aria-label` e navegável.
 4. **Placeholder por estado**: com workspace → "Descreva a tarefa… @ para arquivos, / para comandos";
    sem workspace → "Abra uma pasta para trabalhar com código".
 5. **Atalhos**: `Ctrl/Cmd+L` foca o composer (como o Paseo), `Ctrl+Enter` envia,
@@ -184,9 +186,26 @@ acima das abas: `⎇ main ▾` (lista de branches, criar/trocar), `+N −M`, bot
 - Árvore do workspace (`role="tree"`, virtualizada): pastas expandíveis, ícones por tipo, filtro
   incremental no topo, **badges de estado git** (`M`, `A`, `D`, `U`, `!`), arquivos ignorados
   ocultos por padrão (toggle "mostrar ignorados").
-- Clique curto → prévia read-only no painel (syntax highlight, imagem, PDF via pdf.js reusando o
-  preview de artefatos); duplo clique → abrir no editor externo (`opener`); menu: copiar caminho,
-  revelar no Explorer, "adicionar ao contexto" (vira `@` no composer).
+- Clique curto → abre o arquivo em uma **aba central** (a mesma faixa de abas das sessões, como o
+  diff de Alterações): **cada arquivo aberto tem a sua própria aba** (ícone do tipo + nome truncado
+  + X para fechar), na ordem de abertura; clicar num arquivo já aberto apenas ativa a aba dele
+  (sem duplicar). O conteúdo da aba ativa ocupa o centro, read-only, com **syntax highlight e
+  números de linha** (Prism), **imagem** com zoom/ajuste à janela, **PDF via pdf.js** (páginas +
+  zoom) e estados honestos para binário, truncado e encoding; "Abrir no Explorer", "Recarregar" e
+  o botão de **quebra de linha** vivem no header. A quebra de linha é **global e persistida**: vale
+  para todos os arquivos (inclusive os que forem abertos depois) e sobrevive ao reinício do app;
+  desligada, linhas longas rolam na horizontal. Arquivos **Markdown** (`.md`/`.markdown`/`.mdx`)
+  abrem por padrão como **documento renderizado** (mesmo pipeline GFM/KaTeX + sanitização do chat,
+  largura de leitura centrada) e o header oferece a alternância **Documento ⇄ Código** para ver o
+  fonte com o mesmo highlight/linhas/wrap — a escolha é local da aba e volta ao documento ao trocar
+  de arquivo. Acima do limite inline (24 MiB) imagem/PDF viram cartão com o tamanho e a orientação
+  de abrir fora do app.
+- A antiga prévia inline do painel foi removida: a árvore ocupa o painel inteiro e o arquivo ativo
+  fica destacado nela. Fechar a aba ativa (X) ativa a vizinha (direita, depois esquerda); fechar a
+  última volta para a conversa; fechar uma aba em segundo plano não muda o centro. O gutter dos
+  números de linha usa a mesma cor de fundo do código (`--background`) nos dois temas.
+- Duplo clique → abrir no editor externo (`opener`); menu: copiar caminho, revelar no Explorer,
+  "adicionar ao contexto" (vira `@` no composer).
 - Estados: carregando (skeleton), vazio, erro de leitura, workspace grande ("mostrando 5.000 de
   38.000 arquivos — refine a busca").
 
@@ -327,7 +346,7 @@ Conflito de arquivo: aviso "o arquivo foi alterado por outra sessão".
 | --- | --- | --- |
 | `/plan [instrução]` | entra no modo Plano (com instrução opcional) | v1.0 |
 | `/plan off` | sai do modo Plano | v1.0 |
-| `/permissoes` | abre seletor de modo de permissão | v1.0 |
+| `/permissoes` | aponta o seletor de modo de permissão no composer | v1.0 |
 | `/compact` | compacta o contexto agora | v1.0 |
 | `/limpar` | limpa o composer | v1.0 |
 | `/commit` | abre o commit do painel | v1.0 |
@@ -379,7 +398,7 @@ Microcopy-chave:
 | Componente/serviço | Testes |
 | --- | --- |
 | `CodeSidebar` | workspaces (agrupamento, expansão, menu, remover sem apagar pasta), sessões por status, abrir pasta, empty state |
-| `CodeSessionHeader` | título, chip workspace (branch/sujo/ahead), modo de permissão, plano, medidor, toggle painel, abas persistidas |
+| `CodeSessionHeader` | título, chip workspace (branch/sujo/ahead), medidor, toggle painel, abas persistidas (os controles de permissão/Plano vivem no composer) |
 | `FileTree` | expandir/colapsar, filtro, badges git, virtualização, seleção, teclado, estado grande/vazio |
 | `ChangesPanel` | agrupamentos, origem, contadores, diff, reverter arquivo/turno (com confirmação), commit desabilitado/habilitado |
 | `DiffView` | unificado, linhas, hunks, binário, grande, lado-a-lado, a11y |
@@ -388,7 +407,7 @@ Microcopy-chave:
 | `PlanCard` | render markdown, aprovar/revisar cada edição/continuar, feedback, estado aprovado |
 | `AskUserCard` | opções single/multi, texto livre, ignorar, teclado |
 | `TodoCard` / `ContextMeter` / `JobsBar` | estados, contadores, ações |
-| `Composer` (novos) | `@` (busca, chips, faixa de linhas, backspace), `/` (filtro, teclado, execução), modos, placeholder por estado |
+| `Composer` (novos) | `@` (busca, chips, faixa de linhas, backspace), `/` (filtro, teclado, execução), modo de permissão/Plano no Code, placeholder por estado |
 | `chatStore` | aplicação de eventos novos (aprov/plan/todo/changes/context/job), replay de `presentation`, tolerância a eventos desconhecidos |
 | `uiStore` | workspace ativo, abas por workspace, painel/aba, persistência e merge |
 

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   addWorkspace: vi.fn(),
   setWorkspaceTrusted: vi.fn(),
   setPermissionMode: vi.fn(),
+  getCodeSessionState: vi.fn(),
   removeWorkspace: vi.fn(),
   renameWorkspace: vi.fn(),
   getWorkspace: vi.fn(),
@@ -67,6 +68,7 @@ beforeEach(() => {
   mocks.listConversations.mockResolvedValue([]);
   mocks.listArtifacts.mockResolvedValue([]);
   mocks.createConversation.mockResolvedValue(conversation());
+  mocks.getCodeSessionState.mockResolvedValue(null);
   mocks.setConversationWorkspace.mockImplementation(async (id: string, workspaceId: string | null) =>
     conversation({ id, workspaceId }),
   );
@@ -218,6 +220,9 @@ describe('useWorkspaces — abrir pasta e confiança', () => {
 
     expect(mocks.setWorkspaceTrusted).toHaveBeenCalledWith('ws-1', true);
     expect(mocks.setPermissionMode).toHaveBeenCalledWith('c-new', 'edit');
+    // O snapshot do codeStore é recarregado: os chips de permissão/Plano do
+    // composer refletem o modo aplicado assim que o diálogo fecha.
+    expect(mocks.getCodeSessionState).toHaveBeenCalledWith('c-new');
     await waitFor(() => expect(result.current.pendingTrust).toBeNull());
   });
 
