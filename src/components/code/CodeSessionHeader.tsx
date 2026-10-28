@@ -691,7 +691,7 @@ export function CodeSessionHeader() {
         </div>
       </div>
 
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
+      <div className="flex h-10 shrink-0 items-center gap-1 px-2">
         <div
           role="tablist"
           aria-label="Sessões abertas"
@@ -706,7 +706,7 @@ export function CodeSessionHeader() {
               title={NEW_SESSION_TITLE}
               tabIndex={0}
               className={cn(
-                'flex h-8 max-w-44 shrink-0 select-none items-center rounded-lg border border-border',
+                'flex h-8 max-w-44 shrink-0 select-none items-center rounded-lg',
                 'bg-surface-raised pl-2.5 pr-2 text-[12px] text-foreground shadow-sm',
                 'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
               )}
@@ -721,10 +721,10 @@ export function CodeSessionHeader() {
                   key={tab.id}
                   role="presentation"
                   className={cn(
-                    'group flex h-8 max-w-44 shrink-0 items-center rounded-lg border transition-colors duration-150',
+                    'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                     selected
-                      ? 'border-border bg-surface-raised text-foreground shadow-sm'
-                      : 'border-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                      ? 'bg-surface-raised text-foreground shadow-sm'
+                      : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
                   )}
                 >
                   <button
@@ -766,10 +766,10 @@ export function CodeSessionHeader() {
             <div
               role="presentation"
               className={cn(
-                'group flex h-8 max-w-44 shrink-0 items-center rounded-lg border transition-colors duration-150',
+                'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                 codeView === 'diff'
-                  ? 'border-border bg-surface-raised text-foreground shadow-sm'
-                  : 'border-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                  ? 'bg-surface-raised text-foreground shadow-sm'
+                  : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
               )}
             >
               <button
@@ -810,10 +810,10 @@ export function CodeSessionHeader() {
             <div
               role="presentation"
               className={cn(
-                'group flex h-8 max-w-44 shrink-0 items-center rounded-lg border transition-colors duration-150',
+                'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                 codeView === 'commits'
-                  ? 'border-border bg-surface-raised text-foreground shadow-sm'
-                  : 'border-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                  ? 'bg-surface-raised text-foreground shadow-sm'
+                  : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
               )}
             >
               <button
