@@ -13,8 +13,9 @@ export type {
   ApprovalResolution,
 } from './ApprovalCard';
 
-export { PlanCard } from './PlanCard';
+export { PlanCard, MAX_PLAN_CHARS } from './PlanCard';
 export type { PlanAction, PlanCardProps } from './PlanCard';
+export { PresentationBoundary, normalizePlanPresentation } from './ToolPresentationCard';
 
 export { TodoCard } from './TodoCard';
 export type { TodoCardProps } from './TodoCard';

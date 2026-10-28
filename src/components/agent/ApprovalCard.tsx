@@ -232,7 +232,7 @@ export function ApprovalCard({
                   {approval.title || risk.ask}
                 </h3>
                 <Badge variant={risk.tone}>{risk.label}</Badge>
-                <span className="font-mono text-[11px] text-foreground-subtle">{approval.tool}</span>
+                <span className="font-mono text-[11px] text-foreground-muted">{approval.tool}</span>
               </div>
               <div id={descriptionId} className="mt-2 flex flex-col gap-2">
                 <ApprovalDetailView
@@ -302,7 +302,7 @@ export function ApprovalCard({
                 <DropdownMenuContent align="end">
                   <DropdownMenuLabel>Lembrar para</DropdownMenuLabel>
                   {savedScope ? (
-                    <p className="px-2 pb-1 text-[11px] leading-snug text-foreground-subtle">
+                    <p className="px-2 pb-1 text-[11px] leading-snug text-foreground-muted">
                       Regra salva: {SCOPE_SHORT[savedScope]}
                     </p>
                   ) : null}
@@ -316,7 +316,7 @@ export function ApprovalCard({
                     </DropdownMenuItem>
                   ))}
                   <DropdownMenuSeparator />
-                  <p className="px-2 py-1 text-[11px] leading-snug text-foreground-subtle">
+                  <p className="px-2 py-1 text-[11px] leading-snug text-foreground-muted">
                     A regra só vale para <span className="font-mono">{approval.tool}</span>.
                   </p>
                 </DropdownMenuContent>
@@ -353,7 +353,7 @@ function riskColor(risk: RiskClass): string {
     case 'network':
       return 'text-warning';
     case 'read':
-      return 'text-foreground-subtle';
+      return 'text-foreground-muted';
     default:
       return 'text-foreground-muted';
   }
@@ -376,7 +376,7 @@ function ApprovalDetailView({
     case 'command':
       return (
         <div className="flex flex-col gap-1">
-          <p className="text-[11px] text-foreground-subtle">
+          <p className="text-[11px] text-foreground-muted">
             cwd: <span className="font-mono text-foreground-muted">{detail.workdir}</span>
           </p>
           <pre
@@ -393,7 +393,7 @@ function ApprovalDetailView({
       const hidden = detail.paths.length - visible.length;
       return (
         <div className="flex flex-col gap-1">
-          <p className="text-[11px] text-foreground-subtle">
+          <p className="text-[11px] text-foreground-muted">
             {detail.change || 'Alterar arquivos'}
           </p>
           <ul aria-label="Arquivos que serão alterados" className="flex flex-col gap-0.5">
@@ -403,7 +403,7 @@ function ApprovalDetailView({
               </li>
             ))}
             {hidden > 0 ? (
-              <li className="text-[11px] text-foreground-subtle">+{hidden} outro(s) arquivo(s)</li>
+              <li className="text-[11px] text-foreground-muted">+{hidden} outro(s) arquivo(s)</li>
             ) : null}
           </ul>
           {preview ? (
@@ -421,7 +421,7 @@ function ApprovalDetailView({
     case 'secret':
       return (
         <div className="flex flex-col gap-1">
-          <p className="text-[11px] text-foreground-subtle">Arquivo de segredo</p>
+          <p className="text-[11px] text-foreground-muted">Arquivo de segredo</p>
           <p className="break-all font-mono text-[12px] text-foreground-muted">{detail.path}</p>
           <p className="text-[11px] leading-snug text-warning">
             O conteúdo deste arquivo não é mostrado ao agente.

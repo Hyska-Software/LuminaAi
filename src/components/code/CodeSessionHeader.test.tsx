@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { AppInfo, CodeSessionState, Conversation, Settings, Workspace } from '@/lib/types';
+import type {
+  AppInfo,
+  ApprovalRequest,
+  CodeSessionState,
+  Conversation,
+  Settings,
+  Workspace,
+} from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
@@ -24,7 +31,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/api', () => ({ api: mocks }));
 
 // Imported after the API mock.
-import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { emptyCodeSession, useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import { __resetWorkspacesForTests } from './useWorkspaces';
 import { CodeSessionHeader } from './CodeSessionHeader';
 
@@ -169,6 +176,7 @@ beforeEach(() => {
     codeView: 'session',
     codeFileTab: null,
     codeFileTabs: [],
+    codePlanTab: null,
     codePanelOpen: true,
     codePanelTab: 'changes',
     activeWorkspaceId: null,
@@ -176,6 +184,7 @@ beforeEach(() => {
     artifactPanelOpen: false,
     artifacts: [],
   });
+  useCodeStore.setState({ byConversation: {} });
 });
 
 afterEach(() => {
@@ -215,11 +224,36 @@ describe('CodeSessionHeader — cabeçalho da sessão', () => {
     expect(tab('Corrigir o build').getAttribute('aria-controls')).toBe('code-session-panel');
   });
 
+  it('mostra badge "Aguardando aprovação" quando há pedido pendente', async () => {
+    const pending: ApprovalRequest[] = [
+      {
+        id: 'apr-1',
+        toolCallId: 'call-1',
+        tool: 'submit_plan',
+        title: 'Aprovar plano?',
+        detail: { kind: 'other', text: 'Resumo' },
+        risk: 'ask',
+        options: [],
+        createdAt: 1,
+      },
+    ];
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Com gate' })],
+      activeId: 'c-1',
+    });
+    useCodeStore.setState({
+      byConversation: { 'c-1': { ...emptyCodeSession('c-1'), approvals: pending } },
+    });
+
+    render(<CodeSessionHeader />);
+
+    expect(await screen.findByText('Aguardando aprovação')).toBeTruthy();
+  });
+
   it('sincroniza novas abas com a conversa ativa', async () => {
     useChatStore.setState({
       conversations: [conversation({ id: 'c-1', title: 'Primeira sessão' })],
-      activeId: 'c-1',
-    });
+      activeId: 'c-1',    });
     render(<CodeSessionHeader />);
 
     act(() => {
@@ -705,6 +739,49 @@ describe('CodeSessionHeader — aba de histórico de commits', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Fechar histórico de commits' }));
     expect(useUiStore.getState().codeCommitsTab).toBeNull();
     expect(useUiStore.getState().codeView).toBe('session');
+  });
+});
+
+describe('CodeSessionHeader — aba do plano', () => {
+  beforeEach(() => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Sessão aberta' })],
+      activeId: 'c-1',
+    });
+  });
+
+  it('mostra a aba do plano, ativa no centro e fecha pelo X', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta')).toBeTruthy());
+
+    act(() => {
+      useUiStore.getState().openCodePlan({
+        conversationId: 'c-1',
+        markdown: '# Plano aprovado',
+        title: 'Plano',
+        updatedAt: 1,
+      });
+    });
+
+    const planTab = await screen.findByRole('tab', { name: 'Plano aprovado da sessão' });
+    expect(planTab.getAttribute('aria-selected')).toBe('true');
+    expect(planTab.getAttribute('aria-controls')).toBe('code-plan-panel');
+    expect(planTab.textContent).toBe('Plano');
+    expect(tab('Sessão aberta').getAttribute('aria-selected')).toBe('false');
+
+    // Voltar para a sessão mantém a aba do plano disponível.
+    fireEvent.click(tab('Sessão aberta'));
+    expect(useUiStore.getState().codeView).toBe('session');
+    expect(useUiStore.getState().codePlanTab?.markdown).toBe('# Plano aprovado');
+    expect(planTab.getAttribute('aria-selected')).toBe('false');
+
+    fireEvent.click(planTab);
+    expect(useUiStore.getState().codeView).toBe('plan');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar plano' }));
+    expect(useUiStore.getState().codePlanTab).toBeNull();
+    expect(useUiStore.getState().codeView).toBe('session');
+    expect(screen.queryByRole('tab', { name: 'Plano aprovado da sessão' })).toBeNull();
   });
 });
 

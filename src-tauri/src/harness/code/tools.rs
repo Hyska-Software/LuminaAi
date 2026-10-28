@@ -36,7 +36,10 @@ fn default_timeout_ms(name: &str) -> Option<u64> {
         "read_file" | "list_dir" | "search_files" | "search_text" | "read_tool_output"
         | "git_status" | "git_diff" | "git_log" => Some(30_000),
         "write_file" | "edit_file" => Some(30_000),
-        "todo_write" | "submit_plan" => Some(60_000),
+        "todo_write" => Some(60_000),
+        // `submit_plan` e `ask_user` pausam para revisão humana: o timeout é o do
+        // broker (`settings.approval_timeout_secs`), nunca um teto curto do
+        // runtime (B-03; `TOOLS.md` §4 — 10 min por aprovação).
         // `run_command` aplica o `timeout_ms` dos argumentos dentro da tool.
         _ => None,
     }
@@ -145,6 +148,16 @@ mod tests {
         assert!(parse_arguments("{oops").is_err());
     }
 
+    #[test]
+    fn human_review_tools_have_no_runtime_timeout() {
+        // A revisão humana não pode morrer no teto curto do runtime (B-03).
+        assert_eq!(default_timeout_ms("submit_plan"), None);
+        assert_eq!(default_timeout_ms("ask_user"), None);
+        // Ferramentas rápidas continuam protegidas.
+        assert_eq!(default_timeout_ms("todo_write"), Some(60_000));
+        assert_eq!(default_timeout_ms("write_file"), Some(30_000));
+    }
+
     #[tokio::test]
     async fn unknown_tool_is_an_actionable_error() {
         let ctx = test_ctx();
@@ -176,7 +189,6 @@ mod tests {
             skills_roots: Vec::new(),
             emit: None,
             rules: Vec::new(),
-            plan_mode: false,
         }
     }
 }

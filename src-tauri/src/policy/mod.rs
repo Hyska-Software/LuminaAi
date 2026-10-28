@@ -129,6 +129,15 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
                 reason: "ação sensível".to_string(),
             },
         },
+        // Saída do modo Plano "revisar cada edição": leitura livre, mas toda
+        // escrita/shell pede aprovação uma a uma (`WORKBENCH.md` §5.4).
+        PermissionMode::Review => match facts.risk {
+            RiskClass::Read | RiskClass::Network => PolicyDecision::Allow,
+            _ => PolicyDecision::Ask {
+                risk: facts.risk,
+                reason: "o modo Revisar pede aprovação para cada alteração".to_string(),
+            },
+        },
         PermissionMode::Autonomous => match facts.risk {
             RiskClass::Ask => PolicyDecision::Ask {
                 risk: facts.risk,
@@ -305,6 +314,26 @@ mod tests {
         let c = ctx(PermissionMode::Edit);
         assert_eq!(decide(&c, &write()), PolicyDecision::Allow);
         assert!(matches!(decide(&c, &shell("npm test", None)), PolicyDecision::Ask { risk: RiskClass::Shell, .. }));
+    }
+
+    #[test]
+    fn review_mode_allows_reads_and_asks_for_each_write() {
+        // Saída "Aprovar e revisar cada edição" (`PLAN.md` D2).
+        let c = ctx(PermissionMode::Review);
+        assert_eq!(decide(&c, &read()), PolicyDecision::Allow);
+        assert!(matches!(
+            decide(&c, &write()),
+            PolicyDecision::Ask { risk: RiskClass::Write, .. }
+        ));
+        assert!(matches!(
+            decide(&c, &shell("npm test", None)),
+            PolicyDecision::Ask { risk: RiskClass::Shell, .. }
+        ));
+        // Destrutivo continua com risco próprio (ASK, nunca allow).
+        assert!(matches!(
+            decide(&c, &shell("rm -rf build", Some("rm -rf"))),
+            PolicyDecision::Ask { risk: RiskClass::Destroy, .. }
+        ));
     }
 
     #[test]

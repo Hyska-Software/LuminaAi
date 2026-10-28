@@ -21,6 +21,11 @@ pub struct ApprovalOutcome {
     pub decision: ApprovalDecision,
     pub scope: Option<ApprovalScope>,
     pub feedback: Option<String>,
+    /// Escolha do gate do plano: `approve_run` | `approve_review` (None nas
+    /// demais aprovações).
+    pub choice: Option<String>,
+    /// Markdown revisado pelo usuário antes de aprovar o plano.
+    pub plan_markdown: Option<String>,
 }
 
 impl ApprovalOutcome {
@@ -29,6 +34,20 @@ impl ApprovalOutcome {
             decision: ApprovalDecision::Approved,
             scope,
             feedback: None,
+            choice: None,
+            plan_markdown: None,
+        }
+    }
+
+    /// Aprovação do gate de plano, carregando a escolha (`approve_run` /
+    /// `approve_review`) e o eventual markdown revisado.
+    pub fn approved_plan(choice: Option<String>, plan_markdown: Option<String>) -> Self {
+        Self {
+            decision: ApprovalDecision::Approved,
+            scope: None,
+            feedback: None,
+            choice,
+            plan_markdown,
         }
     }
 
@@ -37,6 +56,8 @@ impl ApprovalOutcome {
             decision: ApprovalDecision::Denied,
             scope: None,
             feedback,
+            choice: None,
+            plan_markdown: None,
         }
     }
 
@@ -45,6 +66,8 @@ impl ApprovalOutcome {
             decision: ApprovalDecision::Cancelled,
             scope: None,
             feedback: None,
+            choice: None,
+            plan_markdown: None,
         }
     }
 
@@ -53,11 +76,18 @@ impl ApprovalOutcome {
             decision: ApprovalDecision::Expired,
             scope: None,
             feedback: None,
+            choice: None,
+            plan_markdown: None,
         }
     }
 
     pub fn is_approved(&self) -> bool {
         self.decision == ApprovalDecision::Approved
+    }
+
+    /// `true` quando o usuário escolheu "Aprovar e revisar cada edição".
+    pub fn review_each_edit(&self) -> bool {
+        self.choice.as_deref() == Some("approve_review")
     }
 }
 

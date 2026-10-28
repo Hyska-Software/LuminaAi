@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
+  Badge,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -27,7 +28,13 @@ import {
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { filterConversationsForLayout } from '@/lib/conversations';
-import { codeFileTabKey, useChatStore, useUiStore, type CodeFileTab } from '@/lib/store';
+import {
+  codeFileTabKey,
+  useChatStore,
+  useCodeStore,
+  useUiStore,
+  type CodeFileTab,
+} from '@/lib/store';
 import type { Conversation, Workspace } from '@/lib/types';
 import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel';
 import { cn, copyText } from '@/lib/utils';
@@ -43,6 +50,8 @@ const NEW_SESSION_TITLE = 'Nova sessão';
 const CODE_DIFF_TAB_ID = '__code_diff__';
 /** Synthetic center tab for the commit history (WORKBENCH §7.2). */
 const CODE_COMMITS_TAB_ID = '__code_commits__';
+/** Synthetic center tab for the approved plan opened from "Ver plano". */
+const CODE_PLAN_TAB_ID = '__code_plan__';
 /**
  * Prefixo dos ids das abas centrais de arquivo (§7.1) — cada arquivo aberto tem
  * a própria aba. O sufixo é a chave estável `codeFileTabKey` codificada para o
@@ -230,6 +239,7 @@ export function CodeSessionHeader() {
   const codeCommitsTab = useUiStore((state) => state.codeCommitsTab);
   const closeCodeCommits = useUiStore((state) => state.closeCodeCommits);
   const codeFileTabs = useUiStore((state) => state.codeFileTabs);
+  const codePlanTab = useUiStore((state) => state.codePlanTab);
   const codeFileTab = useUiStore((state) => state.codeFileTab);
   const closeCodeFile = useUiStore((state) => state.closeCodeFile);
   const viewportWidth = useViewportWidth();
@@ -282,6 +292,14 @@ export function CodeSessionHeader() {
     ? codeConversations.find((conversation) => conversation.id === activeId)
     : undefined;
   const title = activeConversation?.title ?? NEW_SESSION_TITLE;
+  // Aprovação/pergunta pendente precisa ser descobrível mesmo com o card fora
+  // da viewport (WORKBENCH §9: badge âmbar na aba/header).
+  const pendingApprovals = useCodeStore((state) => {
+    if (!activeId) return 0;
+    const session = state.byConversation[activeId];
+    if (!session) return 0;
+    return session.approvals.length + session.questions.length;
+  });
   const tabs: SessionTab[] =
     openIds.length === 0
       ? []
@@ -309,6 +327,10 @@ export function CodeSessionHeader() {
     }
     if (id === CODE_COMMITS_TAB_ID) {
       useUiStore.getState().setCodeView('commits');
+      return;
+    }
+    if (id === CODE_PLAN_TAB_ID) {
+      useUiStore.getState().setCodeView('plan');
       return;
     }
     if (id === NEW_SESSION_ID) return;
@@ -340,6 +362,11 @@ export function CodeSessionHeader() {
     }
     if (id === CODE_COMMITS_TAB_ID) {
       closeCodeCommits();
+      focusTab(activeId ?? undefined);
+      return;
+    }
+    if (id === CODE_PLAN_TAB_ID) {
+      useUiStore.getState().closeCodePlan();
       focusTab(activeId ?? undefined);
       return;
     }
@@ -497,6 +524,15 @@ export function CodeSessionHeader() {
           {title}
         </h2>
 
+        {pendingApprovals > 0 ? (
+          <Badge
+            variant="warning"
+            title={`${pendingApprovals} ${pendingApprovals === 1 ? 'pedido aguardando' : 'pedidos aguardando'} sua decisão`}
+          >
+            Aguardando aprovação
+          </Badge>
+        ) : null}
+
         <WorkspaceChip
           workspace={workspace}
           busy={trustBusy}
@@ -651,6 +687,50 @@ export function CodeSessionHeader() {
               </div>
             );
           })}
+          {codePlanTab ? (
+            <div
+              role="presentation"
+              className={cn(
+                'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
+                codeView === 'plan'
+                  ? 'bg-surface-raised text-foreground shadow-sm'
+                  : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+              )}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-label="Plano aprovado da sessão"
+                aria-selected={codeView === 'plan'}
+                aria-controls="code-plan-panel"
+                title="Plano aprovado da sessão"
+                tabIndex={codeView === 'plan' ? 0 : -1}
+                ref={addTabRef(CODE_PLAN_TAB_ID)}
+                onClick={() => selectTab(CODE_PLAN_TAB_ID)}
+                onKeyDown={(event) => handleTabKeyDown(event, CODE_PLAN_TAB_ID)}
+                className={cn(
+                  'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                  'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                )}
+              >
+                <FileIcon path="Plano.md" className="size-3.5 shrink-0" />
+                <span className="truncate">{codePlanTab.title ?? 'Plano'}</span>
+              </button>
+              <button
+                type="button"
+                aria-label="Fechar plano"
+                tabIndex={-1}
+                onClick={() => closeTab(CODE_PLAN_TAB_ID)}
+                className={cn(
+                  'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                  'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                )}
+              >
+                <X aria-hidden className="size-3.5" />
+              </button>
+            </div>
+          ) : null}
           {codeDiffTab ? (
             <div
               role="presentation"

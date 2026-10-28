@@ -79,8 +79,11 @@ O sidebar nunca lista sessões de outro workspace fora do grupo dele.
 
 - **Linha 1 (44 px)**: título da sessão (truncado), chip do workspace
   (`📁 lumina-core · ⎇ main* · ▤ 2 alterações`; clique abre menu: trocar workspace, abrir pasta,
-  copiar caminho, atualizar git), **medidor de contexto** (anel/barrinha: `38% · ~72k/200k`, clique
-  abre popover com detalhes e botão "Compactar agora"), botão ligar/desligar painel
+  copiar caminho, atualizar git), **medidor de contexto** atualizado em tempo real: chip com anel de
+  progresso + percentual; o clique abre um popover com `X% do contexto usado` e `~usado / janela`
+  no topo, barra segmentada e legenda com os valores de **Prompt de sistema**, **Definições de
+  ferramentas** e **Mensagens** (cores `context-system`/`context-tools`/`context-messages`), além do
+  limite de saída e da nota de compactação; botão ligar/desligar painel
   (`aria-pressed`). Os controles de **modo de permissão** e **Plano** não ficam mais no cabeçalho:
   vivem no composer (§6).
 - **Linha 2 (36 px)**: abas das sessões abertas no Code (`role="tablist"`), `+` nova sessão, `X`
@@ -100,23 +103,49 @@ Ao fim de cada turno, um separador discreto `Trabalhou por 4m 29s · 38,2k token
 +42 −7` com ações `Ver alterações` / `Reverter turno` / `Copiar resumo`. Colapsável (o conteúdo do
 turno pode ser recolhido) — resolve transcripts longos (padrão Paseo).
 
-### 5.2 Cards de tool (extensão de `AgentSteps`)
+### 5.2 Cards de tool (removidos do transcript)
 
-| Tool | Card |
+Decisão de UX (2026-10): o transcript **não renderiza mais** os cards de apresentação de tool
+(`file_change`/diff, `todos`, `plan`, `job`, `answers`). O bloco recolhível "Thinking"
+(`AgentSteps`) já mostra o que o agente está fazendo (rótulos/ícones/erros) e os estados
+operacionais ficam concentrados no popover do composer (`CodeSessionControls`):
+
+| Informação | Onde vive agora |
 | --- | --- |
-| `read_file` / `list_dir` / `search_*` | linha compacta: ícone, "Ler src/app.ts:1–80", status; expandir mostra conteúdo com syntax highlight e link "abrir no painel" |
-| `write_file` / `edit_file` | **card de diff**: caminho, `+N −M`, diff unificado (colapsado em 8 linhas + "ver completo"), botões "Reverter arquivo" e "Abrir no painel" |
-| `run_command` | terminal compacto: comando em mono, status (rodando/exited), saída com scroll e "ver saída completa"; ações "Parar" (se rodando), "Promover a job" |
-| `job_*` | card de job com barra de progresso indeterminada, tempo, botão parar |
-| `git_*` | diff/status formatado, link para o painel |
-| `todo_write` | card de lista de tarefas (checkbox/status) |
-| `submit_plan` | card grande de plano (ver 5.3) |
-| `ask_user` | card de pergunta com opções (ver 5.4) |
-| `web_search` / `fetch_url` | como hoje (citações) |
-| erro | card com código estável + mensagem acionável + "tentar de novo" quando aplicável |
+| Plano (estado/markdown/feedback) e tarefas (progresso + itens) | popover "Plano e tarefas" no composer (§6) |
+| Jobs em segundo plano (status/comando/tempo/parar) | mesma popover, seção "Trabalhos em segundo plano", com contador de jobs no pill (§7.4) |
+| Alterações de arquivos (diff, `+N −M`, reverter) | painel Alterações + fecho do turno (§5.1, §7.2) |
+| Aprovação e pergunta ao usuário | cards inline (§5.3/§5.5), pois bloqueiam o turno |
+| `ask_user` respondido, subagente e saídas longas | apenas no resumo do "Thinking"/resultados, sem card extra |
 
-Todos os cards: `summary` sempre visível; conteúdo sob demanda; nada de auto-expandir saída longa.
-Ícones/labels no mapa de `src/lib/agentTrace.ts` (adicionar as tools novas + fallback genérico).
+`ToolCallRecord.presentation` continua sendo persistido (auditoria/replay e consumidores futuros),
+mas não é mais montado no chat. `ToolPresentationCard` permanece como biblioteca disponível, sem uso
+no transcript. Ícones/labels do "Thinking" no mapa de `src/lib/agentTrace.ts` (tools novas +
+fallback genérico).
+
+#### 5.2.1 Timeline de execução (dentro do "Thinking")
+
+O bloco recolhível mostra uma **linha por chamada de tool do harness** (não o card agregado), no
+estilo `Think/Edit/Pwsh`:
+
+- Raciocínio: legenda `Pensou` (ícone `Brain`) seguida do **Markdown completo** do passo do modelo
+  (mesmo contrato de `docs/MARKDOWN.md` §4/§10, na variante compacta `variant="thinking"`: 13px,
+  `foreground-muted`; títulos, listas, tabelas, código com copiar, math e links funcionam). O texto
+  do passo é preservado **bruto** (`agentTrace.buildAgentTrace` não divide por linha em branco nem
+  remove marcadores de lista) e o caret de streaming aparece no último bloco durante a fase de
+  raciocínio.
+- Tool: ícone + **verbo** (`Leu`, `Buscou`, `Alterou`/`Criou`, `Executou`, `Atualizou as tarefas`,
+  `Plano proposto`…) + **alvo** em mono (path/comando/busca) + status + metadados:
+  - escrita/edição: `+N −M` e, ao expandir, **diff com syntax highlight** (`DiffView`);
+  - shell/verificações: badge `exit N` (verde=0, vermelho≠0), duração e, ao expandir, a **saída**
+    (mono, scroll, copiar); falhas abrem a saída automaticamente;
+  - demais tools: saída/resultado sob demanda (região rolável, `tabindex=0`).
+- Toda linha expansível usa `aria-expanded`/`aria-controls`; a linha tem nome acessível
+  (`aria-label`) com o texto completo ("Leu src/app.ts").
+- Tools do Chat (web/skills/artefatos) mantêm os grupos/resumos existentes (páginas, domínios,
+  chips) sem mudança — a diferença Chat × Code é intencional e preservada.
+
+Implementação: `AgentSteps` + `ToolCallRow` (chat) + `describeCodeTool` (`src/lib/agentTrace.ts`).
 
 ### 5.3 Aprovação (card inline)
 
@@ -142,11 +171,22 @@ Todos os cards: `summary` sempre visível; conteúdo sob demanda; nada de auto-e
 ### 5.4 Plano (modo Plano)
 
 - Card com Markdown renderizado do plano + metadados (arquivos que serão tocados, passos,
-  verificação). Ações: **Aprovar e executar** (sai do plano → Editar) / **Aprovar e revisar cada
-  edição** (sai para modo Editar com aprovação por escrita) / **Continuar planejando** (com
-  feedback livre) / Editar plano antes de aprovar (textarea auxiliar) — ver `HARNESS.md` §6.
-- Depois de aprovado, o plano permanece acessível no popover do chip "Plano" (com status por passo
-  vindo dos todos).
+  verificação). O gate é acessível (`role="alertdialog"`, foco no botão primário, `Esc`, `aria-busy`
+  enquanto envia) e possui três saídas:
+  **Aprovar e executar** (sai do Plano → **Editar**; o turno segue **no mesmo turno**) /
+  **Aprovar e revisar cada edição** (sai do Plano → **Revisar**: cada escrita pede aprovação) /
+  **Continuar planejando** (feedback livre persistido; o agente revisa e reenvia).
+- **Editar plano antes de aprovar**: textarea auxiliar (markdown, limite do backend); o texto
+  editado é o plano aprovado/persistido.
+- O draft é persistido na submissão (`plan/submitted`) e o feedback em `plan/feedback`, então
+  reabrir a sessão mostra o estado correto (planejando/aguardando revisão/aprovado).
+- Depois de aprovado, o plano permanece acessível no popover do chip "Plano" (estado, markdown e
+  status por passo vindo dos todos). O botão **Ver plano** abre o Markdown em uma **aba central** na
+  mesma faixa das abas de sessão/arquivo, usando a prévia de Markdown do `FilePreview`
+  (Documento ⇄ Código, copiar, quebra de linha global) e fechável pelo X — o conteúdo é um snapshot
+  do plano aprovado, sem passar pelo backend. O gate também rola para a viewport e o header mostra o
+  badge "Aguardando aprovação".
+- O timeout de revisão é o do broker (default 10 min), não o timeout curto da tool.
 
 ### 5.5 Pergunta ao usuário
 
@@ -166,8 +206,9 @@ Reaproveita o `Composer` atual (draft, anexos, model picker, envio/parada) com:
    ou ação direta (`/compact`, `/commit`, `/review`, `/test`, `/init`, `/plan`, `/permissoes`).
 3. **Controles**: modelo (existente), anexos (existente), enviar/parar e, no lugar dos pills globais
    de ferramentas do Chat (`Busca web`/`Criar arquivos`), os **controles da sessão**: **modo de
-   permissão** (chip/escudo: Leitura/Editar/Autônomo, menu com a descrição de cada modo e atualização
-   otimista com rollback) e **Plano** (toggle com `aria-pressed`). Tudo com `aria-label` e navegável.
+   permissão** (chip/escudo: Leitura/Editar/Revisar/Autônomo, menu com a descrição de cada modo e
+   atualização otimista com rollback), **Plano** (toggle com `aria-pressed`) e o **popover de
+   plano/tarefas** (estado do plano, markdown e status dos itens). Tudo com `aria-label` e navegável.
 4. **Placeholder por estado**: com workspace → "Descreva a tarefa… @ para arquivos, / para comandos";
    sem workspace → "Abra uma pasta para trabalhar com código".
 5. **Atalhos**: `Ctrl/Cmd+L` foca o composer (como o Paseo), `Ctrl+Enter` envia,
@@ -239,10 +280,12 @@ não existem).
 - Terminal é do **usuário**, não do agente (agente tem `run_command`/jobs) — quando o agente usa o
   mesmo processo, o card de job abre no painel.
 
-### 7.4 Jobs (fora do painel)
+### 7.4 Jobs (no composer)
 
-Faixa compacta acima do composer quando há jobs: `◐ npm run dev · 2m · [ver] [parar]`; expande
-para lista com saída ao vivo. Jobs pertencem à sessão.
+Jobs pertencem à sessão e ficam no **popover "Plano e tarefas"** do composer, junto de plano/tarefas
+(seção "Trabalhos em segundo plano": status, comando truncado, tempo e ações ver/parar). O pill
+mostra um contador de jobs quando existe algum; não há mais faixa acima do composer. Saída ao vivo
+continua acessível pelo job/terminal no painel.
 
 ## 8. Fluxos principais
 
@@ -266,9 +309,9 @@ Medida de segurança contra repo clonado malicioso (padrão Claude Code/Cursor).
 ### 8.3 Tarefa com plano
 
 `/plan Corrija o bug de arredondamento no cálculo de juros` → modo Plano ativa → agente explora
-(leitura/busca) → card de plano → **Aprovar e revisar cada edição** → agente edita (cada escrita
-gera card de diff) → roda testes com aprovação → fecho de turno com `+2 −1` → painel Alterações →
-commit.
+(leitura/busca) → gate de plano → **Aprovar e revisar cada edição** → agente edita (cada escrita
+aparece no painel Alterações e no fecho do turno; sem card de diff no chat) → roda testes com
+aprovação → fecho de turno com `+2 −1` → painel Alterações → commit.
 
 ### 8.4 Aprovação de comando
 
@@ -304,14 +347,14 @@ Conflito de arquivo: aviso "o arquivo foi alterado por outra sessão".
 | Workspace não confiável | banner "Modo leitura — confie na pasta para liberar edições" + botão |
 | Sem git | chip "sem git"; commit desabilitado com tooltip; Alterações por sessão funcionam |
 | Carregando sessão | skeleton do transcript + header; nunca spinner de página inteira |
-| Turno rodando | aba com pulso; composer vira "Parar"; jobs ao vivo; cards incrementais |
+| Turno rodando | aba com pulso; composer vira "Parar"; jobs no popover do composer; "Thinking" incremental |
 | Aguardando aprovação | badge âmbar na aba/header + card inline; notificação se app em background |
 | Erro de turno | card de erro com código + hint + "tentar de novo"; parcial preservado |
 | Provider sem credencial | gate existente do Chat (reuso) |
 | Arquivo binário/grande | cartão, sem diff |
 | Alterações vazias | "Nenhuma alteração pendente" + dica |
-| Jobs vazios | seção oculta |
-| Contexto compactado | card de sistema "Contexto compactado — 42 mensagens resumidas · ~18k liberados" |
+| Jobs vazios | mensagem no popover do composer; pill sem contador |
+| Contexto compactado | nota no popover do medidor de contexto "N mensagens resumidas" |
 | Limite de passos | aviso "Limite de passos atingido — continuar?" com botão que abre novo turno |
 | Workspace removido/renomeado no disco | banner "pasta não encontrada" + "localizar pasta" |
 | Git com conflito | aviso no painel Alterações, commit bloqueado |
@@ -324,7 +367,9 @@ Conflito de arquivo: aviso "o arquivo foi alterado por outra sessão".
   (↑/↓/←/→/Home/End/Enter).
 - Aprovação: `role="alertdialog"` no card, foco no primeiro botão, `Esc` = negar, retorno de foco ao
   composer ao resolver; anúncio `aria-live="assertive"`.
-- Cards de tool: botão de expandir com `aria-expanded`; conteúdo longo em região com `tabindex=0`.
+- Cards inline restantes (aprovação/pergunta): foco, `aria-expanded` quando expandem; conteúdo longo
+  em região com `tabindex=0`. A timeline do "Thinking" tem linhas por tool com `aria-label` completo,
+  `aria-expanded`/`aria-controls` no detalhe (diff/saída) e falhas anunciadas por texto + cor.
 - Diff: cada linha com `aria-label` ("linha 12, adicionada, ...") apenas no modo acessível; cabeçalhos
   de hunk focáveis.
 - Contraste AA em todos os tokens; nenhuma informação só por cor (badges com letra/símbolo).
@@ -406,9 +451,9 @@ Microcopy-chave:
 | `ApprovalCard` | render por tipo (comando/path/segredo), aprovar/negar/motivo/escopo, teclado, aria-live, resolução |
 | `PlanCard` | render markdown, aprovar/revisar cada edição/continuar, feedback, estado aprovado |
 | `AskUserCard` | opções single/multi, texto livre, ignorar, teclado |
-| `TodoCard` / `ContextMeter` / `JobsBar` | estados, contadores, ações |
-| `Composer` (novos) | `@` (busca, chips, faixa de linhas, backspace), `/` (filtro, teclado, execução), modo de permissão/Plano no Code, placeholder por estado |
-| `chatStore` | aplicação de eventos novos (aprov/plan/todo/changes/context/job), replay de `presentation`, tolerância a eventos desconhecidos |
+| `TodoCard` / `ContextMeter` / `JobsBar` | estados, contadores, ações (plano/tarefas/jobs no popover do composer) |
+| `Composer` (novos) | `@` (busca, chips, faixa de linhas, backspace), `/` (filtro, teclado, execução), modo de permissão/Plano no Code, popover Plano/tarefas/jobs, placeholder por estado |
+| `chatStore` | aplicação de eventos novos (aprov/plan/todo/changes/context/job), `presentation` persistida (não renderizada no transcript), tolerância a eventos desconhecidos |
 | `uiStore` | workspace ativo, abas por workspace, painel/aba, persistência e merge |
 
 ## 16. Não-objetivos desta fase (registrados)

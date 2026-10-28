@@ -402,8 +402,19 @@ O contrato completo (sintaxe suportada, decisões e matriz de testes) está em
   aceitas são apenas `http(s)`, `mailto:` e `#âncora`. O prompt (seção
   **Formatação Markdown** em `harness/prompt.rs`) orienta o modelo a preferir
   Markdown puro e nunca emitir HTML perigoso.
-- **Testes**: `src/components/chat/Markdown.test.tsx` (matriz funcional) e
-  `Markdown.security.test.tsx` (vetores XSS/atributos/URLs).
+- **Thinking do modelo**: o raciocínio visível (`ChatMessage.reasoning` e
+  `trace[].reasoning`) usa o **mesmo** renderer pela variante
+  `variant="thinking"` (modificador `.lumina-prose--thinking`: 13px,
+  `foreground-muted`, ritmo compacto), com a **mesma** sanitização/allowlist. A
+  timeline (`src/lib/agentTrace.ts` → `AgentSteps`) devolve o Markdown **bruto
+  por passo** (sem dividir por linha em branco nem remover marcadores de lista) e
+  preserva as diferenças entre layouts (Chat: resumos agrupados de tools; Code:
+  uma linha por chamada do harness). Contrato em `docs/MARKDOWN.md` §10.
+- **Testes**: `src/components/chat/Markdown.test.tsx` (matriz funcional, incluindo
+  a variante `thinking`), `Markdown.security.test.tsx` (vetores XSS/atributos/URLs
+  nas duas variantes), `src/lib/__tests__/agentTrace.test.ts` (Markdown bruto por
+  passo) e `src/components/code/CodeTranscriptThinking.test.tsx` (transcript do
+  layout Code).
 
 ## 9. UI generativa
 

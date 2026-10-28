@@ -89,6 +89,11 @@ fn permission_section(ctx: &CodeContext) -> String {
             "Editar (padrão): você pode criar e editar arquivos dentro do workspace. Comandos \
              de shell pedem aprovação do usuário antes de executar."
         }
+        PermissionMode::Review => {
+            "Revisar: você pode ler e buscar livremente, mas **cada escrita** (e comando de \
+             shell) pede aprovação do usuário antes de ser aplicada. Explique a mudança de cada \
+             arquivo de forma objetiva para facilitar a revisão."
+        }
         PermissionMode::Autonomous => {
             "Autônomo: você pode editar arquivos e executar comandos dentro do workspace. \
              Comandos destrutivos (apagar em massa, reset/clean do git, force-push, publicar \
@@ -180,7 +185,7 @@ fn project_section(ctx: &CodeContext) -> String {
     out
 }
 
-fn planning_section(ctx: &CodeContext) -> String {
+fn planning_section(ctx: &CodeContext, has_todo_write: bool) -> String {
     let mut out = String::from("# Plano e tarefas\n\n");
     if let Some(plan) = &ctx.plan {
         let status = match plan.state {
@@ -190,6 +195,12 @@ fn planning_section(ctx: &CodeContext) -> String {
             PlanState::Approved => "aprovado",
         };
         out.push_str(&format!("Plano da sessão: {status}.\n"));
+        if let Some(feedback) = plan.feedback.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+            out.push_str(&format!(
+                "\nFeedback do usuário sobre o último plano (incorpore antes de reenviar):\n> {}\n",
+                truncate(feedback, 2_000).replace('\n', "\n> ")
+            ));
+        }
         if let Some(markdown) = &plan.markdown {
             out.push_str("\n```markdown\n");
             out.push_str(&truncate(markdown, 8_000));
@@ -206,10 +217,12 @@ fn planning_section(ctx: &CodeContext) -> String {
             };
             out.push_str(&format!("- {mark} {}\n", todo.content));
         }
-    } else {
+    } else if has_todo_write {
+        // Subagentes não têm `todo_write` no catálogo: não os instrua a usá-lo.
         out.push_str(
             "Para tarefas com 3+ passos, mantenha uma lista com `todo_write` e atualize o \
-             status conforme avança (uma tarefa `in_progress` por vez).\n",
+             status conforme avança (uma tarefa `in_progress` por vez); envie `[]` para limpar \
+             quando terminar.\n",
         );
     }
     out
@@ -276,7 +289,10 @@ pub fn build_system_prompt(
         out.push_str(&project);
         out.push('\n');
     }
-    out.push_str(&planning_section(ctx));
+    // A orientação de `todo_write` só faz sentido quando a tool está no catálogo
+    // do turno (subagentes são somente leitura e não a recebem — B-11).
+    let has_todo_write = tools.iter().any(|tool| tool.name == "todo_write");
+    out.push_str(&planning_section(ctx, has_todo_write));
     out.push('\n');
     out.push_str(response_section());
     out
@@ -394,6 +410,38 @@ mod tests {
         assert!(prompt.contains("Modo Plano ativo"));
         assert!(prompt.contains("Autônomo"));
         assert!(!prompt.contains("Leitura (somente leitura)"));
+
+        context.permission_mode = PermissionMode::Review;
+        let prompt = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        assert!(prompt.contains("Revisar:"), "{prompt}");
+        assert!(prompt.contains("cada escrita"), "{prompt}");
+    }
+
+    #[test]
+    fn planning_section_renders_feedback_and_respects_the_tool_catalog() {
+        let mut context = ctx();
+        context.plan_mode = true;
+        context.todos = Vec::new();
+        context.plan = Some(crate::domain::PlanView {
+            state: PlanState::Planning,
+            markdown: Some("# Draft".into()),
+            feedback: Some("inclua testes de erro".into()),
+            updated_at: 1,
+        });
+        // Sem `todo_write` no catálogo (subagente): não instrui a usar a tool.
+        let prompt = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        assert!(prompt.contains("Plano da sessão: em planejamento"), "{prompt}");
+        assert!(prompt.contains("inclua testes de erro"), "{prompt}");
+        assert!(!prompt.contains("mantenha uma lista com `todo_write`"), "{prompt}");
+
+        // Com a tool no catálogo: orientação presente.
+        let tools = [ToolPrompt {
+            name: "todo_write",
+            guidance: "Mantenha a lista.",
+        }];
+        let prompt = build_system_prompt(&model(), &context, &tools, "Windows", "2026-10-27");
+        assert!(prompt.contains("mantenha uma lista com `todo_write`"), "{prompt}");
+        assert!(prompt.contains("envie `[]` para limpar"), "{prompt}");
     }
 
     #[test]

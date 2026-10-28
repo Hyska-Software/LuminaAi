@@ -151,7 +151,7 @@ export interface ToolCallRecord {
 
 export type TurnProfile = 'chat' | 'code';
 
-export type PermissionMode = 'read_only' | 'edit' | 'autonomous';
+export type PermissionMode = 'read_only' | 'edit' | 'review' | 'autonomous';
 
 export type RiskClass =
   | 'read'
@@ -293,9 +293,14 @@ export interface TodoItem {
 
 export type PlanState = 'inactive' | 'planning' | 'reviewing' | 'approved';
 
+/** Ação escolhida no gate de aprovação do plano (`respond_approval.choice`). */
+export type PlanApprovalChoice = 'approve_run' | 'approve_review';
+
 export interface PlanView {
   state: PlanState;
   markdown?: string | null;
+  /** Feedback do usuário após "Continuar planejando" (persistido no backend). */
+  feedback?: string | null;
   updatedAt: number;
 }
 
@@ -327,6 +332,13 @@ export interface ChangesSummary {
   removed?: number;
 }
 
+/** Quebra estimada do contexto (tokens) para o medidor/popover. */
+export interface ContextBreakdown {
+  systemPrompt: number;
+  toolDefinitions: number;
+  messages: number;
+}
+
 /** Medidor de contexto do turno/sessão. */
 export interface ContextStats {
   used: number;
@@ -335,6 +347,8 @@ export interface ContextStats {
   percent: number;
   compacted?: number;
   messages?: number;
+  /** Ausente em payloads antigos persistidos antes do breakdown. */
+  breakdown?: ContextBreakdown;
 }
 
 export type JobStatus = 'running' | 'done' | 'failed' | 'killed';
@@ -369,7 +383,11 @@ export type ToolPresentation =
   | { kind: 'file_change'; path: string; change: FileChangeKind; added: number; removed: number; diff?: string | null }
   | { kind: 'changes'; turnId?: string | null; files: FileChangeSummary[]; added: number; removed: number }
   | { kind: 'todos'; items: TodoItem[] }
-  | { kind: 'plan'; plan: PlanView }
+  /**
+   * Plano flat (`TOOLS.md` §1.1): o backend emite o `PlanView` achatado com
+   * `kind`. O renderer normaliza payloads antigos (sem `markdown`) sem quebrar.
+   */
+  | { kind: 'plan'; state: PlanState; markdown?: string | null; feedback?: string | null; updatedAt?: number }
   | { kind: 'job'; job: JobView }
   | { kind: 'answers'; answers: AskUserAnswer[]; skipped: boolean }
   | { kind: 'subagent'; description: string; subagentType: string }

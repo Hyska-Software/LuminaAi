@@ -105,8 +105,6 @@ pub struct ToolCtx {
     pub emit: Option<Arc<dyn crate::harness::EventEmitter>>,
     /// Regras "sempre permitir/negar" aplicáveis a esta sessão/workspace.
     pub rules: Vec<crate::domain::ApprovalRule>,
-    /// Modo Plano ativo (mutação negada pela política).
-    pub plan_mode: bool,
     /// Jobs de processo em background (`AppState::jobs`; `None` em testes que
     /// não exercitam shell).
     pub jobs: Option<Arc<crate::jobs::JobRegistry>>,
@@ -749,7 +747,6 @@ mod tests {
         let ctx = test_ctx();
         assert!(ctx.workspace_root().is_some());
         assert!(ctx.policy_rules().is_empty());
-        assert!(!ctx.plan_mode);
     }
 
     fn test_ctx() -> ToolCtx {
@@ -772,7 +769,6 @@ mod tests {
             observed: None,
             emit: None,
             rules: Vec::new(),
-            plan_mode: false,
             jobs: None,
             questions: None,
         mcp: None,

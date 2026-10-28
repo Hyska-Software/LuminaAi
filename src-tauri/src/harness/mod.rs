@@ -626,6 +626,143 @@ async fn run_provider_stream(
     }
 }
 
+/// Composição do system prompt do passo com as notas de mudança de modo
+/// acumuladas no turno. Sem notas, devolve o prompt base inalterado.
+fn compose_system_prompt(base: &str, notes: &[String]) -> String {
+    if notes.is_empty() {
+        return base.to_string();
+    }
+    format!("{base}\n\n{}", notes.join("\n\n"))
+}
+
+/// Rótulo curto do modo de permissão para a nota do prompt.
+fn permission_mode_label(mode: crate::domain::PermissionMode) -> &'static str {
+    match mode {
+        crate::domain::PermissionMode::ReadOnly => "Leitura (somente leitura)",
+        crate::domain::PermissionMode::Edit => "Editar",
+        crate::domain::PermissionMode::Review => "Revisar (cada escrita pede aprovação)",
+        crate::domain::PermissionMode::Autonomous => "Autônomo",
+    }
+}
+
+/// Nota injetada no system prompt do próximo passo quando o modo Plano ou o
+/// modo de permissão mudam no meio do turno (`HARNESS.md` §6.1 / D7). Sem isso
+/// o modelo continuaria agindo pelo estado do começo do turno.
+fn mode_update_note(
+    previous_plan_mode: bool,
+    plan_mode: bool,
+    previous_mode: crate::domain::PermissionMode,
+    mode: crate::domain::PermissionMode,
+) -> String {
+    let mut lines = vec!["# Atualização de permissões".to_string(), String::new()];
+    if plan_mode != previous_plan_mode {
+        if plan_mode {
+            lines.push(
+                "O **modo Plano foi ativado** pelo usuário: não altere arquivos nem execute \
+                 comandos mutantes; use `submit_plan` quando o plano estiver pronto."
+                    .to_string(),
+            );
+        } else {
+            lines.push(
+                "O **modo Plano foi desativado** (plano aprovado ou revisão cancelada): você \
+                 pode trabalhar no workspace conforme o modo de permissão atual."
+                    .to_string(),
+            );
+        }
+    }
+    if mode != previous_mode {
+        lines.push(format!(
+            "O modo de permissão agora é **{}**.",
+            permission_mode_label(mode)
+        ));
+    }
+    lines.join("\n")
+}
+
+/* ------------------------------------------------------------------ */
+/* Medidor de contexto (HARNESS.md §10.1)                              */
+/* ------------------------------------------------------------------ */
+
+/// Caracteres do histórico neutral que vão no request: texto + reasoning +
+/// argumentos das tool calls. Imagens ficam **fora** da conta por ora (o custo
+/// em tokens não segue `chars/4`); o breakdown é uma estimativa, corrigida pelo
+/// `usage.input_tokens` real.
+fn history_request_chars(history: &[HistoryMessage]) -> usize {
+    history
+        .iter()
+        .map(|message| {
+            let mut chars = message.text.chars().count();
+            if let Some(reasoning) = &message.reasoning {
+                chars += reasoning.chars().count();
+            }
+            for call in &message.tool_calls {
+                chars += call.name.chars().count() + call.arguments.chars().count();
+            }
+            chars
+        })
+        .sum()
+}
+
+/// Tool calls declaradas no histórico (overhead de 16 tokens por call).
+fn history_tool_call_count(history: &[HistoryMessage]) -> u32 {
+    let count: usize = history
+        .iter()
+        .map(|message| message.tool_calls.len())
+        .sum();
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+/// Caracteres das definições wire das tools (nome + descrição + JSON Schema).
+fn tool_definition_chars(definitions: &[crate::providers::ToolDefinition]) -> usize {
+    definitions
+        .iter()
+        .map(|tool| {
+            tool.name.chars().count()
+                + tool.description.chars().count()
+                + tool.parameters.to_string().chars().count()
+        })
+        .sum()
+}
+
+/// Estimativa do medidor para o request montado a partir de `history` +
+/// `system_prompt` + `tool_definitions`.
+fn context_stats_estimate(
+    history: &[HistoryMessage],
+    system_prompt: &str,
+    tool_definitions: &[crate::providers::ToolDefinition],
+    model: &ModelInfo,
+    compacted: u32,
+) -> crate::domain::ContextStats {
+    code::session::estimate_context(
+        system_prompt.chars().count(),
+        history_request_chars(history),
+        tool_definition_chars(tool_definitions),
+        model.context_window,
+        model.max_output.clamp(1_024, 32_768),
+        u32::try_from(history.len()).unwrap_or(u32::MAX),
+        history_tool_call_count(history),
+        compacted,
+    )
+}
+
+/// Emite e persiste a estimativa do medidor de contexto.
+///
+/// Sem coalescing artificial além do natural: um evento no início do turno, um
+/// por passo (antes do request), um calibrado pelo uso real de cada passo e o
+/// fecho. O snapshot tem o último valor persistido (`context/stats`).
+fn emit_context_stats(
+    db: &Db,
+    emitter: &Arc<dyn EventEmitter>,
+    conversation_id: &str,
+    turn_id: &str,
+    stats: crate::domain::ContextStats,
+) {
+    if let Err(error) = code::session::save_context_stats(db, conversation_id, turn_id, &stats) {
+        eprintln!("lumina: falha ao salvar contexto da sessão: {error:#}");
+    }
+    emitter.emit(TurnEvent::ContextStats { stats });
+}
+
 /// Runs a full conversational turn:
 /// 1. persists the user message,
 /// 2. builds context (system prompt + attachments + history),
@@ -739,16 +876,6 @@ pub async fn run_turn(
             assistant_message_id: assistant_message.id.clone(),
         },
     );
-    if profile == TurnProfile::Code {
-        emit(
-            &on_event,
-            TurnEvent::ProfileChanged {
-                profile: profile.as_str().to_string(),
-                permission_mode: conversation.permission_mode.as_str().to_string(),
-                plan_mode: false,
-            },
-        );
-    }
 
     /* ---------------------------------------------------------------- */
     /* 4. Build the neutral history + system prompt                      */
@@ -823,9 +950,22 @@ pub async fn run_turn(
     // Perfil Code: contexto do workspace (git/projeto/AGENTS.md/árvore) e as
     // regras de aprovação aplicáveis à sessão. O Chat não paga esse custo.
     let code_context = match profile {
-        TurnProfile::Code => Some(code::context::build(&deps.db, &conversation, true).await),
+        TurnProfile::Code => Some(code::context::build(&deps.db, &conversation).await),
         TurnProfile::Chat => None,
     };
+    // O evento inicial do perfil Code carrega o estado **real** da sessão
+    // (B-05: o modo Plano era enviado como `false` fixo e o chip dessincronizava
+    // durante todo o turno).
+    if let (TurnProfile::Code, Some(code_ctx)) = (profile, code_context.as_ref()) {
+        emit(
+            &on_event,
+            TurnEvent::ProfileChanged {
+                profile: profile.as_str().to_string(),
+                permission_mode: code_ctx.permission_mode.as_str().to_string(),
+                plan_mode: code_ctx.plan_mode,
+            },
+        );
+    }
     let code_rules = if profile == TurnProfile::Code {
         deps.db
             .list_approval_rules_for_context(
@@ -938,7 +1078,6 @@ pub async fn run_turn(
             observed: deps.observed.clone(),
             emit: Some(on_event.clone()),
             rules: code_rules.clone(),
-            plan_mode: code_ctx.plan_mode,
             jobs: deps.jobs.clone(),
             questions: deps.questions.clone(),
             mcp: deps.mcp.clone(),
@@ -952,6 +1091,23 @@ pub async fn run_turn(
         }),
         _ => None,
     };
+
+    // Medidor de contexto (HARNESS.md §10.1): o perfil Code emite/persiste uma
+    // estimativa logo no início do turno e a recalibra com o uso real a cada
+    // passo. `compacted_messages` vem da projeção (`context/compacted`) e é
+    // atualizado quando a compactação automática roda.
+    let mut compacted_messages = 0u32;
+    if profile == TurnProfile::Code {
+        compacted_messages = code::session::compacted_messages(&deps.db, &conversation.id);
+        let stats = context_stats_estimate(
+            &history,
+            &system_prompt,
+            &tool_definitions,
+            &model,
+            compacted_messages,
+        );
+        emit_context_stats(&deps.db, &on_event, &conversation.id, &tool_turn_id, stats);
+    }
 
     /* ---------------------------------------------------------------- */
     /* 5. Agent loop                                                     */
@@ -969,6 +1125,18 @@ pub async fn run_turn(
     let mut replay_steps: Vec<ReplayStep> = Vec::new();
     let mut cancelled = false;
     let mut turn_failure: Option<TurnFailure> = None;
+    // Estado de modo observado pelo loop: comparado a cada passo para avisar a
+    // UI e o modelo quando o Plano/`permissões` mudam no meio do turno
+    // (B-02/D7). As notas viram texto adicional no system prompt do passo.
+    let mut observed_plan_mode = code_context
+        .as_ref()
+        .map(|context| context.plan_mode)
+        .unwrap_or(false);
+    let mut observed_permission_mode = code_context
+        .as_ref()
+        .map(|context| context.permission_mode)
+        .unwrap_or(conversation.permission_mode);
+    let mut mode_notes: Vec<String> = Vec::new();
 
     while step_number < options.max_steps {
         if cancel.is_cancelled() {
@@ -979,7 +1147,7 @@ pub async fn run_turn(
         // aperta (resumo por chamada auxiliar; falha não derruba o turno).
         if profile == TurnProfile::Code && settings.auto_compact {
             let covered = u32::try_from(messages.len()).unwrap_or(u32::MAX);
-            let _ = code::compaction::maybe_compact(
+            let compacted = code::compaction::maybe_compact(
                 &deps,
                 &provider.id,
                 &model.id,
@@ -994,9 +1162,73 @@ pub async fn run_turn(
                 &cancel,
             )
             .await;
+            if compacted.is_some() {
+                // `covered` é o `to_seq` do resumo (total de mensagens cobertas,
+                // não um delta); o fold de `context/compacted` usa o último.
+                compacted_messages = covered;
+            }
         }
         step_number += 1;
         emit(&on_event, TurnEvent::StepStarted { step: step_number });
+
+        // Revalida o estado de modo a cada passo: a aprovação do plano (ou o
+        // chip de permissões) pode ter mudado o modo no meio do turno. A
+        // política lê o DB por chamada; aqui só mantemos a UI e o modelo
+        // informados (HARNESS §6.1 / B-02 / D7).
+        if profile == TurnProfile::Code {
+            let live_plan_mode = code::session::plan_mode_active(&deps.db, &conversation.id)
+                .unwrap_or(observed_plan_mode);
+            let live_permission_mode = deps
+                .db
+                .get_conversation(&conversation.id)
+                .ok()
+                .flatten()
+                .map(|current| current.permission_mode)
+                .unwrap_or(observed_permission_mode);
+            if live_plan_mode != observed_plan_mode
+                || live_permission_mode != observed_permission_mode
+            {
+                emit(
+                    &on_event,
+                    TurnEvent::ProfileChanged {
+                        profile: profile.as_str().to_string(),
+                        permission_mode: live_permission_mode.as_str().to_string(),
+                        plan_mode: live_plan_mode,
+                    },
+                );
+                mode_notes.push(mode_update_note(
+                    observed_plan_mode,
+                    live_plan_mode,
+                    observed_permission_mode,
+                    live_permission_mode,
+                ));
+                observed_plan_mode = live_plan_mode;
+                observed_permission_mode = live_permission_mode;
+            }
+        }
+        let step_system_prompt = compose_system_prompt(&system_prompt, &mode_notes);
+
+        // Estimativa do request prestes a rodar: a UI recebe o medidor em tempo
+        // real a cada passo. Guardamos o valor para calibrar com o
+        // `usage.input_tokens` quando o provedor responder.
+        let mut step_context_stats: Option<crate::domain::ContextStats> = None;
+        if profile == TurnProfile::Code {
+            let stats = context_stats_estimate(
+                &history,
+                &step_system_prompt,
+                &tool_definitions,
+                &model,
+                compacted_messages,
+            );
+            emit_context_stats(
+                &deps.db,
+                &on_event,
+                &conversation.id,
+                &tool_turn_id,
+                stats.clone(),
+            );
+            step_context_stats = Some(stats);
+        }
 
         // One provider attempt may be retried once after a forced OAuth refresh
         // (401 → force_refresh → same step again).
@@ -1006,7 +1238,7 @@ pub async fn run_turn(
                 config: provider_config(&provider, &model, &credential, &payload.conversation_id),
                 protocols: protocols.clone(),
                 history: history.clone(),
-                system_prompt: system_prompt.clone(),
+                system_prompt: step_system_prompt.clone(),
                 tools: tool_definitions.clone(),
                 reasoning: reasoning.clone(),
                 max_output_tokens,
@@ -1070,8 +1302,28 @@ pub async fn run_turn(
             }
             full_reasoning.push_str(&step_reasoning);
         }
+        let step_input_tokens = step_usage
+            .as_ref()
+            .and_then(|usage| usage.input_tokens);
         if let Some(usage) = step_usage {
             merge_usage(&mut total_usage, &usage);
+        }
+        // Tempo real: o uso real do request recém-executado corrige a estimativa
+        // (`HARNESS.md` §10.1). O histórico aqui ainda é o do request — a
+        // resposta do modelo e os resultados das tools entram depois.
+        if let (Some(input_tokens), Some(estimate)) =
+            (step_input_tokens, step_context_stats.take())
+        {
+            if input_tokens > 0 {
+                let calibrated = code::session::calibrate_context(&estimate, input_tokens);
+                emit_context_stats(
+                    &deps.db,
+                    &on_event,
+                    &conversation.id,
+                    &tool_turn_id,
+                    calibrated,
+                );
+            }
         }
 
         if let Some(failure) = failure {
@@ -1228,8 +1480,9 @@ pub async fn run_turn(
                 step: step_number + 1,
             },
         );
+        let forced_system_prompt = compose_system_prompt(&system_prompt, &mode_notes);
         let forced_prompt = format!(
-            "{system_prompt}\n\n# Encerramento\n\
+            "{forced_system_prompt}\n\n# Encerramento\n\
              Você não pode chamar mais ferramentas nesta resposta. Responda agora, em Markdown, \
              usando apenas as informações já coletadas nos resultados acima. Se algum dado não \
              foi confirmado, deixe isso explícito. Não narre o processo: entregue a resposta final."
@@ -1467,31 +1720,18 @@ pub async fn run_turn(
         {
             emit(&on_event, TurnEvent::WorkspaceChanges { summary });
         }
-        let history_chars: usize = messages
-            .iter()
-            .map(|message| {
-                message.content.chars().count()
-                    + message.reasoning.as_deref().unwrap_or("").chars().count()
-            })
-            .sum();
-        let tool_chars: usize = all_tool_calls
-            .iter()
-            .map(|call| call.result.as_deref().unwrap_or("").chars().count())
-            .sum();
-        let stats = code::session::estimate_context(
-            system_prompt.chars().count(),
-            history_chars,
-            tool_chars,
-            model.context_window,
-            model.max_output.clamp(1_024, 32_768),
-            u32::try_from(messages.len()).unwrap_or(u32::MAX),
+        // Fecho: estimativa final do histórico efetivamente enviado ao modelo
+        // (substitui o cálculo antigo baseado em `messages`/`all_tool_calls`,
+        // que não refletia o request real).
+        let final_system_prompt = compose_system_prompt(&system_prompt, &mode_notes);
+        let stats = context_stats_estimate(
+            &history,
+            &final_system_prompt,
+            &tool_definitions,
+            &model,
+            compacted_messages,
         );
-        if let Err(error) =
-            code::session::save_context_stats(&deps.db, &conversation.id, &tool_turn_id, &stats)
-        {
-            eprintln!("lumina: falha ao salvar contexto da sessão: {error:#}");
-        }
-        emit(&on_event, TurnEvent::ContextStats { stats });
+        emit_context_stats(&deps.db, &on_event, &conversation.id, &tool_turn_id, stats);
         let turn_status = if cancelled {
             "cancelled"
         } else if turn_failure.is_some() {
@@ -5320,9 +5560,331 @@ mod agent_loop_tests {
                 .is_some(),
             "o turno Code grava `turn/ended` no log da sessão"
         );
-        let context = code::session::context_stats(&temp.db, &conversation.id);
-        assert!(context.is_some(), "medidor de contexto persistido");
+        let context = code::session::context_stats(&temp.db, &conversation.id)
+            .expect("medidor de contexto persistido");
+        assert_eq!(
+            context.breakdown.system_prompt
+                + context.breakdown.tool_definitions
+                + context.breakdown.messages,
+            context.used,
+            "breakdown soma `used`: {context:?}"
+        );
+        assert!(context.breakdown.system_prompt > 0, "system prompt no breakdown");
+        assert!(
+            context.breakdown.tool_definitions > 0,
+            "definições de tools no breakdown"
+        );
+        assert_eq!(
+            context.breakdown.messages,
+            (context.used - context.breakdown.system_prompt - context.breakdown.tool_definitions)
+        );
+        assert!(context.messages >= 2, "mensagens contadas: {context:?}");
+        assert_eq!(context.compacted, 0);
 
+        let _ = workspace_dir;
+    }
+
+    /// Medidor **em tempo real**: um turno Code com provider falso que reporta
+    /// `Usage.input_tokens` deve emitir `context_stats` várias vezes (início,
+    /// passo, pós-uso calibrado, fecho), com `used` calibrado pelo input real, e
+    /// o último persistido igual ao último emitido (`HARNESS.md` §10.1).
+    #[tokio::test]
+    async fn context_meter_calibrates_in_real_time_with_provider_usage() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation_with_mode(
+                "Sessão de código",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa code");
+
+        const REAL_INPUT_TOKENS: u32 = 9_000;
+        let streamer: ProviderStreamer = Arc::new(move |_request, sink| {
+            Box::pin(async move {
+                emit(
+                    &sink,
+                    ProviderEvent::Usage(UsageInfo {
+                        input_tokens: Some(REAL_INPUT_TOKENS),
+                        output_tokens: Some(120),
+                        ..Default::default()
+                    }),
+                );
+                text_stream(&sink, "Resposta final com uso real.");
+                Ok(())
+            })
+        });
+        let (channel, events) = channel();
+        let mut payload = payload(&conversation, 4);
+        payload.profile = TurnProfile::Code;
+        payload.content = "Diga oi.".to_string();
+        run_turn(
+            deps(temp.db.clone(), streamer),
+            payload,
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno code");
+
+        let raw = events.lock().expect("events lock").clone();
+        let parsed: Vec<Value> = raw
+            .iter()
+            .map(|json| serde_json::from_str::<Value>(json).expect("evento JSON"))
+            .collect();
+        let stats_events: Vec<(usize, &Value)> = parsed
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| event["type"] == "context_stats")
+            .map(|(index, event)| (index, &event["stats"]))
+            .collect();
+        assert!(
+            stats_events.len() >= 2,
+            "medidor deve emitir em tempo real (eventos: {})",
+            stats_events.len()
+        );
+        let done_index = parsed
+            .iter()
+            .position(|event| event["type"] == "done")
+            .expect("evento done");
+        assert!(
+            stats_events.last().expect("stats").0 < done_index,
+            "último context_stats deve preceder o `done`"
+        );
+
+        // O evento calibrado usa exatamente o `usage.input_tokens` real.
+        let calibrated = stats_events
+            .iter()
+            .find(|(_, stats)| stats["used"] == REAL_INPUT_TOKENS)
+            .map(|(index, stats)| (*index, *stats))
+            .expect("estimativa calibrada pelo input real");
+        assert!(calibrated.0 < done_index);
+        assert_eq!(
+            calibrated.1["breakdown"]["systemPrompt"].as_u64().unwrap()
+                + calibrated.1["breakdown"]["toolDefinitions"].as_u64().unwrap()
+                + calibrated.1["breakdown"]["messages"].as_u64().unwrap(),
+            u64::from(REAL_INPUT_TOKENS),
+            "breakdown calibrado soma o uso real"
+        );
+
+        // Último emitido == último persistido (snapshot consistente).
+        let persisted = code::session::context_stats(&temp.db, &conversation.id)
+            .expect("medidor persistido");
+        let last_emitted = stats_events.last().expect("último evento").1;
+        // Compara o JSON como o renderer vê: `percent` é f32 e o valor persistido
+        // passa por to_string/parse (mesma representação do evento).
+        let persisted_json = serde_json::to_string(&persisted).expect("serializa stats");
+        let expected: Value = serde_json::from_str(&persisted_json).expect("parse stats");
+        assert_eq!(
+            last_emitted, &expected,
+            "último persistido deve ser o último emitido (emitido={last_emitted} persistido={expected})"
+        );
+        assert_eq!(
+            persisted.breakdown.system_prompt
+                + persisted.breakdown.tool_definitions
+                + persisted.breakdown.messages,
+            persisted.used
+        );
+    }
+
+    /// B-02/D7 de ponta a ponta: um plano aprovado no **mesmo turno** muda o
+    /// modo (Editar); a política relê o DB e o passo seguinte consegue escrever;
+    /// o loop avisa o modelo (nota no system prompt) e a UI (`ProfileChanged`).
+    #[tokio::test]
+    async fn plan_approval_unlocks_mutations_in_the_same_code_turn() {
+        let temp = TempDb::new();
+        let workspace_dir = std::env::temp_dir().join(format!(
+            "lumina-code-plan-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
+        let workspace = temp
+            .db
+            .create_workspace("demo", &workspace_dir.to_string_lossy())
+            .expect("workspace");
+        temp.db
+            .set_workspace_trusted(&workspace.id, true)
+            .expect("confiar");
+        let conversation = temp
+            .db
+            .create_conversation_with_mode(
+                "Sessão de código",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa code");
+        temp.db
+            .set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("vincular workspace");
+        // O turno começa em modo Plano.
+        code::session::set_plan_mode(&temp.db, &conversation.id, true).expect("modo plano");
+
+        let approvals = Arc::new(crate::policy::approval::ApprovalRegistry::new());
+        let responder_registry = approvals.clone();
+        let responder = tokio::spawn(async move {
+            for _ in 0..2000 {
+                if let Some(request) = responder_registry.pending_requests().first() {
+                    let _ = responder_registry.resolve(
+                        &request.id,
+                        crate::policy::approval::ApprovalOutcome::approved_plan(
+                            Some("approve_run".to_string()),
+                            None,
+                        ),
+                    );
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            panic!("a aprovação do plano nunca foi registrada");
+        });
+
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                requests.lock().expect("requests lock").push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    match current {
+                        0 => {
+                            let arguments = serde_json::json!({
+                                "plan": "# Plano\n1. Criar src/novo.ts"
+                            })
+                            .to_string();
+                            emit(
+                                &sink,
+                                ProviderEvent::ToolCallStart {
+                                    index: 0,
+                                    id: "call-plan".to_string(),
+                                    name: "submit_plan".to_string(),
+                                },
+                            );
+                            emit(
+                                &sink,
+                                ProviderEvent::ToolCallArgsDelta {
+                                    index: 0,
+                                    delta: arguments.clone(),
+                                },
+                            );
+                            emit(
+                                &sink,
+                                ProviderEvent::ToolCallDone { index: 0, arguments },
+                            );
+                            emit(&sink, ProviderEvent::Done);
+                        }
+                        1 => {
+                            let arguments = serde_json::json!({
+                                "path": "src/novo.ts",
+                                "content": "export const a = 1;\n"
+                            })
+                            .to_string();
+                            emit(
+                                &sink,
+                                ProviderEvent::ToolCallStart {
+                                    index: 0,
+                                    id: "call-write".to_string(),
+                                    name: "write_file".to_string(),
+                                },
+                            );
+                            emit(
+                                &sink,
+                                ProviderEvent::ToolCallArgsDelta {
+                                    index: 0,
+                                    delta: arguments.clone(),
+                                },
+                            );
+                            emit(
+                                &sink,
+                                ProviderEvent::ToolCallDone { index: 0, arguments },
+                            );
+                            emit(&sink, ProviderEvent::Done);
+                        }
+                        _ => text_stream(&sink, "Plano executado e arquivo criado."),
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.approvals = Some(approvals);
+        harness.observed = Some(Arc::new(code::observed::ObservedFiles::new()));
+        harness.jobs = Some(Arc::new(crate::jobs::JobRegistry::new()));
+        let (channel, events) = channel();
+        let mut payload = payload(&conversation, 6);
+        payload.profile = TurnProfile::Code;
+        payload.content = "Monte um plano e implemente.".to_string();
+
+        let result = run_turn(
+            harness,
+            payload,
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno code completo");
+        responder.await.expect("responder da aprovação");
+
+        // 1) O passo seguinte executou a escrita no MESMO turno (B-02).
+        assert!(
+            workspace_dir.join("src/novo.ts").exists(),
+            "write_file devia ter gravado no mesmo turno"
+        );
+        let write = result
+            .assistant_message
+            .tool_calls
+            .iter()
+            .find(|call| call.name == "write_file")
+            .expect("chamada write_file");
+        assert_eq!(write.status, ToolCallStatus::Done, "{:?}", write.result);
+
+        // 2) O prompt do passo 2 avisa o modelo da mudança de modo (D7).
+        let requests = requests.lock().expect("requests lock").clone();
+        assert_eq!(requests.len(), 3, "submit_plan → write_file → resposta final");
+        assert!(
+            requests[1]
+                .system_prompt
+                .contains("# Atualização de permissões"),
+            "{}",
+            requests[1].system_prompt
+        );
+        assert!(
+            requests[1].system_prompt.contains("modo Plano foi desativado"),
+            "{}",
+            requests[1].system_prompt
+        );
+
+        // 3) A UI recebeu `ProfileChanged` real: true no início, false depois.
+        let joined = events.lock().expect("events lock").clone().join("\n");
+        assert!(joined.contains("\"type\":\"profile_changed\""), "{joined}");
+        assert!(joined.contains("\"planMode\":true"), "{joined}");
+        assert!(joined.contains("\"planMode\":false"), "{joined}");
+        assert!(joined.contains("\"type\":\"plan_updated\""), "{joined}");
+
+        // 4) Persistência e modo final.
+        assert!(!code::session::plan_mode_active(&temp.db, &conversation.id).expect("modo"));
+        assert_eq!(
+            temp.db
+                .get_conversation(&conversation.id)
+                .expect("conversa")
+                .expect("conversa existente")
+                .permission_mode,
+            crate::domain::PermissionMode::Edit
+        );
+        assert_eq!(
+            code::session::plan_view(&temp.db, &conversation.id)
+                .expect("plano")
+                .expect("plano visível")
+                .state,
+            crate::domain::PlanState::Approved
+        );
         let _ = workspace_dir;
     }
 

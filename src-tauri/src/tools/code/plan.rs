@@ -13,14 +13,16 @@ use crate::tools::ToolOutcome;
 
 pub static TODO_WRITE_SPEC: ToolSpec = ToolSpec {
     name: "todo_write",
-    description: "Replace the session todo list. Use it to plan multi-step work, mark the active task and check tasks off as they finish.",
+    description: "Replace the session todo list. Use it to plan multi-step work, mark the active task and check tasks off as they finish. Send an empty list to clear it.",
     schema: todo_write_schema,
     parallel: ParallelClass::Exclusive,
-    risk: RiskClass::Write,
-    mutating: true,
+    // Estado de sessão (não muta o workspace): permitido no modo Plano e sem
+    // gate de política (PLAN.md D8).
+    risk: RiskClass::Read,
+    mutating: false,
     requires_workspace: false,
     profiles: &[TurnProfile::Code],
-    guidance: "Mantenha a lista de tarefas viva com `todo_write` (substitui a lista inteira): no máximo uma tarefa `in_progress`, itens curtos e concretos, e marque `completed` assim que terminar.",
+    guidance: "Mantenha a lista de tarefas viva com `todo_write` (substitui a lista inteira): no máximo uma tarefa `in_progress`, itens curtos e concretos, marque `completed` assim que terminar e envie `[]` para limpar a lista.",
 };
 
 pub static SUBMIT_PLAN_SPEC: ToolSpec = ToolSpec {

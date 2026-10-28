@@ -1,5 +1,14 @@
 import { useState } from 'react';
-import { ListChecks, Shield, ShieldAlert, ShieldCheck, type LucideIcon } from 'lucide-react';
+import {
+  FileSearch,
+  ListChecks,
+  ListTodo,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  SquareTerminal,
+  type LucideIcon,
+} from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,15 +16,20 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Tooltip,
 } from '@/components/ui';
-import { useChatStore, useCodeStore } from '@/lib/store';
+import { JobsBar, PlanCard, TodoCard } from '@/components/agent';
+import { useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import type { PermissionMode } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 /** Rótulos pt-BR do modo de permissão da sessão (WORKBENCH §4/§6). */
 const PERMISSION_LABELS: Record<PermissionMode, string> = {
   read_only: 'Leitura',
+  review: 'Revisar',
   edit: 'Editar',
   autonomous: 'Autônomo',
 };
@@ -23,19 +37,22 @@ const PERMISSION_LABELS: Record<PermissionMode, string> = {
 /** Descrições idênticas às do antigo chip do cabeçalho do Code. */
 const PERMISSION_DESCRIPTIONS: Record<PermissionMode, string> = {
   read_only: 'O agente só pode ler arquivos e consultar o workspace.',
+  review: 'O agente pode propor edições, mas cada escrita pede aprovação.',
   edit: 'O agente pode editar arquivos; comandos pedem aprovação.',
   autonomous: 'O agente pode editar e executar comandos com menos confirmações.',
 };
 
 const PERMISSION_ICONS: Record<PermissionMode, LucideIcon> = {
   read_only: Shield,
+  review: FileSearch,
   edit: ShieldCheck,
   autonomous: ShieldAlert,
 };
 
-const PERMISSION_ORDER: PermissionMode[] = ['read_only', 'edit', 'autonomous'];
+/** Ordem do menu: da permissão mais restrita para a mais ampla. */
+const PERMISSION_ORDER: PermissionMode[] = ['read_only', 'review', 'edit', 'autonomous'];
 
-/** Estilo base dos dois pills de sessão (tokens do design system). */
+/** Estilo base dos pills de sessão (tokens do design system). */
 const PILL_CLASS_NAME =
   'flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border px-2.5 text-[12.5px] font-medium text-foreground-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-60';
 
@@ -49,13 +66,11 @@ export interface CodeSessionControlsProps {
 
 /**
  * Controles de sessão do composer no layout Code (WORKBENCH §6): chip do modo
- * de permissão (Leitura/Editar/Autônomo) e toggle do modo Plano. Substituem os
- * pills globais "Busca web"/"Criar arquivos", que continuam apenas no Chat.
+ * de permissão (Leitura/Revisar/Editar/Autônomo), toggle do modo Plano e o
+ * popover "Plano e tarefas" (estado do plano + progresso dos todos).
  *
  * O snapshot da sessão vem do `codeStore` (o `chatStore` o carrega ao abrir a
- * conversa); a linha da conversa é o fallback enquanto ele não chegou. A troca
- * de permissão é otimista no store, que também faz o rollback e o toast de
- * erro — aqui só vive o estado local de "ocupado" que desabilita os pills.
+ * conversa); a linha da conversa é o fallback enquanto ele não chegou.
  */
 export function CodeSessionControls({ conversationId, className }: CodeSessionControlsProps) {
   const session = useCodeStore((state) => state.byConversation[conversationId]);
@@ -65,13 +80,27 @@ export function CodeSessionControls({ conversationId, className }: CodeSessionCo
   );
   const setPermissionMode = useCodeStore((state) => state.setPermissionMode);
   const setPlanMode = useCodeStore((state) => state.setPlanMode);
+  const killJob = useCodeStore((state) => state.killJob);
+  const refreshJobs = useCodeStore((state) => state.refreshJobs);
   const [permissionBusy, setPermissionBusy] = useState(false);
   const [planBusy, setPlanBusy] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
 
   const permissionMode = session?.permissionMode ?? fallbackPermissionMode ?? 'edit';
   const planMode = session?.planMode ?? false;
+  const plan = session?.plan ?? null;
+  const todos = session?.todos ?? [];
+  const jobs = session?.jobs ?? [];
   const PermissionIcon = PERMISSION_ICONS[permissionMode];
   const planTitle = planMode ? PLAN_TITLE_ON : PLAN_TITLE_OFF;
+  const planStateLabel =
+    plan?.state === 'planning'
+      ? 'Em preparação'
+      : plan?.state === 'reviewing'
+        ? 'Aguardando aprovação'
+        : plan?.state === 'approved'
+          ? 'Aprovado'
+          : null;
 
   const changePermissionMode = async (mode: PermissionMode) => {
     if (permissionBusy || mode === permissionMode) return;
@@ -109,7 +138,7 @@ export function CodeSessionControls({ conversationId, className }: CodeSessionCo
             <span className="truncate">{PERMISSION_LABELS[permissionMode]}</span>
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="min-w-60">
+        <DropdownMenuContent align="start" className="min-w-64">
           <DropdownMenuLabel>Modo de permissão</DropdownMenuLabel>
           {PERMISSION_ORDER.map((mode) => {
             const ModeIcon = PERMISSION_ICONS[mode];
@@ -125,7 +154,7 @@ export function CodeSessionControls({ conversationId, className }: CodeSessionCo
             );
           })}
           <DropdownMenuSeparator />
-          <p className="px-2 pb-1 text-[11px] leading-relaxed text-foreground-subtle">
+          <p className="px-2 pb-1 text-[11px] leading-relaxed text-foreground-muted">
             {PERMISSION_DESCRIPTIONS[permissionMode]}
           </p>
         </DropdownMenuContent>
@@ -134,22 +163,110 @@ export function CodeSessionControls({ conversationId, className }: CodeSessionCo
       <Tooltip content={planTitle} side="top">
         <button
           type="button"
-          aria-label="Modo Plano"
+          aria-label={`Modo Plano: ${planMode ? 'ativado' : 'desativado'}`}
           aria-pressed={planMode}
-          title={planTitle}
           disabled={planBusy}
           onClick={() => void togglePlanMode()}
           className={cn(
             PILL_CLASS_NAME,
             planMode
-              ? 'border-accent/40 bg-accent-soft text-accent hover:bg-accent-soft'
+              ? // Texto com contraste AA sobre `accent-soft` (o `text-accent` dava
+                // 4,40:1 no tema claro); o accent fica no ícone/borda.
+                'border-accent/40 bg-accent-soft text-foreground hover:bg-accent-soft'
               : 'bg-transparent',
           )}
         >
-          <ListChecks aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+          <ListChecks
+            aria-hidden
+            className={cn('size-3.5 shrink-0', planMode ? 'text-accent' : undefined)}
+            strokeWidth={1.75}
+          />
           <span className="truncate">Plano</span>
         </button>
       </Tooltip>
+
+      <Popover open={planOpen} onOpenChange={setPlanOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label="Plano, tarefas e trabalhos em segundo plano"
+            className={cn(PILL_CLASS_NAME, 'bg-transparent')}
+          >
+            <ListTodo aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+            <span className="truncate">Plano e tarefas</span>
+            {todos.length > 0 ? (
+              <span className="text-[11px] tabular-nums text-foreground-muted">
+                {todos.filter((todo) => todo.status === 'completed').length}/{todos.length}
+              </span>
+            ) : null}
+            {jobs.length > 0 ? (
+              <span
+                className="flex items-center gap-0.5 text-[11px] tabular-nums text-foreground-muted"
+                title={`${jobs.filter((job) => job.status === 'running').length} rodando · ${jobs.length} no total`}
+              >
+                <SquareTerminal aria-hidden className="size-3 shrink-0" strokeWidth={1.75} />
+                {jobs.length}
+              </span>
+            ) : null}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-80">
+          <div className="flex max-h-96 flex-col gap-2 overflow-y-auto overscroll-contain p-2">
+            {planStateLabel ? (
+              <p className="px-1 text-[11px] font-medium text-foreground-muted">
+                Plano · {planStateLabel}
+              </p>
+            ) : null}
+            {plan ? (
+              <PlanCard
+                plan={plan}
+                readOnly
+                onViewPlan={(view) => {
+                  const markdown = view.markdown?.trim();
+                  if (!markdown) return;
+                  setPlanOpen(false);
+                  // Aba central de plano (mesma faixa/prévia dos arquivos da
+                  // filetree): Markdown com alternância Documento ⇄ Código.
+                  useUiStore.getState().openCodePlan({
+                    conversationId,
+                    markdown,
+                    title: 'Plano',
+                    updatedAt: view.updatedAt,
+                  });
+                }}
+              />
+            ) : (
+              <p className="px-1 text-[12px] leading-relaxed text-foreground-muted">
+                Nenhum plano nesta sessão.
+              </p>
+            )}
+            {todos.length > 0 ? (
+              <TodoCard todos={todos} />
+            ) : (
+              <p className="px-1 text-[12px] leading-relaxed text-foreground-muted">
+                Nenhuma tarefa registrada.
+              </p>
+            )}
+            <div className="border-t border-border pt-2">
+              {jobs.length > 0 ? (
+                <JobsBar
+                  jobs={jobs}
+                  onKill={(jobId) => {
+                    void killJob(conversationId, jobId);
+                  }}
+                  onOpen={() => {
+                    void refreshJobs(conversationId);
+                  }}
+                />
+              ) : (
+                <p className="px-1 text-[12px] leading-relaxed text-foreground-muted">
+                  Nenhum trabalho em segundo plano.
+                </p>
+              )}
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }

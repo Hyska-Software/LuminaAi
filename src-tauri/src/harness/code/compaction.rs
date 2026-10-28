@@ -221,13 +221,10 @@ pub async fn maybe_compact(
     {
         eprintln!("lumina: falha ao persistir resumo de contexto: {error:#}");
     }
-    let _ = session::append(
-        &deps.db,
-        conversation_id,
-        Some(turn_id),
-        session::KIND_CONTEXT_STATS,
-        &serde_json::json!({ "compacted": true, "tokensFreed": tokens_freed }),
-    );
+    // Evento próprio de compactação (`context/compacted`): o fold do medidor lê
+    // só o total de mensagens cobertas daqui — reciclar `context/stats` com um
+    // payload parcial envenenava a projeção do `ContextStats`.
+    let _ = record_compaction(&deps.db, conversation_id, turn_id, covered, tokens_freed);
     emit.emit(TurnEvent::Compacted {
         messages: covered,
         tokens_freed: tokens_freed,
@@ -236,6 +233,25 @@ pub async fn maybe_compact(
         tokens_freed,
         summary_chars: summary.chars().count(),
     })
+}
+
+/// Persiste o fato de compactação para a projeção do medidor
+/// (`context/compacted` → [`session::compacted_messages`]). O evento
+/// `TurnEvent::Compacted` para a UI é emitido pelo chamador.
+pub fn record_compaction(
+    db: &Db,
+    conversation_id: &str,
+    turn_id: &str,
+    covered: u32,
+    tokens_freed: u32,
+) -> anyhow::Result<()> {
+    session::append(
+        db,
+        conversation_id,
+        Some(turn_id),
+        session::KIND_CONTEXT_COMPACTED,
+        &serde_json::json!({ "messages": covered, "tokensFreed": tokens_freed }),
+    )
 }
 
 /// Aplica um resumo persistido ao histórico reconstruído no início do turno.
@@ -322,5 +338,15 @@ mod tests {
         assert!(over_threshold(80_000, 100_000));
         assert!(!over_threshold(10_000, 100_000));
         assert!(!over_threshold(1, 0));
+    }
+
+    #[test]
+    fn compaction_event_feeds_the_meter_projection_without_poisoning_stats() {
+        let db = Db::open_in_memory().expect("db");
+        assert_eq!(session::compacted_messages(&db, "conv-1"), 0);
+        record_compaction(&db, "conv-1", "turn-1", 14, 900).expect("registrar compactação");
+        assert_eq!(session::compacted_messages(&db, "conv-1"), 14);
+        // O fold do medidor não trata o evento de compactação como `context/stats`.
+        assert!(session::context_stats(&db, "conv-1").is_none());
     }
 }

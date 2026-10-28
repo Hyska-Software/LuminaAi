@@ -3,7 +3,6 @@ import {
   buildAgentTrace,
   countTraceTools,
   hasTraceReasoning,
-  splitReasoning,
   type AgentTraceEntry,
   type ToolGroup,
 } from '@/lib/agentTrace';
@@ -105,17 +104,18 @@ describe('buildAgentTrace', () => {
     expect(hasTraceReasoning(entries)).toBe(false);
   });
 
-  it('falls back to a heuristic when the message has no trace (legacy messages)', () => {
+  it('falls back to a single reasoning block when the message has no trace (legacy messages)', () => {
     const tools = [
       tool({ name: 'web_search', result: SEARCH_RESULTS }),
       tool({ name: 'fetch_url', arguments: '{"url":"https://mit.edu/ia"}' }),
     ];
-    const entries = buildAgentTrace({
-      reasoning: 'Primeiro pensamento.\n\nSegundo pensamento.',
-      toolCalls: tools,
-    });
+    const reasoning = 'Primeiro pensamento.\n\nSegundo pensamento.';
+    const entries = buildAgentTrace({ reasoning, toolCalls: tools });
 
-    expect(reasoningTexts(entries)).toEqual(['Primeiro pensamento.', 'Segundo pensamento.']);
+    // Legacy messages have no step boundaries: the whole raw reasoning is one
+    // Markdown block, followed by every tool group.
+    expect(reasoningTexts(entries)).toEqual([reasoning]);
+    expect(entries.map((entry) => entry.kind)).toEqual(['reasoning', 'tools', 'tools']);
     expect(toolGroups(entries).map((group) => group.name)).toEqual(['web_search', 'fetch_url']);
   });
 
@@ -486,19 +486,173 @@ describe('buildAgentTrace', () => {
   });
 });
 
-describe('splitReasoning', () => {
-  it('splits blank-line blocks and preserves single line breaks', () => {
-    expect(splitReasoning('  Primeiro bloco.  \n\nSegunda linha.\nContinuação.\n')).toEqual([
-      'Primeiro bloco.',
-      'Segunda linha.\nContinuação.',
-    ]);
+describe('buildAgentTrace — Markdown do raciocínio', () => {
+  it('emits exactly one raw reasoning entry per trace step (never splits paragraphs)', () => {
+    const text = [
+      '### Plano',
+      '',
+      'Vou verificar os arquivos.',
+      '',
+      '- item um',
+      '- item dois',
+      '',
+      '| coluna | valor |',
+      '| --- | --- |',
+      '| a | 1 |',
+      '',
+      'A fórmula $x^2$ explica.',
+    ].join('\n');
+
+    const entries = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [],
+      trace: [{ reasoning: text, toolCalls: 0 }],
+    });
+
+    // One entry per step, with the raw Markdown — blank lines included.
+    expect(entries).toHaveLength(1);
+    expect(reasoningTexts(entries)).toEqual([text]);
   });
 
-  it('strips markdown list markers so the bullet is not duplicated', () => {
-    expect(splitReasoning('- item um\n- item dois\n\n1. passo')).toEqual(['item um\nitem dois', 'passo']);
+  it('preserves list markers and indentation instead of flattening bullets', () => {
+    const text = '- item um\n- item dois\n  - aninhado\n\n1. passo';
+
+    const entries = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [],
+      trace: [{ reasoning: text, toolCalls: 0 }],
+    });
+
+    expect(reasoningTexts(entries)).toEqual([text]);
   });
 
-  it('returns an empty list for blank reasoning', () => {
-    expect(splitReasoning('   \n\n ')).toEqual([]);
+  it('keeps a fenced block with an internal blank line in the same entry', () => {
+    const fence = ['```ts', 'const a = 1;', '', 'const b = 2;', '```', '', 'Depois do bloco.'].join(
+      '\n',
+    );
+
+    const entries = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [],
+      trace: [{ reasoning: fence, toolCalls: 0 }],
+    });
+
+    expect(reasoningTexts(entries)).toEqual([fence]);
+  });
+
+  it('keeps heading, list and table together in a single Markdown entry', () => {
+    const text = [
+      '## Diagnóstico',
+      '',
+      '- causa provável: cache',
+      '- próxima ação: limpar',
+      '',
+      '| arquivo | status |',
+      '| --- | --- |',
+      '| cache.ts | revisar |',
+    ].join('\n');
+
+    const entries = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [],
+      trace: [{ reasoning: text, toolCalls: 0 }],
+    });
+
+    expect(reasoningTexts(entries)).toEqual([text]);
+  });
+
+  it('keeps math and GitHub alerts untouched', () => {
+    const text = 'Cálculo: $\\sum_{i=1}^{n} i$.\n\n> [!NOTE]\n> Continua como alerta.';
+
+    const entries = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [],
+      trace: [{ reasoning: text, toolCalls: 0 }],
+    });
+
+    expect(reasoningTexts(entries)).toEqual([text]);
+  });
+
+  it('keeps blank-line separated paragraphs in one entry (only the edges are trimmed)', () => {
+    const text = 'Primeiro parágrafo.\n\nSegundo parágrafo.\n\n- lista final';
+
+    const entries = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [],
+      trace: [{ reasoning: `  \n${text}\n  `, toolCalls: 0 }],
+    });
+
+    expect(reasoningTexts(entries)).toEqual([text]);
+  });
+
+  it('skips blank reasoning and emits one entry per non-empty step', () => {
+    const first = '**Primeiro** passo.\n\n- um\n- dois';
+    const second = '### Segundo\n\n```ts\nconst x = 1;\n```';
+    const entries = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [],
+      trace: [
+        { reasoning: null, toolCalls: 0 },
+        { reasoning: '   \n\t ', toolCalls: 0 },
+        { reasoning: first, toolCalls: 0 },
+        { reasoning: second, toolCalls: 0 },
+      ],
+    });
+
+    expect(reasoningTexts(entries)).toEqual([first, second]);
+    expect(entries.map((entry) => entry.kind)).toEqual(['reasoning', 'reasoning']);
+  });
+
+  it('keeps each step reasoning stable between builds (Markdown is memoized)', () => {
+    const first = '**Passo** um.\n\n- a\n- b';
+    const second = '## Passo dois';
+    const message = {
+      reasoning: null,
+      toolCalls: [] as ToolCallRecord[],
+      trace: [
+        { reasoning: first, toolCalls: 0 },
+        { reasoning: second, toolCalls: 0 },
+      ],
+    };
+
+    const one = reasoningTexts(buildAgentTrace(message));
+    const two = reasoningTexts(buildAgentTrace(message));
+
+    expect(one).toEqual([first, second]);
+    expect(two).toEqual(one);
+    expect(two[0]).toBe(first);
+    expect(two[1]).toBe(second);
+  });
+
+  it('keeps the raw Markdown of the legacy reasoning fallback in one block', () => {
+    const reasoning = '# Título\n\n- um\n- dois\n\n```ts\nconst a = 1;\n```';
+
+    const entries = buildAgentTrace({
+      reasoning: `  ${reasoning}  `,
+      toolCalls: [tool({ name: 'web_search', result: SEARCH_RESULTS })],
+    });
+
+    expect(reasoningTexts(entries)).toEqual([reasoning]);
+    expect(entries.map((entry) => entry.kind)).toEqual(['reasoning', 'tools']);
+  });
+
+  it('interleaves per-step Markdown with the tool groups of that step', () => {
+    const first = 'Buscando **fontes**.';
+    const second = '- leitura\n- análise';
+    const entries = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({ name: 'web_search', result: SEARCH_RESULTS }),
+        tool({ name: 'fetch_url', arguments: '{"url":"https://mit.edu/ia"}' }),
+      ],
+      trace: [
+        { reasoning: first, toolCalls: 1 },
+        { reasoning: second, toolCalls: 1 },
+      ],
+    });
+
+    expect(entries.map((entry) => entry.kind)).toEqual(['reasoning', 'tools', 'reasoning', 'tools']);
+    expect(reasoningTexts(entries)).toEqual([first, second]);
+    expect(toolGroups(entries).map((group) => group.name)).toEqual(['web_search', 'fetch_url']);
   });
 });

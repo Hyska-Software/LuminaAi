@@ -227,13 +227,20 @@ tratado como dado. `read_tool_output` só lê spills da própria sessão.
 | **Leitura** | ✅ | ❌ (erro de política) | ❌ | só leitura | ❌ | explorar/entender código |
 | **Editar** (padrão) | ✅ | ✅ auto | **pergunta** | stage/commit manual | pergunta | dia a dia |
 | **Autônomo** | ✅ | ✅ auto | ✅ auto **exceto destrutivo** | stage/commit manual | pergunta | tarefas longas confiadas |
+| **Revisar** (saída do Plano) | ✅ | ✅ **com aprovação por escrita** | pergunta | stage/commit manual | pergunta | revisar cada edição após aprovar um plano |
 | **Plano** (overlay) | ✅ | ❌ | ❌ | só leitura | ❌ | planejar antes de executar |
 
 - Mudança de modo é **ação explícita do usuário** (chip ou `/permissoes`), registrada na sessão
-  (`permission/mode` em `code_events`) e informada ao modelo no próximo passo (o modelo sabe o que
-  pode fazer; nunca fica "tentando e falhando").
-- Modo Plano é overlay (vale sobre qualquer modo), ativado por `/plan` ou chip; ao aprovar o plano,
-  volta ao modo anterior (default Editar).
+  (`permission/mode` em `code_events`) e informada ao modelo **no mesmo turno**: a política relê
+  `permission_mode`/`plan_mode` do banco a cada tool call e o loop anexa uma nota de
+  "Atualização de permissões" ao system prompt quando o estado muda entre passos.
+- Modo Plano é overlay (vale sobre qualquer modo), ativado por `/plan` ou chip, e tem **três
+  saídas** no gate do card: **Aprovar e executar** (Plano off → Editar), **Aprovar e revisar cada
+  edição** (Plano off → Revisar: cada escrita pede aprovação) e **Continuar planejando** (Plano
+  permanece, feedback persistido em `plan/feedback`). O plano é editável antes de valer e o texto
+  aprovado é o persistido.
+- A aprovação destrava a execução **no mesmo turno** (não exige nova mensagem); o turno continua
+  bloqueado até a decisão, com timeout individual de aprovação (default 10 min, configurável).
 - A UI **nunca** muda o modo automaticamente. O modelo nunca muda o modo (pode sugerir).
 
 ### 6.2 Matriz de decisão (ordem de precedência)
@@ -247,6 +254,12 @@ tratado como dado. `read_tool_output` só lê spills da própria sessão.
 6. Padrão do modo (§6.1)
 7. Fallback para tool com risk >= write              → ASK
 ```
+
+- O gate do modo Plano vale para mutações **de workspace** (arquivo/shell/git). `todo_write` e
+  `submit_plan` são estado de sessão e não passam por esse gate; `todo_write` declara
+  `mutating: false`/`risk: read` no registry.
+- No modo **Revisar**, toda tool `risk=write` (write/edit) e `shell` recebe `ASK`, mantendo o
+  precedente de destrutivo/segredo/fora do workspace.
 
 - `approval_rules` são criadas por "Sempre permitir…" no card de aprovação, com escopo explícito
   (esta sessão / este workspace / sempre) e matcher (`exact`, `prefix`, `glob`), e podem ser
@@ -271,9 +284,17 @@ pub struct ApprovalRequest {
 }
 ```
 
+- `submit_plan` usa **options próprias do plano** (`approve_run` / `approve_review` /
+  `keep_planning`), sem "Sempre permitir"; `ApprovalOutcome`/`respond_approval` carregam
+  `choice: Option<String>` e `plan_markdown: Option<String>`. O comando resolve o pedido antes de
+  criar regra/auditoria: pedido morto (timeout/cancelamento) devolve `APPROVAL_NOT_FOUND` sem
+  efeito colateral.
+
 - Fluxo: tool → `broker.request()` → emite `TurnEvent::ApprovalRequested` → renderer mostra card →
-  `invoke('respond_approval', { approvalId, decision, scope?, feedback? })` → broker resolve o
-  `oneshot` → tool continua/aborta → emite `ApprovalResolved`.
+  `invoke('respond_approval', { approvalId, decision, scope?, feedback?, choice?, planMarkdown? })`
+  → broker resolve o `oneshot` → tool continua/aborta → emite `ApprovalResolved`. `choice`
+  (`approve_run`/`approve_review`) e `planMarkdown` só valem para `submit_plan`; aprovações
+  genéricas rejeitam esses campos.
 - Timeout 10 min (config) → `deny` com `APPROVAL_TIMEOUT`; cancelamento do turno → `cancelled`.
 - Sem aprovador (teste/headless) → `APPROVAL_UNAVAILABLE` (fail-closed).
 - Negar com feedback: o texto vira parte do resultado da tool ("usuário negou: <feedback>") para o
@@ -447,16 +468,25 @@ pub struct ExecRequest {
 ### 10.1 Token meter
 
 ```rust
+pub struct ContextBreakdown { pub system_prompt: u32, pub tool_definitions: u32, pub messages: u32 }
 pub struct ContextStats { pub used: u32, pub window: u32, pub output_cap: u32, pub percent: f32,
-                          pub compacted: u8, pub breakdown: ContextBreakdown }
+                          pub compacted: u32, pub messages: u32, pub breakdown: ContextBreakdown }
 ```
 
-- Estimativa `tokens ≈ chars / 4` + overhead por mensagem (8) / tool call (16) / imagem (preço
-  declarado no catálogo). Contadores incrementais por evento (não re-medir a sessão toda).
-- Uso real do provider (`usage`) corrige a estimativa do passo (fator de calibração por modelo,
-  persistido em memória) — mostrar "≈" na UI.
-- Emitir `ContextStats` a cada passo (coalescido ≤ 1/s) e no fim do turno; persistir o último em
-  `code_events` (`context/stats`) para a UI abrir com o medidor correto.
+- Estimativa `tokens ≈ chars / 4` + overhead por mensagem (8) / tool call (16); imagens ainda não
+  entram no breakdown (limite documentado). O breakdown separa **prompt de sistema**, **definições
+  de ferramentas** (nome + descrição + JSON Schema) e **mensagens** (texto, reasoning, argumentos e
+  resultados de tools); a soma acompanha `used`.
+- Uso real do provider (`usage.input_tokens`) **calibra o passo**: `used` passa a ser o valor real e
+  o breakdown é escalado proporcionalmente (mensagens recebe o residual). A UI mostra "≈".
+- **Tempo real**: emitir `TurnEvent::ContextStats` (e persistir em `code_events` `context/stats`) no
+  início do turno, antes de cada passo, logo após cada passo com `usage.input_tokens` e no fecho;
+  a cadência natural por passo satisfaz o limite de coalescência ≤ 1/s em produção. O último
+  evento persistido é o que o snapshot devolve ao reabrir a sessão.
+- Compactação é registrada em `context/compacted` (`{messages, tokensFreed}`), separada do medidor;
+  o contador `compacted` do `ContextStats` é o total de mensagens resumidas e é somado ao breakdown
+  seguinte. A persistência do medidor é **best-effort**: falha de append em `context/stats` é
+  logada e o evento ainda chega à UI; o snapshot mantém o último valor persistido com sucesso.
 
 ### 10.2 Poda de tool results ("pruner")
 
@@ -623,7 +653,19 @@ ErrorCode { code: String }   // já existe Error{code}
 - Regras: variante nova só no fim; campos opcionais com `#[serde(default, skip_serializing_if)]`;
   payloads pequenos (≤ 8 KB); nada de binário no evento (terminal usa base64/CHANNEL próprio).
 - `ToolCallRecord` ganha `presentation: Option<Value>` (persistido no DB junto da mensagem) para
-  replay de cards (diff, todo, job) após reabrir.
+  auditoria/replay e consumidores futuros. O transcript **não** monta mais cards de tool (decisão de
+  UX: o bloco "Thinking" resume a atividade; plano/tarefas/jobs vivem no popover do composer —
+  `WORKBENCH.md` §5.2).
+- `PlanUpdated { plan: PlanView }` é emitido em **entrar/sair do Plano, submissão
+  (`state=reviewing`), feedback (`state=planning` + `plan.feedback`) e aprovação
+  (`state=approved`)**. `PlanView` carrega `state`, `markdown?`, `feedback?` e `updated_at`
+  (timestamp do evento de origem, nunca `now()`).
+- `TodosUpdated` substitui a lista inteira; `todos: []` limpa (lista vazia é válida).
+- `ProfileChanged` carrega o **estado real** (`plan_mode`/`permission_mode`) no início do turno e
+  de novo quando o estado muda entre passos.
+- `respond_approval` (IPC) aceita `choice` (`approve_run`/`approve_review`) e `plan_markdown`
+  (plano revisado antes de valer) para decisões de `submit_plan`; escopos "sempre permitir" não se
+  aplicam ao plano.
 
 ### 12.2 Comandos novos (IPC)
 

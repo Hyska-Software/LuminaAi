@@ -13,6 +13,7 @@ import type {
   FileChange,
   JobView,
   PermissionMode,
+  PlanApprovalChoice,
   PlanView,
   TodoItem,
   TurnEvent,
@@ -148,7 +149,11 @@ export function applyCodeEvent(state: CodeSessionUi, event: TurnEvent): CodeSess
         context: state.context
           ? {
               ...state.context,
-              compacted: (state.context.compacted ?? 0) + 1,
+              // `ContextStats.compacted` = mensagens resumidas (cumulativo desde
+              // o último sumário), não o número de compactações. O próximo
+              // `context_stats` traz o valor canônico; aqui usamos o evento para
+              // a nota não mostrar "1 mensagem" entre a compactação e o passo.
+              compacted: event.messages,
               used: Math.max(0, state.context.used - event.tokensFreed),
             }
           : state.context,
@@ -224,7 +229,13 @@ interface CodeStoreState {
     conversationId: string,
     approvalId: string,
     decision: ApprovalDecision,
-    options?: { scope?: ApprovalScope | null; feedback?: string | null; remember?: boolean },
+    options?: {
+      scope?: ApprovalScope | null;
+      feedback?: string | null;
+      choice?: PlanApprovalChoice | null;
+      planMarkdown?: string | null;
+      remember?: boolean;
+    },
   ) => Promise<boolean>;
   respondQuestion: (
     conversationId: string,
@@ -312,7 +323,19 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
       const ok = await api.respondApproval(approvalId, decision, {
         scope: options?.scope ?? null,
         feedback: options?.feedback ?? null,
+        choice: options?.choice ?? null,
+        planMarkdown: options?.planMarkdown ?? null,
       });
+      if (!ok) {
+        toast.error('Esta aprovação já não está disponível', {
+          description: 'Atualizando o estado da sessão…',
+        });
+        await get().refresh(conversationId);
+        return false;
+      }
+      // Decisão de plano muda modo/permissão e projeção: sincroniza o snapshot
+      // (o evento `plan_updated` é emitido depois que a tool destrava).
+      if (options?.choice) await get().refresh(conversationId);
       return ok;
     } catch (error) {
       toast.error('Não foi possível responder à aprovação', { description: String(error) });
@@ -366,16 +389,29 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
   },
 
   setPlanMode: async (conversationId, enabled) => {
+    const previous = get().byConversation[conversationId];
+    // Otimista, como o chip de permissão: o toggle responde antes do IPC.
+    set((state) => ({
+      byConversation: patch(state.byConversation, conversationId, (current) => ({
+        ...current,
+        planMode: enabled,
+      })),
+    }));
     try {
       const snapshot = await api.setPlanMode(conversationId, enabled);
       set((state) => ({
         byConversation: {
           ...state.byConversation,
-          [conversationId]: fromSnapshot(snapshot, state.byConversation[conversationId]),
+          [conversationId]: fromSnapshot(snapshot, previous),
         },
       }));
       return true;
     } catch (error) {
+      if (previous) {
+        set((state) => ({
+          byConversation: { ...state.byConversation, [conversationId]: previous },
+        }));
+      }
       toast.error('Não foi possível alterar o modo Plano', { description: String(error) });
       return false;
     }

@@ -70,15 +70,15 @@ export function JobsBar({ jobs, onKill, onOpen, className }: JobsBarProps) {
         )}
       >
         {open ? (
-          <ChevronDown aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
+          <ChevronDown aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
         ) : (
-          <ChevronRight aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
+          <ChevronRight aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
         )}
         <span className="min-w-0 flex-1 text-[12px] font-medium text-foreground-muted">
           Trabalhos em segundo plano
         </span>
         {running > 0 ? <Badge variant="accent">{running} rodando</Badge> : null}
-        <span className="text-[11px] tabular-nums text-foreground-subtle">{jobs.length}</span>
+        <span className="text-[11px] tabular-nums text-foreground-muted">{jobs.length}</span>
       </button>
 
       {open ? (
@@ -99,11 +99,11 @@ export function JobsBar({ jobs, onKill, onOpen, className }: JobsBarProps) {
                 </code>
                 <span className="sr-only">{STATUS_LABEL[job.status]}</span>
                 {job.exitCode != null && !isRunning ? (
-                  <span className="shrink-0 font-mono text-[10px] tabular-nums text-foreground-subtle">
+                  <span className="shrink-0 font-mono text-[10px] tabular-nums text-foreground-muted">
                     exit {job.exitCode}
                   </span>
                 ) : null}
-                <span className="shrink-0 text-[11px] tabular-nums text-foreground-subtle">
+                <span className="shrink-0 text-[11px] tabular-nums text-foreground-muted">
                   {elapsed(job)}
                 </span>
                 {onOpen ? (

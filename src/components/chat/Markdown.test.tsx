@@ -555,6 +555,296 @@ describe('Markdown — HTML seguro e detalhes', () => {
   });
 });
 
+describe('Markdown — variante thinking', () => {
+  function renderThinking(content: string, props: Partial<MarkdownProps> = {}) {
+    return renderMarkdown(content, { variant: 'thinking', ...props });
+  }
+
+  it('aplica a classe da variante e dispensa o tamanho da prosa da resposta', () => {
+    const { prose } = renderThinking('Raciocínio em **Markdown**.');
+
+    expect(prose.classList.contains('lumina-prose--thinking')).toBe(true);
+    expect(prose.classList.contains('text-[15px]')).toBe(false);
+  });
+
+  it('mantém a variante default idêntica à prosa da resposta', () => {
+    const { prose } = renderMarkdown('Resposta final');
+
+    expect(prose.className).toBe('lumina-prose text-[15px]');
+    expect(prose.classList.contains('lumina-prose--thinking')).toBe(false);
+  });
+
+  it('mescla className extra com a classe da variante', () => {
+    const { prose } = renderThinking('texto', { className: 'minha-classe-extra' });
+
+    expect(prose.classList.contains('lumina-prose--thinking')).toBe(true);
+    expect(prose.classList.contains('minha-classe-extra')).toBe(true);
+  });
+
+  it('renderiza títulos h1–h6', () => {
+    const { container } = renderThinking(
+      ['# Título 1', '## Título 2', '### Título 3', '#### Título 4', '##### Título 5', '###### Título 6'].join(
+        '\n\n',
+      ),
+    );
+
+    for (let level = 1; level <= 6; level += 1) {
+      expect(container.querySelector(`h${level}`)?.textContent).toBe(`Título ${level}`);
+    }
+  });
+
+  it('renderiza ênfase, forte e riscado', () => {
+    const { container } = renderThinking('**forte** e *ênfase* e ~~riscado~~');
+
+    expect(container.querySelector('strong')?.textContent).toBe('forte');
+    expect(container.querySelector('em')?.textContent).toBe('ênfase');
+    expect(container.querySelector('del')?.textContent).toBe('riscado');
+  });
+
+  it('renderiza listas aninhadas e ordenadas com start', () => {
+    const { container } = renderThinking(['- um', '  - um A', '- dois', '', '3. três', '4. quatro'].join('\n'));
+
+    expect(container.querySelector('ul li ul li')?.textContent).toBe('um A');
+    const ordered = container.querySelector('ol');
+    expect(ordered?.getAttribute('start')).toBe('3');
+    expect(ordered?.querySelectorAll('li')).toHaveLength(2);
+  });
+
+  it('renderiza task list GFM com checkbox desabilitado e rótulos pt-BR', () => {
+    const { container } = renderThinking('- [ ] pendente\n- [x] feito');
+
+    const list = container.querySelector('ul.contains-task-list');
+    expect(list).toBeTruthy();
+    expect(container.querySelectorAll('li.task-list-item')).toHaveLength(2);
+
+    const [pending, done] = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+    expect(pending.disabled).toBe(true);
+    expect(pending.checked).toBe(false);
+    expect(pending.getAttribute('aria-label')).toBe('Pendente');
+    expect(done.disabled).toBe(true);
+    expect(done.checked).toBe(true);
+    expect(done.getAttribute('aria-label')).toBe('Concluído');
+  });
+
+  it('renderiza tabela com alinhamento e wrapper de scroll', () => {
+    const { container } = renderThinking('| Nome | Idade |\n| :--- | ---: |\n| Ana | 30 |');
+
+    const wrapper = container.querySelector('.lumina-table-wrap');
+    expect(wrapper).toBeTruthy();
+    expect(wrapper?.className).toContain('overflow-x-auto');
+
+    const headers = Array.from(container.querySelectorAll<HTMLTableCellElement>('th'));
+    expect(headers.map((header) => header.textContent)).toEqual(['Nome', 'Idade']);
+    expect(headers[0].style.textAlign).toBe('left');
+    expect(headers[1].style.textAlign).toBe('right');
+    expect(container.querySelectorAll('tbody td')).toHaveLength(2);
+  });
+
+  it('renderiza citação e alerta GitHub com rótulo pt-BR', () => {
+    const { container } = renderThinking('> citação simples\n\n> [!WARNING]\n> Cuidado com **isto**');
+
+    expect(container.querySelector('blockquote')?.textContent).toContain('citação simples');
+
+    const alert = screen.getByRole('note', { name: 'Atenção' });
+    expect(alert.getAttribute('data-alert')).toBe('warning');
+    expect(alert.textContent).not.toContain('[!WARNING]');
+    expect(within(alert).getByText('isto').tagName).toBe('STRONG');
+  });
+
+  it('renderiza fence com header de linguagem e botão copiar', async () => {
+    const { container } = renderThinking('```ts\nconst valor = 1;\n```');
+
+    expect(container.textContent).toContain('ts');
+    expect(container.textContent).toContain('const valor = 1;');
+
+    const copyButton = screen.getByRole('button', { name: 'Copiar código' });
+    fireEvent.click(copyButton);
+    await waitFor(() => expect(clipboardWrite).toHaveBeenCalledWith('const valor = 1;'));
+  });
+
+  it('renderiza código indentado e código inline', () => {
+    const { container } = renderThinking('Rode `pnpm test` no terminal.\n\n    codigo indentado');
+
+    expect(container.querySelector('p code')?.textContent).toBe('pnpm test');
+    expect(container.textContent).toContain('codigo indentado');
+    expect(screen.getByRole('button', { name: 'Copiar código' })).toBeTruthy();
+  });
+
+  it('renderiza math inline e display com KaTeX', () => {
+    const { container } = renderThinking('Inline $x^2$ aqui.\n\n$$\na + b = c\n$$');
+
+    expect(container.querySelector('.katex')).toBeTruthy();
+    expect(container.querySelector('.katex-display')).toBeTruthy();
+    const annotations = Array.from(container.querySelectorAll('annotation')).map((node) => node.textContent ?? '');
+    expect(annotations.some((annotation) => annotation === 'x^2')).toBe(true);
+    expect(annotations.some((annotation) => annotation.includes('a + b = c'))).toBe(true);
+  });
+
+  it('renderiza notas de rodapé localizadas', () => {
+    const { container } = renderThinking('Uma nota[^1] no texto.\n\n[^1]: Conteúdo da nota.');
+
+    const section = container.querySelector('section.lumina-footnotes');
+    expect(section).toBeTruthy();
+
+    const title = container.querySelector('#footnote-label');
+    expect(title?.tagName).toBe('H2');
+    expect(title?.textContent).toBe('Notas');
+    expect(title?.className).toContain('sr-only');
+
+    expect(container.querySelector('a[data-footnote-ref]')?.getAttribute('href')).toBe('#user-content-fn-1');
+    expect(container.querySelector('a[data-footnote-backref]')?.getAttribute('href')).toBe('#user-content-fnref-1');
+    expect(container.querySelector('a[data-footnote-backref]')?.getAttribute('aria-label')).toBe(
+      'Voltar para a referência 1',
+    );
+  });
+
+  it('renderiza o subconjunto seguro de HTML', () => {
+    const { container } = renderThinking(
+      '<kbd>Ctrl</kbd> <mark>marca</mark> <br> <details open><summary>Mais detalhes</summary>conteúdo interno</details>',
+    );
+
+    expect(container.querySelector('kbd')?.textContent).toBe('Ctrl');
+    expect(container.querySelector('mark')?.textContent).toBe('marca');
+    expect(container.querySelector('br')).toBeTruthy();
+
+    const details = container.querySelector('details');
+    expect(details?.hasAttribute('open')).toBe(true);
+    expect(details?.querySelector('summary')?.textContent).toBe('Mais detalhes');
+    expect(details?.textContent).toContain('conteúdo interno');
+  });
+
+  it('mantém quebra dura e autolinks GFM', () => {
+    const { container } = renderThinking('linha um  \nlinha dois e https://lumina.dev');
+
+    expect(container.querySelector('br')).toBeTruthy();
+    expect(container.querySelector('p')?.textContent).toContain('linha um');
+    expect(container.querySelector('p')?.textContent).toContain('linha dois');
+
+    const hrefs = Array.from(container.querySelectorAll('a')).map((anchor) => anchor.getAttribute('href'));
+    expect(hrefs).toContain('https://lumina.dev');
+  });
+
+  it('renderiza imagem com alt e loading lazy', () => {
+    const { container } = renderThinking('![Logo do Lumina](https://lumina.dev/logo.png)');
+
+    const image = container.querySelector('img');
+    expect(image?.getAttribute('src')).toBe('https://lumina.dev/logo.png');
+    expect(image?.getAttribute('alt')).toBe('Logo do Lumina');
+    expect(image?.getAttribute('loading')).toBe('lazy');
+  });
+
+  it('abre link externo pelo opener e mailto no app padrão', async () => {
+    const user = userEvent.setup();
+    renderThinking('[site do Lumina](https://lumina.dev/docs) e [fale conosco](mailto:contato@lumina.dev)');
+
+    await user.click(screen.getByRole('link', { name: 'site do Lumina' }));
+    expect(external.openExternalUrl).toHaveBeenCalledWith('https://lumina.dev/docs');
+
+    await user.click(screen.getByRole('link', { name: 'fale conosco' }));
+    expect(external.openExternalUrl).toHaveBeenCalledWith('mailto:contato@lumina.dev');
+    expect(external.openExternalUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it('renderiza régua horizontal', () => {
+    const { container } = renderThinking('acima\n\n---\n\nabaixo');
+
+    expect(container.querySelector('hr')).toBeTruthy();
+  });
+
+  it('aplica o caret de streaming junto da variante thinking', () => {
+    const streaming = renderThinking('Raciocínio parcial', { streaming: true });
+    expect(streaming.prose.classList.contains('lumina-prose--thinking')).toBe(true);
+    expect(streaming.prose.classList.contains('lumina-prose--streaming')).toBe(true);
+    cleanup();
+
+    const idle = renderThinking('Raciocínio completo');
+    expect(idle.prose.classList.contains('lumina-prose--streaming')).toBe(false);
+  });
+
+  it('produz o mesmo DOM com o mesmo pipeline e overrides nas duas variantes', () => {
+    const content = [
+      '# Título',
+      'Texto **forte**, *ênfase*, ~~riscado~~ e `código` com $x^2$.',
+      '- item\n  - aninhado\n- [x] feito',
+      '3. terceiro\n4. quarto',
+      '| Nome | Idade |\n| :--- | ---: |\n| Ana | 30 |',
+      '> citação\n>\n> > aninhada',
+      '> [!TIP]\n> Dica com **negrito**',
+      '```ts\nconst valor = 1;\n```',
+      '    codigo indentado',
+      '$$\na + b = c\n$$',
+      '<kbd>Ctrl</kbd> <mark>marca</mark> <details open><summary>Mais</summary>conteúdo</details>',
+      'linha um  \nlinha dois',
+      'veja https://lumina.dev',
+      '![Logo do Lumina](https://lumina.dev/logo.png)',
+      '[site do Lumina](https://lumina.dev/docs)',
+      'Uma nota[^1].',
+      '[^1]: Conteúdo da nota.',
+      '---',
+    ].join('\n\n');
+
+    const resposta = renderMarkdown(content);
+    const raciocinio = renderThinking(content);
+
+    expect(raciocinio.prose.innerHTML).toBe(resposta.prose.innerHTML);
+  });
+});
+
+describe('Markdown — CSS da variante thinking', () => {
+  const css = readFileSync('src/styles/globals.css', 'utf8');
+
+  function ruleBlock(selector: string): string {
+    const start = css.indexOf(selector);
+    expect(start, `regra ausente: ${selector}`).toBeGreaterThanOrEqual(0);
+    const end = css.indexOf('}', start);
+    return css.slice(start, end + 1);
+  }
+
+  it('vive em @layer components e só usa tokens', () => {
+    expect(css).toMatch(/@layer components\s*\{[\s\S]*?\.lumina-prose--thinking\s*\{/);
+
+    const block = ruleBlock('.lumina-prose--thinking {');
+    expect(block).toContain('font-size: 0.8125rem');
+    expect(block).toContain('line-height: 1.6');
+    expect(block).toContain('color: var(--foreground-muted)');
+    expect(block).toContain('overflow-wrap: anywhere');
+    expect(block).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+
+  it('escala títulos e aperta o ritmo de parágrafos e listas', () => {
+    expect(ruleBlock('.lumina-prose--thinking p {')).toContain('margin-block: 0.5em');
+
+    expect(ruleBlock('.lumina-prose--thinking h1 {')).toContain('font-size: 1.15em');
+    expect(ruleBlock('.lumina-prose--thinking h6 {')).toContain('font-size: 0.95em');
+    const headings = ruleBlock('.lumina-prose--thinking h1,');
+    expect(headings).toContain('margin-block: 0.9em 0.35em');
+
+    const lists = ruleBlock('.lumina-prose--thinking ul,');
+    expect(lists).toContain('margin-block: 0.45em');
+    expect(lists).toContain('padding-inline-start: 1.15em');
+    expect(ruleBlock('.lumina-prose--thinking li {')).toContain('margin-block: 0.15em');
+
+    expect(ruleBlock('.lumina-prose--thinking hr {')).toContain('margin-block: 1em');
+  });
+
+  it('compacta tabelas, citações, alertas, notas e código inline', () => {
+    expect(ruleBlock('.lumina-prose--thinking table {')).toContain('font-size: 0.95em');
+    expect(ruleBlock('.lumina-prose--thinking th,')).toContain('padding: 0.35em 0.6em');
+    expect(ruleBlock('.lumina-prose--thinking blockquote {')).toContain('margin-block: 0.6em');
+    expect(ruleBlock('.lumina-prose--thinking .lumina-alert {')).toContain('margin-block: 0.65em');
+    expect(ruleBlock('.lumina-prose--thinking .lumina-footnotes {')).toContain('margin-top: 1.15em');
+    expect(ruleBlock('.lumina-prose--thinking details {')).toContain('margin-block: 0.65em');
+    expect(ruleBlock('.lumina-prose--thinking :not(pre) > code {')).toContain('font-size: 0.92em');
+  });
+
+  it('não altera a tipografia da prosa da resposta', () => {
+    const base = ruleBlock('.lumina-prose {');
+    expect(base).toContain('font-size: 0.9375rem');
+    expect(base).toContain('line-height: 1.7');
+    expect(base).toContain('color: var(--foreground)');
+  });
+});
+
 describe('Markdown — bordas uniformes (regra de produto)', () => {
   const css = readFileSync('src/styles/globals.css', 'utf8');
 

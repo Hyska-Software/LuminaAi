@@ -96,9 +96,16 @@ describe('codeStore reducer', () => {
     let state = emptyCodeSession('conv-1');
     state = applyCodeEvent(state, { type: 'context_stats', stats: context(50_000) });
     expect(state.context?.used).toBe(50_000);
+    // `compacted` é o total de mensagens resumidas (não o nº de compactações).
     state = applyCodeEvent(state, { type: 'compacted', messages: 20, tokensFreed: 30_000 });
-    expect(state.context?.compacted).toBe(1);
+    expect(state.context?.compacted).toBe(20);
     expect(state.context?.used).toBe(20_000);
+    // O stats seguinte é a fonte canônica do total.
+    state = applyCodeEvent(state, {
+      type: 'context_stats',
+      stats: { ...context(20_000), compacted: 25 },
+    });
+    expect(state.context?.compacted).toBe(25);
     state = applyCodeEvent(state, { type: 'job_updated', job: job('running') });
     expect(state.jobs).toHaveLength(1);
     state = applyCodeEvent(state, { type: 'job_updated', job: job('done') });

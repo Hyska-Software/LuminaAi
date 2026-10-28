@@ -16,6 +16,7 @@ export type SlashInvoke =
   | 'permissoes'
   | 'novo'
   | 'limpar'
+  | 'plan-on'
   | 'plan-off';
 
 export interface SlashCommand {
@@ -37,10 +38,12 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     id: 'plan',
     command: '/plan',
     title: 'Planejar antes de editar',
-    description: 'Insere um pedido de plano; o modo Plano fica no campo de mensagem.',
+    description: 'Ativa o modo Plano e insere um pedido de plano para o agente.',
     group: 'Plano',
     action: 'fill',
     fill: 'Planeje a solução para esta tarefa antes de alterar arquivos:\n',
+    // `fill` + `invoke`: ativa o modo (o texto continua sendo a instrução).
+    invoke: 'plan-on',
   },
   {
     id: 'plan-off',
@@ -55,7 +58,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     id: 'permissoes',
     command: '/permissoes',
     title: 'Modo de permissão',
-    description: 'Mostra onde trocar entre Leitura, Editar e Autônomo.',
+    description: 'Mostra onde trocar entre Leitura, Revisar, Editar e Autônomo.',
     group: 'Sessão',
     action: 'invoke',
     invoke: 'permissoes',

@@ -42,7 +42,7 @@ pub enum ToolPresentation {
     FileChange { path, change: FileChangeKind, added: u32, removed: u32, diff: String },
     Changes { turn_id, files: Vec<FileChangeSummary>, added: u32, removed: u32 },
     Todos { items: Vec<TodoItem> },
-    Plan { markdown: String, state: PlanReviewState },
+    Plan { state: PlanState, markdown: Option<String>, feedback: Option<String>, updated_at: i64 },
     Job { id: String, command: String, status: JobStatus },
     Approval { request: ApprovalRequest },       // quando a tool pausou pedindo aprovação
     Output { spilled: Option<SpillRef>, lines: u64 }, // saída longa paginada
@@ -288,11 +288,14 @@ M  src/app.ts           (staged)
 ```
 
 - **Substitui a lista inteira** (sem edição parcial), status `pending|in_progress|completed`;
-  no máximo 1 `in_progress` (regra do modo; em subagentes pode ser múltiplo); itens vazios ou
-  duplicados → erro visível. Retorna contadores.
-- **Resultado**: `Updated todo list: 1 pending, 1 in progress, 1 completed.`
-- **UI**: card na timeline + popover no header; persistido (projeção `todos` em `code_events`).
-- **Política**: `Exclusive`. **Testes**: validação, contadores, projeção, replay.
+  no máximo 1 `in_progress` no turno principal; itens vazios ou duplicados → erro visível; `[]` é
+  válido e **limpa** a lista (use ao concluir o trabalho); teto de 50 itens. Subagentes (somente
+  leitura) **não** recebem `todo_write` e o prompt do filho não menciona a tool.
+- **Resultado**: `Lista atualizada: N pendente(s), N em andamento, N concluída(s).`
+- **UI**: card na timeline + popover no composer/header; persistido (projeção `todos` em
+  `code_events`). `todos: []` faz o card sumir.
+- **Política**: `Exclusive`, **não mutante de workspace** (`mutating=false`, `risk=Read`): é estado
+  de sessão, permitido no modo Plano. **Testes**: validação, contadores, projeção, replay, limpeza.
 
 #### `submit_plan`
 
@@ -300,13 +303,20 @@ M  src/app.ts           (staged)
 { "plan": "### 1. Contexto\n…\n### 2. Arquivos\n…\n### 3. Verificação\n…" }
 ```
 
-- Só válido em **modo Plano**; publica o plano para revisão na UI e bloqueia o turno até a decisão
-  (aprovar → sai do modo Plano e destrava; continuar planejando → volta com feedback como mensagem).
+- Só válido em **modo Plano**; publica o plano para revisão na UI (persistido em
+  `plan/submitted` **antes** da decisão) e bloqueia o turno até a decisão. Três saídas:
+  **Aprovar e executar** (`approve_run` → modo Editar), **Aprovar e revisar cada edição**
+  (`approve_review` → modo Revisar, cada escrita pede aprovação) e **Continuar planejando**
+  (nega + feedback persistido em `plan/feedback`, o agente revisa e reenvia). O plano é
+  **editável antes de valer**: `respond_approval.planMarkdown` substitui o markdown aprovado.
   Sem canal de revisão (headless/teste) → falha fechada com dica `/plan off`.
 - **Regras de prompt**: plano começa com heading, inclui arquivos a tocar, passos, riscos e como
   verificar; sem código completo (é plano, não implementação).
-- **Política**: `Ask` (revisão humana obrigatória). **Testes**: fora do modo → erro; aprovação →
-  transição + mensagem; feedback → mensagem; timeout/cancelamento.
+- **Política**: `Ask` (revisão humana obrigatória, **sem** "sempre permitir"); o timeout da tool é
+  o do broker de aprovação (10 min default), não o timeout curto do runtime. **Testes**: fora do
+  modo → erro; aprovação → transição + mensagem + mutação liberada no mesmo turno; revisar cada
+  edição → `ASK` na escrita seguinte; feedback → mensagem/persistência; plano editado; timeout/
+  cancelamento.
 
 #### `ask_user`
 
@@ -439,7 +449,7 @@ pub struct ToolSpec {
 | Arquivo escrito | 2 MB | acima → erro orientando gerar via script |
 | Leitura antes de escrita | obrigatória | stale → re-ler |
 | Jobs concorrentes | 8 por sessão | + fila |
-| Aprovações por turno | ilimitadas | timeout individual 10 min (config.) |
+| Aprovações por turno | ilimitadas | timeout individual 10 min (config.); `submit_plan`/`ask_user` são limitados pelo broker, não pelo wrapper de timeout da tool |
 | Tentativas de tool repetida | aviso após 3x iguais | injeção de lembrete no próximo passo |
 
 ## 5. Matriz de testes (resumo)

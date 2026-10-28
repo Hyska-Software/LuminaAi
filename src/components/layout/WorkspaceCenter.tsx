@@ -3,6 +3,7 @@ import {
   CodeCommitHistoryView,
   CodeDiffView,
   CodeFileView,
+  CodePlanView,
   CodeSessionHeader,
   CodeWelcomeScreen,
 } from '@/components/code';
@@ -28,6 +29,7 @@ export function WorkspaceCenter() {
   const codeView = useUiStore((state) => state.codeView);
   const codeDiffTab = useUiStore((state) => state.codeDiffTab);
   const codeFileTab = useUiStore((state) => state.codeFileTab);
+  const codePlanTab = useUiStore((state) => state.codePlanTab);
   const codeCommitsTab = useUiStore((state) => state.codeCommitsTab);
   const selectCodeCommit = useUiStore((state) => state.selectCodeCommit);
   const activeView = useUiStore((state) => state.activeView);
@@ -39,9 +41,10 @@ export function WorkspaceCenter() {
   const showLibrary = !isCode && activeView === 'library';
   const showDiff = isCode && codeView === 'diff' && codeDiffTab !== null;
   const showFile = isCode && codeView === 'file' && codeFileTab !== null;
+  const showPlan = isCode && codeView === 'plan' && codePlanTab !== null;
   const showCommits = isCode && codeView === 'commits' && codeCommitsTab !== null;
-  const showChat = !showSkills && !showLibrary && !showDiff && !showCommits && !showFile;
-  const showHeader = isCode && (showChat || showDiff || showCommits || showFile);
+  const showChat = !showSkills && !showLibrary && !showDiff && !showCommits && !showFile && !showPlan;
+  const showHeader = isCode && (showChat || showDiff || showCommits || showFile || showPlan);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -97,6 +100,17 @@ export function WorkspaceCenter() {
           className="flex min-h-0 flex-1 flex-col"
         >
           <CodeFileView target={codeFileTab} className="flex min-h-0 flex-1 flex-col" />
+        </div>
+      ) : null}
+
+      {showPlan && codePlanTab ? (
+        <div
+          id="code-plan-panel"
+          role="region"
+          aria-label="Plano aprovado da sessão"
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <CodePlanView tab={codePlanTab} className="flex min-h-0 flex-1 flex-col" />
         </div>
       ) : null}
 

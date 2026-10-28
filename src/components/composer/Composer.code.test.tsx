@@ -169,11 +169,12 @@ describe('Composer — placeholder e atalho no modo Code', () => {
 });
 
 describe('Composer — controles de sessão no layout Code', () => {
-  it('troca os pills de ferramentas pelos controles de permissão e Plano', () => {
+  it('troca os pills de ferramentas pelos controles de permissão, Plano e Plano/tarefas', () => {
     render(<Composer />);
 
     expect(screen.getByRole('button', { name: 'Modo de permissão: Editar' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Modo Plano' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Modo Plano/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Plano, tarefas e trabalhos em segundo plano' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Busca web' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Criar arquivos' })).toBeNull();
   });
@@ -187,9 +188,9 @@ describe('Composer — controles de sessão no layout Code', () => {
     render(<Composer />);
 
     expect(screen.getByRole('button', { name: 'Modo de permissão: Leitura' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Modo Plano' }).getAttribute('aria-pressed')).toBe(
-      'true',
-    );
+    expect(
+      screen.getByRole('button', { name: 'Modo Plano: ativado' }).getAttribute('aria-pressed'),
+    ).toBe('true');
   });
 });
 
@@ -377,10 +378,47 @@ describe('Composer — comandos /', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('/plan off desativa o modo Plano pela API da sessão', async () => {
+  it('/plan ativa o modo Plano no codeStore e mantém o texto de instrução', async () => {
+    mocks.setPlanMode.mockResolvedValue({
+      conversationId: 'c-1',
+      permissionMode: 'edit',
+      planMode: true,
+      todos: [],
+      jobs: [],
+      approvals: [],
+    });
     render(<Composer />);
 
-    typeInComposer('/plan off');
+    typeInComposer('/plan');
+    fireEvent.keyDown(textarea(), { key: 'Enter' });
+
+    await waitFor(() => expect(mocks.setPlanMode).toHaveBeenCalledWith('c-1', true));
+    expect(textarea().value).toContain('Planeje a solução para esta tarefa');
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Modo Plano: ativado' }).getAttribute('aria-pressed'),
+      ).toBe('true'),
+    );
+  });
+
+  it('/plan não chama o backend quando o modo já está ativo', async () => {
+    useCodeStore.setState({
+      byConversation: { 'c-1': { ...emptyCodeSession('c-1'), planMode: true } },
+    });
+    render(<Composer />);
+
+    typeInComposer('/plan');
+    fireEvent.keyDown(textarea(), { key: 'Enter' });
+
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith('Modo Plano já está ativo'));
+    expect(mocks.setPlanMode).not.toHaveBeenCalled();
+  });
+
+  it('/plan off desativa o modo Plano pelo store (chip sincroniza)', async () => {
+    useCodeStore.setState({
+      byConversation: { 'c-1': { ...emptyCodeSession('c-1'), planMode: true } },
+    });
+    render(<Composer />);
 
     // O catálogo completo abre com `/`; escolhe a opção pelo clique (o espaço
     // fecha o filtro, então o comando é selecionado na lista inicial).
@@ -389,6 +427,10 @@ describe('Composer — comandos /', () => {
     fireEvent.click(screen.getByRole('option', { name: /\/plan off/ }));
 
     await waitFor(() => expect(mocks.setPlanMode).toHaveBeenCalledWith('c-1', false));
+    await waitFor(() => expect(useCodeStore.getState().byConversation['c-1']?.planMode).toBe(false));
+    expect(
+      screen.getByRole('button', { name: 'Modo Plano: desativado' }).getAttribute('aria-pressed'),
+    ).toBe('false');
   });
 
   it('não abre slash no Chat', async () => {

@@ -6,8 +6,14 @@
  * requested. Tool calls themselves live in `ChatMessage.toolCalls`, in
  * chronological order, so the timeline can be rebuilt exactly after a reload.
  *
- * Messages created before the trace existed fall back to a heuristic:
- * reasoning paragraphs first, then adjacent tool calls grouped by tool.
+ * Messages created before the trace existed fall back to a single block with
+ * the whole persisted reasoning, followed by adjacent tool calls grouped by
+ * tool.
+ *
+ * Reasoning is kept as the **raw Markdown** emitted by the model: one entry per
+ * step, trimmed only at the edges. It is rendered by `Markdown` with
+ * `variant="thinking"` (docs/MARKDOWN.md §4), so splitting paragraphs or
+ * stripping list markers here would corrupt lists, fences, tables and math.
  */
 import type { ChatMessage, ToolCallRecord } from './types';
 import { hostnameOf, safeJsonParse, truncate } from './utils';
@@ -47,6 +53,11 @@ const MAX_ERROR_CHARS = 220;
 /**
  * Builds the ordered timeline of reasoning blocks and tool groups for one
  * assistant message.
+ *
+ * Each trace step produces **one** `reasoning` entry with its raw Markdown
+ * (trimmed only at the edges), followed by the tool groups of the calls that
+ * step requested. The reasoning text must stay byte-identical between renders:
+ * `Markdown` is memoized on `content`.
  */
 export function buildAgentTrace(
   message: Pick<ChatMessage, 'reasoning' | 'toolCalls' | 'trace'>,
@@ -59,21 +70,17 @@ export function buildAgentTrace(
   if (steps.length > 0) {
     for (const step of steps) {
       const reasoning = step.reasoning?.trim() ?? '';
-      if (reasoning) {
-        for (const paragraph of splitReasoning(reasoning)) {
-          entries.push({ kind: 'reasoning', text: paragraph });
-        }
-      }
+      if (reasoning) entries.push({ kind: 'reasoning', text: reasoning });
       const count = Math.max(0, Math.floor(step.toolCalls ?? 0));
       const stepTools = tools.slice(cursor, cursor + count);
       cursor += count;
       pushToolGroups(entries, stepTools);
     }
   } else {
-    // Legacy heuristic for messages persisted before the trace contract.
-    for (const paragraph of splitReasoning(message.reasoning ?? '')) {
-      entries.push({ kind: 'reasoning', text: paragraph });
-    }
+    // Legacy messages (persisted before the trace contract) have no step
+    // boundaries: the whole reasoning is a single Markdown block.
+    const reasoning = message.reasoning?.trim() ?? '';
+    if (reasoning) entries.push({ kind: 'reasoning', text: reasoning });
     pushToolGroups(entries, tools);
     cursor = tools.length;
   }
@@ -95,28 +102,6 @@ export function countTraceTools(entries: AgentTraceEntry[]): number {
 /** True when the timeline has at least one reasoning block. */
 export function hasTraceReasoning(entries: AgentTraceEntry[]): boolean {
   return entries.some((entry) => entry.kind === 'reasoning');
-}
-
-/**
- * Splits streamed reasoning into readable blocks: blank lines separate blocks,
- * single line breaks are preserved. Markdown list markers are dropped because
- * the timeline already renders each block as a bullet.
- */
-export function splitReasoning(text: string): string[] {
-  const normalized = text.replace(/\r\n?/g, '\n').trim();
-  if (!normalized) return [];
-  return normalized
-    .split(/\n{2,}/)
-    .map(cleanReasoningBlock)
-    .filter((block) => block.length > 0);
-}
-
-function cleanReasoningBlock(block: string): string {
-  return block
-    .split('\n')
-    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').trimEnd())
-    .join('\n')
-    .trim();
 }
 
 function pushToolGroups(entries: AgentTraceEntry[], tools: ToolCallRecord[]): void {
@@ -161,6 +146,37 @@ function buildToolGroup(tools: ToolCallRecord[]): ToolGroup {
       return artifactsListGroup(tools, status, errors);
     case 'read_artifact':
       return readArtifactGroup(tools, status, errors);
+    /* ---- harness de código (docs/goals/code-harness/WORKBENCH.md §5.2) ---- */
+    case 'read_file':
+    case 'list_dir':
+    case 'search_files':
+    case 'search_text':
+      return readCodeGroup(tools, status, errors);
+    case 'write_file':
+    case 'edit_file':
+      return writeCodeGroup(tools, status, errors);
+    case 'run_command':
+      return commandCodeGroup(tools, status, errors);
+    case 'run_checks':
+      return checksCodeGroup(tools, status, errors);
+    case 'todo_write':
+      return todoCodeGroup(tools, status, errors);
+    case 'submit_plan':
+      return planCodeGroup(tools, status, errors);
+    case 'ask_user':
+      return askCodeGroup(tools, status, errors);
+    case 'task':
+      return subagentCodeGroup(tools, status, errors);
+    case 'job_list':
+    case 'job_output':
+    case 'job_kill':
+      return jobCodeGroup(tools, status, errors);
+    case 'git_status':
+    case 'git_diff':
+    case 'git_log':
+      return gitCodeGroup(tools, status, errors);
+    case 'read_tool_output':
+      return readOutputCodeGroup(tools, status, errors);
     default:
       return {
         name,
@@ -447,6 +463,377 @@ function defaultLabel(name: string, count: number, status: ToolGroupStatus): str
   if (status === 'running') return `Executando ${readable}…`;
   if (status === 'error') return `Falha em ${readable}`;
   return count > 1 ? `Executou ${readable} ${count} vezes` : `Executou ${readable}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tools do harness de código (rótulos pt-BR)                          */
+/* ------------------------------------------------------------------ */
+
+function codeArgs(tool: ToolCallRecord): Record<string, unknown> {
+  const parsed = safeJsonParse<unknown>(tool.arguments ?? '', null);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : {};
+}
+
+function codeArg(tool: ToolCallRecord, key: string): string | null {
+  const value = codeArgs(tool)[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function codePaths(tools: ToolCallRecord[]): string[] {
+  return uniqueStrings(
+    tools
+      .map((tool) => codeArg(tool, 'path') ?? codeArg(tool, 'file'))
+      .filter((path): path is string => Boolean(path)),
+  );
+}
+
+function harnessGroup(
+  name: string,
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+  label: string,
+  files: string[] = [],
+): ToolGroup {
+  return { name, tools, status, label, total: tools.length, domains: [], pages: [], files, errors };
+}
+
+function firstPattern(tools: ToolCallRecord[]): string | null {
+  const pattern = tools.map((tool) => codeArg(tool, 'pattern')).find(Boolean) ?? null;
+  return pattern ? truncate(pattern, 48) : null;
+}
+
+function readCodeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const name = tools[0]?.name ?? 'read_file';
+  const paths = codePaths(tools);
+  const first = paths[0] ?? null;
+  const pattern = firstPattern(tools);
+  const noun = plural(paths.length, 'arquivo', 'arquivos');
+  let label: string;
+  if (name === 'list_dir') {
+    label =
+      status === 'running'
+        ? `Listando ${first ?? 'a pasta'}…`
+        : status === 'error'
+          ? `Não foi possível listar ${first ?? 'a pasta'}`
+          : first
+            ? `Listou ${first}`
+            : 'Listou a pasta';
+  } else if (name === 'search_files' || name === 'search_text') {
+    label =
+      status === 'running'
+        ? pattern
+          ? `Buscando “${pattern}”…`
+          : 'Buscando no workspace…'
+        : status === 'error'
+          ? 'A busca no workspace falhou'
+          : pattern
+            ? `Buscou “${pattern}”`
+            : 'Buscou no workspace';
+  } else {
+    label =
+      status === 'running'
+        ? `Lendo ${first ?? 'arquivos'}…`
+        : status === 'error'
+          ? first
+            ? `Não foi possível ler ${first}`
+            : 'Não foi possível ler os arquivos'
+          : paths.length > 1
+            ? `Leu ${paths.length} ${noun}`
+            : first
+              ? `Leu ${first}`
+              : 'Leu o arquivo';
+  }
+  return harnessGroup(name, tools, status, errors, label);
+}
+
+function writeCodeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const paths = codePaths(tools);
+  const first = paths[0] ?? null;
+  const noun = plural(paths.length, 'arquivo', 'arquivos');
+  const label =
+    status === 'running'
+      ? `Gravando ${first ?? 'arquivos'}…`
+      : status === 'error'
+        ? first
+          ? `Falha ao gravar ${first}`
+          : 'Falha ao gravar os arquivos'
+        : paths.length > 1
+          ? `Alterou ${paths.length} ${noun}`
+          : first
+            ? `Alterou ${first}`
+            : 'Alterou o arquivo';
+  return harnessGroup(tools[0]?.name ?? 'write_file', tools, status, errors, label, paths);
+}
+
+function commandCodeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const command = tools.map((tool) => codeArg(tool, 'command')).find(Boolean) ?? null;
+  const short = command ? truncate(command, 64) : null;
+  const label =
+    status === 'running'
+      ? `Executando ${short ?? 'comando'}…`
+      : status === 'error'
+        ? short
+          ? `Comando falhou: ${short}`
+          : 'O comando falhou'
+        : short
+          ? `Executou ${short}`
+          : 'Executou o comando';
+  return harnessGroup('run_command', tools, status, errors, label);
+}
+
+function checksCodeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const label =
+    status === 'running'
+      ? 'Rodando as verificações…'
+      : status === 'error'
+        ? 'As verificações falharam'
+        : 'Rodou as verificações';
+  return harnessGroup('run_checks', tools, status, errors, label);
+}
+
+function todoCodeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const label =
+    status === 'running'
+      ? 'Atualizando as tarefas…'
+      : status === 'error'
+        ? 'Falha ao atualizar as tarefas'
+        : 'Atualizou as tarefas';
+  return harnessGroup('todo_write', tools, status, errors, label);
+}
+
+function planPresentationState(tool: ToolCallRecord): string | null {
+  const presentation = tool.presentation;
+  if (!presentation || presentation.kind !== 'plan') return null;
+  return presentation.state ?? null;
+}
+
+function planCodeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const state = [...tools].reverse().map(planPresentationState).find(Boolean) ?? null;
+  const feedback = [...tools]
+    .reverse()
+    .map((tool) => (tool.presentation?.kind === 'plan' ? tool.presentation.feedback : null))
+    .find(Boolean);
+  let label: string;
+  if (status === 'running') label = 'Enviando o plano para revisão…';
+  else if (status === 'error') label = feedback ? 'Plano não aprovado' : 'Falha ao enviar o plano';
+  else if (state === 'approved') label = 'Plano aprovado';
+  else if (state === 'reviewing') label = feedback ? 'Plano revisado' : 'Plano enviado para revisão';
+  else label = 'Plano proposto';
+  return harnessGroup('submit_plan', tools, status, errors, label);
+}
+
+function askCodeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const label =
+    status === 'running'
+      ? 'Aguardando resposta do usuário…'
+      : status === 'error'
+        ? 'A pergunta não foi concluída'
+        : 'Perguntou ao usuário';
+  return harnessGroup('ask_user', tools, status, errors, label);
+}
+
+function subagentCodeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const type =
+    tools
+      .map((tool) => codeArg(tool, 'subagent_type'))
+      .find(Boolean) ?? null;
+  const kind = type ? (type === 'review' ? 'revisão' : type === 'explore' ? 'exploração' : type) : null;
+  const label =
+    status === 'running'
+      ? 'Delegando a um subagente…'
+      : status === 'error'
+        ? 'O subagente falhou'
+        : kind
+          ? `Delegou ${kind} a um subagente`
+          : 'Delegou a um subagente';
+  return harnessGroup('task', tools, status, errors, label);
+}
+
+function jobCodeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const name = tools[0]?.name ?? 'job_list';
+  const label =
+    status === 'running'
+      ? 'Consultando jobs…'
+      : status === 'error'
+        ? 'Falha ao consultar o job'
+        : name === 'job_kill'
+          ? 'Parou um job'
+          : name === 'job_output'
+            ? 'Leu a saída de um job'
+            : 'Listou os jobs';
+  return harnessGroup(name, tools, status, errors, label);
+}
+
+function gitCodeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const name = tools[0]?.name ?? 'git_status';
+  const label =
+    status === 'running'
+      ? 'Consultando o git…'
+      : status === 'error'
+        ? 'O comando do git falhou'
+        : name === 'git_diff'
+          ? 'Viu o diff do git'
+          : name === 'git_log'
+            ? 'Consultou o histórico do git'
+            : 'Consultou o status do git';
+  return harnessGroup(name, tools, status, errors, label);
+}
+
+function readOutputCodeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const label =
+    status === 'running'
+      ? 'Lendo a saída completa…'
+      : status === 'error'
+        ? 'Não foi possível ler a saída'
+        : 'Leu a saída completa de uma ferramenta';
+  return harnessGroup('read_tool_output', tools, status, errors, label);
+}
+
+/**
+ * Rótulo por **chamada** de tool do harness de código. A timeline de execução
+ * do "Thinking" renderiza uma linha por chamada (verbo + alvo + status) em vez
+ * do card agregado; `label` mantém o texto completo para leitores de tela/testes.
+ */
+export interface CodeToolLabel {
+  verb: string;
+  detail: string | null;
+  label: string;
+}
+
+export function describeCodeTool(tool: ToolCallRecord): CodeToolLabel {
+  const make = (verb: string, detail: string | null = null): CodeToolLabel => ({
+    verb,
+    detail,
+    label: detail ? `${verb} ${detail}` : verb,
+  });
+  const path = codeArg(tool, 'path') ?? codeArg(tool, 'file');
+  const command = codeArg(tool, 'command');
+  const pattern = codeArg(tool, 'pattern');
+  const query = codeArg(tool, 'query');
+  const presentation = tool.presentation;
+  const fileChange = presentation?.kind === 'file_change' ? presentation : null;
+  const failed = tool.status === 'error';
+
+  switch (tool.name) {
+    case 'read_file':
+      return make('Leu', path);
+    case 'list_dir':
+      return make('Listou', path);
+    case 'search_files':
+    case 'search_text': {
+      const term = pattern ?? query;
+      return make('Buscou', term ? `“${truncate(term, 64)}”` : null);
+    }
+    case 'write_file':
+    case 'edit_file': {
+      const verb =
+        fileChange?.change === 'created'
+          ? 'Criou'
+          : fileChange?.change === 'deleted'
+            ? 'Removeu'
+            : fileChange?.change === 'renamed'
+              ? 'Renomeou'
+              : 'Alterou';
+      return make(verb, path ?? fileChange?.path ?? null);
+    }
+    case 'run_command':
+      return make('Executou', command ? truncate(command, 96) : null);
+    case 'run_checks':
+      return make(failed ? 'As verificações falharam' : 'Rodou as verificações');
+    case 'todo_write':
+      return make(failed ? 'Falha ao atualizar as tarefas' : 'Atualizou as tarefas');
+    case 'submit_plan': {
+      const plan = presentation?.kind === 'plan' ? presentation : null;
+      if (failed) return make(plan?.feedback ? 'Plano não aprovado' : 'Falha ao enviar o plano');
+      if (plan?.state === 'approved') return make('Plano aprovado');
+      if (plan?.state === 'reviewing') {
+        return make(plan.feedback ? 'Plano revisado' : 'Plano enviado para revisão');
+      }
+      return make('Plano proposto');
+    }
+    case 'ask_user':
+      return make(
+        failed
+          ? 'A pergunta não foi concluída'
+          : tool.status === 'running'
+            ? 'Aguardando resposta do usuário'
+            : 'Perguntou ao usuário',
+      );
+    case 'task': {
+      const type = codeArg(tool, 'subagent_type');
+      const kind = type === 'review' ? 'revisão' : type === 'explore' ? 'exploração' : type;
+      return make(
+        failed ? 'O subagente falhou' : kind ? `Delegou ${kind} a um subagente` : 'Delegou a um subagente',
+      );
+    }
+    case 'job_list':
+      return make(failed ? 'Falha ao consultar os jobs' : 'Listou os jobs');
+    case 'job_output':
+      return make(failed ? 'Falha ao ler a saída do job' : 'Leu a saída de um job');
+    case 'job_kill':
+      return make(failed ? 'Falha ao parar o job' : 'Parou um job');
+    case 'git_status':
+      return make(failed ? 'O status do git falhou' : 'Consultou o status do git');
+    case 'git_diff':
+      return make(failed ? 'O diff do git falhou' : 'Viu o diff do git');
+    case 'git_log':
+      return make(failed ? 'O histórico do git falhou' : 'Consultou o histórico do git');
+    case 'read_tool_output':
+      return make(failed ? 'Não foi possível ler a saída completa' : 'Leu a saída completa de uma ferramenta');
+    default:
+      return make(
+        failed
+          ? `Falha em ${tool.name.replace(/_/g, ' ')}`
+          : `Executou ${tool.name.replace(/_/g, ' ')}`,
+      );
+  }
 }
 
 function plural(count: number, singular: string, pluralForm: string): string {

@@ -25,6 +25,7 @@ import type {
   LibraryArtifact,
   LoginChallenge,
   PermissionMode,
+  PlanApprovalChoice,
   ProviderAuthStatus,
   ProviderValidation,
   Settings,
@@ -182,13 +183,22 @@ export const api = {
   respondApproval: (
     approvalId: string,
     decision: ApprovalDecision,
-    options?: { scope?: ApprovalScope | null; feedback?: string | null },
+    options?: {
+      scope?: ApprovalScope | null;
+      feedback?: string | null;
+      /** Escolha do gate do plano (`approve_run` | `approve_review`). */
+      choice?: PlanApprovalChoice | null;
+      /** Markdown revisado pelo usuário antes de aprovar o plano. */
+      planMarkdown?: string | null;
+    },
   ) =>
     invoke<boolean>('respond_approval', {
       approvalId,
       decision,
       scope: options?.scope ?? null,
       feedback: options?.feedback ?? null,
+      choice: options?.choice ?? null,
+      planMarkdown: options?.planMarkdown ?? null,
     }),
   listApprovalRules: (conversationId: string) =>
     invoke<ApprovalRule[]>('list_approval_rules', { conversationId }),

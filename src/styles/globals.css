@@ -32,6 +32,10 @@
   --warning-soft: #fff7e6;
   --danger: #dc2626;
   --danger-soft: #fef2f2;
+  /* Categorias do medidor de contexto (WORKBENCH §4/§9). */
+  --context-system: #9ca3af;
+  --context-tools: #8b5cf6;
+  --context-messages: #3b82f6;
   --user-bubble: #f2f2f4;
   --assistant-bubble: transparent;
   --code-bg: #f7f7f8;
@@ -62,6 +66,10 @@
   --warning-soft: #2a2110;
   --danger: #f87171;
   --danger-soft: #2b1313;
+  /* Categorias do medidor de contexto (WORKBENCH §4/§9). */
+  --context-system: #6f6f7a;
+  --context-tools: #a78bfa;
+  --context-messages: #60a5fa;
   --user-bubble: #242429;
   --assistant-bubble: transparent;
   --code-bg: #1c1c20;
@@ -92,6 +100,9 @@
   --color-warning-soft: var(--warning-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
+  --color-context-system: var(--context-system);
+  --color-context-tools: var(--context-tools);
+  --color-context-messages: var(--context-messages);
   --color-user-bubble: var(--user-bubble);
 
   --radius-xs: 0.375rem;
@@ -607,6 +618,137 @@
   color: var(--danger) !important;
   font-family: var(--font-mono);
   font-size: 0.85em;
+}
+
+/* ------------------------------------------------------------------ */
+/* Variante "thinking": prosa compacta/discreta do raciocínio           */
+/* ------------------------------------------------------------------ */
+/* Mesmo pipeline e mesmos overrides de componente da prosa da resposta;
+   aqui só o ritmo tipográfico muda (13px, muted, margens curtas). O
+   contraste AA fica garantido pelos tokens `foreground` (títulos h1–h4)
+   e `foreground-muted` (texto corrido), em claro e escuro. */
+.lumina-prose--thinking {
+  font-size: 0.8125rem; /* 13px */
+  line-height: 1.6;
+  color: var(--foreground-muted);
+  overflow-wrap: anywhere;
+}
+.lumina-prose--thinking > *:first-child {
+  margin-top: 0;
+}
+.lumina-prose--thinking > *:last-child {
+  margin-bottom: 0;
+}
+.lumina-prose--thinking p {
+  margin-block: 0.5em;
+}
+
+/* Títulos escalados: h1–h4 recuperam o contraste do texto de resposta;
+   h5/h6 mantêm o tratamento discreto já existente (muted/uppercase). */
+.lumina-prose--thinking h1 {
+  font-size: 1.15em;
+  color: var(--foreground);
+}
+.lumina-prose--thinking h2 {
+  font-size: 1.1em;
+  color: var(--foreground);
+}
+.lumina-prose--thinking h3 {
+  font-size: 1.05em;
+  color: var(--foreground);
+}
+.lumina-prose--thinking h4 {
+  font-size: 1em;
+  color: var(--foreground);
+}
+.lumina-prose--thinking h5 {
+  font-size: 0.95em;
+}
+.lumina-prose--thinking h6 {
+  font-size: 0.95em;
+}
+.lumina-prose--thinking h1,
+.lumina-prose--thinking h2,
+.lumina-prose--thinking h3,
+.lumina-prose--thinking h4,
+.lumina-prose--thinking h5,
+.lumina-prose--thinking h6 {
+  margin-block: 0.9em 0.35em;
+  line-height: 1.28;
+}
+
+/* Listas e itens com respiro mínimo. */
+.lumina-prose--thinking ul,
+.lumina-prose--thinking ol {
+  margin-block: 0.45em;
+  padding-inline-start: 1.15em;
+}
+.lumina-prose--thinking li {
+  margin-block: 0.15em;
+}
+.lumina-prose--thinking li > ul,
+.lumina-prose--thinking li > ol {
+  margin-block: 0.2em;
+}
+
+/* Réguas, citações, alertas, notas e detalhes com gaps menores. */
+.lumina-prose--thinking hr {
+  margin-block: 1em;
+}
+.lumina-prose--thinking blockquote {
+  margin-block: 0.6em;
+}
+.lumina-prose--thinking blockquote blockquote {
+  margin-block: 0.45em;
+}
+.lumina-prose--thinking .lumina-alert {
+  margin-block: 0.65em;
+}
+.lumina-prose--thinking .lumina-alert-header {
+  font-size: 0.9em;
+}
+.lumina-prose--thinking .lumina-alert-body > :first-child {
+  margin-top: 0.1em;
+}
+.lumina-prose--thinking .lumina-footnotes {
+  margin-top: 1.15em;
+  padding-top: 0.5em;
+  font-size: 0.9em;
+}
+.lumina-prose--thinking .lumina-footnotes li {
+  margin-block: 0.25em;
+}
+.lumina-prose--thinking .lumina-footnotes p {
+  margin-block: 0.2em;
+}
+.lumina-prose--thinking details {
+  margin-block: 0.65em;
+}
+.lumina-prose--thinking summary {
+  padding: 0.4em 0.65em;
+}
+.lumina-prose--thinking details > :not(summary) {
+  margin-inline: 0.65em;
+}
+
+/* Código inline e tabelas mais compactos. */
+.lumina-prose--thinking :not(pre) > code {
+  font-size: 0.92em;
+}
+.lumina-prose--thinking .lumina-table-wrap {
+  margin-block: 0.6em;
+}
+.lumina-prose--thinking table {
+  font-size: 0.95em;
+}
+.lumina-prose--thinking th,
+.lumina-prose--thinking td {
+  padding: 0.35em 0.6em;
+}
+
+/* Math display com menos respiro. */
+.lumina-prose--thinking .katex-display {
+  margin-block: 0.7em;
 }
 
 /* ------------------------------------------------------------------ */

@@ -23,10 +23,11 @@ export type LayoutMode = 'chat' | 'code';
  * its own view state so switching layouts never loses the Chat surface's page
  * (Biblioteca/Skills) and vice versa. `diff` mostra o diff de um arquivo em uma
  * aba central (WORKBENCH §7.2); `file` mostra a prévia de um arquivo do
- * workspace na mesma faixa de abas (código, imagem ou PDF). Os alvos vivem em
- * `codeDiffTab`/`codeFileTab`.
+ * workspace na mesma faixa de abas (código, imagem ou PDF); `plan` mostra o
+ * plano aprovado da sessão em Markdown na mesma faixa (ver `codePlanTab`).
+ * Os alvos vivem em `codeDiffTab`/`codeFileTab`/`codePlanTab`.
  */
-export type CodeView = 'session' | 'skills' | 'diff' | 'commits' | 'file';
+export type CodeView = 'session' | 'skills' | 'diff' | 'commits' | 'file' | 'plan';
 
 /** Diff aberto como aba central (alvo é volátil; não persiste entre sessões). */
 export interface CodeDiffTab {
@@ -53,6 +54,20 @@ export interface CodeFileTab {
 /** Chave estável de uma aba de arquivo (workspace + caminho relativo). */
 export function codeFileTabKey(tab: CodeFileTab): string {
   return `${tab.workspaceId}\u0000${tab.path}`;
+}
+
+/**
+ * Plano aprovado aberto como aba central (volátil, como as abas de arquivo).
+ * Guarda o Markdown no momento da abertura; a visualização reusa o `FilePreview`
+ * (Documento ⇄ Código), igual à prévia de um `.md` da filetree.
+ */
+export interface CodePlanTab {
+  conversationId: string;
+  /** Markdown congelado no momento em que "Ver plano" foi acionado. */
+  markdown: string;
+  /** Rótulo curto da aba (default: "Plano"). */
+  title?: string;
+  updatedAt: number;
 }
 
 /** Tabs of the Code right panel (Arquivos | Alterações). */
@@ -119,6 +134,8 @@ interface UiState {
   codeFileTabs: CodeFileTab[];
   /** Aba de arquivo ativa (`null` = nenhuma; sempre presente em `codeFileTabs`). */
   codeFileTab: CodeFileTab | null;
+  /** Plano aprovado exibido como aba central (`null` = nenhum/aba fechada). */
+  codePlanTab: CodePlanTab | null;
   /** Quebra de linha dos arquivos — global, persistida e aplicada a todas as abas. */
   codeFileWrap: boolean;
   /** Aba central de histórico de commits (`null` = fechada). */
@@ -171,6 +188,10 @@ interface UiState {
    * ativa a vizinha; sem abas restantes, o centro volta para a sessão.
    */
   closeCodeFile: (target?: CodeFileTab) => void;
+  /** Abre (ou atualiza) o plano aprovado em uma aba central (`codeView` vira plan). */
+  openCodePlan: (target: CodePlanTab) => void;
+  /** Fecha a aba do plano; se ela era a ativa, volta para a sessão. */
+  closeCodePlan: () => void;
   /** Liga/desliga a quebra de linha de todas as abas de arquivo (persistida). */
   setCodeFileWrap: (enabled: boolean) => void;
   /** Abre a aba de histórico de commits (lista do workspace). */
@@ -223,7 +244,7 @@ interface UiState {
 }
 
 /** Aba central aberta no centro (as três abas convivem na faixa de abas). */
-type CentralCodeView = Extract<CodeView, 'diff' | 'file' | 'commits'>;
+type CentralCodeView = Extract<CodeView, 'diff' | 'file' | 'commits' | 'plan'>;
 
 /**
  * Fechar uma aba central em **segundo plano** (o usuário está lendo outra aba)
@@ -267,6 +288,7 @@ export const useUiStore = create<UiState>()(
       codeDiffTab: null,
       codeFileTabs: [],
       codeFileTab: null,
+      codePlanTab: null,
       codeFileWrap: false,
       codeCommitsTab: null,
       codePanelOpen: true,
@@ -305,7 +327,9 @@ export const useUiStore = create<UiState>()(
                   ? 'commits'
                   : codeView === 'file'
                     ? 'file'
-                    : 'session',
+                    : codeView === 'plan'
+                      ? 'plan'
+                      : 'session',
         }),
       openCodeDiff: (codeDiffTab) => set({ codeDiffTab, codeView: 'diff' }),
       closeCodeDiff: () =>
@@ -343,6 +367,16 @@ export const useUiStore = create<UiState>()(
             codeView: neighbor === null && state.codeView === 'file' ? 'session' : state.codeView,
           };
         }),
+      openCodePlan: (target) =>
+        set({
+          codePlanTab: {
+            ...target,
+            markdown: target.markdown,
+          },
+          codeView: 'plan',
+        }),
+      closeCodePlan: () =>
+        set((state) => ({ codePlanTab: null, ...keepCenterViewUnlessActive(state, 'plan') })),
       setCodeFileWrap: (codeFileWrap) => set({ codeFileWrap }),
       openCodeCommits: (workspaceId) =>
         set({ codeCommitsTab: { workspaceId, revision: null }, codeView: 'commits' }),

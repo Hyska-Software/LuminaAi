@@ -21,7 +21,7 @@ import {
   PopoverContent,
 } from '@/components/ui';
 import { api } from '@/lib/api';
-import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { AttachmentChips } from './AttachmentChips';
 import { CodeSessionControls } from './CodeSessionControls';
@@ -316,7 +316,7 @@ export function Composer() {
         }
         case 'permissoes': {
           toast.info('Modo de permissão fica no campo de mensagem', {
-            description: 'Use o chip Leitura / Editar / Autônomo ao lado do anexo.',
+            description: 'Use o chip Leitura / Revisar / Editar / Autônomo ao lado do anexo.',
           });
           return;
         }
@@ -331,6 +331,28 @@ export function Composer() {
           textareaRef.current?.focus();
           return;
         }
+        case 'plan-on': {
+          if (!conversationId) {
+            toast.info('Nenhuma sessão ativa', {
+              description: 'Abra uma sessão de código para ativar o modo Plano.',
+            });
+            return;
+          }
+          const current = useCodeStore.getState().byConversation[conversationId];
+          if (current?.planMode) {
+            toast.info('Modo Plano já está ativo');
+            return;
+          }
+          // Estado da sessão vive no `codeStore` (não chamar `api` direto): o
+          // chip do composer reflete a mudança otimista e faz rollback no erro.
+          void useCodeStore
+            .getState()
+            .setPlanMode(conversationId, true)
+            .then((ok) => {
+              if (ok) toast.success('Modo Plano ativado');
+            });
+          return;
+        }
         case 'plan-off': {
           if (!conversationId) {
             toast.info('Nenhuma sessão ativa', {
@@ -338,13 +360,11 @@ export function Composer() {
             });
             return;
           }
-          void api
+          void useCodeStore
+            .getState()
             .setPlanMode(conversationId, false)
-            .then(() => toast.success('Modo Plano desativado'))
-            .catch((error: unknown) => {
-              toast.error('Não foi possível desativar o modo Plano', {
-                description: describeError(error),
-              });
+            .then((ok) => {
+              if (ok) toast.success('Modo Plano desativado');
             });
           return;
         }
@@ -365,6 +385,9 @@ export function Composer() {
       if (command.action === 'fill' && command.fill) {
         setValue(value.slice(0, start) + command.fill + rest);
         focusTextareaAt(start + command.fill.length);
+        // Comandos de intenção que também têm efeito (ex.: `/plan` ativa o
+        // modo Plano antes de preencher a instrução).
+        if (command.invoke) runInvoke(command);
         return;
       }
       setValue(value.slice(0, start) + rest);

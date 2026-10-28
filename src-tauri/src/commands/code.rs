@@ -12,25 +12,19 @@ use sha2::{Digest, Sha256};
 use tauri::State;
 
 use crate::domain::{
-    ApprovalDecision, ApprovalRequest, ApprovalRule, ApprovalScope, ApprovalScope as Scope,
-    ChangesSummary, CodeSessionState, ContextStats, FileChangeKind, FileChangeSummary, PlanState,
-    PlanView, TodoItem, Workspace,
+    ApprovalDecision, ApprovalRequest, ApprovalRule, ApprovalScope, ChangesSummary,
+    CodeSessionState, FileChangeKind, FileChangeSummary, PlanState, PlanView, Workspace,
 };
 use crate::state::AppState;
 
 use super::workspace::{enrich_workspace, project_info, workspace_path};
 
-/// Kinds gravados em `code_events` pela sessão de código.
-pub const EVENT_APPROVAL_ASKED: &str = "approval/asked";
-pub const EVENT_APPROVAL_DECIDED: &str = "approval/decided";
-pub const EVENT_PERMISSION_MODE: &str = "permission/mode";
-pub const EVENT_PLAN_MODE: &str = "plan/mode";
-pub const EVENT_PLAN_SUBMITTED: &str = "plan/submitted";
-pub const EVENT_PLAN_APPROVED: &str = "plan/approved";
-pub const EVENT_TODOS: &str = "todos";
-pub const EVENT_CONTEXT_STATS: &str = "context/stats";
-pub const EVENT_CHANGES_SUMMARY: &str = "changes/summary";
-pub const EVENT_REVERT: &str = "revert/performed";
+/// Kinds gravados em `code_events` por este módulo. As projeções de plano e
+/// tarefas vivem em [`crate::harness::code::session`] (projeção única, D9).
+pub const EVENT_APPROVAL_DECIDED: &str = crate::harness::code::session::KIND_APPROVAL_DECIDED;
+pub const EVENT_PERMISSION_MODE: &str = crate::harness::code::session::KIND_PERMISSION_MODE;
+pub const EVENT_CONTEXT_STATS: &str = crate::harness::code::session::KIND_CONTEXT_STATS;
+pub const EVENT_REVERT: &str = crate::harness::code::session::KIND_REVERT;
 
 fn map_err(error: impl std::fmt::Display) -> String {
     error.to_string()
@@ -48,25 +42,6 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 fn objects_dir(app_data: &Path) -> PathBuf {
     app_data.join("checkpoints").join("objects")
-}
-
-/// Payloads gravados em `code_events` (schema versionado por `kind`).
-#[derive(Debug, Deserialize)]
-struct ModePayload {
-    #[serde(default)]
-    active: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct PlanPayload {
-    #[serde(default)]
-    markdown: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TodosPayload {
-    #[serde(default)]
-    items: Vec<TodoItem>,
 }
 
 /// Reconstrói o estado da sessão a partir do log de eventos + journal + git.
@@ -91,28 +66,6 @@ async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSe
         }
     }
 
-    let plan_mode = state
-        .db
-        .latest_code_event(conversation_id, EVENT_PLAN_MODE)
-        .map_err(map_err)?
-        .and_then(|event| serde_json::from_str::<ModePayload>(&event.payload).ok())
-        .map(|payload| payload.active)
-        .unwrap_or(false);
-
-    let plan = build_plan_view(state, conversation_id)?;
-    let todos = state
-        .db
-        .latest_code_event(conversation_id, EVENT_TODOS)
-        .map_err(map_err)?
-        .and_then(|event| serde_json::from_str::<TodosPayload>(&event.payload).ok())
-        .map(|payload| payload.items)
-        .unwrap_or_default();
-    let context = state
-        .db
-        .latest_code_event(conversation_id, EVENT_CONTEXT_STATS)
-        .map_err(map_err)?
-        .and_then(|event| serde_json::from_str::<ContextStats>(&event.payload).ok());
-
     let changes = collect_changes(state, conversation_id, workspace.as_ref()).await;
 
     let approvals: Vec<ApprovalRequest> = state
@@ -130,6 +83,20 @@ async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSe
         .filter(|request| request.conversation_id == conversation_id)
         .collect();
 
+    // Projeção **única** (`PLAN.md` D9/B-09): plano, modo e tarefas vêm de
+    // `harness::code::session` — este módulo não recalcula nada.
+    let plan_mode = crate::harness::code::session::plan_mode_active(&state.db, conversation_id)
+        .map_err(map_err)?;
+    let plan = crate::harness::code::session::plan_view(&state.db, conversation_id)
+        .map_err(map_err)?;
+    // Uma revisão sem aprovação `submit_plan` pendente não tem gate ativo
+    // (timeout/cancel/crash): degrada para planejamento com instrução curta.
+    let has_pending_plan_approval = approvals.iter().any(|request| request.tool == "submit_plan");
+    let plan = degrade_orphan_review(plan, has_pending_plan_approval);
+    let todos = crate::harness::code::session::todos(&state.db, conversation_id)
+        .map_err(map_err)?;
+    let context = crate::harness::code::session::context_stats(&state.db, conversation_id);
+
     Ok(CodeSessionState {
         conversation_id: conversation_id.to_string(),
         permission_mode: conversation.permission_mode,
@@ -146,49 +113,19 @@ async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSe
     })
 }
 
-fn build_plan_view(state: &AppState, conversation_id: &str) -> Result<Option<PlanView>, String> {
-    let submitted = state
-        .db
-        .latest_code_event(conversation_id, EVENT_PLAN_SUBMITTED)
-        .map_err(map_err)?;
-    let approved = state
-        .db
-        .latest_code_event(conversation_id, EVENT_PLAN_APPROVED)
-        .map_err(map_err)?;
-    let active = state
-        .db
-        .latest_code_event(conversation_id, EVENT_PLAN_MODE)
-        .map_err(map_err)?
-        .and_then(|event| serde_json::from_str::<ModePayload>(&event.payload).ok())
-        .map(|payload| payload.active)
-        .unwrap_or(false);
-
-    let Some(submitted) = submitted else {
-        if active {
-            return Ok(Some(PlanView {
-                state: PlanState::Planning,
-                markdown: None,
-                updated_at: crate::domain::now_ms(),
-            }));
-        }
-        return Ok(None);
-    };
-    let markdown = serde_json::from_str::<PlanPayload>(&submitted.payload)
-        .ok()
-        .and_then(|payload| payload.markdown);
-    let is_approved = approved
-        .as_ref()
-        .map(|event| event.seq > submitted.seq)
-        .unwrap_or(false);
-    Ok(Some(PlanView {
-        state: if is_approved {
-            PlanState::Approved
-        } else {
-            PlanState::Reviewing
-        },
-        markdown,
-        updated_at: submitted.created_at,
-    }))
+/// Uma revisão órfã (aprovação expirou/cancelou, o app reiniciou ou o turno
+/// acabou sem decisão) não tem gate ativo: degrada para `Planning` com
+/// instrução curta para reenviar o plano (B-07, espelho do fold do `turn/ended`).
+fn degrade_orphan_review(
+    plan: Option<PlanView>,
+    has_pending_plan_approval: bool,
+) -> Option<PlanView> {
+    let mut plan = plan?;
+    if plan.state == PlanState::Reviewing && !has_pending_plan_approval {
+        plan.state = PlanState::Planning;
+        plan.feedback = Some(crate::harness::code::session::STALE_REVIEW_FEEDBACK.to_string());
+    }
+    Some(plan)
 }
 
 /// Junta journal (alterações da sessão) + git (working tree) por arquivo.
@@ -314,12 +251,28 @@ pub async fn set_plan_mode(
     conversation_id: String,
     plan_mode: bool,
 ) -> Result<CodeSessionState, String> {
-    let payload = serde_json::json!({ "active": plan_mode }).to_string();
-    state
-        .db
-        .append_code_event(&conversation_id, None, EVENT_PLAN_MODE, &payload)
-        .map_err(map_err)?;
+    apply_plan_mode(&state.db, &conversation_id, plan_mode)?;
     session_state(&state, &conversation_id).await
+}
+
+/// Lógica testável de `set_plan_mode`: valida a conversa **antes** de gravar o
+/// evento (B-16 — ids inválidos não podem deixar linhas órfãs em `code_events`).
+fn apply_plan_mode(
+    db: &crate::db::Db,
+    conversation_id: &str,
+    plan_mode: bool,
+) -> Result<(), String> {
+    ensure_conversation(db, conversation_id)?;
+    crate::harness::code::session::set_plan_mode(db, conversation_id, plan_mode).map_err(map_err)
+}
+
+fn ensure_conversation(
+    db: &crate::db::Db,
+    conversation_id: &str,
+) -> Result<crate::domain::Conversation, String> {
+    db.get_conversation(conversation_id)
+        .map_err(map_err)?
+        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))
 }
 
 /// Status dos servidores MCP configurados (`mcp.json`) e tools descobertas.
@@ -354,6 +307,30 @@ pub async fn respond_question(
     Ok(true)
 }
 
+/// Resposta do usuário a uma aprovação pendente (dados do card).
+#[derive(Debug, Clone)]
+struct ApprovalAnswer {
+    decision: ApprovalDecision,
+    scope: Option<ApprovalScope>,
+    feedback: Option<String>,
+    /// Escolha do gate de plano: `approve_run` | `approve_review`.
+    choice: Option<String>,
+    /// Markdown revisado pelo usuário antes de aprovar o plano (D3).
+    plan_markdown: Option<String>,
+}
+
+impl Default for ApprovalAnswer {
+    fn default() -> Self {
+        Self {
+            decision: ApprovalDecision::Denied,
+            scope: None,
+            feedback: None,
+            choice: None,
+            plan_markdown: None,
+        }
+    }
+}
+
 /// Responde a uma aprovação pendente (falha fechada para id desconhecido).
 #[tauri::command]
 pub async fn respond_approval(
@@ -362,91 +339,199 @@ pub async fn respond_approval(
     decision: ApprovalDecision,
     scope: Option<ApprovalScope>,
     feedback: Option<String>,
+    choice: Option<String>,
+    plan_markdown: Option<String>,
 ) -> Result<bool, String> {
-    let request = state.approvals.request(&approval_id);
-    let Some(request) = request else {
-        return Err("APPROVAL_NOT_FOUND: esta aprovação já foi resolvida".to_string());
-    };
-    let outcome = match decision {
+    apply_approval_decision(
+        &state.db,
+        &state.approvals,
+        &approval_id,
+        ApprovalAnswer {
+            decision,
+            scope,
+            feedback,
+            choice,
+            plan_markdown,
+        },
+    )
+}
+
+/// Aplica a decisão de uma aprovação.
+///
+/// Ordem importa (B-17): **resolve o oneshot primeiro** — se o pedido já morreu
+/// (timeout/cancelamento/duplo clique) devolve `APPROVAL_NOT_FOUND` sem criar
+/// regra nem auditar uma decisão que nunca existiu. Aprovações de plano **não**
+/// criam regra "sempre permitir" (D5).
+fn apply_approval_decision(
+    db: &crate::db::Db,
+    approvals: &crate::policy::approval::ApprovalRegistry,
+    approval_id: &str,
+    answer: ApprovalAnswer,
+) -> Result<bool, String> {
+    let request = approvals
+        .request(approval_id)
+        .ok_or_else(|| "APPROVAL_NOT_FOUND: esta aprovação já foi resolvida".to_string())?;
+    let is_plan = request.tool == "submit_plan";
+
+    if is_plan {
+        if answer.scope.is_some() {
+            return Err(
+                "APPROVAL_INVALID: aprovações de plano não criam regra de permissão".to_string(),
+            );
+        }
+        if answer.decision == ApprovalDecision::Approved {
+            validate_plan_choice(answer.choice.as_deref(), answer.plan_markdown.as_deref())?;
+        }
+    } else if answer.choice.is_some() || answer.plan_markdown.is_some() {
+        return Err(
+            "APPROVAL_INVALID: `choice`/`planMarkdown` só se aplicam à aprovação de plano"
+                .to_string(),
+        );
+    }
+
+    let normalized_markdown = answer
+        .plan_markdown
+        .as_deref()
+        .map(str::trim)
+        .filter(|markdown| !markdown.is_empty())
+        .map(str::to_string);
+    let mut outcome = match answer.decision {
+        ApprovalDecision::Approved if is_plan => {
+            crate::policy::approval::ApprovalOutcome::approved_plan(
+                answer.choice.clone(),
+                normalized_markdown,
+            )
+        }
         ApprovalDecision::Approved => {
-            if let Some(scope) = scope {
-                // "Sempre permitir": deriva a regra do pedido auditado.
-                let (matcher, pattern, scope_id) = rule_from_request(&request, scope);
-                let tool = request.tool.clone();
-                let decision = ApprovalDecision::Approved;
-                if let Err(error) = state.db.create_approval_rule(
-                    &crate::db::NewApprovalRule {
-                        scope,
-                        scope_id: scope_id.as_deref(),
-                        tool: &tool,
-                        matcher: &matcher,
-                        pattern: &pattern,
-                        decision,
-                    },
-                ) {
-                    return Err(format!("não foi possível salvar a regra: {error}"));
-                }
-            }
-            crate::policy::approval::ApprovalOutcome {
-                decision: ApprovalDecision::Approved,
-                scope,
-                feedback: feedback.clone(),
-            }
+            crate::policy::approval::ApprovalOutcome::approved(answer.scope)
         }
-        ApprovalDecision::Denied | ApprovalDecision::Cancelled | ApprovalDecision::Expired => {
-            crate::policy::approval::ApprovalOutcome {
-                decision,
-                scope: None,
-                feedback: feedback.clone(),
-            }
+        ApprovalDecision::Denied => {
+            crate::policy::approval::ApprovalOutcome::denied(answer.feedback.clone())
         }
+        ApprovalDecision::Cancelled => crate::policy::approval::ApprovalOutcome::cancelled(),
+        ApprovalDecision::Expired => crate::policy::approval::ApprovalOutcome::expired(),
     };
+    // O feedback também acompanha aprovações (auditoria/card).
+    if answer.decision == ApprovalDecision::Approved {
+        outcome.feedback = answer.feedback.clone();
+    }
+    if !approvals.resolve(approval_id, outcome.clone()) {
+        return Err("APPROVAL_NOT_FOUND: esta aprovação já foi resolvida".to_string());
+    }
+
+    // A partir daqui a tool já destravou: regra/auditoria são efeitos
+    // secundários (best effort auditado; regra pode falhar e reportar erro).
+    if answer.decision == ApprovalDecision::Approved {
+        if let Some(scope) = answer.scope {
+            let (matcher, pattern, scope_id) = rule_from_request(db, &request, scope)?;
+            state_create_rule(
+                db,
+                scope,
+                scope_id.as_deref(),
+                &request.tool,
+                &matcher,
+                &pattern,
+            )?;
+        }
+    }
     let audit = serde_json::json!({
         "approvalId": approval_id,
-        "decision": decision.as_str(),
-        "scope": scope.map(|scope| scope.as_str()),
-        "feedback": feedback,
+        "decision": answer.decision.as_str(),
+        "choice": outcome.choice,
+        "scope": outcome.scope.map(|scope| scope.as_str()),
+        "feedback": outcome.feedback,
     })
     .to_string();
-    state
-        .db
-        .append_code_event(
-            &request.conversation_id,
-            None,
-            EVENT_APPROVAL_DECIDED,
-            &audit,
-        )
-        .map_err(map_err)?;
-    Ok(state.approvals.resolve(&approval_id, outcome))
+    db.append_code_event(
+        &request.conversation_id,
+        None,
+        EVENT_APPROVAL_DECIDED,
+        &audit,
+    )
+    .map_err(map_err)?;
+    Ok(true)
+}
+
+/// Cria a regra "sempre permitir" derivada do pedido aprovado.
+fn state_create_rule(
+    db: &crate::db::Db,
+    scope: ApprovalScope,
+    scope_id: Option<&str>,
+    tool: &str,
+    matcher: &str,
+    pattern: &str,
+) -> Result<(), String> {
+    db.create_approval_rule(&crate::db::NewApprovalRule {
+        scope,
+        scope_id,
+        tool,
+        matcher,
+        pattern,
+        decision: ApprovalDecision::Approved,
+    })
+    .map(|_| ())
+    .map_err(|error| format!("não foi possível salvar a regra: {error}"))
+}
+
+/// Valida a escolha do gate de plano e o markdown revisado (D3/D5).
+fn validate_plan_choice(choice: Option<&str>, plan_markdown: Option<&str>) -> Result<(), String> {
+    if let Some(choice) = choice {
+        match choice {
+            "approve_run" | "approve_review" => {}
+            other => {
+                return Err(format!(
+                    "APPROVAL_INVALID: escolha de plano desconhecida: `{other}`"
+                ))
+            }
+        }
+    }
+    if let Some(markdown) = plan_markdown {
+        let trimmed = markdown.trim();
+        if trimmed.is_empty() {
+            return Err("APPROVAL_INVALID: o plano revisado não pode ficar vazio".to_string());
+        }
+        if trimmed.chars().count() > 20_000 {
+            return Err(
+                "APPROVAL_INVALID: o plano revisado excede 20 000 caracteres".to_string(),
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Deriva `(matcher, pattern, scope_id)` de um pedido para a regra "sempre".
+///
+/// Para `scope = Workspace` o `scope_id` vem da conversa; sem workspace a ação
+/// falha em vez de gravar uma regra que nunca casaria (B-06).
 fn rule_from_request(
+    db: &crate::db::Db,
     request: &ApprovalRequest,
     scope: ApprovalScope,
-) -> (String, String, Option<String>) {
+) -> Result<(String, String, Option<String>), String> {
     let scope_id = match scope {
         ApprovalScope::Session => Some(request.conversation_id.clone()),
-        ApprovalScope::Workspace => None,
+        ApprovalScope::Workspace => {
+            let conversation = ensure_conversation(db, &request.conversation_id)?;
+            Some(conversation.workspace_id.ok_or_else(|| {
+                "APPROVAL_INVALID: a sessão não tem workspace; escolha \"esta sessão\" ou \"sempre\""
+                    .to_string()
+            })?)
+        }
         ApprovalScope::Global => None,
     };
-    match &request.detail {
+    let (matcher, pattern) = match &request.detail {
         crate::domain::ApprovalDetail::Command { command, .. } => {
-            ("prefix".to_string(), command.trim().to_string(), scope_id)
+            ("prefix".to_string(), command.trim().to_string())
         }
         crate::domain::ApprovalDetail::Paths { paths, .. } => (
             "glob".to_string(),
             paths.first().cloned().unwrap_or_default(),
-            scope_id,
         ),
         crate::domain::ApprovalDetail::Secret { path }
-        | crate::domain::ApprovalDetail::Outside { path } => {
-            ("glob".to_string(), path.clone(), scope_id)
-        }
-        crate::domain::ApprovalDetail::Other { text } => {
-            ("exact".to_string(), text.clone(), scope_id)
-        }
-    }
+        | crate::domain::ApprovalDetail::Outside { path } => ("glob".to_string(), path.clone()),
+        crate::domain::ApprovalDetail::Other { text } => ("exact".to_string(), text.clone()),
+    };
+    Ok((matcher, pattern, scope_id))
 }
 
 #[tauri::command]
@@ -895,4 +980,267 @@ pub async fn kill_job(
         .wait(&job_id, std::time::Duration::from_millis(1_500))
         .await
         .map_err(map_err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{ApprovalDetail, RiskClass};
+    use crate::harness::code::session;
+    use crate::policy::approval::{ApprovalOutcome, ApprovalRegistry};
+
+    fn db_with_conversation() -> (crate::db::Db, String) {
+        let db = crate::db::Db::open_in_memory().expect("banco em memória");
+        let conversation = db
+            .create_conversation_with_mode(
+                "Sessão",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa");
+        (db, conversation.id)
+    }
+
+    fn approval_request(conversation_id: &str, tool: &str) -> ApprovalRequest {
+        ApprovalRequest {
+            id: "apr-1".to_string(),
+            conversation_id: conversation_id.to_string(),
+            tool_call_id: "call-1".to_string(),
+            tool: tool.to_string(),
+            title: "Ação?".to_string(),
+            detail: ApprovalDetail::Command {
+                command: "npm test".to_string(),
+                workdir: ".".to_string(),
+            },
+            risk: RiskClass::Shell,
+            preview: None,
+            options: Vec::new(),
+            created_at: 1,
+        }
+    }
+
+    fn answer(decision: ApprovalDecision) -> ApprovalAnswer {
+        ApprovalAnswer {
+            decision,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn set_plan_mode_validates_the_conversation_before_writing() {
+        let (db, conversation_id) = db_with_conversation();
+        assert!(apply_plan_mode(&db, "nao-existe", true).is_err());
+        assert!(
+            db.latest_code_event("nao-existe", session::KIND_PLAN_MODE)
+                .expect("ler")
+                .is_none(),
+            "id inválido não pode gravar evento"
+        );
+
+        apply_plan_mode(&db, &conversation_id, true).expect("ligar plano");
+        assert!(session::plan_mode_active(&db, &conversation_id).expect("modo"));
+    }
+
+    #[test]
+    fn rule_from_request_resolves_the_workspace_scope_id() {
+        let (db, conversation_id) = db_with_conversation();
+        let request = approval_request(&conversation_id, "run_command");
+
+        // Sessão sem workspace: erro em vez de regra morta (B-06).
+        let error = rule_from_request(&db, &request, ApprovalScope::Workspace)
+            .expect_err("sem workspace deve falhar");
+        assert!(error.contains("workspace"), "{error}");
+
+        let workspace = db
+            .create_workspace("demo", "C:/dev/demo")
+            .expect("workspace");
+        db.set_conversation_workspace(&conversation_id, Some(&workspace.id))
+            .expect("vincular");
+        let (matcher, pattern, scope_id) =
+            rule_from_request(&db, &request, ApprovalScope::Workspace).expect("regra");
+        assert_eq!(matcher, "prefix");
+        assert_eq!(pattern, "npm test");
+        assert_eq!(scope_id.as_deref(), Some(workspace.id.as_str()));
+
+        let (_, _, session_scope) =
+            rule_from_request(&db, &request, ApprovalScope::Session).expect("sessão");
+        assert_eq!(session_scope.as_deref(), Some(conversation_id.as_str()));
+        let (_, _, global_scope) =
+            rule_from_request(&db, &request, ApprovalScope::Global).expect("global");
+        assert!(global_scope.is_none());
+    }
+
+    #[test]
+    fn validate_plan_choice_rejects_invalid_choice_and_bad_markdown() {
+        assert!(validate_plan_choice(None, None).is_ok());
+        assert!(validate_plan_choice(Some("approve_run"), None).is_ok());
+        assert!(validate_plan_choice(Some("approve_review"), Some("# Plano")).is_ok());
+        assert!(validate_plan_choice(Some("keep_planning"), None).is_err());
+        assert!(validate_plan_choice(Some("qualquer"), None).is_err());
+        assert!(validate_plan_choice(None, Some("   ")).is_err());
+        assert!(validate_plan_choice(None, Some(&"x".repeat(20_001))).is_err());
+    }
+
+    #[test]
+    fn orphan_review_degrades_to_planning_only_without_a_pending_approval() {
+        let reviewing = |state: PlanState| PlanView {
+            state,
+            markdown: Some("# Draft".into()),
+            feedback: None,
+            updated_at: 10,
+        };
+
+        // Gate pendente: mantém a revisão (o card ainda pode aprovar).
+        let kept = degrade_orphan_review(Some(reviewing(PlanState::Reviewing)), true)
+            .expect("plano");
+        assert_eq!(kept.state, PlanState::Reviewing);
+        assert!(kept.feedback.is_none());
+
+        // Sem aprovação pendente: volta para planejamento com o aviso.
+        let degraded = degrade_orphan_review(Some(reviewing(PlanState::Reviewing)), false)
+            .expect("plano");
+        assert_eq!(degraded.state, PlanState::Planning);
+        assert_eq!(
+            degraded.feedback.as_deref(),
+            Some(session::STALE_REVIEW_FEEDBACK)
+        );
+        assert_eq!(degraded.markdown.as_deref(), Some("# Draft"));
+
+        // Aprovado/planejando não são tocados.
+        let approved = degrade_orphan_review(Some(reviewing(PlanState::Approved)), false)
+            .expect("plano");
+        assert_eq!(approved.state, PlanState::Approved);
+        assert!(degrade_orphan_review(None, false).is_none());
+    }
+
+    #[test]
+    fn dead_approval_is_rejected_without_rule_or_audit() {
+        let (db, conversation_id) = db_with_conversation();
+        let registry = ApprovalRegistry::new();
+        let error = apply_approval_decision(&db, &registry, "apr-morto", answer(ApprovalDecision::Approved))
+            .expect_err("aprovação inexistente");
+        assert!(error.starts_with("APPROVAL_NOT_FOUND"), "{error}");
+        assert!(
+            db.latest_code_event(&conversation_id, session::KIND_APPROVAL_DECIDED)
+                .expect("ler")
+                .is_none()
+        );
+        assert!(db.list_approval_rules().expect("regras").is_empty());
+    }
+
+    #[test]
+    fn approval_is_resolved_once_and_plan_scope_is_rejected() {
+        let (db, conversation_id) = db_with_conversation();
+        let registry = ApprovalRegistry::new();
+
+        // Gate de plano: escopo é inválido (não cria regra — D5).
+        let mut request = approval_request(&conversation_id, "submit_plan");
+        request.id = "apr-plan".to_string();
+        let _rx = registry.register_request(request);
+        let error = apply_approval_decision(
+            &db,
+            &registry,
+            "apr-plan",
+            ApprovalAnswer {
+                decision: ApprovalDecision::Approved,
+                scope: Some(ApprovalScope::Session),
+                ..Default::default()
+            },
+        )
+        .expect_err("escopo em plano é inválido");
+        assert!(error.starts_with("APPROVAL_INVALID"), "{error}");
+        assert!(registry.has_pending("apr-plan"), "pedido continua pendente");
+
+        // Aprovação normal: o oneshot resolve e o segundo clique falha.
+        let mut rx = registry.register_request(approval_request(&conversation_id, "run_command"));
+        let first = apply_approval_decision(
+            &db,
+            &registry,
+            "apr-1",
+            answer(ApprovalDecision::Approved),
+        )
+        .expect("primeira decisão");
+        assert!(first);
+        let outcome = rx.try_recv().expect("outcome entregue");
+        assert!(outcome.is_approved());
+        assert!(outcome.choice.is_none());
+        assert!(
+            db.latest_code_event(&conversation_id, session::KIND_APPROVAL_DECIDED)
+                .expect("ler")
+                .is_some(),
+            "auditoria registrada"
+        );
+
+        let second = apply_approval_decision(
+            &db,
+            &registry,
+            "apr-1",
+            answer(ApprovalDecision::Approved),
+        )
+        .expect_err("segundo clique não pode resolver");
+        assert!(second.starts_with("APPROVAL_NOT_FOUND"), "{second}");
+    }
+
+    #[test]
+    fn workspace_scope_rule_is_created_with_the_conversation_workspace() {
+        let (db, conversation_id) = db_with_conversation();
+        let workspace = db
+            .create_workspace("demo", "C:/dev/demo")
+            .expect("workspace");
+        db.set_conversation_workspace(&conversation_id, Some(&workspace.id))
+            .expect("vincular");
+
+        let registry = ApprovalRegistry::new();
+        let _rx = registry.register_request(approval_request(&conversation_id, "run_command"));
+        let resolved = apply_approval_decision(
+            &db,
+            &registry,
+            "apr-1",
+            ApprovalAnswer {
+                decision: ApprovalDecision::Approved,
+                scope: Some(ApprovalScope::Workspace),
+                ..Default::default()
+            },
+        )
+        .expect("aprovar com regra workspace");
+        assert!(resolved);
+
+        let rules = db.list_approval_rules().expect("regras");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].scope, ApprovalScope::Workspace);
+        assert_eq!(rules[0].scope_id.as_deref(), Some(workspace.id.as_str()));
+        assert_eq!(rules[0].tool, "run_command");
+        assert_eq!(rules[0].pattern, "npm test");
+    }
+
+    #[test]
+    fn plan_choice_and_revised_markdown_reach_the_approval_outcome() {
+        let (db, conversation_id) = db_with_conversation();
+        let registry = ApprovalRegistry::new();
+        let mut request = approval_request(&conversation_id, "submit_plan");
+        request.id = "apr-plan".to_string();
+        let mut rx = registry.register_request(request);
+        let resolved = apply_approval_decision(
+            &db,
+            &registry,
+            "apr-plan",
+            ApprovalAnswer {
+                decision: ApprovalDecision::Approved,
+                choice: Some("approve_review".to_string()),
+                plan_markdown: Some("  # Plano revisado  ".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("aprovar plano");
+        assert!(resolved);
+        let outcome: ApprovalOutcome = rx.try_recv().expect("outcome");
+        assert!(outcome.is_approved());
+        assert!(outcome.review_each_edit());
+        assert_eq!(outcome.plan_markdown.as_deref(), Some("# Plano revisado"));
+        assert!(
+            db.list_approval_rules().expect("regras").is_empty(),
+            "aprovação de plano não cria regra"
+        );
+    }
 }

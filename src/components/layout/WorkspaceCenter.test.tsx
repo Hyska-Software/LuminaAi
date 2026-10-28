@@ -22,6 +22,9 @@ vi.mock('@/components/code', () => ({
       {target.path}
     </div>
   ),
+  CodePlanView: ({ tab }: { tab: { markdown: string } }) => (
+    <div data-testid="code-plan-view">{tab.markdown}</div>
+  ),
 }));
 
 vi.mock('@/components/skills', () => ({
@@ -49,6 +52,7 @@ beforeEach(() => {
     codeDiffTab: null,
     codeCommitsTab: null,
     codeFileTab: null,
+    codePlanTab: null,
   });
 });
 
@@ -169,6 +173,29 @@ describe('WorkspaceCenter — histórico de commits', () => {
     render(<WorkspaceCenter />);
 
     expect(screen.getByTestId('code-commits-view').textContent).toContain('lista');
+    expect(screen.getByTestId('code-session-header')).toBeTruthy();
+    expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
+  });
+});
+
+describe('WorkspaceCenter — aba central de plano', () => {
+  it('mostra o plano aprovado no centro mantendo header e chat montados', () => {
+    useUiStore.setState({
+      layoutMode: 'code',
+      codeView: 'plan',
+      codePlanTab: {
+        conversationId: 'c-1',
+        markdown: '# Plano aprovado',
+        title: 'Plano',
+        updatedAt: 1,
+      },
+    });
+
+    render(<WorkspaceCenter />);
+
+    const panel = screen.getByRole('region', { name: 'Plano aprovado da sessão' });
+    expect(panel.id).toBe('code-plan-panel');
+    expect(screen.getByTestId('code-plan-view').textContent).toContain('# Plano aprovado');
     expect(screen.getByTestId('code-session-header')).toBeTruthy();
     expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
   });

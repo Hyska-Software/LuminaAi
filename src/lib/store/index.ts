@@ -31,6 +31,7 @@ export type {
   CodeDiffTab,
   CodeFileTab,
   CodePanelTab,
+  CodePlanTab,
   CodeView,
   LayoutMode,
   MainView,

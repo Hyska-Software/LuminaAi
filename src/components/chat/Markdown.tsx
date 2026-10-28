@@ -173,16 +173,30 @@ export interface MarkdownProps {
   className?: string;
   /** Adds the blinking stream caret to the last text block. */
   streaming?: boolean;
+  /** `thinking`: prosa compacta e discreta usada pela timeline de raciocínio. */
+  variant?: 'default' | 'thinking';
 }
 
 /** GFM + math markdown renderer tuned by the global `.lumina-prose` styles. */
-export const Markdown = memo(function Markdown({ content, className, streaming = false }: MarkdownProps) {
+export const Markdown = memo(function Markdown({
+  content,
+  className,
+  streaming = false,
+  variant = 'default',
+}: MarkdownProps) {
   // `\$` must be protected before parsing (see `markdown/mathDollars.ts`);
   // `remarkRestoreMathDollars` puts the per-node semantics back afterwards.
   const source = useMemo(() => protectEscapedDollars(content), [content]);
 
   return (
-    <div className={cn('lumina-prose text-[15px]', streaming && 'lumina-prose--streaming', className)}>
+    <div
+      className={cn(
+        'lumina-prose',
+        variant === 'thinking' ? 'lumina-prose--thinking' : 'text-[15px]',
+        streaming && 'lumina-prose--streaming',
+        className,
+      )}
+    >
       <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={COMPONENTS}>
         {source}
       </ReactMarkdown>

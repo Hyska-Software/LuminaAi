@@ -22,6 +22,9 @@ export type { CodeDiffViewProps } from './CodeDiffView';
 export { CodeFileView } from './CodeFileView';
 export type { CodeFileViewProps } from './CodeFileView';
 
+export { CodePlanView } from './CodePlanView';
+export type { CodePlanViewProps } from './CodePlanView';
+
 export { CodeCommitHistoryView } from './CodeCommitHistoryView';
 export type { CodeCommitHistoryViewProps, CodeCommitsTabTarget } from './CodeCommitHistoryView';
 

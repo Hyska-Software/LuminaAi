@@ -1,6 +1,8 @@
 # Markdown no chat — auditoria, contrato e plano
 
 > Status: **concluído e verificado** (checklist e registro em §7/§9).
+> Extensão: **Markdown no Thinking (raciocínio do modelo)** — contrato em §10,
+> plano em `docs/goals/thinking-markdown/PLAN.md`.
 > Donos: `ui-core` (renderer `src/components/chat/**` + CSS), `harness-dev`
 > (prompt do agente em `src-tauri/src/harness/prompt.rs`), Lead (docs, deps,
 > revisão final e verificação independente via `verifier`). Referências:
@@ -292,4 +294,45 @@ garantido, orientar no prompt a colocar os delimitadores em linhas próprias.
 - Detecção de alertas GitHub no parser (mdast) para tratar `> \[!NOTE]` literal.
 - Habilitar o renderer de Markdown no preview de artefatos Markdown (fora do
   escopo do chat).
+
+## 10. Thinking do modelo (variante compacta)
+
+> Requisito: **suporte completo a Markdown para os campos de Thinking do modelo
+> no chat**, aplicado nos layouts **Chat** e **Code**, mantendo as diferenças de
+> cada layout. Plano e registro em `docs/goals/thinking-markdown/PLAN.md`.
+
+O Thinking é o rastro de raciocínio visível do modelo: `ChatMessage.reasoning`
+(total) e `ChatMessage.trace[].reasoning` (por passo do loop de agentes), exibidos
+na timeline recolhível "Thinking/Pensou" (`AgentSteps`). Ele usa o **mesmo
+contrato de sintaxe desta §4** — não há dialeto reduzido no Thinking.
+
+- **Renderer**: `src/components/chat/Markdown.tsx` aceita
+  `variant?: 'default' | 'thinking'`. As duas variantes compartilham plugins
+  (`remark-gfm`, `remark-math`, `rehype-raw`, `rehypeSafeHtml`, `rehype-katex`) e
+  overrides de componentes; a variante `thinking` só aplica o modificador
+  `.lumina-prose--thinking` (13px, `foreground-muted`, ritmo vertical compacto,
+  títulos escalados, tabelas/listas/notas menores — somente tokens).
+- **Modelo da timeline**: `buildAgentTrace` devolve **uma entrada de raciocínio
+  por passo** com o Markdown **bruto** (apenas `trim` nas pontas); não divide por
+  linha em branco nem remove marcadores de lista. Mensagens legadas (sem `trace`)
+  viram um bloco único de raciocínio + os grupos de tools.
+- **Segurança**: o raciocínio passa pelo mesmo sanitizador e pela mesma allowlist
+  de URLs (`http(s)`, `mailto:`, `#âncora`); nunca há `innerHTML`. Nenhuma
+  superfície nova de XSS: os vetores de §6 valem para as duas variantes.
+- **Streaming**: o bloco abre durante o turno e o último bloco de raciocínio
+  recebe o caret (`lumina-prose--streaming`) enquanto a fase é `reasoning`; fence
+  ainda não fechada renderiza como card de código parcial. Com a resposta pronta
+  o bloco recolhe (ou permanece recolhido, com a opção **Raciocínio recolhido por
+  padrão**).
+- **Diferenças de layout preservadas**: Chat mostra tools de web/skills/artefatos
+  como resumos agrupados (domínios, páginas, chips de arquivo); Code mostra uma
+  linha por chamada do harness (`ToolCallRow`: verbo + alvo + status/exit/duração
+  + diff/saída). Header, shimmer, contador, auto-recolher, composer variant,
+  welcome e chrome do Code não mudam.
+- **Testes**: `Markdown.test.tsx` (variante thinking + streaming + className),
+  `Markdown.security.test.tsx` (mesmos vetores nas duas variantes),
+  `src/lib/__tests__/agentTrace.test.ts` (Markdown bruto por passo),
+  `AgentSteps.test.tsx` (renderização, diferenças Chat × Code, XSS inerte) e
+  `src/components/code/CodeTranscriptThinking.test.tsx` (transcript real do
+  layout Code).
 

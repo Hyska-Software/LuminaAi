@@ -134,7 +134,7 @@ export function AskUserCard({ questions, onSubmit, onSkip, className }: AskUserC
                         {option.recommended ? <Badge variant="accent">Recomendada</Badge> : null}
                       </span>
                       {option.description ? (
-                        <span className="mt-0.5 block text-[11px] leading-snug text-foreground-subtle">
+                        <span className="mt-0.5 block text-[11px] leading-snug text-foreground-muted">
                           {option.description}
                         </span>
                       ) : null}

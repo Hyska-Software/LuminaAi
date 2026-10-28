@@ -557,12 +557,33 @@ async fn policy_check(
         secret,
         destructive_reason,
     };
+    // Estado **vivo** da sessão (B-02/D6): o modo Plano e o modo de permissão
+    // podem mudar no meio do turno (aprovação do plano, chip, `/permissoes`).
+    // Ler do banco por chamada garante que o gate vale imediatamente, sem
+    // esperar o próximo turno.
+    let conversation = ctx
+        .db
+        .get_conversation(&ctx.conversation_id)
+        .ok()
+        .flatten();
+    let plan_mode = crate::harness::code::session::plan_mode_active(
+        &ctx.db,
+        &ctx.conversation_id,
+    )
+    .unwrap_or(true); // leitura falhou ⇒ falha fechada (age como Plano)
+    let mode = conversation
+        .as_ref()
+        .map(|conversation| conversation.permission_mode)
+        .unwrap_or(workspace.permission_mode);
+    let workspace_id = conversation
+        .as_ref()
+        .and_then(|conversation| conversation.workspace_id.as_deref());
     let policy_ctx = PolicyContext {
-        mode: workspace.permission_mode,
-        plan_mode: ctx.plan_mode,
+        mode,
+        plan_mode,
         trusted: workspace.trusted,
         session_id: ctx.conversation_id.as_str(),
-        workspace_id: None,
+        workspace_id,
         rules: ctx.policy_rules(),
     };
     match decide(&policy_ctx, &facts) {
@@ -2228,6 +2249,59 @@ async fn git_log(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
 /* Planejamento e interação                                            */
 /* ------------------------------------------------------------------ */
 
+/// Perfil emitido em `TurnEvent::ProfileChanged` (o harness de código).
+const CODE_PROFILE: &str = "code";
+
+/// Opções do gate de plano (`PLAN.md` D5): aprovar um plano **não** cria regra
+/// de permissão, então não há "sempre permitir" aqui.
+fn plan_approval_options() -> Vec<ApprovalOption> {
+    vec![
+        ApprovalOption {
+            id: "approve_run".into(),
+            label: "Aprovar e executar".into(),
+            scope: None,
+        },
+        ApprovalOption {
+            id: "approve_review".into(),
+            label: "Aprovar e revisar cada edição".into(),
+            scope: None,
+        },
+        ApprovalOption {
+            id: "keep_planning".into(),
+            label: "Continuar planejando".into(),
+            scope: None,
+        },
+    ]
+}
+
+/// Presentation canônica do plano (`PLAN.md` D1): **flat**, com o `PlanView`
+/// achatado + `kind` (`{kind, state, markdown?, feedback?, updatedAt}`).
+fn plan_presentation(plan: &crate::domain::PlanView) -> Value {
+    let mut value = serde_json::to_value(plan).unwrap_or_else(|_| json!({}));
+    if let Value::Object(map) = &mut value {
+        map.insert("kind".to_string(), Value::String("plan".to_string()));
+    }
+    value
+}
+
+/// Recalcula o plano pela projeção única e emite `PlanUpdated` quando há algo
+/// para mostrar. Devolve o `PlanView` emitido (para o card da tool).
+fn emit_plan_updated(ctx: &ToolCtx) -> Option<crate::domain::PlanView> {
+    let plan = session::plan_view(&ctx.db, &ctx.conversation_id).ok().flatten()?;
+    ctx.emit_event(crate::events::TurnEvent::PlanUpdated { plan: plan.clone() });
+    Some(plan)
+}
+
+/// Erro de tool carregando a presentation do plano (o card da timeline continua
+/// coerente mesmo quando a revisão falha/cancela).
+fn plan_error(code: &str, message: impl Into<String>, plan: Option<&crate::domain::PlanView>) -> ToolOutcome {
+    let mut outcome = err(code, message);
+    if let Some(plan) = plan {
+        outcome.presentation = Some(plan_presentation(plan));
+    }
+    outcome
+}
+
 async fn todo_write(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let Some(raw) = args.get("todos") else {
         return err("TOOL_INVALID_ARGS", "`todos` é obrigatório");
@@ -2241,7 +2315,9 @@ async fn todo_write(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             )
         }
     };
-    if let Err(message) = session::validate_todos(&items, true) {
+    // Lista vazia é válida e limpa a lista (`PLAN.md` D8/B-12); no máximo um
+    // `in_progress` no agente principal.
+    if let Err(message) = session::validate_todos(&items) {
         return err("TOOL_INVALID_ARGS", message);
     }
     if let Err(error) = session::save_todos(&ctx.db, &ctx.conversation_id, &ctx.turn_id, &items) {
@@ -2251,12 +2327,16 @@ async fn todo_write(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let count = |status: crate::domain::TodoStatus| {
         items.iter().filter(|item| item.status == status).count()
     };
-    let content = format!(
-        "Lista atualizada: {} pendente(s), {} em andamento, {} concluída(s).\n",
-        count(crate::domain::TodoStatus::Pending),
-        count(crate::domain::TodoStatus::InProgress),
-        count(crate::domain::TodoStatus::Completed)
-    );
+    let content = if items.is_empty() {
+        "Lista de tarefas limpa.\n".to_string()
+    } else {
+        format!(
+            "Lista atualizada: {} pendente(s), {} em andamento, {} concluída(s).\n",
+            count(crate::domain::TodoStatus::Pending),
+            count(crate::domain::TodoStatus::InProgress),
+            count(crate::domain::TodoStatus::Completed)
+        )
+    };
     finish(
         ctx,
         content,
@@ -2266,7 +2346,18 @@ async fn todo_write(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
 }
 
 async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
-    if !ctx.plan_mode {
+    // Modo **vivo**: uma aprovação anterior, o chip ou `/plan off` podem ter
+    // desligado o Plano no meio do turno (B-02).
+    let plan_mode = match session::plan_mode_active(&ctx.db, &ctx.conversation_id) {
+        Ok(active) => active,
+        Err(error) => {
+            return err(
+                "SESSION_LOG_FAILED",
+                format!("não foi possível ler o modo Plano: {error}"),
+            )
+        }
+    };
+    if !plan_mode {
         return err(
             "PLAN_MODE_INACTIVE",
             "`submit_plan` só vale no modo Plano; entre com /plan antes de propor um plano",
@@ -2285,6 +2376,23 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             "não há canal de revisão disponível para o plano; prossiga em prosa ou use /plan off",
         );
     }
+
+    // Persiste o draft **antes** de esperar a revisão: o plano sobrevive a
+    // negação, timeout, crash e reabertura da sessão (B-07/D4). Falha de
+    // persistência não pode ser mascarada como sucesso (B-13).
+    if let Err(error) = session::submit_plan(&ctx.db, &ctx.conversation_id, &ctx.turn_id, &markdown) {
+        return err(
+            "SESSION_LOG_FAILED",
+            format!("não foi possível salvar o plano para revisão: {error}"),
+        );
+    }
+    let Some(reviewing) = emit_plan_updated(ctx) else {
+        return err(
+            "SESSION_LOG_FAILED",
+            "o plano foi salvo, mas a projeção da sessão não o encontrou",
+        );
+    };
+
     let summary_text: String = markdown.chars().take(600).collect();
     let request = ApprovalRequest {
         id: format!("apr-{}", uuid::Uuid::new_v4().simple()),
@@ -2295,7 +2403,7 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         detail: ApprovalDetail::Other { text: summary_text },
         risk: RiskClass::Ask,
         preview: Some(markdown.clone()),
-        options: approval_options(),
+        options: plan_approval_options(),
         created_at: now_ms(),
     };
     audit_append(
@@ -2311,44 +2419,148 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         &json!({
             "approvalId": approval_id,
             "decision": outcome.decision.as_str(),
+            "choice": outcome.choice,
             "scope": outcome.scope.map(|scope| scope.as_str()),
             "feedback": outcome.feedback,
         }),
     );
+
     match outcome.decision {
         crate::domain::ApprovalDecision::Approved => {
-            let _ = session::submit_plan(&ctx.db, &ctx.conversation_id, &ctx.turn_id, &markdown);
-            let _ = session::approve_plan(&ctx.db, &ctx.conversation_id, &ctx.turn_id);
-            if let Some(plan) = session::plan_view(&ctx.db, &ctx.conversation_id) {
-                ctx.emit_event(crate::events::TurnEvent::PlanUpdated { plan });
+            let review_each_edit = outcome.review_each_edit();
+            // O markdown revisado na aprovação é o plano persistido (D3).
+            let approved_markdown = outcome
+                .plan_markdown
+                .as_deref()
+                .map(str::trim)
+                .filter(|markdown| !markdown.is_empty())
+                .unwrap_or(markdown.as_str());
+            if let Err(error) = session::approve_plan(
+                &ctx.db,
+                &ctx.conversation_id,
+                &ctx.turn_id,
+                Some(approved_markdown),
+                review_each_edit,
+            ) {
+                return plan_error(
+                    "SESSION_LOG_FAILED",
+                    format!("não foi possível salvar a aprovação do plano: {error}"),
+                    Some(&reviewing),
+                );
             }
+            // `approve_review` → modo Revisar (cada escrita pede aprovação);
+            // `approve_run` → Editar (`PLAN.md` D2).
+            let mode = if review_each_edit {
+                crate::domain::PermissionMode::Review
+            } else {
+                crate::domain::PermissionMode::Edit
+            };
+            if let Err(error) = ctx
+                .db
+                .set_conversation_permission_mode(&ctx.conversation_id, mode)
+            {
+                return plan_error(
+                    "SESSION_LOG_FAILED",
+                    format!("não foi possível atualizar o modo de permissão: {error}"),
+                    Some(&reviewing),
+                );
+            }
+            let approved = emit_plan_updated(ctx);
+            ctx.emit_event(crate::events::TurnEvent::ProfileChanged {
+                profile: CODE_PROFILE.to_string(),
+                permission_mode: mode.as_str().to_string(),
+                plan_mode: false,
+            });
+            let next_step = if review_each_edit {
+                "Modo Revisar ativo: cada escrita será aprovada uma a uma."
+            } else {
+                "Modo Editar ativo: você pode alterar os arquivos do workspace."
+            };
             finish(
                 ctx,
-                "Plano aprovado — continue a implementação seguindo o plano.\n".to_string(),
+                format!(
+                    "Plano aprovado — continue a implementação seguindo o plano.\n{next_step}\n"
+                ),
                 Some("Plano aprovado".to_string()),
-                Some(json!({ "kind": "plan", "state": "approved" })),
+                Some(
+                    approved
+                        .as_ref()
+                        .map(plan_presentation)
+                        .unwrap_or_else(|| plan_presentation(&reviewing)),
+                ),
             )
         }
         crate::domain::ApprovalDecision::Denied => {
             let feedback = outcome
                 .feedback
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| "sem comentários; ajuste o plano".to_string());
+            if let Err(error) = session::plan_feedback(
+                &ctx.db,
+                &ctx.conversation_id,
+                &ctx.turn_id,
+                &feedback,
+            ) {
+                return plan_error(
+                    "SESSION_LOG_FAILED",
+                    format!("não foi possível salvar o feedback do plano: {error}"),
+                    Some(&reviewing),
+                );
+            }
+            let planning = emit_plan_updated(ctx);
             finish(
                 ctx,
                 format!(
                     "Plano não aprovado: {feedback}\nRevise o plano conforme o feedback e reenvie com submit_plan.\n"
                 ),
                 Some("Plano revisado".to_string()),
-                Some(json!({ "kind": "plan", "state": "reviewing", "feedback": feedback })),
+                Some(planning.as_ref().map(plan_presentation).unwrap_or_else(|| {
+                    json!({
+                        "kind": "plan",
+                        "state": "planning",
+                        "feedback": feedback,
+                        "updatedAt": reviewing.updated_at,
+                    })
+                })),
             )
         }
         crate::domain::ApprovalDecision::Cancelled => {
-            err("APPROVAL_CANCELLED", "a revisão do plano foi cancelada")
+            let feedback = "a revisão do plano foi cancelada; reenvie o plano".to_string();
+            if let Err(error) =
+                session::plan_feedback(&ctx.db, &ctx.conversation_id, &ctx.turn_id, &feedback)
+            {
+                return plan_error(
+                    "SESSION_LOG_FAILED",
+                    format!("não foi possível salvar o feedback do plano: {error}"),
+                    Some(&reviewing),
+                );
+            }
+            let planning = emit_plan_updated(ctx);
+            plan_error(
+                "APPROVAL_CANCELLED",
+                "a revisão do plano foi cancelada",
+                planning.as_ref().or(Some(&reviewing)),
+            )
         }
-        crate::domain::ApprovalDecision::Expired => err(
-            "APPROVAL_TIMEOUT",
-            "o usuário não revisou o plano a tempo; falhando fechado",
-        ),
+        crate::domain::ApprovalDecision::Expired => {
+            let feedback = "o usuário não revisou o plano a tempo; reenvie o plano".to_string();
+            if let Err(error) =
+                session::plan_feedback(&ctx.db, &ctx.conversation_id, &ctx.turn_id, &feedback)
+            {
+                return plan_error(
+                    "SESSION_LOG_FAILED",
+                    format!("não foi possível salvar o feedback do plano: {error}"),
+                    Some(&reviewing),
+                );
+            }
+            let planning = emit_plan_updated(ctx);
+            plan_error(
+                "APPROVAL_TIMEOUT",
+                "o usuário não revisou o plano a tempo; falhando fechado",
+                planning.as_ref().or(Some(&reviewing)),
+            )
+        }
     }
 }
 
@@ -2389,6 +2601,8 @@ mod tests {
         root: PathBuf,
         data_dir: PathBuf,
         db: Arc<Db>,
+        /// Id da conversa criada no DB (a política lê o estado dela).
+        conversation_id: String,
         observed: Arc<ObservedFiles>,
         approvals: Arc<ApprovalRegistry>,
         jobs: Arc<crate::jobs::JobRegistry>,
@@ -2402,11 +2616,22 @@ mod tests {
             std::fs::create_dir_all(&root).expect("workspace");
             let data_dir = temp.path().join("data");
             std::fs::create_dir_all(&data_dir).expect("data dir");
+            let db = Arc::new(Db::open_in_memory().expect("db em memória"));
+            // A política lê o modo de permissão e o workspace da conversa (B-02/B-06).
+            let conversation = db
+                .create_conversation_with_mode(
+                    "Sessão de teste",
+                    "opencode-go",
+                    "deepseek-v4.1-flash",
+                    crate::domain::CONVERSATION_MODE_CODE,
+                )
+                .expect("conversa de teste");
             Self {
                 _temp: temp,
                 root,
                 data_dir,
-                db: Arc::new(Db::open_in_memory().expect("db em memória")),
+                db,
+                conversation_id: conversation.id,
                 observed: Arc::new(ObservedFiles::new()),
                 approvals: Arc::new(ApprovalRegistry::new()),
                 jobs: Arc::new(crate::jobs::JobRegistry::new()),
@@ -2414,12 +2639,47 @@ mod tests {
             }
         }
 
+        fn conv(&self) -> &str {
+            &self.conversation_id
+        }
+
+        /// Troca o modo de permissão da conversa de teste (a política relê do DB).
+        fn set_permission_mode(&self, mode: PermissionMode) {
+            self.db
+                .set_conversation_permission_mode(&self.conversation_id, mode)
+                .expect("modo de permissão");
+        }
+
+        fn set_plan_mode(&self, active: bool) {
+            session::set_plan_mode(&self.db, &self.conversation_id, active).expect("modo plano");
+        }
+
+        fn permission_mode(&self) -> PermissionMode {
+            self.db
+                .get_conversation(&self.conversation_id)
+                .expect("conversa")
+                .expect("conversa existente")
+                .permission_mode
+        }
+
+        /// Registra um workspace no DB e vincula a conversa de teste (B-06).
+        fn attach_workspace(&self) -> String {
+            let workspace = self
+                .db
+                .create_workspace("demo", &self.root.to_string_lossy())
+                .expect("workspace");
+            self.db
+                .set_conversation_workspace(&self.conversation_id, Some(&workspace.id))
+                .expect("vincular workspace");
+            workspace.id
+        }
+
         fn ctx(&self) -> ToolCtx {
             let emit: Arc<dyn crate::harness::EventEmitter> = self.recorder.clone();
             ToolCtx {
                 db: self.db.clone(),
                 http: reqwest::Client::new(),
-                conversation_id: "conv-1".into(),
+                conversation_id: self.conversation_id.clone(),
                 message_id: "msg-1".into(),
                 tool_call_id: "call-1".into(),
                 turn_id: "turn-1".into(),
@@ -2435,10 +2695,9 @@ mod tests {
                 observed: Some(self.observed.clone()),
                 emit: Some(emit),
                 rules: Vec::new(),
-                plan_mode: false,
                 jobs: Some(self.jobs.clone()),
                 questions: None,
-        mcp: None,
+                mcp: None,
                 subagent: None,
                 skills_roots: Vec::new(),
             }
@@ -2579,7 +2838,7 @@ mod tests {
         assert_eq!(outcome.presentation.as_ref().expect("presentation")["kind"], "file_change");
         let journal = fixture
             .db
-            .list_file_journal_for_turn("conv-1", "turn-1")
+            .list_file_journal_for_turn(fixture.conv(), "turn-1")
             .expect("journal");
         assert_eq!(journal.len(), 1);
         assert_eq!(journal[0].path, "src/novo.ts");
@@ -2684,8 +2943,8 @@ mod tests {
     #[tokio::test]
     async fn run_command_returns_output_and_exit_codes_without_erroring() {
         let fixture = Fixture::new();
-        let mut ctx = fixture.ctx();
-        ctx.workspace.as_mut().expect("workspace").permission_mode = PermissionMode::Autonomous;
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let ctx = fixture.ctx();
 
         let ok = call(&ctx, "run_command", json!({ "command": "echo ola", "description": "testar echo" })).await;
         if error_code(&ok) == "EXEC_SPAWN" || error_code(&ok) == "EXEC_FAILED" {
@@ -2723,16 +2982,20 @@ mod tests {
     #[tokio::test]
     async fn run_command_respects_plan_mode_read_only_and_missing_approval() {
         let fixture = Fixture::new();
-        let mut ctx = fixture.ctx();
-        ctx.plan_mode = true;
+        // Modo Plano agora é lido do banco a cada chamada (B-02): ligar o modo
+        // depois de o `ToolCtx` existir já basta para negar a mutação.
+        let ctx = fixture.ctx();
+        fixture.set_plan_mode(true);
         let plan = call(&ctx, "run_command", json!({ "command": "echo x", "description": "x" })).await;
         assert_eq!(error_code(&plan), "PLAN_MODE_ACTIVE");
 
-        let mut readonly = fixture.ctx();
-        readonly.workspace.as_mut().expect("ws").permission_mode = PermissionMode::ReadOnly;
+        fixture.set_plan_mode(false);
+        fixture.set_permission_mode(PermissionMode::ReadOnly);
+        let readonly = fixture.ctx();
         let denied = call(&readonly, "run_command", json!({ "command": "echo x", "description": "x" })).await;
         assert_eq!(error_code(&denied), "POLICY_DENIED");
 
+        fixture.set_permission_mode(PermissionMode::Edit);
         let mut no_approval = fixture.ctx();
         no_approval.approval = None;
         let ask = call(&no_approval, "run_command", json!({ "command": "echo x", "description": "x" })).await;
@@ -2740,11 +3003,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn plan_mode_activated_mid_turn_blocks_writes_immediately() {
+        let fixture = Fixture::new();
+        let ctx = fixture.ctx();
+        // Antes: Editar permite escrita.
+        let allowed = call(&ctx, "write_file", json!({ "path": "a.txt", "content": "1" })).await;
+        assert!(!allowed.is_error, "{}", allowed.content);
+
+        // Chip/`/plan` liga o modo no meio do turno: o gate vale na hora.
+        fixture.set_plan_mode(true);
+        let blocked = call(&ctx, "write_file", json!({ "path": "b.txt", "content": "2" })).await;
+        assert_eq!(error_code(&blocked), "PLAN_MODE_ACTIVE");
+    }
+
+    #[tokio::test]
     async fn readonly_and_untrusted_workspaces_block_writes_but_allow_reads() {
         let fixture = Fixture::new();
         fixture.write("a.txt", "conteudo\n");
-        let mut readonly = fixture.ctx();
-        readonly.workspace.as_mut().expect("ws").permission_mode = PermissionMode::ReadOnly;
+        fixture.set_permission_mode(PermissionMode::ReadOnly);
+        let readonly = fixture.ctx();
         let denied = call(&readonly, "write_file", json!({ "path": "b.txt", "content": "x" })).await;
         assert_eq!(error_code(&denied), "POLICY_DENIED");
 
@@ -2841,7 +3118,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn todo_write_validates_saves_and_emits() {
+    async fn todo_write_validates_saves_clears_and_emits() {
         let fixture = Fixture::new();
         let ctx = fixture.ctx();
         let outcome = call(
@@ -2856,11 +3133,16 @@ mod tests {
         assert!(!outcome.is_error, "{}", outcome.content);
         assert!(outcome.content.contains("1 concluída(s)"), "{}", outcome.content);
         assert_eq!(outcome.presentation.as_ref().expect("presentation")["kind"], "todos");
-        assert_eq!(session::todos(&fixture.db, "conv-1").len(), 2);
+        assert_eq!(session::todos(&fixture.db, fixture.conv()).expect("tarefas").len(), 2);
         assert!(event_types(&fixture.recorder).contains(&"todos_updated".to_string()));
 
+        // `[]` limpa a lista (B-12/D8) e o card recebe a lista vazia.
         let empty = call(&ctx, "todo_write", json!({ "todos": [] })).await;
-        assert_eq!(error_code(&empty), "TOOL_INVALID_ARGS");
+        assert!(!empty.is_error, "{}", empty.content);
+        assert!(empty.content.contains("limpa"), "{}", empty.content);
+        assert_eq!(empty.presentation.as_ref().expect("presentation")["items"], json!([]));
+        assert!(session::todos(&fixture.db, fixture.conv()).expect("tarefas").is_empty());
+
         let duplicate = call(
             &ctx,
             "todo_write",
@@ -2871,6 +3153,27 @@ mod tests {
         )
         .await;
         assert_eq!(error_code(&duplicate), "TOOL_INVALID_ARGS");
+
+        // Um único `in_progress` no agente principal (TOOLS §2.5 / D8).
+        let parallel = call(
+            &ctx,
+            "todo_write",
+            json!({ "todos": [
+                { "content": "A", "status": "in_progress" },
+                { "content": "B", "status": "in_progress" },
+            ]}),
+        )
+        .await;
+        assert_eq!(error_code(&parallel), "TOOL_INVALID_ARGS");
+        assert!(parallel.content.contains("in_progress"), "{}", parallel.content);
+
+        // Cap de 50 itens.
+        let overflow: Vec<serde_json::Value> = (0..51)
+            .map(|index| json!({ "content": format!("item {index}"), "status": "pending" }))
+            .collect();
+        let overflow = call(&ctx, "todo_write", json!({ "todos": overflow })).await;
+        assert_eq!(error_code(&overflow), "TOOL_INVALID_ARGS");
+        assert!(overflow.content.contains("50"), "{}", overflow.content);
     }
 
     async fn answer_next_approval(registry: Arc<ApprovalRegistry>, outcome: ApprovalOutcome) {
@@ -2883,37 +3186,180 @@ mod tests {
         }
     }
 
+    fn plan_state(fixture: &Fixture) -> crate::domain::PlanView {
+        session::plan_view(&fixture.db, fixture.conv())
+            .expect("projeção do plano")
+            .expect("plano visível")
+    }
+
     #[tokio::test]
-    async fn submit_plan_requires_plan_mode_and_waits_for_review() {
+    async fn submit_plan_requires_live_plan_mode() {
         let fixture = Fixture::new();
-        let mut ctx = fixture.ctx();
+        let ctx = fixture.ctx();
         let inactive = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
         assert_eq!(error_code(&inactive), "PLAN_MODE_INACTIVE");
+        assert!(session::plan_view(&fixture.db, fixture.conv()).expect("plano").is_none());
 
-        ctx.plan_mode = true;
+        // Ligar o modo depois de o ctx existir já destrava a tool (B-02).
+        fixture.set_plan_mode(true);
         let responder = tokio::spawn(answer_next_approval(
             fixture.approvals.clone(),
-            ApprovalOutcome::approved(None),
+            ApprovalOutcome::approved_plan(Some("approve_run".to_string()), None),
         ));
         let approved = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
         responder.await.expect("responder");
         assert!(!approved.is_error, "{}", approved.content);
-        assert!(approved.content.contains("Plano aprovado"), "{}", approved.content);
-        let view = session::plan_view(&fixture.db, "conv-1").expect("plano");
-        assert_eq!(view.state, crate::domain::PlanState::Approved);
-        assert!(event_types(&fixture.recorder).contains(&"plan_updated".to_string()));
+    }
 
-        let mut denied_ctx = fixture.ctx();
-        denied_ctx.plan_mode = true;
+    #[tokio::test]
+    async fn approved_plan_unlocks_mutations_in_the_same_turn_and_is_flat_in_the_card() {
+        let fixture = Fixture::new();
+        fixture.set_plan_mode(true);
+        let ctx = fixture.ctx();
+        let responder = tokio::spawn(answer_next_approval(
+            fixture.approvals.clone(),
+            ApprovalOutcome::approved_plan(Some("approve_run".to_string()), None),
+        ));
+        let approved = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
+        responder.await.expect("responder");
+        assert!(!approved.is_error, "{}", approved.content);
+
+        // Presentation canônica **flat** (B-01): `{kind, state, markdown, updatedAt}`.
+        let presentation = approved.presentation.expect("presentation do plano");
+        assert_eq!(presentation["kind"], "plan");
+        assert_eq!(presentation["state"], "approved");
+        assert!(presentation.get("plan").is_none(), "não deve ser aninhado: {presentation}");
+        assert_eq!(presentation["markdown"], "### Plano\n1. Fazer");
+        assert!(presentation["updatedAt"].is_number());
+
+        // Projeção/flags de sessão.
+        assert_eq!(plan_state(&fixture).state, crate::domain::PlanState::Approved);
+        assert!(!session::plan_mode_active(&fixture.db, fixture.conv()).expect("modo"));
+        assert_eq!(fixture.permission_mode(), PermissionMode::Edit);
+        assert!(event_types(&fixture.recorder).contains(&"plan_updated".to_string()));
+        assert!(event_types(&fixture.recorder).contains(&"profile_changed".to_string()));
+
+        // O MESMO `ToolCtx` (sem refresh) já pode mutar: a política relê o DB.
+        let write = call(&ctx, "write_file", json!({ "path": "src/a.ts", "content": "x" })).await;
+        assert!(!write.is_error, "{}", write.content);
+        assert!(fixture.root.join("src/a.ts").exists());
+    }
+
+    #[tokio::test]
+    async fn approve_review_switches_to_review_and_writes_ask_approval() {
+        let fixture = Fixture::new();
+        fixture.set_plan_mode(true);
+        let ctx = fixture.ctx();
+        let responder = tokio::spawn(answer_next_approval(
+            fixture.approvals.clone(),
+            ApprovalOutcome::approved_plan(Some("approve_review".to_string()), None),
+        ));
+        let approved = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
+        responder.await.expect("responder");
+        assert!(!approved.is_error, "{}", approved.content);
+        assert_eq!(fixture.permission_mode(), PermissionMode::Review);
+
+        // Leitura continua livre...
+        fixture.write("a.txt", "conteudo\n");
+        let read = call(&ctx, "read_file", json!({ "path": "a.txt" })).await;
+        assert!(!read.is_error, "{}", read.content);
+
+        // ...e a escrita pede aprovação (sem canal = falha fechada, prova o Ask).
+        let mut no_channel = fixture.ctx();
+        no_channel.approval = None;
+        let write = call(&no_channel, "write_file", json!({ "path": "b.txt", "content": "x" })).await;
+        assert_eq!(error_code(&write), "APPROVAL_UNAVAILABLE");
+    }
+
+    #[tokio::test]
+    async fn revised_plan_markdown_is_the_persisted_plan() {
+        let fixture = Fixture::new();
+        fixture.set_plan_mode(true);
+        let ctx = fixture.ctx();
+        let responder = tokio::spawn(answer_next_approval(
+            fixture.approvals.clone(),
+            ApprovalOutcome::approved_plan(
+                Some("approve_run".to_string()),
+                Some("# Plano revisado pelo usuário".to_string()),
+            ),
+        ));
+        let approved = call(&ctx, "submit_plan", json!({ "plan": "### Plano original" })).await;
+        responder.await.expect("responder");
+        assert!(!approved.is_error, "{}", approved.content);
+        assert_eq!(plan_state(&fixture).markdown.as_deref(), Some("# Plano revisado pelo usuário"));
+        assert_eq!(
+            approved.presentation.expect("presentation")["markdown"],
+            "# Plano revisado pelo usuário"
+        );
+    }
+
+    #[tokio::test]
+    async fn denied_plan_persists_feedback_and_returns_to_planning() {
+        let fixture = Fixture::new();
+        fixture.set_plan_mode(true);
+        let ctx = fixture.ctx();
         let responder = tokio::spawn(answer_next_approval(
             fixture.approvals.clone(),
             ApprovalOutcome::denied(Some("faltou contexto".to_string())),
         ));
-        let denied = call(&denied_ctx, "submit_plan", json!({ "plan": "### Plano\n2. Revisar" })).await;
+        let denied = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
         responder.await.expect("responder");
         assert!(!denied.is_error, "{}", denied.content);
         assert!(denied.content.contains("Plano não aprovado"), "{}", denied.content);
         assert!(denied.content.contains("faltou contexto"), "{}", denied.content);
+
+        let view = plan_state(&fixture);
+        assert_eq!(view.state, crate::domain::PlanState::Planning);
+        assert_eq!(view.markdown.as_deref(), Some("### Plano\n1. Fazer"));
+        assert_eq!(view.feedback.as_deref(), Some("faltou contexto"));
+        // O draft foi persistido ANTES da revisão (B-07) e o modo continua ativo.
+        assert!(session::plan_mode_active(&fixture.db, fixture.conv()).expect("modo"));
+        let presentation = denied.presentation.expect("presentation do plano");
+        assert_eq!(presentation["kind"], "plan");
+        assert_eq!(presentation["state"], "planning");
+        assert_eq!(presentation["feedback"], "faltou contexto");
+        assert!(presentation.get("plan").is_none(), "não deve ser aninhado: {presentation}");
+    }
+
+    #[tokio::test]
+    async fn cancelled_plan_review_persists_feedback_and_errors() {
+        let fixture = Fixture::new();
+        fixture.set_plan_mode(true);
+        let ctx = fixture.ctx();
+        ctx.cancel.cancel();
+        let outcome = call(&ctx, "submit_plan", json!({ "plan": "### Plano" })).await;
+        assert_eq!(error_code(&outcome), "APPROVAL_CANCELLED");
+        let view = plan_state(&fixture);
+        assert_eq!(view.state, crate::domain::PlanState::Planning);
+        assert!(view.feedback.is_some());
+    }
+
+    #[tokio::test]
+    async fn workspace_scoped_rule_matches_through_the_live_policy() {
+        let fixture = Fixture::new();
+        let workspace_id = fixture.attach_workspace();
+        let mut ctx = fixture.ctx();
+        ctx.approval = None;
+        ctx.rules = vec![crate::domain::ApprovalRule {
+            id: "rule-ws".to_string(),
+            scope: crate::domain::ApprovalScope::Workspace,
+            scope_id: Some(workspace_id),
+            tool: "run_command".to_string(),
+            matcher: "prefix".to_string(),
+            pattern: "git status".to_string(),
+            decision: crate::domain::ApprovalDecision::Approved,
+            created_at: 1,
+        }];
+        let allowed = call(
+            &ctx,
+            "run_command",
+            json!({ "command": "git status", "description": "ver status" }),
+        )
+        .await;
+        // A regra de workspace venceu o "ASK" do modo Editar: se a política
+        // tivesse ignorado `workspace_id`, cairia em APPROVAL_UNAVAILABLE.
+        assert_ne!(error_code(&allowed), "APPROVAL_UNAVAILABLE", "{}", allowed.content);
+        assert_ne!(error_code(&allowed), "POLICY_DENIED", "{}", allowed.content);
     }
 
 
@@ -2936,8 +3382,8 @@ mod tests {
             ".lumina/hooks.json",
             r#"{"postWrite":["echo hook-run >> hook.log"]}"#,
         );
-        let mut ctx = fixture.ctx();
-        ctx.workspace.as_mut().expect("ws").permission_mode = PermissionMode::Autonomous;
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let ctx = fixture.ctx();
         let outcome = call(
             &ctx,
             "write_file",
@@ -2969,7 +3415,6 @@ mod tests {
         let fixture = Fixture::new();
         let mut ctx = fixture.ctx();
         ctx.approval = None;
-        ctx.workspace.as_mut().expect("ws").permission_mode = PermissionMode::Edit;
         let outcome = call(
             &ctx,
             "run_command",
@@ -3045,18 +3490,17 @@ mod tests {
         let missing = call(&ctx, "run_checks", json!({})).await;
         assert_eq!(error_code(&missing), "NO_CHECKS");
 
-        let mut plan = fixture.ctx();
-        plan.plan_mode = true;
         fixture.write("package.json", r#"{"name":"demo","scripts":{"test":"node -e \"console.log('ok')\""}}"#);
-        let denied = call(&plan, "run_checks", json!({})).await;
+        fixture.set_plan_mode(true);
+        let denied = call(&ctx, "run_checks", json!({})).await;
         assert_eq!(error_code(&denied), "PLAN_MODE_ACTIVE");
     }
 
     #[tokio::test]
     async fn run_checks_runs_the_detected_command_when_shell_is_available() {
         let fixture = Fixture::new();
-        let mut ctx = fixture.ctx();
-        ctx.workspace.as_mut().expect("ws").permission_mode = PermissionMode::Autonomous;
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let ctx = fixture.ctx();
         fixture.write(
             "package.json",
             r#"{"name":"demo","scripts":{"test":"node -e \"console.log('checks-ok')\""}}"#,
@@ -3182,15 +3626,15 @@ mod tests {
         )
         .await;
         assert!(!outcome.is_error, "{}", outcome.content);
-        let todos = session::todos(&fixture.db, "conv-1");
+        let todos = session::todos(&fixture.db, fixture.conv()).expect("tarefas");
         assert_eq!(todos.len(), 1);
         assert_eq!(todos[0].status, TodoStatus::Pending);
     }
     #[tokio::test]
     async fn background_jobs_can_be_listed_read_and_killed() {
         let fixture = Fixture::new();
-        let mut ctx = fixture.ctx();
-        ctx.workspace.as_mut().expect("workspace").permission_mode = PermissionMode::Autonomous;
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let ctx = fixture.ctx();
         let started = call(
             &ctx,
             "run_command",
@@ -3216,7 +3660,7 @@ mod tests {
         for _ in 0..200 {
             let settled = fixture
                 .jobs
-                .list("conv-1")
+                .list(fixture.conv())
                 .into_iter()
                 .find(|view| view.id == job_id)
                 .map(|view| view.status != crate::domain::JobStatus::Running)
@@ -3248,8 +3692,8 @@ mod tests {
         #[cfg(not(windows))]
         let script = "sleep 20";
         let fixture = Fixture::new();
-        let mut ctx = fixture.ctx();
-        ctx.workspace.as_mut().expect("workspace").permission_mode = PermissionMode::Autonomous;
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let ctx = fixture.ctx();
         let outcome = call(
             &ctx,
             "run_command",

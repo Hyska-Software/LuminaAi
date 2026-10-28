@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown } from 'lucide-react';
-import { CodeJobsBar, CodeSessionCards } from '@/components/code/CodeAgentWidgets';
+import { CodeSessionCards } from '@/components/code/CodeAgentWidgets';
 import { Composer } from '@/components/composer/Composer';
 import { useReduceMotion } from '@/components/layout/hooks';
 import { providerSupportsPlan } from '@/lib/catalog';
 import { isConversationVisibleIn } from '@/lib/conversations';
-import { selectActiveMessages, useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { selectActiveMessages, useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import type { ChatMessage } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { LoadingSkeleton } from './LoadingSkeleton';
@@ -71,6 +71,25 @@ export function ChatView({ welcome }: { welcome?: ReactNode } = {}) {
   const atBottomRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
 
+  // Aprovações/perguntas e plano são estado da sessão (codeStore), não
+  // mensagens: o transcript tem de rolar até o gate quando ele aparece
+  // (WORKBENCH §9 — antes o card ficava fora da viewport e a revisão expirava).
+  // O gate não depende do layout: um pedido pendente precisa continuar
+  // operável mesmo se a UI trocar de layout no meio do turno.
+  const pendingGateCount = useCodeStore((state) => {
+    if (!activeId) return 0;
+    const session = state.byConversation[activeId];
+    if (!session) return 0;
+    return session.approvals.length + session.questions.length;
+  });
+  const planUpdatedAt = useCodeStore((state) =>
+    activeId ? (state.byConversation[activeId]?.plan?.updatedAt ?? 0) : 0,
+  );
+  const lastGateRef = useRef(0);
+  const lastPlanRef = useRef(0);
+  /** Sessão dos contadores acima (troca de sessão reinicia a comparação). */
+  const gateSessionRef = useRef<string | null>(null);
+
   const loading = loadingConversationId !== null && loadingConversationId === activeId;
   const planProvider = Boolean(
     providerSupportsPlan(selectedProvider) &&
@@ -109,6 +128,22 @@ export function ChatView({ welcome }: { welcome?: ReactNode } = {}) {
     scrollToBottom('auto');
   }, [activeId, scrollToBottom]);
 
+  /* Scroll to the approval/plan gate as soon as it appears. */
+  useEffect(() => {
+    if (gateSessionRef.current !== activeId) {
+      gateSessionRef.current = activeId;
+      lastGateRef.current = 0;
+      lastPlanRef.current = 0;
+    }
+    const gateIncreased = pendingGateCount > lastGateRef.current;
+    const planChanged = planUpdatedAt !== 0 && planUpdatedAt !== lastPlanRef.current;
+    lastGateRef.current = pendingGateCount;
+    lastPlanRef.current = planUpdatedAt;
+    if (!gateIncreased && !planChanged) return;
+    atBottomRef.current = true;
+    scrollToBottom(reduceMotion ? 'auto' : 'smooth');
+  }, [activeId, pendingGateCount, planUpdatedAt, reduceMotion, scrollToBottom]);
+
   /* Sending a message (or regenerating) pulls the view back to the bottom. */
   useEffect(() => {
     const onScrollBottom = () => {
@@ -128,14 +163,17 @@ export function ChatView({ welcome }: { welcome?: ReactNode } = {}) {
       >
         {loading ? (
           <LoadingSkeleton />
-        ) : messages.length === 0 ? (
+        ) : messages.length === 0 && pendingGateCount === 0 ? (
           <div className="flex min-h-full items-center justify-center">
             {welcome ?? <WelcomeScreen />}
           </div>
         ) : (
           <div className="mx-auto w-full max-w-3xl px-6 pb-10 pt-6">
-            <MessageList messages={messages} streaming={streaming} />
-            {layoutMode === 'code' && activeId ? (
+            {messages.length > 0 ? <MessageList messages={messages} streaming={streaming} /> : null}
+            {activeId && (layoutMode === 'code' || pendingGateCount > 0) ? (
+              // Aprovação/pergunta pendente deve continuar visível e operável
+              // mesmo se o usuário trocar para o layout Chat no meio do turno
+              // (senão o gate fica escondido e o turno bloqueia até o timeout).
               <CodeSessionCards conversationId={activeId} />
             ) : null}
           </div>
@@ -148,9 +186,8 @@ export function ChatView({ welcome }: { welcome?: ReactNode } = {}) {
           className="pointer-events-none absolute inset-x-0 -top-10 bottom-0 bg-linear-to-t from-background via-background/90 to-transparent"
         />
         <div className="relative mx-auto w-full max-w-3xl">
-          {layoutMode === 'code' && activeId ? (
-            <CodeJobsBar conversationId={activeId} />
-          ) : null}
+          {/* Jobs em background vivem no popover do composer (CodeSessionControls),
+              junto de plano/tarefas; não há mais faixa acima do composer. */}
           {showTurnError ? (
             <TurnErrorBanner
               code={errorCode}

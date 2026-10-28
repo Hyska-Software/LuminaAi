@@ -1,5 +1,5 @@
-import { Gauge } from 'lucide-react';
-import type { ContextStats } from '@/lib/types';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
+import type { ContextBreakdown, ContextStats } from '@/lib/types';
 import { cn, formatTokens } from '@/lib/utils';
 
 export interface ContextMeterProps {
@@ -9,16 +9,19 @@ export interface ContextMeterProps {
   className?: string;
 }
 
+type TierKey = 'ok' | 'warning' | 'critical';
+
 interface Tier {
+  key: TierKey;
   label: string;
-  bar: string;
-  text: string;
+  /** Cor do anel/alerta (a barra usa as cores do breakdown). */
+  ring: string;
 }
 
-const TIERS: Record<'ok' | 'warning' | 'critical', Tier> = {
-  ok: { label: 'ok', bar: 'bg-success', text: 'text-foreground-muted' },
-  warning: { label: 'atenção', bar: 'bg-warning', text: 'text-warning' },
-  critical: { label: 'compactando', bar: 'bg-danger', text: 'text-danger' },
+const TIERS: Record<TierKey, Tier> = {
+  ok: { key: 'ok', label: 'ok', ring: 'text-success' },
+  warning: { key: 'warning', label: 'atenção', ring: 'text-warning' },
+  critical: { key: 'critical', label: 'compactando', ring: 'text-danger' },
 };
 
 function tierFor(percent: number): Tier {
@@ -27,56 +30,201 @@ function tierFor(percent: number): Tier {
   return TIERS.ok;
 }
 
+/** Percentual sempre 0–100 (payloads antigos/tolerância a dados ruins). */
+function clampPercent(percent: number): number {
+  if (!Number.isFinite(percent)) return 0;
+  return Math.min(100, Math.max(0, Math.round(percent)));
+}
+
 /**
- * Medidor de contexto (WORKBENCH §4/§9): percentual usado da janela, tokens e
- * aviso de compactação. Cor indica a faixa, mas o rótulo textual acompanha.
+ * Janela do modelo em formato curto (1M sem casa decimal; 200K; 32K).
+ * `formatTokens` imprime "1.0M", então a janela ganha este helper local.
+ */
+function formatWindow(value?: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+  }
+  return formatTokens(value);
+}
+
+/** Legenda e segmentos na ordem do briefing: sistema → ferramentas → mensagens. */
+const BREAKDOWN_SEGMENTS: Array<{
+  key: keyof ContextBreakdown;
+  label: string;
+  color: string;
+}> = [
+  { key: 'systemPrompt', label: 'Prompt de sistema', color: 'bg-context-system' },
+  { key: 'toolDefinitions', label: 'Definições de ferramentas', color: 'bg-context-tools' },
+  { key: 'messages', label: 'Mensagens', color: 'bg-context-messages' },
+];
+
+const RING_RADIUS = 6.5;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+function ContextRing({ percent, tier }: { percent: number; tier: Tier }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 16 16"
+      className="size-4 shrink-0 -rotate-90"
+      fill="none"
+      strokeWidth={2}
+    >
+      <circle cx={8} cy={8} r={RING_RADIUS} stroke="currentColor" className="text-surface-active" />
+      <circle
+        cx={8}
+        cy={8}
+        r={RING_RADIUS}
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeDasharray={RING_CIRCUMFERENCE}
+        strokeDashoffset={RING_CIRCUMFERENCE * (1 - percent / 100)}
+        className={cn(
+          'transition-[stroke-dashoffset] duration-300 ease-out motion-reduce:transition-none',
+          tier.ring,
+        )}
+      />
+    </svg>
+  );
+}
+
+function compactedNote(count: number): string {
+  return `Contexto compactado · ${count} mensage${count === 1 ? 'm' : 'ns'} resumida${
+    count === 1 ? '' : 's'
+  }`;
+}
+
+/**
+ * Medidor de contexto do harness de código (WORKBENCH §4/§9).
+ *
+ * Chip compacto no header (anel + percentual) que abre um popover com o
+ * detalhamento do contexto: `breakdown` em três partes (prompt de sistema /
+ * definições de ferramentas / mensagens), valores estimados, barra segmentada
+ * proporcional à janela e o limite de saída. Componente puro: os eventos
+ * `context_stats` do backend atualizam o `codeStore` e o componente rerenderiza
+ * no lugar (larguras animadas, valores tabulares, sem layout shift).
  */
 export function ContextMeter({ stats, compacted, className }: ContextMeterProps) {
-  const percent = Number.isFinite(stats.percent)
-    ? Math.min(100, Math.max(0, Math.round(stats.percent)))
-    : 0;
+  const percent = clampPercent(stats.percent);
   const tier = tierFor(percent);
   const compactedCount = compacted ?? stats.compacted ?? 0;
-  const compactedNote =
-    compactedCount > 0
-      ? `Contexto compactado · ${compactedCount} mensage${compactedCount === 1 ? 'm' : 'ns'} resumida${compactedCount === 1 ? '' : 's'}`
-      : null;
+  const note = compactedCount > 0 ? compactedNote(compactedCount) : null;
+
+  const breakdown = stats.breakdown;
+  const hasBreakdown = breakdown != null;
+  const parts = hasBreakdown
+    ? BREAKDOWN_SEGMENTS.map((segment) => ({
+        ...segment,
+        value: Number.isFinite(breakdown?.[segment.key])
+          ? Math.max(0, breakdown?.[segment.key] ?? 0)
+          : 0,
+      }))
+    : [{ key: 'messages' as const, label: 'Mensagens', color: 'bg-accent', value: stats.used }];
+  const breakdownTotal = parts.reduce((total, part) => total + part.value, 0);
+  // Barra usa as cores do breakdown; payload antigo (ou breakdown zerado)
+  // degrada para uma barra única accent.
+  const useAccentBar = !hasBreakdown || breakdownTotal <= 0;
+  const segments = useAccentBar
+    ? []
+    : (() => {
+        const window = stats.window > 0 ? stats.window : 1;
+        const raw = parts.map((part) => (part.value / window) * 100);
+        const total = raw.reduce((sum, width) => sum + width, 0);
+        const scale = total > 100 ? 100 / total : 1;
+        return parts.map((part, index) => ({
+          ...part,
+          width: Number((raw[index] * scale).toFixed(1)),
+        }));
+      })();
 
   return (
-    <div className={cn('flex flex-col gap-1', className)}>
-      <div className="flex items-center gap-2">
-        <Gauge aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
-        <span className="min-w-0 flex-1 text-[11px] font-medium text-foreground-muted">Contexto</span>
-        <span className={cn('text-[11px] font-medium tabular-nums', tier.text)}>
-          {percent}%
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Contexto usado: ${percent}%`}
+          className={cn(
+            'flex h-8 min-w-[4.25rem] shrink-0 items-center justify-center gap-1.5 rounded-full border px-2 text-[11px] font-medium tabular-nums',
+            'text-foreground-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+            tier.key === 'critical' ? 'border-danger/40' : 'border-border',
+            className,
+          )}
+        >
+          <ContextRing percent={percent} tier={tier} />
+          <span className="tabular-nums">{percent}%</span>
           <span className="sr-only"> — {tier.label}</span>
-        </span>
-        <span className="text-[11px] tabular-nums text-foreground-subtle">
-          {formatTokens(stats.used)} / {formatTokens(stats.window)}
-        </span>
-      </div>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" aria-label="Detalhes do contexto" className="w-72 p-3 shadow-lg">
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="min-w-0 text-[13px] font-semibold text-foreground">
+              {percent}% do contexto usado
+            </p>
+            <p className="shrink-0 text-[11px] tabular-nums text-foreground-muted">
+              ~{formatTokens(stats.used)} / {formatWindow(stats.window)}
+            </p>
+          </div>
 
-      <div
-        role="progressbar"
-        aria-label="Contexto usado"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={percent}
-        aria-valuetext={`${percent}% do contexto usado — ${tier.label}`}
-        title={`Limite de saída: ${formatTokens(stats.outputCap)} tokens`}
-        className="h-1 w-full overflow-hidden rounded-full bg-surface-active"
-      >
-        <div
-          className={cn('h-full rounded-full transition-[width] duration-200 ease-out', tier.bar, 'motion-reduce:transition-none')}
-          style={{ width: `${percent}%` }}
-        />
-      </div>
+          <div
+            role="progressbar"
+            aria-label="Contexto usado"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent}
+            aria-valuetext={`${percent}% do contexto usado — ${tier.label}`}
+            title={`Limite de saída: ~${formatTokens(stats.outputCap)} tokens`}
+            className="flex h-1.5 w-full overflow-hidden rounded-full bg-surface-active"
+          >
+            {useAccentBar ? (
+              <div
+                className="h-full rounded-full bg-accent transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                style={{ width: `${percent}%` }}
+              />
+            ) : (
+              segments.map((segment) => (
+                <div
+                  key={segment.key}
+                  className={cn(
+                    'h-full transition-[width] duration-300 ease-out motion-reduce:transition-none',
+                    segment.color,
+                  )}
+                  style={{ width: `${segment.width}%` }}
+                />
+              ))
+            )}
+          </div>
 
-      {compactedNote ? (
-        <p className="text-[11px] leading-snug text-foreground-subtle" role="status">
-          {compactedNote}
-        </p>
-      ) : null}
-    </div>
+          <ul aria-label="Composição do contexto" className="flex flex-col gap-1">
+            {parts.map((part) => (
+              <li
+                key={part.key}
+                className="flex min-w-0 items-center gap-2 text-[11px] leading-snug"
+              >
+                <span aria-hidden className={cn('size-2 shrink-0 rounded-[3px]', part.color)} />
+                <span className="min-w-0 flex-1 truncate text-foreground-muted">{part.label}</span>
+                <span
+                  className="shrink-0 tabular-nums text-foreground-muted"
+                  aria-label={`aproximadamente ${formatTokens(part.value)} tokens`}
+                >
+                  ~{formatTokens(part.value)}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          <div className="flex flex-col gap-1 border-t border-border pt-2 text-[11px] leading-snug text-foreground-muted">
+            <p>Limite de saída: ~{formatTokens(stats.outputCap)}</p>
+            {note ? (
+              <p role="status" className="text-foreground-muted">
+                {note}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

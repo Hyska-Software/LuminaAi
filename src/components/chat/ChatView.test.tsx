@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type {
+  ApprovalRequest,
   ChatMessage,
   Conversation,
   ProviderAuthStatus,
@@ -20,7 +21,7 @@ vi.mock('@/components/composer/Composer', () => ({
 vi.mock('./MessageList', () => ({ MessageList: () => <div data-testid="messages" /> }));
 
 // Imported after the mocks above.
-import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { emptyCodeSession, useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import { ChatView } from './ChatView';
 
 function provider(overrides: Partial<ProviderInfo> = {}): ProviderInfo {
@@ -154,6 +155,7 @@ afterEach(() => {
   useAppStore.setState({ providers: [], auth: [], keys: [] });
   useUiStore.setState({ layoutMode: 'chat' });
   useChatStore.setState({ conversations: [], activeId: null, messagesByConversation: {} });
+  useCodeStore.setState({ byConversation: {} });
 });
 
 describe('ChatView — tela vazia', () => {
@@ -309,5 +311,88 @@ describe('ChatView — sessões por layout (defesa contra activeId obsoleto)', (
 
     expect(screen.queryByTestId('messages')).toBeNull();
     expect(screen.getByTestId('code-welcome')).toBeTruthy();
+  });
+});
+
+describe('ChatView — gate de aprovação no layout Code (F-06)', () => {
+  function planApproval(): ApprovalRequest {
+    return {
+      id: 'apr-plan',
+      toolCallId: 'call-plan',
+      tool: 'submit_plan',
+      title: 'Aprovar plano?',
+      detail: { kind: 'other', text: 'Resumo' },
+      risk: 'ask',
+      preview: '## Plano\n\n1. Fazer',
+      options: [],
+      createdAt: 1,
+    };
+  }
+
+  function seedCode(messages: ChatMessage[]): void {
+    const codeConversation: Conversation = { ...conversation(), mode: 'code', workspaceId: 'ws-1' };
+    useChatStore.setState({
+      conversations: [codeConversation],
+      activeId: 'conv-1',
+      messagesByConversation: { 'conv-1': messages },
+      loadingConversationId: null,
+      streaming: null,
+      errorCode: null,
+      errorHint: null,
+      error: null,
+    });
+    useAppStore.setState({
+      providers: [provider()],
+      auth: [signedIn()],
+      keys: [],
+      selection: { providerId: 'openai', modelId: 'gpt-6.1-sol', reasoning: null },
+    });
+    useUiStore.setState({ layoutMode: 'code' });
+    useCodeStore.setState({ byConversation: {} });
+  }
+
+  it('rola até o gate quando uma aprovação aparece', async () => {
+    seedCode([userMessage(), assistantMessage('complete')]);
+    render(<ChatView />);
+
+    const scrollTo = HTMLElement.prototype.scrollTo as unknown as ReturnType<typeof vi.fn>;
+    scrollTo.mockClear();
+
+    act(() => {
+      useCodeStore.setState({
+        byConversation: {
+          'conv-1': { ...emptyCodeSession('conv-1'), approvals: [planApproval()] },
+        },
+      });
+    });
+
+    expect(await screen.findByText('Aguardando aprovação')).toBeTruthy();
+    await vi.waitFor(() => expect(scrollTo).toHaveBeenCalled());
+  });
+
+  it('mostra o gate mesmo sem mensagens (não esconde atrás do welcome)', () => {
+    seedCode([]);
+    useCodeStore.setState({
+      byConversation: {
+        'conv-1': { ...emptyCodeSession('conv-1'), approvals: [planApproval()] },
+      },
+    });
+    render(<ChatView welcome={<div data-testid="code-welcome" />} />);
+
+    expect(screen.queryByTestId('code-welcome')).toBeNull();
+    expect(screen.getByRole('alertdialog', { name: 'Plano proposto' })).toBeTruthy();
+  });
+
+  it('mantém o gate visível mesmo com o layout Chat selecionado', () => {
+    seedCode([userMessage(), assistantMessage('complete')]);
+    useUiStore.setState({ layoutMode: 'chat' });
+    useCodeStore.setState({
+      byConversation: {
+        'conv-1': { ...emptyCodeSession('conv-1'), approvals: [planApproval()] },
+      },
+    });
+    render(<ChatView />);
+
+    expect(screen.getByRole('alertdialog', { name: 'Plano proposto' })).toBeTruthy();
   });
 });

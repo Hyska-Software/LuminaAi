@@ -917,6 +917,9 @@ pub enum PermissionMode {
     Edit,
     /// Escritas e comandos liberados, exceto comandos destrutivos.
     Autonomous,
+    /// Saída do modo Plano: edita o workspace, mas **cada escrita pede
+    /// aprovação** (`WORKBENCH.md` §5.4, "Aprovar e revisar cada edição").
+    Review,
 }
 
 impl PermissionMode {
@@ -925,6 +928,7 @@ impl PermissionMode {
             Self::ReadOnly => "read_only",
             Self::Edit => "edit",
             Self::Autonomous => "autonomous",
+            Self::Review => "review",
         }
     }
 
@@ -932,6 +936,7 @@ impl PermissionMode {
         match value.trim().to_ascii_lowercase().as_str() {
             "read_only" | "readonly" | "leitura" => Self::ReadOnly,
             "autonomous" | "autonomo" | "autônomo" => Self::Autonomous,
+            "review" | "revisar" | "revisão" => Self::Review,
             _ => Self::Edit,
         }
     }
@@ -1236,6 +1241,10 @@ pub struct PlanView {
     pub state: PlanState,
     #[serde(default)]
     pub markdown: Option<String>,
+    /// Feedback do usuário quando "Continuar planejando" foi escolhido
+    /// (persistido em `plan/feedback`; usado pelo card e pelo prompt).
+    #[serde(default)]
+    pub feedback: Option<String>,
     pub updated_at: i64,
 }
 
@@ -1293,6 +1302,22 @@ pub struct ChangesSummary {
     pub removed: u32,
 }
 
+/// Quebra estimada do contexto consumido, em tokens, para o medidor/popover
+/// (`WORKBENCH.md` §4/§9, `HARNESS.md` §10.1). A soma deve acompanhar `used`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextBreakdown {
+    /// System prompt (identidade, política, projeto, skills…).
+    #[serde(default)]
+    pub system_prompt: u32,
+    /// Definições wire das tools (nome + descrição + JSON Schema).
+    #[serde(default)]
+    pub tool_definitions: u32,
+    /// Histórico (mensagens, reasoning, argumentos de tool calls e resultados).
+    #[serde(default)]
+    pub messages: u32,
+}
+
 /// Uso de contexto estimado (medidor do header).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1305,6 +1330,9 @@ pub struct ContextStats {
     pub compacted: u32,
     #[serde(default)]
     pub messages: u32,
+    /// Payloads antigos persistidos antes do breakdown não têm este campo.
+    #[serde(default)]
+    pub breakdown: ContextBreakdown,
 }
 
 /// Estado de um job de processo em background.

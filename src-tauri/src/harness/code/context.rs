@@ -100,16 +100,15 @@ fn project_info(profile: &crate::workspace::project::ProjectProfile) -> ProjectI
 }
 
 /// Monta o contexto do turno a partir do banco e do disco.
-pub async fn build(db: &Db, conversation: &Conversation, allow_parallel_todos: bool) -> CodeTurnContext {
+pub async fn build(db: &Db, conversation: &Conversation) -> CodeTurnContext {
     let mut context = CodeTurnContext {
         workspace_id: conversation.workspace_id.clone(),
         permission_mode: conversation.permission_mode,
-        todos: session::todos(db, &conversation.id),
-        plan: session::plan_view(db, &conversation.id),
-        plan_mode: session::plan_mode_active(db, &conversation.id),
+        todos: session::todos(db, &conversation.id).unwrap_or_default(),
+        plan: session::plan_view(db, &conversation.id).ok().flatten(),
+        plan_mode: session::plan_mode_active(db, &conversation.id).unwrap_or(false),
         ..Default::default()
     };
-    let _ = allow_parallel_todos;
 
     let Some(workspace_id) = conversation.workspace_id.as_deref() else {
         return context;
@@ -288,7 +287,7 @@ mod tests {
     #[tokio::test]
     async fn builds_context_without_workspace() {
         let db = Db::open_in_memory().expect("db");
-        let context = build(&db, &conversation(None), false).await;
+        let context = build(&db, &conversation(None)).await;
         assert!(context.workspace.is_none());
         assert!(context.prompt_context().workspace_path.is_none());
         assert!(!context.plan_mode);
@@ -308,7 +307,7 @@ mod tests {
         db.set_workspace_trusted(&workspace.id, true).expect("trust");
         let mut conv = conversation(Some(workspace.id.clone()));
         conv.mode = CONVERSATION_MODE_CODE.to_string();
-        let context = build(&db, &conv, false).await;
+        let context = build(&db, &conv).await;
         assert!(context.trusted);
         assert_eq!(context.permission_mode, PermissionMode::Edit);
         assert!(context.agents_md.as_deref().unwrap().contains("Use pnpm"));

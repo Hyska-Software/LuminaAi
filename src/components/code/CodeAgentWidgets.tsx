@@ -6,58 +6,110 @@
  * envia as decisões pelo `api` — mantendo o `ChatView` livre de regras de
  * sessão (docs/goals/code-harness/WORKBENCH.md §5).
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import {
   ApprovalCard,
   AskUserCard,
   ContextMeter,
-  JobsBar,
   PlanCard,
-  TodoCard,
   type ApprovalDecisionOptions,
   type PlanAction,
 } from '@/components/agent';
 import { useCodeStore } from '@/lib/store';
-import type { ApprovalDecision, ApprovalRequest, PlanView } from '@/lib/types';
+import type {
+  ApprovalDecision,
+  ApprovalRequest,
+  PlanApprovalChoice,
+  PlanView,
+} from '@/lib/types';
 
-/** Aprovações, plano e tarefas da sessão de código ativa. */
+/**
+ * Aprovações, plano e perguntas da sessão de código ativa.
+ *
+ * Tarefas não moram mais aqui: o `TodoCard` fixo no fim do transcript era
+ * duplicado com as apresentações da timeline (F-08). O estado atual vive no
+ * popover "Plano e tarefas" do composer.
+ */
 export function CodeSessionCards({ conversationId }: { conversationId: string }) {
   const session = useCodeStore((state) => state.byConversation[conversationId]);
   const respondApproval = useCodeStore((state) => state.respondApproval);
   const respondQuestion = useCodeStore((state) => state.respondQuestion);
   const [responding, setResponding] = useState<string | null>(null);
+  /** Guard síncrono contra duplo submit (o estado do React é assíncrono). */
+  const submittingRef = useRef<string | null>(null);
 
   if (!session) return null;
   const planApprovals = session.approvals.filter((approval) => approval.tool === 'submit_plan');
   const otherApprovals = session.approvals.filter((approval) => approval.tool !== 'submit_plan');
-  if (
-    planApprovals.length === 0 &&
-    otherApprovals.length === 0 &&
-    session.questions.length === 0 &&
-    session.todos.length === 0
-  ) {
+  if (planApprovals.length === 0 && otherApprovals.length === 0 && session.questions.length === 0) {
     return null;
   }
 
   const decide = async (
     approval: ApprovalRequest,
     decision: ApprovalDecision,
-    options?: ApprovalDecisionOptions,
+    options?: ApprovalDecisionOptions & {
+      choice?: PlanApprovalChoice | null;
+      planMarkdown?: string | null;
+    },
   ) => {
+    // Duplo clique / dois listeners no mesmo gate: só a primeira decisão vale.
+    if (submittingRef.current) return;
+    submittingRef.current = approval.id;
     setResponding(approval.id);
     try {
+      // O store faz o refresh e o toast quando o backend responde `false`
+      // (aprovação já resolvida/expirada) — ver `codeStore.respondApproval`.
       await respondApproval(conversationId, approval.id, decision, {
         scope: options?.scope ?? null,
         feedback: options?.feedback ?? null,
+        choice: options?.choice ?? null,
+        planMarkdown: options?.planMarkdown ?? null,
       });
     } finally {
+      submittingRef.current = null;
       setResponding(null);
     }
   };
 
+  const handlePlanAction = (
+    approval: ApprovalRequest,
+    action: PlanAction,
+    feedback?: string,
+    planMarkdown?: string,
+  ) => {
+    if (action === 'keep_planning') {
+      void decide(approval, 'denied', {
+        feedback: feedback?.trim() || 'Continue planejando.',
+      });
+      return;
+    }
+    const choice: PlanApprovalChoice =
+      action === 'approve_review' ? 'approve_review' : 'approve_run';
+    const edited = planMarkdown?.trim();
+    void decide(approval, 'approved', {
+      choice,
+      planMarkdown: edited ? edited : null,
+    });
+  };
+
+  const announcement =
+    planApprovals.length > 0
+      ? 'Plano aguardando aprovação.'
+      : otherApprovals.length > 0
+        ? 'Aprovação necessária.'
+        : session.questions.length > 0
+          ? 'O agente fez uma pergunta.'
+          : '';
+
   return (
-    <div className="mt-3 flex flex-col gap-3" aria-live="polite">
+    <div className="mt-3 flex flex-col gap-3">
+      {announcement ? (
+        <p aria-live="polite" className="sr-only">
+          {announcement}
+        </p>
+      ) : null}
       {otherApprovals.map((approval) => (
         <ApprovalCard
           key={approval.id}
@@ -73,20 +125,16 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
           state: 'reviewing',
           markdown: approval.preview ?? '',
           updatedAt: approval.createdAt,
+          feedback: null,
         };
         return (
           <PlanCard
             key={approval.id}
             plan={plan}
-            onAction={(action: PlanAction, feedback?: string) => {
-              if (action === 'keep_planning') {
-                void decide(approval, 'denied', {
-                  feedback: feedback?.trim() || 'Continue planejando.',
-                });
-                return;
-              }
-              void decide(approval, 'approved');
-            }}
+            busy={responding === approval.id}
+            onAction={(action, feedback, planMarkdown) =>
+              handlePlanAction(approval, action, feedback, planMarkdown)
+            }
           />
         );
       })}
@@ -120,41 +168,16 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
           }}
         />
       ))}
-      {session.todos.length > 0 ? <TodoCard todos={session.todos} /> : null}
     </div>
   );
 }
 
-/** Array estável: um `?? []` dentro do seletor do zustand causaria loop. */
-const EMPTY_JOBS: readonly import('@/lib/types').JobView[] = [];
-
-/** Jobs de processo em background da sessão ativa (acima do composer). */
-export function CodeJobsBar({ conversationId }: { conversationId: string }) {
-  const jobs = useCodeStore(
-    (state) => state.byConversation[conversationId]?.jobs ?? EMPTY_JOBS,
-  );
-  const killJob = useCodeStore((state) => state.killJob);
-  const refreshJobs = useCodeStore((state) => state.refreshJobs);
-  if (jobs.length === 0) return null;
-  return (
-    <JobsBar
-      jobs={jobs as import('@/lib/types').JobView[]}
-      onKill={(jobId) => {
-        void killJob(conversationId, jobId);
-      }}
-      onOpen={() => {
-        void refreshJobs(conversationId);
-      }}
-    />
-  );
-}
-
-/** Medidor de contexto do header (compacto). */
+/** Medidor de contexto do header (chip compacto com anel + popover). */
 export function CodeContextMeterChip({ conversationId }: { conversationId: string }) {
   const stats = useCodeStore((state) => state.byConversation[conversationId]?.context);
   if (!stats) return null;
   return (
-    <div className="hidden min-w-32 lg:block">
+    <div className="hidden lg:block">
       <ContextMeter stats={stats} />
     </div>
   );

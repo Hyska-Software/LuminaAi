@@ -1,14 +1,23 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import * as Collapsible from '@radix-ui/react-collapsible';
 import {
   ArrowUpRight,
+  Bot,
   BookOpen,
   Brain,
   ChevronDown,
+  ClipboardCheck,
+  FilePenLine,
   FilePlus,
   FileSearch,
   FileText,
+  FolderOpen,
+  GitBranch,
+  HelpCircle,
   Library,
+  ListChecks,
+  ListTodo,
+  Play,
   Search,
   ShieldCheck,
   SquareTerminal,
@@ -17,7 +26,6 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useReduceMotion } from '@/components/layout/hooks';
-import { ToolPresentationCard } from '@/components/agent/ToolPresentationCard';
 import { Spinner } from '@/components/ui';
 import {
   buildAgentTrace,
@@ -30,6 +38,8 @@ import { useAppStore } from '@/lib/store';
 import type { ChatMessage } from '@/lib/types';
 import { cn, formatDuration, formatThinkingDuration, truncate } from '@/lib/utils';
 import { openExternalUrl } from './external';
+import { Markdown } from './Markdown';
+import { ToolCallRow } from './ToolCallRow';
 
 export type AgentStepsPhase = 'starting' | 'reasoning' | 'text' | 'tool';
 
@@ -54,11 +64,54 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   read_skill: BookOpen,
   list_artifacts: Library,
   read_artifact: FileSearch,
+  /* harness de código */
+  read_file: FileText,
+  read_tool_output: FileSearch,
+  list_dir: FolderOpen,
+  search_files: Search,
+  search_text: Search,
+  write_file: FilePenLine,
+  edit_file: FilePenLine,
+  run_command: SquareTerminal,
+  run_checks: ClipboardCheck,
+  todo_write: ListTodo,
+  submit_plan: ListChecks,
+  ask_user: HelpCircle,
+  task: Bot,
+  job_list: Play,
+  job_output: Play,
+  job_kill: Play,
+  git_status: GitBranch,
+  git_diff: GitBranch,
+  git_log: GitBranch,
 };
 
 const MAX_DOMAINS = 5;
 const MAX_PAGE_CHIPS = 6;
 const MAX_FILE_CHIPS = 4;
+
+/** Tools do harness de código: uma linha por chamada (ver `ToolCallRow`). */
+const CODE_TOOL_NAMES = new Set([
+  'read_file',
+  'read_tool_output',
+  'list_dir',
+  'search_files',
+  'search_text',
+  'write_file',
+  'edit_file',
+  'run_command',
+  'run_checks',
+  'todo_write',
+  'submit_plan',
+  'ask_user',
+  'task',
+  'job_list',
+  'job_output',
+  'job_kill',
+  'git_status',
+  'git_diff',
+  'git_log',
+]);
 
 /** Live counter while the turn streams (500ms tick). */
 function useLiveElapsed(active: boolean, startedAt?: number | null): number | null {
@@ -93,22 +146,23 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
   );
   const hasReasoning = hasTraceReasoning(entries);
   const toolCount = countTraceTools(entries);
+  /** Last reasoning block: the only one that shows the streaming caret. */
+  const lastReasoningIndex = useMemo(() => {
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      if (entries[index].kind === 'reasoning') return index;
+    }
+    return -1;
+  }, [entries]);
   const running = entries.some(
     (entry) => entry.kind === 'tools' && entry.group.status === 'running',
   );
   const liveElapsed = useLiveElapsed(streaming, startedAt);
-  // Apresentações persistidas das tools do harness de código (diff/tarefas/
-  // plano/job/respostas) — ficam fora do bloco recolhível para não esconder o
-  // que o agente mudou (WORKBENCH §5.2).
-  const presentations = useMemo(
-    () =>
-      (message.toolCalls ?? [])
-        .map((tool) => tool.presentation)
-        .filter((presentation): presentation is NonNullable<typeof presentation> =>
-          Boolean(presentation),
-        ),
-    [message.toolCalls],
-  );
+
+  // Decisão de UX (2026-10): os cards de apresentação das tools (`file_change`,
+  // `todos`, `plan`, `job`, `answers`) **não** são mais renderizados no
+  // transcript. O bloco "Thinking" já mostra o que o agente está fazendo e os
+  // estados de plano/tarefas/jobs vivem no popover do composer
+  // (`CodeSessionControls`), evitando duplicação e poluição do chat.
 
   // Auto-open while the agent works and collapse once the answer is ready
   // (same behavior as the previous reasoning block; the user can reopen).
@@ -196,45 +250,68 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
             !streaming && 'max-h-80 overflow-y-auto overscroll-contain pr-1',
           )}
         >
-          <ol className="flex flex-col gap-3">
-            {entries.map((entry, index) => (
-              <li key={index} className="relative flex gap-2.5">
-                <span
-                  aria-hidden
-                  className="relative z-10 mt-[3px] flex size-4 shrink-0 items-center justify-center rounded-full bg-background"
+          <ol className="flex flex-col gap-1">
+            {entries.map((entry, index) => {
+              if (entry.kind === 'reasoning') {
+                // O raciocínio do modelo é Markdown (docs/MARKDOWN.md §4) e é
+                // renderizado pela variante compacta/muted do `Markdown`. O
+                // caret de streaming fica só no último bloco, enquanto o
+                // modelo pensa — nunca junto das tools nem da resposta.
+                return (
+                  <li
+                    key={`reasoning-${index}`}
+                    className="flex min-w-0 items-start gap-2.5 rounded-lg px-1.5 py-1"
+                  >
+                    <Brain
+                      aria-hidden
+                      className="mt-0.5 size-3.5 shrink-0 text-foreground-subtle"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <span className="mb-0.5 block text-[12px] font-semibold text-foreground">
+                        Pensou
+                      </span>
+                      <Markdown
+                        content={entry.text}
+                        variant="thinking"
+                        streaming={streaming && phase === 'reasoning' && index === lastReasoningIndex}
+                      />
+                    </div>
+                  </li>
+                );
+              }
+
+              // Tools do harness: detalhe por chamada (verbo + alvo + status +
+              // diff/saída sob demanda), como o "Think/Edit/Pwsh" do DSH.
+              if (CODE_TOOL_NAMES.has(entry.group.name)) {
+                return (
+                  <Fragment key={`tools-${index}`}>
+                    {entry.group.tools.map((tool) => (
+                      <ToolCallRow
+                        key={tool.id}
+                        tool={tool}
+                        icon={TOOL_ICONS[tool.name] ?? Wrench}
+                      />
+                    ))}
+                  </Fragment>
+                );
+              }
+
+              return (
+                <li
+                  key={`tools-${index}`}
+                  className="flex min-w-0 items-start gap-2.5 rounded-lg px-1.5 py-1"
                 >
-                  {entry.kind === 'reasoning' ? (
-                    <span className="size-[5px] rounded-full bg-foreground-subtle" />
-                  ) : (
+                  <span className="mt-0.5 flex size-3.5 shrink-0 items-center justify-center">
                     <ToolMarker group={entry.group} />
-                  )}
-                </span>
-                {index < entries.length - 1 ? (
-                  <span
-                    aria-hidden
-                    className="absolute -bottom-3 left-[7.5px] top-5 w-px bg-border"
-                  />
-                ) : null}
-                {entry.kind === 'reasoning' ? (
-                  <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground-muted">
-                    {entry.text}
-                  </p>
-                ) : (
+                  </span>
                   <ToolActivity group={entry.group} />
-                )}
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ol>
         </div>
       </Collapsible.Content>
       </Collapsible.Root>
-      {presentations.length > 0 ? (
-        <div className="mb-3 flex flex-col gap-2">
-          {presentations.map((presentation, index) => (
-            <ToolPresentationCard key={index} presentation={presentation} />
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }

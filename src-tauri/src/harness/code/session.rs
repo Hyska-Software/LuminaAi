@@ -4,27 +4,36 @@
 //! fonte dos fatos da UI: permissões, plano, tarefas, contexto, aprovações,
 //! alterações e reversões (`docs/goals/code-harness/HARNESS.md` §11).
 //!
-//! Todas as projeções são folds simples do último evento de um `kind`; o
-//! snapshot completo é montado por `commands::code::get_code_session_state`.
+//! **Projeção única** (`PLAN.md` D9): `commands::code` e o harness delegam para
+//! as funções deste módulo; nenhuma tela recalcula o estado do plano/tarefas.
+//! O plano é um fold de `plan/mode → plan/submitted → plan/feedback →
+//! plan/approved → turn/ended`, e `updated_at` vem sempre do evento que define
+//! o estado.
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::db::Db;
-use crate::domain::{ContextStats, PlanState, PlanView, TodoItem, TodoStatus};
+use crate::db::{Db, StoredCodeEvent};
+use crate::domain::{ContextBreakdown, ContextStats, PlanState, PlanView, TodoItem, TodoStatus};
 
 pub const KIND_APPROVAL_ASKED: &str = "approval/asked";
 pub const KIND_APPROVAL_DECIDED: &str = "approval/decided";
 pub const KIND_PERMISSION_MODE: &str = "permission/mode";
 pub const KIND_PLAN_MODE: &str = "plan/mode";
 pub const KIND_PLAN_SUBMITTED: &str = "plan/submitted";
+pub const KIND_PLAN_FEEDBACK: &str = "plan/feedback";
 pub const KIND_PLAN_APPROVED: &str = "plan/approved";
 pub const KIND_TODOS: &str = "todos";
 pub const KIND_CONTEXT_STATS: &str = "context/stats";
+pub const KIND_CONTEXT_COMPACTED: &str = "context/compacted";
 pub const KIND_CHANGES_SUMMARY: &str = "changes/summary";
 pub const KIND_REVERT: &str = "revert/performed";
 pub const KIND_TURN_ENDED: &str = "turn/ended";
 pub const KIND_TURN_INTERRUPTED: &str = "turn/interrupted";
+
+/// Feedback sintético quando uma revisão ficou órfã (aprovação expirou ou o
+/// turno terminou sem decisão): o card volta para planejamento com instrução.
+pub const STALE_REVIEW_FEEDBACK: &str = "A revisão não está mais ativa; reenvie o plano.";
 
 /// Grava um evento da sessão (JSON serializado).
 pub fn append(db: &Db, conversation_id: &str, turn_id: Option<&str>, kind: &str, payload: &Value) -> anyhow::Result<()> {
@@ -32,11 +41,18 @@ pub fn append(db: &Db, conversation_id: &str, turn_id: Option<&str>, kind: &str,
     Ok(())
 }
 
-fn latest<T: DeserializeOwned>(db: &Db, conversation_id: &str, kind: &str) -> Option<T> {
+/// Último evento de um `kind` (com `seq`/`created_at` — o fold do plano precisa
+/// dos dois para ordenar e para o `updated_at` estável).
+pub fn latest_event(db: &Db, conversation_id: &str, kind: &str) -> anyhow::Result<Option<StoredCodeEvent>> {
     db.latest_code_event(conversation_id, kind)
-        .ok()
-        .flatten()
-        .and_then(|event| serde_json::from_str::<T>(&event.payload).ok())
+}
+
+fn decode<T: DeserializeOwned>(event: &StoredCodeEvent) -> Option<T> {
+    serde_json::from_str::<T>(&event.payload).ok()
+}
+
+fn latest<T: DeserializeOwned>(db: &Db, conversation_id: &str, kind: &str) -> anyhow::Result<Option<T>> {
+    Ok(latest_event(db, conversation_id, kind)?.and_then(|event| decode::<T>(&event)))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -46,9 +62,26 @@ struct ModePayload {
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct PlanPayload {
+struct SubmittedPayload {
     #[serde(default)]
     markdown: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct FeedbackPayload {
+    #[serde(default)]
+    feedback: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ApprovedPayload {
+    #[serde(default)]
+    markdown: Option<String>,
+    /// Registrado no log da sessão (`plan/approved {reviewEachEdit}`) para
+    /// auditoria; o modo efetivo já vai em `permission/mode`/conversa.
+    #[serde(default, rename = "reviewEachEdit")]
+    #[allow(dead_code)]
+    review_each_edit: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -57,11 +90,18 @@ struct TodosPayload {
     items: Vec<TodoItem>,
 }
 
-/// Modo Plano está ativo nesta sessão?
-pub fn plan_mode_active(db: &Db, conversation_id: &str) -> bool {
-    latest::<ModePayload>(db, conversation_id, KIND_PLAN_MODE)
+#[derive(Debug, serde::Deserialize)]
+struct CompactedPayload {
+    #[serde(default)]
+    messages: u32,
+}
+
+/// Modo Plano está ativo nesta sessão? (leitura viva; usada pela política e
+/// pelo harness a cada passo).
+pub fn plan_mode_active(db: &Db, conversation_id: &str) -> anyhow::Result<bool> {
+    Ok(latest::<ModePayload>(db, conversation_id, KIND_PLAN_MODE)?
         .map(|payload| payload.active)
-        .unwrap_or(false)
+        .unwrap_or(false))
 }
 
 /// Liga/desliga o modo Plano (append-only; último evento vence).
@@ -75,45 +115,175 @@ pub fn set_plan_mode(db: &Db, conversation_id: &str, active: bool) -> anyhow::Re
     )
 }
 
-/// Estado do plano: em planejamento, aguardando revisão ou aprovado.
-pub fn plan_view(db: &Db, conversation_id: &str) -> Option<PlanView> {
-    let active = plan_mode_active(db, conversation_id);
-    let submitted = db.latest_code_event(conversation_id, KIND_PLAN_SUBMITTED).ok()?;
-    let approved = db.latest_code_event(conversation_id, KIND_PLAN_APPROVED).ok()?;
-    match submitted {
-        None => {
-            if active {
-                Some(PlanView {
-                    state: PlanState::Planning,
-                    markdown: None,
-                    updated_at: crate::domain::now_ms(),
-                })
-            } else {
-                None
-            }
-        }
-        Some(submitted) => {
-            let markdown = serde_json::from_str::<PlanPayload>(&submitted.payload)
-                .ok()
-                .and_then(|payload| payload.markdown);
-            let is_approved = approved
-                .as_ref()
-                .map(|event| event.seq > submitted.seq)
-                .unwrap_or(false);
-            Some(PlanView {
-                state: if is_approved {
-                    PlanState::Approved
-                } else {
-                    PlanState::Reviewing
-                },
-                markdown,
-                updated_at: submitted.created_at,
-            })
-        }
-    }
+fn markdown_of(event: Option<&StoredCodeEvent>) -> Option<String> {
+    event
+        .and_then(|event| decode::<SubmittedPayload>(event))
+        .and_then(|payload| payload.markdown)
 }
 
-/// Registra o plano submetido para revisão.
+fn feedback_of(event: Option<&StoredCodeEvent>) -> Option<String> {
+    event
+        .and_then(|event| decode::<FeedbackPayload>(event))
+        .map(|payload| payload.feedback)
+        .filter(|feedback| !feedback.trim().is_empty())
+}
+
+/// Estado do plano: em planejamento, aguardando revisão ou aprovado.
+///
+/// Fold por `seq` (HARNESS §11.2 / PLAN.md D4):
+/// - modo ativo: a ativação abre um ciclo novo (`Planning`); dentro do ciclo, o
+///   último entre `submitted`/`feedback`/`approved` decide o estado;
+/// - `turn/ended` depois de um `submitted` sem decisão degrada a revisão para
+///   `Planning` com feedback sintético (a aprovação não existe mais);
+/// - modo inativo: um `approved` mantém o plano aprovado; sem aprovação, o
+///   `submitted` fica em revisão até o fim do turno.
+pub fn plan_view(db: &Db, conversation_id: &str) -> anyhow::Result<Option<PlanView>> {
+    let mode = latest_event(db, conversation_id, KIND_PLAN_MODE)?;
+    let submitted = latest_event(db, conversation_id, KIND_PLAN_SUBMITTED)?;
+    let feedback = latest_event(db, conversation_id, KIND_PLAN_FEEDBACK)?;
+    let approved = latest_event(db, conversation_id, KIND_PLAN_APPROVED)?;
+    let turn_ended = latest_event(db, conversation_id, KIND_TURN_ENDED)?;
+
+    let mode_active = mode
+        .as_ref()
+        .and_then(|event| decode::<ModePayload>(event))
+        .map(|payload| payload.active)
+        .unwrap_or(false);
+
+    if mode_active {
+        let mode_seq = mode.as_ref().map(|event| event.seq).unwrap_or(0);
+        let cycle_submitted = submitted.as_ref().filter(|event| event.seq > mode_seq);
+        let cycle_feedback = feedback.as_ref().filter(|event| event.seq > mode_seq);
+        let cycle_approved = approved.as_ref().filter(|event| event.seq > mode_seq);
+
+        // Aprovado dentro do ciclo corrente (defensivo; o approve desliga o modo).
+        if let Some(approved_event) = cycle_approved {
+            let submitted_before = cycle_submitted
+                .map(|event| approved_event.seq > event.seq)
+                .unwrap_or(true);
+            let feedback_before = cycle_feedback
+                .map(|event| approved_event.seq > event.seq)
+                .unwrap_or(true);
+            if submitted_before && feedback_before {
+                let payload = decode::<ApprovedPayload>(approved_event);
+                return Ok(Some(PlanView {
+                    state: PlanState::Approved,
+                    markdown: payload
+                        .as_ref()
+                        .and_then(|payload| payload.markdown.clone())
+                        .or_else(|| markdown_of(cycle_submitted)),
+                    feedback: None,
+                    updated_at: approved_event.created_at,
+                }));
+            }
+        }
+
+        // "Continuar planejando": volta para Planning com o draft + feedback.
+        if let Some(feedback_event) = cycle_feedback {
+            let newer_than_submitted = cycle_submitted
+                .map(|event| feedback_event.seq > event.seq)
+                .unwrap_or(true);
+            if newer_than_submitted {
+                return Ok(Some(PlanView {
+                    state: PlanState::Planning,
+                    markdown: markdown_of(cycle_submitted),
+                    feedback: feedback_of(Some(feedback_event)),
+                    updated_at: feedback_event.created_at,
+                }));
+            }
+        }
+
+        if let Some(submitted_event) = cycle_submitted {
+            // Turno terminou sem decisão: a revisão morreu, o agente volta a planejar.
+            let stale = turn_ended
+                .as_ref()
+                .map(|event| event.seq > submitted_event.seq)
+                .unwrap_or(false);
+            if stale {
+                return Ok(Some(PlanView {
+                    state: PlanState::Planning,
+                    markdown: markdown_of(Some(submitted_event)),
+                    feedback: Some(STALE_REVIEW_FEEDBACK.to_string()),
+                    updated_at: turn_ended
+                        .as_ref()
+                        .map(|event| event.created_at)
+                        .unwrap_or(submitted_event.created_at),
+                }));
+            }
+            // Feedback anterior (de um plano rejeitado) contextualiza a revisão.
+            let prior_feedback = cycle_feedback
+                .filter(|event| event.seq < submitted_event.seq)
+                .and_then(|event| feedback_of(Some(event)));
+            return Ok(Some(PlanView {
+                state: PlanState::Reviewing,
+                markdown: markdown_of(Some(submitted_event)),
+                feedback: prior_feedback,
+                updated_at: submitted_event.created_at,
+            }));
+        }
+
+        // Modo ativo sem plano neste ciclo: estado "planejando" do chip.
+        return Ok(Some(PlanView {
+            state: PlanState::Planning,
+            markdown: None,
+            feedback: None,
+            updated_at: mode.as_ref().map(|event| event.created_at).unwrap_or(0),
+        }));
+    }
+
+    // Modo inativo: plano aprovado continua acessível (popover do chip).
+    if let Some(approved_event) = approved {
+        let approved_after_submitted = submitted
+            .as_ref()
+            .map(|event| approved_event.seq > event.seq)
+            .unwrap_or(true);
+        if approved_after_submitted {
+            let payload = decode::<ApprovedPayload>(&approved_event);
+            return Ok(Some(PlanView {
+                state: PlanState::Approved,
+                markdown: payload
+                    .as_ref()
+                    .and_then(|payload| payload.markdown.clone())
+                    .or_else(|| markdown_of(submitted.as_ref())),
+                feedback: None,
+                updated_at: approved_event.created_at,
+            }));
+        }
+    }
+
+    if let Some(submitted_event) = submitted {
+        let stale = turn_ended
+            .as_ref()
+            .map(|event| event.seq > submitted_event.seq)
+            .unwrap_or(false);
+        if stale {
+            return Ok(Some(PlanView {
+                state: PlanState::Planning,
+                markdown: markdown_of(Some(&submitted_event)),
+                feedback: Some(STALE_REVIEW_FEEDBACK.to_string()),
+                updated_at: turn_ended
+                    .as_ref()
+                    .map(|event| event.created_at)
+                    .unwrap_or(submitted_event.created_at),
+            }));
+        }
+        let prior_feedback = feedback
+            .as_ref()
+            .filter(|event| event.seq < submitted_event.seq)
+            .and_then(|event| feedback_of(Some(event)));
+        return Ok(Some(PlanView {
+            state: PlanState::Reviewing,
+            markdown: markdown_of(Some(&submitted_event)),
+            feedback: prior_feedback,
+            updated_at: submitted_event.created_at,
+        }));
+    }
+
+    Ok(None)
+}
+
+/// Registra o plano submetido para revisão (persistido **antes** da aprovação
+/// interativa, para o draft sobreviver a negação/crash — `TOOLS.md` §2.5).
 pub fn submit_plan(db: &Db, conversation_id: &str, turn_id: &str, markdown: &str) -> anyhow::Result<()> {
     append(
         db,
@@ -124,23 +294,46 @@ pub fn submit_plan(db: &Db, conversation_id: &str, turn_id: &str, markdown: &str
     )
 }
 
-/// Marca o plano como aprovado (a sessão sai do modo Plano).
-pub fn approve_plan(db: &Db, conversation_id: &str, turn_id: &str) -> anyhow::Result<()> {
+/// Persiste o feedback do "Continuar planejando" (volta o estado para Planning).
+pub fn plan_feedback(db: &Db, conversation_id: &str, turn_id: &str, feedback: &str) -> anyhow::Result<()> {
+    append(
+        db,
+        conversation_id,
+        Some(turn_id),
+        KIND_PLAN_FEEDBACK,
+        &serde_json::json!({ "feedback": feedback }),
+    )
+}
+
+/// Marca o plano como aprovado (a sessão sai do modo Plano). `markdown` é o
+/// texto revisado pelo usuário, quando houver; `review_each_edit` registra a
+/// escolha "Aprovar e revisar cada edição" no log da sessão.
+pub fn approve_plan(
+    db: &Db,
+    conversation_id: &str,
+    turn_id: &str,
+    markdown: Option<&str>,
+    review_each_edit: bool,
+) -> anyhow::Result<()> {
+    let mut payload = serde_json::json!({ "reviewEachEdit": review_each_edit });
+    if let Some(markdown) = markdown.filter(|markdown| !markdown.trim().is_empty()) {
+        payload["markdown"] = Value::String(markdown.to_string());
+    }
     append(
         db,
         conversation_id,
         Some(turn_id),
         KIND_PLAN_APPROVED,
-        &serde_json::json!({ "approved": true }),
+        &payload,
     )?;
     set_plan_mode(db, conversation_id, false)
 }
 
 /// Lista de tarefas atual do agente.
-pub fn todos(db: &Db, conversation_id: &str) -> Vec<TodoItem> {
-    latest::<TodosPayload>(db, conversation_id, KIND_TODOS)
+pub fn todos(db: &Db, conversation_id: &str) -> anyhow::Result<Vec<TodoItem>> {
+    Ok(latest::<TodosPayload>(db, conversation_id, KIND_TODOS)?
         .map(|payload| payload.items)
-        .unwrap_or_default()
+        .unwrap_or_default())
 }
 
 /// Substitui a lista inteira de tarefas (e emite para a UI pelo chamador).
@@ -154,11 +347,10 @@ pub fn save_todos(db: &Db, conversation_id: &str, turn_id: &str, items: &[TodoIt
     )
 }
 
-/// Valida a lista de tarefas (itens vazios/duplicados, in_progress único).
-pub fn validate_todos(items: &[TodoItem], allow_parallel: bool) -> Result<(), String> {
-    if items.is_empty() {
-        return Err("a lista de tarefas não pode ficar vazia".to_string());
-    }
+/// Valida a lista de tarefas: até 50 itens, descrições não vazias/duplicadas e
+/// no máximo **um** `in_progress` (`TOOLS.md` §2.5). Lista vazia é válida: é o
+/// "limpar" do `todo_write`.
+pub fn validate_todos(items: &[TodoItem]) -> Result<(), String> {
     if items.len() > 50 {
         return Err("a lista de tarefas aceita no máximo 50 itens".to_string());
     }
@@ -172,14 +364,12 @@ pub fn validate_todos(items: &[TodoItem], allow_parallel: bool) -> Result<(), St
             return Err(format!("tarefa duplicada: `{content}`"));
         }
     }
-    if !allow_parallel {
-        let in_progress = items
-            .iter()
-            .filter(|item| item.status == TodoStatus::InProgress)
-            .count();
-        if in_progress > 1 {
-            return Err("no máximo uma tarefa pode estar `in_progress`".to_string());
-        }
+    let in_progress = items
+        .iter()
+        .filter(|item| item.status == TodoStatus::InProgress)
+        .count();
+    if in_progress > 1 {
+        return Err("no máximo uma tarefa pode estar `in_progress`".to_string());
     }
     Ok(())
 }
@@ -187,6 +377,19 @@ pub fn validate_todos(items: &[TodoItem], allow_parallel: bool) -> Result<(), St
 /// Uso de contexto mais recente registrado pela sessão.
 pub fn context_stats(db: &Db, conversation_id: &str) -> Option<ContextStats> {
     latest::<ContextStats>(db, conversation_id, KIND_CONTEXT_STATS)
+        .ok()
+        .flatten()
+}
+
+/// Quantas mensagens já foram cobertas por compactações (`to_seq` do último
+/// resumo). O evento `context/compacted` é o fold canônico — não reciclar
+/// `context/stats` (um payload parcial envenenava a projeção do medidor).
+pub fn compacted_messages(db: &Db, conversation_id: &str) -> u32 {
+    latest::<CompactedPayload>(db, conversation_id, KIND_CONTEXT_COMPACTED)
+        .ok()
+        .flatten()
+        .map(|payload| payload.messages)
+        .unwrap_or(0)
 }
 
 /// Persiste o uso de contexto do passo (chamado no fim de cada passo).
@@ -225,32 +428,93 @@ pub fn turn_changes(db: &Db, conversation_id: &str, turn_id: &str) -> Option<cra
     })
 }
 
-/// Estimativa de tokens do contexto do turno (heurística `chars/4` + overhead).
+/// Estimativa de tokens do contexto do turno (heurística `chars/4` + overhead)
+/// com **breakdown** para o medidor do header (`HARNESS.md` §10.1).
 ///
-/// Não é um tokenizer exato: a UI mostra "≈" e o uso real do provider corrige a
-/// leitura no próximo turno (`docs/goals/code-harness/HARNESS.md` §10.1).
+/// - `system_prompt_chars`: system prompt efetivo do request (inclui notas);
+/// - `history_chars`: texto + reasoning + argumentos das tool calls do histórico;
+/// - `tool_definition_chars`: nome + descrição + JSON Schema das tools no wire;
+/// - `messages`: contagem de mensagens (overhead de 8 tokens por mensagem);
+/// - `tool_calls`: contagem de tool calls declaradas (16 tokens por call);
+/// - `compacted`: mensagens já resumidas (informativo, vem da projeção).
+///
+/// A soma do breakdown é sempre `used`. Não é um tokenizer exato: a UI mostra
+/// "≈" e o uso real do provider calibra em [`calibrate_context`].
+#[allow(clippy::too_many_arguments)]
 pub fn estimate_context(
     system_prompt_chars: usize,
     history_chars: usize,
-    tool_results_chars: usize,
+    tool_definition_chars: usize,
     window: u32,
     output_cap: u32,
     messages: u32,
+    tool_calls: u32,
+    compacted: u32,
 ) -> ContextStats {
-    let chars = system_prompt_chars + history_chars + tool_results_chars;
-    let used = ((chars / 4) as u32).saturating_add(messages.saturating_mul(8));
-    let percent = if window == 0 {
-        0.0
-    } else {
-        (used as f32 / window as f32 * 100.0).min(100.0)
-    };
+    let system_prompt = u32::try_from(system_prompt_chars / 4).unwrap_or(u32::MAX);
+    let tool_definitions = u32::try_from(tool_definition_chars / 4).unwrap_or(u32::MAX);
+    let messages_tokens = u32::try_from(history_chars / 4)
+        .unwrap_or(u32::MAX)
+        .saturating_add(messages.saturating_mul(8))
+        .saturating_add(tool_calls.saturating_mul(16));
+    let used = system_prompt
+        .saturating_add(tool_definitions)
+        .saturating_add(messages_tokens);
     ContextStats {
         used,
         window,
         output_cap,
-        percent,
-        compacted: 0,
+        percent: context_percent(used, window),
+        compacted,
         messages,
+        breakdown: ContextBreakdown {
+            system_prompt,
+            tool_definitions,
+            messages: messages_tokens,
+        },
+    }
+}
+
+/// Corrige a estimativa com o `usage.input_tokens` real do provider
+/// (`HARNESS.md` §10.1): `used` vira o valor real e o breakdown é escalado na
+/// mesma proporção; `messages` recebe o residual para a soma continuar exata.
+pub fn calibrate_context(stats: &ContextStats, actual_input_tokens: u32) -> ContextStats {
+    if actual_input_tokens == 0 {
+        return stats.clone();
+    }
+    let actual = actual_input_tokens;
+    let scale = |value: u32| -> u32 {
+        if stats.used == 0 {
+            0
+        } else {
+            u32::try_from((u64::from(value) * u64::from(actual)) / u64::from(stats.used))
+                .unwrap_or(u32::MAX)
+        }
+    };
+    // Nunca deixa system/tools passarem do total real (arredondamento).
+    let system_prompt = scale(stats.breakdown.system_prompt).min(actual);
+    let tool_definitions = scale(stats.breakdown.tool_definitions).min(actual - system_prompt);
+    let messages = actual.saturating_sub(system_prompt).saturating_sub(tool_definitions);
+    ContextStats {
+        used: actual,
+        window: stats.window,
+        output_cap: stats.output_cap,
+        percent: context_percent(actual, stats.window),
+        compacted: stats.compacted,
+        messages: stats.messages,
+        breakdown: ContextBreakdown {
+            system_prompt,
+            tool_definitions,
+            messages,
+        },
+    }
+}
+
+fn context_percent(used: u32, window: u32) -> f32 {
+    if window == 0 {
+        0.0
+    } else {
+        (used as f32 / window as f32 * 100.0).min(100.0)
     }
 }
 
@@ -263,25 +527,115 @@ mod tests {
         Db::open_in_memory().expect("banco em memória")
     }
 
+    fn last_event(db: &Db, kind: &str) -> StoredCodeEvent {
+        db.latest_code_event("conv-1", kind)
+            .expect("ler evento")
+            .expect("evento presente")
+    }
+
+    fn feedback(content: &str) -> TodoItem {
+        TodoItem {
+            content: content.to_string(),
+            status: TodoStatus::Pending,
+        }
+    }
+
     #[test]
     fn plan_mode_and_plan_view_lifecycle() {
         let db = db();
-        assert!(!plan_mode_active(&db, "conv-1"));
+        assert!(!plan_mode_active(&db, "conv-1").expect("modo"));
+        assert!(plan_view(&db, "conv-1").expect("plano").is_none());
         set_plan_mode(&db, "conv-1", true).expect("modo plano");
-        assert!(plan_mode_active(&db, "conv-1"));
+        assert!(plan_mode_active(&db, "conv-1").expect("modo"));
+        let view = plan_view(&db, "conv-1").expect("plano").expect("planejando");
+        assert_eq!(view.state, PlanState::Planning);
+        assert_eq!(view.updated_at, last_event(&db, KIND_PLAN_MODE).created_at);
+
         set_plan_mode(&db, "conv-1", false).expect("modo plano off");
-        assert!(!plan_mode_active(&db, "conv-1"));
+        assert!(!plan_mode_active(&db, "conv-1").expect("modo"));
+        assert!(plan_view(&db, "conv-1").expect("plano").is_none());
 
         set_plan_mode(&db, "conv-1", true).expect("modo plano");
         submit_plan(&db, "conv-1", "turn-1", "# Plano\n\n1. Fazer").expect("plano");
-        let view = plan_view(&db, "conv-1").expect("plano visível");
+        let view = plan_view(&db, "conv-1").expect("plano").expect("revisando");
         assert_eq!(view.state, PlanState::Reviewing);
         assert!(view.markdown.unwrap().contains("# Plano"));
+        assert_eq!(view.updated_at, last_event(&db, KIND_PLAN_SUBMITTED).created_at);
 
-        approve_plan(&db, "conv-1", "turn-1").expect("aprovar");
-        let view = plan_view(&db, "conv-1").expect("plano aprovado");
+        approve_plan(&db, "conv-1", "turn-1", None, false).expect("aprovar");
+        let view = plan_view(&db, "conv-1").expect("plano").expect("aprovado");
         assert_eq!(view.state, PlanState::Approved);
-        assert!(!plan_mode_active(&db, "conv-1"));
+        assert_eq!(view.updated_at, last_event(&db, KIND_PLAN_APPROVED).created_at);
+        assert!(!plan_mode_active(&db, "conv-1").expect("modo"));
+    }
+
+    #[test]
+    fn feedback_draft_and_revised_markdown_survive_the_cycle() {
+        let db = db();
+        set_plan_mode(&db, "conv-1", true).expect("modo plano");
+        submit_plan(&db, "conv-1", "turn-1", "# Draft").expect("plano");
+        plan_feedback(&db, "conv-1", "turn-1", "inclua testes de erro").expect("feedback");
+
+        let view = plan_view(&db, "conv-1").expect("plano").expect("planejando");
+        assert_eq!(view.state, PlanState::Planning);
+        assert_eq!(view.markdown.as_deref(), Some("# Draft"));
+        assert_eq!(view.feedback.as_deref(), Some("inclua testes de erro"));
+        assert_eq!(view.updated_at, last_event(&db, KIND_PLAN_FEEDBACK).created_at);
+
+        // Reenvio: volta a revisar e o feedback anterior contextualiza o card.
+        submit_plan(&db, "conv-1", "turn-2", "# Draft revisado").expect("reenvio");
+        let view = plan_view(&db, "conv-1").expect("plano").expect("revisando");
+        assert_eq!(view.state, PlanState::Reviewing);
+        assert_eq!(view.markdown.as_deref(), Some("# Draft revisado"));
+        assert_eq!(view.feedback.as_deref(), Some("inclua testes de erro"));
+
+        // Markdown revisado na aprovação é o persistido.
+        approve_plan(&db, "conv-1", "turn-2", Some("# Aprovado pelo usuário"), true).expect("aprovar");
+        let view = plan_view(&db, "conv-1").expect("plano").expect("aprovado");
+        assert_eq!(view.state, PlanState::Approved);
+        assert_eq!(view.markdown.as_deref(), Some("# Aprovado pelo usuário"));
+        let approved = last_event(&db, KIND_PLAN_APPROVED);
+        assert!(approved.payload.contains("\"reviewEachEdit\":true"));
+    }
+
+    #[test]
+    fn reactivating_plan_after_approval_starts_a_new_cycle() {
+        let db = db();
+        set_plan_mode(&db, "conv-1", true).expect("modo plano");
+        submit_plan(&db, "conv-1", "turn-1", "# Plano").expect("plano");
+        approve_plan(&db, "conv-1", "turn-1", None, false).expect("aprovar");
+        assert_eq!(
+            plan_view(&db, "conv-1").expect("plano").expect("aprovado").state,
+            PlanState::Approved
+        );
+
+        set_plan_mode(&db, "conv-1", true).expect("reativar plano");
+        let view = plan_view(&db, "conv-1").expect("plano").expect("planejando");
+        assert_eq!(view.state, PlanState::Planning);
+        assert!(view.markdown.is_none());
+        assert!(view.feedback.is_none());
+        assert_eq!(view.updated_at, last_event(&db, KIND_PLAN_MODE).created_at);
+    }
+
+    #[test]
+    fn stale_review_degrades_to_planning_after_turn_end() {
+        let db = db();
+        set_plan_mode(&db, "conv-1", true).expect("modo plano");
+        submit_plan(&db, "conv-1", "turn-1", "# Plano").expect("plano");
+        append(
+            &db,
+            "conv-1",
+            Some("turn-1"),
+            KIND_TURN_ENDED,
+            &serde_json::json!({ "status": "done" }),
+        )
+        .expect("turno encerrado");
+
+        let view = plan_view(&db, "conv-1").expect("plano").expect("planejando");
+        assert_eq!(view.state, PlanState::Planning);
+        assert_eq!(view.markdown.as_deref(), Some("# Plano"));
+        assert_eq!(view.feedback.as_deref(), Some(STALE_REVIEW_FEEDBACK));
+        assert_eq!(view.updated_at, last_event(&db, KIND_TURN_ENDED).created_at);
     }
 
     #[test]
@@ -297,27 +651,23 @@ mod tests {
                 status: TodoStatus::InProgress,
             },
         ];
-        validate_todos(&items, false).expect("lista válida");
+        validate_todos(&items).expect("lista válida");
         save_todos(&db, "conv-1", "turn-1", &items).expect("salvar");
-        let loaded = todos(&db, "conv-1");
+        let loaded = todos(&db, "conv-1").expect("tarefas");
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[1].status, TodoStatus::InProgress);
+
+        // Lista vazia é válida e limpa a projeção.
+        validate_todos(&[]).expect("limpar é válido");
+        save_todos(&db, "conv-1", "turn-2", &[]).expect("limpar");
+        assert!(todos(&db, "conv-1").expect("tarefas").is_empty());
     }
 
     #[test]
-    fn rejects_duplicate_or_multiple_in_progress() {
-        let db = db();
-        let duplicates = vec![
-            TodoItem {
-                content: "A".to_string(),
-                status: TodoStatus::Pending,
-            },
-            TodoItem {
-                content: "a".to_string(),
-                status: TodoStatus::Pending,
-            },
-        ];
-        assert!(validate_todos(&duplicates, false).is_err());
+    fn rejects_duplicate_multiple_in_progress_and_overflow() {
+        let duplicates = vec![feedback("A"), feedback("a")];
+        assert!(validate_todos(&duplicates).is_err());
+
         let parallel = vec![
             TodoItem {
                 content: "A".to_string(),
@@ -328,25 +678,102 @@ mod tests {
                 status: TodoStatus::InProgress,
             },
         ];
-        assert!(validate_todos(&parallel, false).is_err());
-        assert!(validate_todos(&parallel, true).is_ok());
-        let _ = db;
+        assert!(validate_todos(&parallel).is_err());
+
+        let overflow: Vec<TodoItem> = (0..51).map(|index| feedback(&format!("item {index}"))).collect();
+        assert!(validate_todos(&overflow).is_err());
+
+        let blank = vec![feedback("   ")];
+        assert!(validate_todos(&blank).is_err());
     }
 
     #[test]
     fn context_stats_roundtrip() {
         let db = db();
         assert!(context_stats(&db, "conv-1").is_none());
-        let stats = ContextStats {
-            used: 12_000,
-            window: 200_000,
-            output_cap: 32_000,
-            percent: 6.0,
-            compacted: 0,
-            messages: 4,
-        };
+        let stats = estimate_context(4_000, 8_000, 2_000, 200_000, 32_000, 4, 2, 0);
         save_context_stats(&db, "conv-1", "turn-1", &stats).expect("salvar stats");
         let loaded = context_stats(&db, "conv-1").expect("stats");
-        assert_eq!(loaded.used, 12_000);
+        assert_eq!(loaded.used, stats.used);
+        assert_eq!(loaded.breakdown, stats.breakdown);
+    }
+
+    #[test]
+    fn estimate_context_sums_the_breakdown_and_clamps_percent() {
+        // 4k system + 8k histórico + 2k tools = 14k chars ⇒ 3.5k tokens de
+        // base, + 4 mensagens × 8 + 2 tool calls × 16.
+        let stats = estimate_context(4_000, 8_000, 2_000, 100_000, 32_000, 4, 2, 3);
+        assert_eq!(stats.breakdown.system_prompt, 1_000);
+        assert_eq!(stats.breakdown.tool_definitions, 500);
+        assert_eq!(stats.breakdown.messages, 2_000 + 32 + 32);
+        assert_eq!(
+            stats.breakdown.system_prompt + stats.breakdown.tool_definitions + stats.breakdown.messages,
+            stats.used
+        );
+        assert_eq!(stats.used, 3_564);
+        assert_eq!(stats.messages, 4);
+        assert_eq!(stats.compacted, 3);
+        assert!((stats.percent - 3.564).abs() < 0.01, "{}", stats.percent);
+        assert!(stats.used <= stats.window);
+
+        // Janela minúscula: percent satura em 100 (nunca passa disso).
+        let tiny = estimate_context(40_000, 0, 0, 1_000, 1_000, 0, 0, 0);
+        assert_eq!(tiny.percent, 100.0);
+        // Janela 0 ⇒ 0% (sem divisão por zero).
+        let zero = estimate_context(4_000, 0, 0, 0, 0, 0, 0, 0);
+        assert_eq!(zero.percent, 0.0);
+    }
+
+    #[test]
+    fn calibrate_context_uses_the_real_input_and_keeps_the_sum() {
+        let estimate = estimate_context(8_000, 16_000, 4_000, 200_000, 32_000, 6, 3, 2);
+        assert_eq!(estimate.used, (8_000 + 16_000 + 4_000) / 4 + 6 * 8 + 3 * 16);
+
+        // Uso real maior: escala tudo proporcionalmente e soma continua exata.
+        let grown = calibrate_context(&estimate, 50_000);
+        assert_eq!(grown.used, 50_000);
+        assert_eq!(grown.percent, 25.0);
+        assert_eq!(grown.messages, estimate.messages);
+        assert_eq!(grown.compacted, estimate.compacted);
+        assert_eq!(
+            grown.breakdown.system_prompt + grown.breakdown.tool_definitions + grown.breakdown.messages,
+            grown.used
+        );
+        assert!(grown.breakdown.system_prompt >= estimate.breakdown.system_prompt);
+
+        // Uso real menor: encolhe proporcionalmente, sem underflow.
+        let shrunk = calibrate_context(&estimate, 500);
+        assert_eq!(shrunk.used, 500);
+        assert_eq!(shrunk.breakdown.messages, shrunk.used - shrunk.breakdown.system_prompt - shrunk.breakdown.tool_definitions);
+
+        // Sem uso real (0) ou estimativa vazia: devolve a entrada.
+        assert_eq!(calibrate_context(&estimate, 0).used, estimate.used);
+        let empty = estimate_context(0, 0, 0, 200_000, 32_000, 0, 0, 0);
+        let calibrated = calibrate_context(&empty, 1_000);
+        assert_eq!(calibrated.used, 1_000);
+        assert_eq!(calibrated.breakdown.messages, 1_000);
+    }
+
+    #[test]
+    fn compacted_messages_fold_and_old_stats_still_deserialize() {
+        let db = db();
+        assert_eq!(compacted_messages(&db, "conv-1"), 0);
+        append(
+            &db,
+            "conv-1",
+            Some("turn-1"),
+            KIND_CONTEXT_COMPACTED,
+            &serde_json::json!({ "messages": 12, "tokensFreed": 900 }),
+        )
+        .expect("compacted");
+        assert_eq!(compacted_messages(&db, "conv-1"), 12);
+        // O evento de compactação NÃO pode envenenar a projeção do medidor.
+        assert!(context_stats(&db, "conv-1").is_none());
+
+        // Backward-compat: payload de `context/stats` anterior ao breakdown.
+        let legacy = r#"{"used":12000,"window":200000,"outputCap":32000,"percent":6.0,"compacted":0,"messages":4}"#;
+        let stats: ContextStats = serde_json::from_str(legacy).expect("payload legado");
+        assert_eq!(stats.used, 12_000);
+        assert_eq!(stats.breakdown, ContextBreakdown::default());
     }
 }
