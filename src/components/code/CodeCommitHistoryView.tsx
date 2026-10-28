@@ -315,8 +315,12 @@ function CommitDetail({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b border-border bg-surface px-3 py-2">
+    <div
+      role="region"
+      aria-label="Detalhes do commit"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+    >
+      <div className="border-b border-border bg-surface px-3 py-2">
         <div className="flex items-center gap-1">
           <IconButton label="Voltar aos commits" size="sm" onClick={onBack}>
             <ArrowLeft aria-hidden className="size-4" strokeWidth={1.75} />
@@ -367,7 +371,9 @@ function CommitDetail({
           </Button>
         </div>
         {detail.body ? (
-          <p className="mt-1 whitespace-pre-wrap break-words pl-1 text-[11.5px] leading-relaxed text-foreground-muted">
+          // Mensagem longa tem rolagem própria para nunca empurrar os arquivos
+          // para fora da área visível do commit.
+          <p className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-surface-raised px-2 py-1 pl-2 text-[11.5px] leading-relaxed text-foreground-muted">
             {detail.body}
           </p>
         ) : null}
@@ -377,7 +383,7 @@ function CommitDetail({
           </p>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div>
         {detail.files.length === 0 ? (
           <p className="px-4 py-6 text-center text-[12px] text-foreground-muted">
             Este commit não alterou arquivos (merge ou commit vazio).

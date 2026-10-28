@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { WorkspaceCommitDetail, WorkspaceGitCommit } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({ gitLog: vi.fn(), gitCommitDetail: vi.fn() }));
@@ -123,5 +123,43 @@ describe('CodeCommitHistoryView', () => {
 
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(screen.getByText(/revisão inválida/)).toBeTruthy();
+  });
+});
+
+describe('CodeCommitHistoryView — commit longo rolável', () => {
+  it('mantém metadados e arquivos no mesmo contêiner rolável (mensagem longa não trava)', async () => {
+    const longBody = Array.from({ length: 80 }, (_, index) => `linha ${index + 1} da mensagem`).join('\n');
+    const files = Array.from({ length: 12 }, (_, index) => ({
+      path: `src/arquivo-${index}.ts`,
+      status: 'M',
+      added: 1,
+      removed: 1,
+      binary: false,
+      diff: '@@ -1 +1 @@\n-antigo\n+novo',
+    }));
+    mocks.gitCommitDetail.mockResolvedValue(
+      detail({ body: longBody, files }),
+    );
+
+    render(
+      <CodeCommitHistoryView
+        target={{ workspaceId: 'ws-1', revision: 'abcdef1234567890abcdef1234567890abcdef12' }}
+        onSelect={() => undefined}
+      />,
+    );
+
+    const scrollArea = await screen.findByRole('region', { name: 'Detalhes do commit' });
+    expect(scrollArea.className).toContain('overflow-y-auto');
+    // Cabeçalho e arquivos vivem DENTRO do contêiner rolável (antes o header
+    // shrink-0 crescia e esmagava a lista, deixando o commit sem scroll).
+    expect(scrollArea.textContent).toContain('Corrige a listagem do workspace');
+    expect(scrollArea.textContent).toContain('linha 80 da mensagem');
+    const fileRow = within(scrollArea).getByText('src/arquivo-5.ts');
+    expect(fileRow.closest('section')).toBeTruthy();
+
+    // Mensagem longa tem limite e rolagem própria para não empurrar os arquivos.
+    const body = within(scrollArea).getByText(/linha 80 da mensagem/);
+    expect(body.className).toContain('max-h-40');
+    expect(body.className).toContain('overflow-y-auto');
   });
 });
