@@ -585,9 +585,19 @@ pub async fn get_file_diff(
             return Ok(diff);
         }
     }
-    crate::workspace::git::diff(&root, std::slice::from_ref(&relative), staged, 3, 200_000)
-        .await
-        .map_err(|error| format!("{}: {}", error.code, error.message))
+    let text =
+        crate::workspace::git::diff(&root, std::slice::from_ref(&relative), staged, 3, 200_000)
+            .await
+            .map_err(|error| format!("{}: {}", error.code, error.message))?;
+    // Arquivo novo (untracked) não aparece no `git diff`: monta o patch "new
+    // file" a partir do conteúdo para a aba Alterações mostrar `A` + diff mesmo
+    // sem staging.
+    if !staged && text.trim().is_empty() && !crate::workspace::git::is_tracked(&root, &relative).await
+    {
+        return crate::workspace::git::untracked_diff(&root, &relative, 200_000)
+            .map_err(|error| format!("{}: {}", error.code, error.message));
+    }
+    Ok(text)
 }
 
 /// Diff do journal para um path (usa o object store de checkpoints).

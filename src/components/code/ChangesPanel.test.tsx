@@ -78,6 +78,7 @@ describe('buildChangeRows', () => {
       { path: 'src/novo.ts', kind: 'created', added: 10, removed: 0 },
     ]);
     const created = rows.find((row) => row.path === 'src/novo.ts');
+    expect(created?.status).toBe('A');
     expect(created?.group).toBe('session');
     expect(created?.origin).toBe('session');
     expect(created?.status).toBe('A');
@@ -240,3 +241,24 @@ describe('ChangesPanel', () => {
     expect(screen.getByText('journal indisponível')).toBeTruthy();
   });
 });
+
+  it('arquivo novo aparece como A e mostra o diff sem staging', async () => {
+    const untrackedStatus = status({
+      staged: [],
+      unstaged: [],
+      untracked: ['novo.ts'],
+      conflicted: [],
+    });
+    mocks.getFileDiff.mockResolvedValue(
+      'diff --git a/novo.ts b/novo.ts\nnew file mode 100644\n--- /dev/null\n+++ b/novo.ts\n@@ -0,0 +1 @@\n+ola',
+    );
+    render(<ChangesPanel workspaceId="ws-1" gitStatus={untrackedStatus} sessionChanges={[]} />);
+
+    const row = rowButton('novo.ts');
+    expect(row.textContent).toContain('A');
+    expect(row.textContent).not.toContain('?');
+
+    fireEvent.click(row);
+    await waitFor(() => expect(mocks.getFileDiff).toHaveBeenCalledWith('ws-1', 'novo.ts', false));
+    expect(await screen.findByRole('group', { name: 'Diff de novo.ts' })).toBeTruthy();
+  });

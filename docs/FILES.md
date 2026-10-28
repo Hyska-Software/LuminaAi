@@ -1196,7 +1196,7 @@ Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested
 - `get_workspace_changes` combina journal da sessão + git working tree; `get_file_diff` usa o
   git (ou o journal quando aplicável); `revert_file`/`revert_turn` restauram do object store e
   recusam quando o arquivo mudou por fora (`FS_STALE_VERSION`).
-- Git: `status --porcelain=v2 -z`, `diff --no-color --no-ext-diff`, `log`, `stage`,
+- Arquivo **novo (untracked)** aparece na aba Alterações com badge `A` e diff próprio mesmo sem staging: `get_file_diff` monta o patch "new file" a partir do conteúdo (binário vira `Binary files … differ`; sem newline final recebe o marcador) — nunca altera o índice só para mostrar o diff.`n- Git: `status --porcelain=v2 -z`, `diff --no-color --no-ext-diff`, `log`, `stage`,
   `unstage`, `discard` (`git restore`), `commit` (mensagem obrigatória, sugestão de IA
   opcional) e `switch`. Commit/push nunca são tools do modelo.
 

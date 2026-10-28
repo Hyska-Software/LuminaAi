@@ -34,7 +34,7 @@ export type ChangeOrigin = 'session' | 'git' | 'both';
 /** One file row of the changes list. */
 export interface ChangeRow {
   path: string;
-  /** Short git status code (`M`, `A`, `D`, `R`, `U`, `?`). */
+/** Short git status code (`M`, `A`, `D`, `R`, `U`…). */
   status: string;
   group: ChangeGroup;
   origin: ChangeOrigin;
@@ -143,7 +143,8 @@ export function buildChangeRows(
     });
   }
   for (const path of gitStatus?.untracked ?? []) {
-    upsert({ path, status: '?', group: 'untracked', origin: 'git', staged: false });
+    // Arquivo novo: mostra o badge A e o diff sintético sem precisar de staging.
+    upsert({ path, status: 'A', group: 'untracked', origin: 'git', staged: false });
   }
   for (const path of gitStatus?.conflicted ?? []) {
     upsert({ path, status: 'U', group: 'unstaged', origin: 'git', staged: false });

@@ -75,6 +75,81 @@ pub async fn detect(root: &Path) -> GitStatus {
     status
 }
 
+/// `true` quando o caminho está no índice (arquivo rastreado pelo git).
+pub async fn is_tracked(root: &Path, relative: &str) -> bool {
+    match run_git_capture(
+        root,
+        &["ls-files", "--error-unmatch", "--", relative],
+        TEXT_CAP,
+    )
+    .await
+    {
+        // Na dúvida (git indisponível/erro), assume rastreado para nunca
+        // fabricar um diff de "arquivo novo" em cima de um arquivo existente.
+        Ok(output) => output.exit_code == Some(0),
+        Err(_) => true,
+    }
+}
+
+/// Diff sintético de um arquivo **não rastreado** (novo): o `git diff` normal
+/// não mostra untracked, então montamos o patch "new file" a partir do conteúdo
+/// — é o que a aba Alterações precisa para exibir `A` + diff sem staging.
+pub fn untracked_diff(root: &Path, relative: &str, max_bytes: usize) -> Result<String, ExecError> {
+    let full = root.join(relative);
+    let metadata = std::fs::metadata(&full).map_err(|error| {
+        ExecError::failed(
+            format!("não foi possível ler `{relative}`: {error}"),
+            None,
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(ExecError::failed(
+            format!("`{relative}` não é um arquivo"),
+            None,
+        ));
+    }
+    let cap = if max_bytes == 0 { DIFF_CAP } else { max_bytes };
+    if metadata.len() > cap as u64 {
+        return Err(ExecError::failed(
+            format!("`{relative}` é grande demais para o diff ({cap} bytes)"),
+            None,
+        ));
+    }
+    let bytes = std::fs::read(&full).map_err(|error| {
+        ExecError::failed(
+            format!("não foi possível abrir `{relative}`: {error}"),
+            None,
+        )
+    })?;
+    let path = relative.replace('\\', "/");
+    let mut diff = format!(
+        "diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n"
+    );
+    if bytes.iter().take(8_000).any(|byte| *byte == 0) {
+        diff.push_str(&format!("Binary files /dev/null and b/{path} differ\n"));
+        return Ok(diff);
+    }
+    let text = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
+    let ends_with_newline = text.ends_with('\n');
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    if ends_with_newline {
+        lines.pop();
+    }
+    let total = lines.len();
+    if total > 0 {
+        diff.push_str(&format!("@@ -0,0 +1,{total} @@\n"));
+        for line in &lines {
+            diff.push('+');
+            diff.push_str(line);
+            diff.push('\n');
+        }
+        if !ends_with_newline {
+            diff.push_str("\\ No newline at end of file\n");
+        }
+    }
+    Ok(diff)
+}
+
 /// Diff textual do working tree (ou do índice com `staged`), por path.
 pub async fn diff(
     root: &Path,
@@ -727,6 +802,57 @@ mod tests {
         assert!(status.root.is_none());
         assert!(status.branch.is_none());
         assert!(status.staged.is_empty() && status.unstaged.is_empty());
+    }
+
+    #[test]
+    fn untracked_diff_synthesizes_new_file_patch() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::write(temp.path().join("novo.txt"), "linha1\nlinha2\n").expect("escrever");
+        let diff = untracked_diff(temp.path(), "novo.txt", 0).expect("diff");
+        assert!(diff.starts_with("diff --git a/novo.txt b/novo.txt"), "{diff}");
+        assert!(diff.contains("new file mode 100644"));
+        assert!(diff.contains("--- /dev/null"));
+        assert!(diff.contains("@@ -0,0 +1,2 @@"));
+        assert!(diff.contains("+linha1"));
+        assert!(diff.contains("+linha2"));
+        assert!(!diff.contains("\\ No newline"), "arquivo termina com newline");
+
+        fs::write(temp.path().join("sem-newline.txt"), "unica").expect("escrever");
+        let diff = untracked_diff(temp.path(), "sem-newline.txt", 0).expect("diff");
+        assert!(diff.contains("+unica"));
+        assert!(diff.contains("\\ No newline at end of file"), "{diff}");
+    }
+
+    #[test]
+    fn untracked_diff_flags_binary_and_large_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::write(temp.path().join("bin.dat"), [0u8, 1, 2, 3]).expect("escrever");
+        let diff = untracked_diff(temp.path(), "bin.dat", 0).expect("diff");
+        assert!(diff.contains("Binary files /dev/null and b/bin.dat differ"), "{diff}");
+
+        fs::write(temp.path().join("grande.txt"), "x".repeat(64)).expect("escrever");
+        assert!(untracked_diff(temp.path(), "grande.txt", 16).is_err());
+    }
+
+    #[tokio::test]
+    async fn is_tracked_distinguishes_new_files_and_git_diff_ignores_them() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        fs::write(temp.path().join("novo.txt"), "conteudo novo\n").expect("escrever");
+        assert!(!is_tracked(temp.path(), "novo.txt").await);
+        assert!(is_tracked(temp.path(), "a.txt").await);
+
+        // O `git diff` normal fica vazio para untracked (a UI precisa do fallback).
+        let normal = diff(temp.path(), &["novo.txt".to_string()], false, 3, 0)
+            .await
+            .expect("diff");
+        assert!(normal.trim().is_empty(), "diff inesperado: {normal}");
+
+        let synthetic = untracked_diff(temp.path(), "novo.txt", 0).expect("diff novo");
+        assert!(synthetic.contains("+conteudo novo"), "{synthetic}");
+        assert!(synthetic.contains("new file mode"));
     }
 
     #[test]
