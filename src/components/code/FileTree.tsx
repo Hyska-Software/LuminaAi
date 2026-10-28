@@ -46,6 +46,8 @@ export interface FileTreeProps {
   onSelectFile?: (path: string) => void;
   /** Fired when a directory is expanded/collapsed; the container may fetch children. */
   onToggleDir?: (path: string) => void;
+  /** Diretórios com filhos sendo carregados (lazy expansion); mostra spinner no lugar do chevron. */
+  loadingPaths?: ReadonlySet<string>;
   className?: string;
 }
 
@@ -133,6 +135,7 @@ export function FileTree({
   totalCount,
   onSelectFile,
   onToggleDir,
+  loadingPaths,
   className,
 }: FileTreeProps) {
   const [query, setQuery] = useState('');
@@ -160,7 +163,16 @@ export function FileTree({
     if (path) rowRefs.current.get(path)?.focus();
   };
 
-  const toggleDirectory = (path: string) => {
+  /**
+   * Expande/colapsa de verdade apenas quando o diretório já tem filhos
+   * carregados; sem filhos (árvore lazy), o clique só pede o carregamento ao
+   * container — antes o clique marcava "colapsado" e o diretório nunca abria.
+   */
+  const toggleDirectory = (path: string, hasChildren: boolean) => {
+    if (!hasChildren) {
+      onToggleDir?.(path);
+      return;
+    }
     setCollapsed((current) => {
       const next = new Set(current);
       if (next.has(path)) next.delete(path);
@@ -185,7 +197,7 @@ export function FileTree({
     // Let the copy/clear buttons inside the header and nested controls win.
     if (event.defaultPrevented) return;
     setFocusedPath(row.entry.path);
-    if (row.entry.isDir) toggleDirectory(row.entry.path);
+    if (row.entry.isDir) toggleDirectory(row.entry.path, !!row.entry.children?.length);
     else selectFile(row.entry.path);
   };
 
@@ -217,7 +229,7 @@ export function FileTree({
       case 'ArrowRight': {
         if (!current) return;
         if (current.entry.isDir) {
-          if (collapsed.has(current.entry.path)) toggleDirectory(current.entry.path);
+          if (collapsed.has(current.entry.path)) toggleDirectory(current.entry.path, true);
           else if (index + 1 < visibleRows.length && visibleRows[index + 1].depth > current.depth) {
             focusRow(index + 1);
           }
@@ -227,7 +239,7 @@ export function FileTree({
       case 'ArrowLeft': {
         if (!current) return;
         if (current.entry.isDir && !collapsed.has(current.entry.path)) {
-          toggleDirectory(current.entry.path);
+          toggleDirectory(current.entry.path, !!current.entry.children?.length);
         } else if (current.depth > 0) {
           /* Focus the nearest ancestor row. */
           for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
@@ -242,7 +254,7 @@ export function FileTree({
       case 'Enter':
       case ' ': {
         if (!current) return;
-        if (current.entry.isDir) toggleDirectory(current.entry.path);
+        if (current.entry.isDir) toggleDirectory(current.entry.path, !!current.entry.children?.length);
         else selectFile(current.entry.path);
         break;
       }
@@ -362,17 +374,23 @@ export function FileTree({
                 )}
               >
                 {entry.isDir ? (
-                  <span
-                    aria-hidden
-                    className={cn(
-                      'flex size-3.5 shrink-0 items-center justify-center text-foreground-subtle transition-transform duration-150 motion-reduce:transition-none',
-                      expanded && 'rotate-90',
-                    )}
-                  >
-                    <svg viewBox="0 0 16 16" fill="none" className="size-3">
-                      <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </span>
+                  loadingPaths?.has(entry.path) ? (
+                    <span className="flex size-3.5 shrink-0 items-center justify-center">
+                      <Spinner size="xs" label={`Carregando ${entry.name}`} />
+                    </span>
+                  ) : (
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'flex size-3.5 shrink-0 items-center justify-center text-foreground-subtle transition-transform duration-150 motion-reduce:transition-none',
+                        expanded && 'rotate-90',
+                      )}
+                    >
+                      <svg viewBox="0 0 16 16" fill="none" className="size-3">
+                        <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                  )
                 ) : (
                   <span aria-hidden className="w-3.5 shrink-0" />
                 )}

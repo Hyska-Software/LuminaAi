@@ -142,3 +142,26 @@ describe('FileTree', () => {
     expect(screen.getByText('Acesso negado à pasta.')).toBeTruthy();
   });
 });
+
+  it('pede carregamento ao abrir um diretório ainda sem filhos (lazy)', () => {
+    const props = renderTree({
+      entries: [{ path: 'apps', name: 'apps', isDir: true, depth: 0 }],
+    });
+
+    fireEvent.click(row('apps'));
+
+    expect(props.onToggleDir).toHaveBeenCalledWith('apps');
+    // Sem filhos carregados não há o que colapsar: o diretório não é marcado
+    // como fechado (o clique apenas solicita o carregamento).
+    expect(row('apps').getAttribute('aria-expanded')).toBe('false');
+    expect(props.onSelectFile).not.toHaveBeenCalled();
+  });
+
+  it('mostra spinner no diretório enquanto os filhos carregam', () => {
+    renderTree({
+      entries: [{ path: 'apps', name: 'apps', isDir: true, depth: 0 }],
+      loadingPaths: new Set(['apps']),
+    });
+
+    expect(screen.getByRole('status', { name: 'Carregando apps' })).toBeTruthy();
+  });

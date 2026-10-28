@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   FileDiff,
   Files,
@@ -24,7 +24,8 @@ import {
   type CodePanelTab,
 } from '@/lib/store';
 import { resolveSidePanelLayout, useViewportWidth } from '@/lib/sidePanel';
-import type { FileChange, WorkspaceFileContent } from '@/lib/types';
+import type { FileChange, WorkspaceFileContent, WorkspaceFileEntry } from '@/lib/types';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ChangesPanel } from './ChangesPanel';
 import { FilePreview } from './FilePreview';
@@ -42,6 +43,19 @@ const PANEL_TABS: ReadonlyArray<{ id: CodePanelTab; label: string; icon: LucideI
 
 /** Single content region controlled by both tabs (only the active one renders). */
 const PANEL_BODY_ID = 'code-panel-body';
+
+/** Mescla os filhos carregados sob demanda (lazy) na árvore do backend. */
+function withLazyChildren(
+  entries: WorkspaceFileEntry[],
+  cache: Record<string, WorkspaceFileEntry[]>,
+): WorkspaceFileEntry[] {
+  return entries.map((entry) => {
+    if (!entry.isDir) return entry;
+    const cached = cache[entry.path];
+    if (cached === undefined) return entry;
+    return { ...entry, children: withLazyChildren(cached, cache) };
+  });
+}
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -105,6 +119,40 @@ export function CodePanel() {
   /** Width previewed while dragging; `null` means "use the persisted width". */
   const [previewWidth, setPreviewWidth] = useState<number | null>(null);
   const tabRefs = useRef(new Map<CodePanelTab, HTMLButtonElement>());
+  /* Expansão sob demanda: o backend lista a árvore até 2 níveis; diretórios
+     mais profundos carregam os filhos quando o usuário abre. */
+  const [lazyChildren, setLazyChildren] = useState<Record<string, WorkspaceFileEntry[]>>({});
+  const [lazyLoading, setLazyLoading] = useState<ReadonlySet<string>>(() => new Set());
+
+  useEffect(() => {
+    setLazyChildren({});
+    setLazyLoading(new Set());
+  }, [workspaceId]);
+
+  const loadDirectory = useCallback(
+    async (path: string) => {
+      if (!workspaceId) return;
+      setLazyLoading((current) => new Set(current).add(path));
+      try {
+        const entries = await api.listWorkspaceFiles(workspaceId, path, 2);
+        setLazyChildren((current) => ({ ...current, [path]: entries ?? [] }));
+      } catch (error) {
+        toast.error('Não foi possível abrir a pasta', { description: String(error) });
+      } finally {
+        setLazyLoading((current) => {
+          const next = new Set(current);
+          next.delete(path);
+          return next;
+        });
+      }
+    },
+    [workspaceId],
+  );
+
+  const treeEntries = useMemo(
+    () => withLazyChildren(panel.files, lazyChildren),
+    [panel.files, lazyChildren],
+  );
 
   const layout = useMemo(
     () =>
@@ -139,6 +187,10 @@ export function CodePanel() {
   );
 
   const refreshAll = useCallback(() => {
+    // Recarrega a raiz e descarta os filhos carregados sob demanda (podem ter
+    // mudado no disco).
+    setLazyChildren({});
+    setLazyLoading(new Set());
     void panel.refresh();
     if (activeId) void refreshSession(activeId);
   }, [panel, activeId, refreshSession]);
@@ -350,16 +402,18 @@ export function CodePanel() {
           <div className="flex min-h-0 flex-1 flex-col">
             <div className={cn('min-h-0 overflow-y-auto', selectedPath ? 'flex-[1.1]' : 'flex-1')}>
               <FileTree
-                entries={panel.files}
+                entries={treeEntries}
                 loading={panel.filesLoading}
                 error={panel.filesError}
                 selectedPath={selectedPath ?? undefined}
                 totalCount={panel.files.length}
+                loadingPaths={lazyLoading}
                 onSelectFile={(path) => {
                   void selectFile(path);
                 }}
-                onToggleDir={() => {
-                  /* Árvore já vem expandida por profundidade; recarregar é feito pelo refresh. */
+                onToggleDir={(path) => {
+                  // Sem filhos em cache = primeiro clique para abrir: busca no backend.
+                  if (lazyChildren[path] === undefined) void loadDirectory(path);
                 }}
               />
             </div>

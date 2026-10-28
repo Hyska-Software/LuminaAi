@@ -362,3 +362,45 @@ describe('CodePanel — histórico de commits', () => {
     expect(screen.queryByRole('button', { name: 'Ver histórico de commits' })).toBeNull();
   });
 });
+describe('CodePanel — árvore lazy', () => {
+  it('carrega os filhos ao abrir um diretório mais profundo e abre o arquivo', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-1', workspaceId: 'ws-1' })],
+      activeId: 'conv-1',
+    });
+    apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    apiMock.listWorkspaceFiles.mockImplementation(async (_workspaceId: string, path = '.') => {
+      if (path === '.') {
+        return [{ path: 'apps', name: 'apps', isDir: true, depth: 0 }];
+      }
+      if (path === 'apps') {
+        return [{ path: 'apps/index.html', name: 'index.html', isDir: false, depth: 0, size: 10 }];
+      }
+      return [];
+    });
+    apiMock.readWorkspaceFile.mockResolvedValue({
+      path: 'apps/index.html',
+      text: '<html></html>',
+      truncated: false,
+      size: 13,
+      binary: false,
+      encoding: 'utf-8',
+    });
+    useUiStore.setState({ codePanelTab: 'files' });
+
+    render(<CodePanel />);
+
+    // Diretório de 1º nível sem filhos na listagem inicial.
+    fireEvent.click(await screen.findByRole('treeitem', { name: 'apps' }));
+
+    await waitFor(() =>
+      expect(apiMock.listWorkspaceFiles).toHaveBeenCalledWith('ws-1', 'apps', 2),
+    );
+    const file = await screen.findByRole('treeitem', { name: 'index.html' });
+    fireEvent.click(file);
+
+    await waitFor(() =>
+      expect(apiMock.readWorkspaceFile).toHaveBeenCalledWith('ws-1', 'apps/index.html'),
+    );
+  });
+});
