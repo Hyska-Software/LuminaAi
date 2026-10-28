@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Download,
   Ellipsis,
   ExternalLink,
   Folder,
@@ -12,6 +13,9 @@ import {
   GitBranch,
   MessageSquare,
   MessageSquarePlus,
+  Pencil,
+  Pin,
+  PinOff,
   RefreshCw,
   Search,
   Settings,
@@ -19,6 +23,7 @@ import {
   Sparkles,
   SquarePen,
   Trash2,
+  Unlink,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -111,43 +116,111 @@ interface SessionRowProps {
   /** Chat session explicitly added to the Code layout (docs/goals/chat-code-sessions). */
   shared: boolean;
   onSelect: () => void;
+  onTogglePin: () => void;
+  onStartRename: () => void;
+  onExport: () => void;
+  /** Only meaningful for shared sessions ("Remover do Code"). */
+  onRemoveFromCode: () => void;
+  onDelete: () => void;
 }
 
 /** One real Code session row; the dot mirrors the Paseo status dot. */
-function SessionRow({ conversation, active, shared, onSelect }: SessionRowProps) {
+function SessionRow({
+  conversation,
+  active,
+  shared,
+  onSelect,
+  onTogglePin,
+  onStartRename,
+  onExport,
+  onRemoveFromCode,
+  onDelete,
+}: SessionRowProps) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-current={active ? 'true' : undefined}
-      aria-label={shared ? `${conversation.title}, sessão compartilhada do Chat` : undefined}
-      title={conversation.title}
-      className={cn(
-        'flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-[13px]',
-        'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-        active
-          ? 'bg-surface-active text-foreground'
-          : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
-      )}
-    >
-      <span
-        aria-hidden
+    <div className="group relative flex items-center">
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={active ? 'true' : undefined}
+        aria-label={shared ? `${conversation.title}, sessão compartilhada do Chat` : undefined}
+        title={conversation.title}
         className={cn(
-          'size-1.5 shrink-0 rounded-full',
-          active ? 'bg-accent' : 'bg-foreground-subtle',
+          'flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 pr-8 text-left text-[13px]',
+          'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+          active
+            ? 'bg-surface-active text-foreground'
+            : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
         )}
-      />
-      <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
-      {shared ? (
+      >
+        {conversation.pinned ? (
+          <Pin aria-hidden className="size-3 shrink-0 text-foreground-subtle" strokeWidth={1.75} />
+        ) : null}
         <span
-          title="Sessão compartilhada do Chat"
-          className="ml-auto flex shrink-0 items-center gap-1 text-foreground-subtle"
-        >
-          <MessageSquare aria-hidden className="size-3.5" strokeWidth={1.75} />
-          <span className="text-[10px] font-medium leading-none">Do Chat</span>
-        </span>
-      ) : null}
-    </button>
+          aria-hidden
+          className={cn(
+            'size-1.5 shrink-0 rounded-full',
+            active ? 'bg-accent' : 'bg-foreground-subtle',
+          )}
+        />
+        <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
+        {shared ? (
+          <span
+            title="Sessão compartilhada do Chat"
+            className="ml-auto flex shrink-0 items-center gap-1 text-foreground-subtle"
+          >
+            <MessageSquare aria-hidden className="size-3.5" strokeWidth={1.75} />
+            <span className="text-[10px] font-medium leading-none">Do Chat</span>
+          </span>
+        ) : null}
+      </button>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`Opções de ${conversation.title}`}
+            onClick={(event) => event.stopPropagation()}
+            className={cn(
+              'absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md',
+              'text-foreground-subtle transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+              'opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-visible:opacity-100 lg:data-[state=open]:opacity-100',
+            )}
+          >
+            <Ellipsis className="size-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-44">
+          <DropdownMenuItem
+            icon={
+              conversation.pinned ? (
+                <PinOff className="size-3.5" />
+              ) : (
+                <Pin className="size-3.5" />
+              )
+            }
+            onSelect={onTogglePin}
+          >
+            {conversation.pinned ? 'Desafixar' : 'Fixar'}
+          </DropdownMenuItem>
+          <DropdownMenuItem icon={<Pencil className="size-3.5" />} onSelect={onStartRename}>
+            Renomear
+          </DropdownMenuItem>
+          <DropdownMenuItem icon={<Download className="size-3.5" />} onSelect={onExport}>
+            Exportar
+          </DropdownMenuItem>
+          {shared ? (
+            <DropdownMenuItem icon={<Unlink className="size-3.5" />} onSelect={onRemoveFromCode}>
+              Remover do Code
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="danger" icon={<Trash2 className="size-3.5" />} onSelect={onDelete}>
+            Excluir
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }
 
@@ -235,6 +308,11 @@ interface WorkspaceRowProps {
   onRefresh: () => void;
   onRemove: () => void;
   onOpenConversation: (conversation: Conversation) => void;
+  onSessionPin: (conversation: Conversation) => void;
+  onSessionRename: (conversation: Conversation) => void;
+  onSessionExport: (conversation: Conversation) => void;
+  onSessionRemoveFromCode: (conversation: Conversation) => void;
+  onSessionDelete: (conversation: Conversation) => void;
 }
 
 function WorkspaceRow({
@@ -252,6 +330,11 @@ function WorkspaceRow({
   onRefresh,
   onRemove,
   onOpenConversation,
+  onSessionPin,
+  onSessionRename,
+  onSessionExport,
+  onSessionRemoveFromCode,
+  onSessionDelete,
 }: WorkspaceRowProps) {
   const Icon = workspaceIcon(workspace);
   const branch = workspace.git?.branch;
@@ -352,6 +435,11 @@ function WorkspaceRow({
               active={conversation.id === activeConversationId}
               shared={conversation.codeLinked === true}
               onSelect={() => onOpenConversation(conversation)}
+              onTogglePin={() => onSessionPin(conversation)}
+              onStartRename={() => onSessionRename(conversation)}
+              onExport={() => onSessionExport(conversation)}
+              onRemoveFromCode={() => onSessionRemoveFromCode(conversation)}
+              onDelete={() => onSessionDelete(conversation)}
             />
           ))}
         </div>
@@ -564,6 +652,66 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
   const [renameBusy, setRenameBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<Workspace | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
+  const [renameSessionTarget, setRenameSessionTarget] = useState<Conversation | null>(null);
+  const [renameSessionValue, setRenameSessionValue] = useState('');
+  const [renameSessionBusy, setRenameSessionBusy] = useState(false);
+  const [deleteSessionTarget, setDeleteSessionTarget] = useState<Conversation | null>(null);
+  const [deleteSessionBusy, setDeleteSessionBusy] = useState(false);
+
+  /* Ações da sessão (mesmo menu das conversas no layout Chat). */
+  const handleSessionPin = (conversation: Conversation) => {
+    void useChatStore.getState().togglePinned(conversation.id);
+  };
+
+  const handleSessionRenameStart = (conversation: Conversation) => {
+    setRenameSessionTarget(conversation);
+    setRenameSessionValue(conversation.title);
+  };
+
+  const handleSessionRenameConfirm = async () => {
+    const target = renameSessionTarget;
+    const title = renameSessionValue.trim();
+    if (!target || !title) return;
+    setRenameSessionBusy(true);
+    try {
+      await useChatStore.getState().renameConversation(target.id, title);
+      setRenameSessionTarget(null);
+    } finally {
+      setRenameSessionBusy(false);
+    }
+  };
+
+  const handleSessionExport = async (conversation: Conversation) => {
+    try {
+      const path = await api.exportConversation(conversation.id, 'markdown');
+      if (path) toast.success('Conversa exportada', { description: path });
+    } catch (error) {
+      toast.error('Não foi possível exportar', { description: String(error) });
+    }
+  };
+
+  const handleSessionRemoveFromCode = async (conversation: Conversation) => {
+    const ok = await useChatStore.getState().setConversationCodeLinked(conversation.id, false);
+    if (!ok) {
+      toast.error('Não foi possível remover a sessão do Code');
+      return;
+    }
+    toast.success('Sessão removida do Code', {
+      description: 'Ela continua disponível no Chat.',
+    });
+  };
+
+  const handleSessionDeleteConfirm = async () => {
+    const target = deleteSessionTarget;
+    if (!target) return;
+    setDeleteSessionBusy(true);
+    try {
+      await useChatStore.getState().deleteConversation(target.id);
+      setDeleteSessionTarget(null);
+    } finally {
+      setDeleteSessionBusy(false);
+    }
+  };
 
   const codeConversations = useMemo(
     () => filterConversationsForLayout(conversations, 'code'),
@@ -1030,6 +1178,13 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                     onRefresh={() => void refreshContext(workspace.id)}
                     onRemove={() => setRemoveTarget(workspace)}
                     onOpenConversation={openConversation}
+                    onSessionPin={handleSessionPin}
+                    onSessionRename={handleSessionRenameStart}
+                    onSessionExport={(conversation) => void handleSessionExport(conversation)}
+                    onSessionRemoveFromCode={(conversation) =>
+                      void handleSessionRemoveFromCode(conversation)
+                    }
+                    onSessionDelete={setDeleteSessionTarget}
                   />
                 ))}
               </div>
@@ -1057,6 +1212,11 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                     active={conversation.id === activeId}
                     shared={conversation.codeLinked === true}
                     onSelect={() => openConversation(conversation)}
+                    onTogglePin={() => handleSessionPin(conversation)}
+                    onStartRename={() => handleSessionRenameStart(conversation)}
+                    onExport={() => void handleSessionExport(conversation)}
+                    onRemoveFromCode={() => void handleSessionRemoveFromCode(conversation)}
+                    onDelete={() => setDeleteSessionTarget(conversation)}
                   />
                 ))}
               </div>
@@ -1106,6 +1266,89 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
         onCancel={() => !removeBusy && setRemoveTarget(null)}
         onConfirm={() => void handleConfirmRemove()}
       />
+      <Dialog
+        open={renameSessionTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !renameSessionBusy) setRenameSessionTarget(null);
+        }}
+      >
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>Renomear sessão</DialogTitle>
+          </DialogHeader>
+          <div className="px-6 py-2">
+            <Input
+              autoFocus
+              value={renameSessionValue}
+              onChange={(event) => setRenameSessionValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void handleSessionRenameConfirm();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  if (!renameSessionBusy) setRenameSessionTarget(null);
+                }
+              }}
+              aria-label="Renomear sessão"
+              placeholder="Título da sessão"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={renameSessionBusy}
+              onClick={() => setRenameSessionTarget(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={renameSessionBusy || renameSessionValue.trim().length === 0}
+              loading={renameSessionBusy}
+              onClick={() => void handleSessionRenameConfirm()}
+            >
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={deleteSessionTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleteSessionBusy) setDeleteSessionTarget(null);
+        }}
+      >
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>Excluir conversa</DialogTitle>
+          </DialogHeader>
+          <DialogDescription className="px-6 pb-4">
+            {deleteSessionTarget ? `“${deleteSessionTarget.title}” será removida permanentemente.` : ''} Esta
+            ação não pode ser desfeita.
+          </DialogDescription>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={deleteSessionBusy}
+              onClick={() => setDeleteSessionTarget(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              loading={deleteSessionBusy}
+              onClick={() => void handleSessionDeleteConfirm()}
+            >
+              Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

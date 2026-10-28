@@ -218,3 +218,8 @@ configuração para MCP/servidores e "Verificações" no painel (backend exposto
 
 - O botão **Histórico** saiu da linha redundante “ALTERAÇÕES” (removida) e passou para a barra **workspace · branch** da aba Alterações, ao lado do nome/branch e dos contadores ↑/↓; só aparece em repositório git. `ChangesPanel` deixou de receber `onOpenCommits` (a ação vive no `CodePanel`, que conhece workspace/git).
 - Testes: `CodePanel` abre o histórico pelo botão (estado `codeCommitsTab`/`codeView`) e não renderiza o botão fora de repo; suíte de `components/code` verde, `pnpm typecheck`/`pnpm build` verdes.
+## 18. Ações por sessão na sidebar do Code (paridade com o Chat)
+
+- Cada linha de sessão da sidebar do Code ganhou o botão **…** (visível no hover/foco, como no layout Chat) com **Fixar/Desafixar** (`togglePinned`), **Renomear** (diálogo com Enter/Esc), **Exportar** (`export_conversation` markdown), **Remover do Code** (só em sessões compartilhadas, `setConversationCodeLinked(false)`) e **Excluir** com confirmação; a linha mostra o ícone de fixada.
+- Funciona tanto nas sessões dentro dos workspaces quanto nas sessões “Sem workspace”; estado de busy nos diálogos e toasts honestos em falha.
+- Testes: fixar, renomear, exportar, remover do Code e excluir (5 novos casos em `CodeSidebar`), total 182 verdes em `components/code`, `pnpm typecheck`/`pnpm build` verdes.

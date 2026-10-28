@@ -19,6 +19,10 @@ const mocks = vi.hoisted(() => ({
   getConversation: vi.fn(),
   listArtifacts: vi.fn(),
   setConversationCodeLinked: vi.fn(),
+  renameConversation: vi.fn(),
+  deleteConversation: vi.fn(),
+  exportConversation: vi.fn(),
+  setConversationPinned: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -594,5 +598,85 @@ describe('CodeSidebar — rodapé', () => {
 
     // O drawer só existe quando o AppShell passa onClose.
     expect(screen.getByRole('button', { name: 'Fechar barra lateral' })).toBeTruthy();
+  });
+});
+
+describe('CodeSidebar — ações da sessão', () => {
+  function seedSession(overrides: Partial<Conversation> = {}): Conversation {
+    const item = conversation({ id: 'c-1', title: 'Sessão antiga', workspaceId: 'ws-1', ...overrides });
+    useChatStore.setState({ conversations: [item], activeId: 'c-1' });
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    return item;
+  }
+
+  it('fixa a sessão pelo menu de ações', async () => {
+    seedSession();
+    mocks.setConversationPinned.mockResolvedValue(conversation({ id: 'c-1', pinned: true }));
+    renderSidebar();
+    await screen.findByRole('button', { name: 'lumina-core' });
+
+    openMenu(await screen.findByRole('button', { name: 'Opções de Sessão antiga' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Fixar' }));
+
+    await waitFor(() => expect(mocks.setConversationPinned).toHaveBeenCalledWith('c-1', true));
+  });
+
+  it('renomeia a sessão pelo menu de ações', async () => {
+    seedSession();
+    mocks.renameConversation.mockResolvedValue(conversation({ id: 'c-1', title: 'Sessão nova' }));
+    renderSidebar();
+    await screen.findByRole('button', { name: 'lumina-core' });
+
+    openMenu(await screen.findByRole('button', { name: 'Opções de Sessão antiga' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Renomear' }));
+
+    const input = await screen.findByRole('textbox', { name: 'Renomear sessão' });
+    fireEvent.change(input, { target: { value: 'Sessão nova' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() => expect(mocks.renameConversation).toHaveBeenCalledWith('c-1', 'Sessão nova'));
+  });
+
+  it('exporta a conversa pelo menu de ações', async () => {
+    seedSession();
+    mocks.exportConversation.mockResolvedValue('C:/exports/sessao.md');
+    renderSidebar();
+    await screen.findByRole('button', { name: 'lumina-core' });
+
+    openMenu(await screen.findByRole('button', { name: 'Opções de Sessão antiga' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Exportar' }));
+
+    await waitFor(() =>
+      expect(mocks.exportConversation).toHaveBeenCalledWith('c-1', 'markdown'),
+    );
+  });
+
+  it('remove uma sessão compartilhada do Code pelo menu', async () => {
+    seedSession({ codeLinked: true });
+    renderSidebar();
+    await screen.findByRole('button', { name: 'lumina-core' });
+
+    openMenu(await screen.findByRole('button', { name: 'Opções de Sessão antiga' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remover do Code' }));
+
+    await waitFor(() =>
+      expect(mocks.setConversationCodeLinked).toHaveBeenCalledWith('c-1', false),
+    );
+  });
+
+  it('exclui a conversa com confirmação', async () => {
+    seedSession();
+    mocks.deleteConversation.mockResolvedValue(undefined);
+    renderSidebar();
+    await screen.findByRole('button', { name: 'lumina-core' });
+
+    openMenu(await screen.findByRole('button', { name: 'Opções de Sessão antiga' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Excluir' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Excluir conversa')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Excluir' }));
+
+    await waitFor(() => expect(mocks.deleteConversation).toHaveBeenCalledWith('c-1'));
   });
 });
