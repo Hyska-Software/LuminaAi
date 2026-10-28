@@ -88,6 +88,8 @@ describe('ChangesPanel', () => {
   it('groups by stage state and shows origin badges and counters', () => {
     render(<ChangesPanel workspaceId="ws-1" gitStatus={status()} sessionChanges={sessionChanges} />);
     expect(screen.getByRole('heading', { name: /Preparados/ })).toBeTruthy();
+    // Separadores usam o fundo padrão do painel (bg-surface-raised).
+    expect(screen.getByRole('heading', { name: /Preparados/ }).className).toContain('bg-surface-raised');
     expect(screen.getByRole('heading', { name: /Não preparados/ })).toBeTruthy();
     expect(screen.getByRole('heading', { name: /Novos/ })).toBeTruthy();
 
