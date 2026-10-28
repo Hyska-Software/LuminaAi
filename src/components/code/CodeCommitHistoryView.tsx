@@ -373,7 +373,7 @@ function CommitDetail({
         {detail.body ? (
           // Mensagem longa tem rolagem própria para nunca empurrar os arquivos
           // para fora da área visível do commit.
-          <p className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-surface-raised px-2 py-1 pl-2 text-[11.5px] leading-relaxed text-foreground-muted">
+          <p className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words px-1 py-1 text-[11.5px] leading-relaxed text-foreground-muted">
             {detail.body}
           </p>
         ) : null}
