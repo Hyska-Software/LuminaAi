@@ -1821,7 +1821,21 @@
    "notes": [
     "Envie o header x-opencode-session para melhor roteamento e prompt caching.",
     "Modelos marcados como \"contributor\" podem usar seus dados para treino."
-   ]
+   ],
+   "cache": {
+    "mode": "explicit",
+    "minTokens": 2048,
+    "blockTokens": null,
+    "ttlOptions": [
+     "1h"
+    ],
+    "supportsKey": true,
+    "supportsRetention": false,
+    "supportsExplicitBreakpoints": true,
+    "source": "probe",
+    "reportsRead": true,
+    "reportsWrite": true
+   }
   },
   {
    "id": "opencode-zen",
@@ -5917,7 +5931,21 @@
    "notes": [
     "Funciona com créditos do OpenCode Console.",
     "Modelos gratuitos exigem o cliente OpenCode."
-   ]
+   ],
+   "cache": {
+    "mode": "explicit",
+    "minTokens": 2048,
+    "blockTokens": null,
+    "ttlOptions": [
+     "1h"
+    ],
+    "supportsKey": true,
+    "supportsRetention": false,
+    "supportsExplicitBreakpoints": true,
+    "source": "probe",
+    "reportsRead": true,
+    "reportsWrite": true
+   }
   },
   {
    "id": "openai",
@@ -7441,7 +7469,22 @@
     "O uso consome o limite do seu plano ChatGPT (o mesmo pool compartilhado por apps, Codex e ChatGPT Work).",
     "Contas Plus têm a janela de 5 h compartilhada; Pro não tem esse limite. Limites específicos deste app também podem valer.",
     "A lista de modelos é específica da conta: use \"Atualizar modelos\" após entrar."
-   ]
+   ],
+   "cache": {
+    "mode": "auto",
+    "minTokens": 1024,
+    "blockTokens": 128,
+    "ttlOptions": [
+     "in_memory",
+     "24h"
+    ],
+    "supportsKey": true,
+    "supportsRetention": true,
+    "supportsExplicitBreakpoints": true,
+    "source": "family-default",
+    "reportsRead": true,
+    "reportsWrite": true
+   }
   },
   {
    "id": "anthropic",
@@ -8166,7 +8209,22 @@
     "Crie ou revise a API key em https://platform.claude.com/settings/keys.",
     "A lista da conta é buscada em GET /v1/models; use \"Atualizar modelos\" para mesclar novidades.",
     "Versão da API fixada em anthropic-version: 2026-10-21 (sem headers beta)."
-   ]
+   ],
+   "cache": {
+    "mode": "explicit",
+    "minTokens": null,
+    "blockTokens": null,
+    "ttlOptions": [
+     "5m",
+     "1h"
+    ],
+    "supportsKey": false,
+    "supportsRetention": false,
+    "supportsExplicitBreakpoints": true,
+    "source": "family-default",
+    "reportsRead": true,
+    "reportsWrite": true
+   }
   }
  ]
 }

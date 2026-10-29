@@ -345,3 +345,89 @@ describe('ToolsTab — workbench de código', () => {
     expect(useAppStore.getState().settings.diffOpenMode).toBe('panel');
   });
 });
+
+describe('ToolsTab — cache de prompt', () => {
+  it('mostra a seção com indicador, TTL da Anthropic e retenção da OpenAI', () => {
+    render(<ToolsTab />);
+
+    expect(screen.getByText('Cache de prompt')).toBeTruthy();
+    expect(screen.getByRole('switch', { name: 'Mostrar indicador de cache' })).toBeTruthy();
+    expect(screen.getByLabelText('TTL do cache da Anthropic')).toBeTruthy();
+    expect(screen.getByLabelText('Retenção do cache da OpenAI')).toBeTruthy();
+  });
+
+  it('reflete os valores atuais de Settings.cache', () => {
+    useAppStore.setState({
+      settings: settings({
+        cache: { showIndicator: false, anthropicTtl: '5m', openaiRetention: '24h' },
+      }),
+    });
+    render(<ToolsTab />);
+
+    expect(
+      screen.getByRole('switch', { name: 'Mostrar indicador de cache' }).getAttribute(
+        'aria-checked',
+      ),
+    ).toBe('false');
+    expect(
+      (screen.getByLabelText('TTL do cache da Anthropic') as HTMLSelectElement).value,
+    ).toBe('5m');
+    expect(
+      (screen.getByLabelText('Retenção do cache da OpenAI') as HTMLSelectElement).value,
+    ).toBe('24h');
+  });
+
+  it('liga/desliga o indicador salvando o objeto CacheSettings completo', async () => {
+    render(<ToolsTab />);
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Mostrar indicador de cache' }));
+
+    await waitFor(() => {
+      expect(mocks.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cache: { showIndicator: false, anthropicTtl: '1h', openaiRetention: null },
+        }),
+      );
+    });
+    expect(useAppStore.getState().settings.cache?.showIndicator).toBe(false);
+  });
+
+  it('salva o TTL do cache da Anthropic', async () => {
+    render(<ToolsTab />);
+
+    fireEvent.change(screen.getByLabelText('TTL do cache da Anthropic'), {
+      target: { value: '5m' },
+    });
+
+    await waitFor(() => {
+      expect(mocks.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cache: expect.objectContaining({ anthropicTtl: '5m' }),
+        }),
+      );
+    });
+  });
+
+  it('salva a retenção da OpenAI (auto = null)', async () => {
+    render(<ToolsTab />);
+
+    const retention = screen.getByLabelText('Retenção do cache da OpenAI');
+    fireEvent.change(retention, { target: { value: '24h' } });
+    await waitFor(() => {
+      expect(mocks.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cache: expect.objectContaining({ openaiRetention: '24h' }),
+        }),
+      );
+    });
+
+    fireEvent.change(retention, { target: { value: 'auto' } });
+    await waitFor(() => {
+      expect(mocks.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cache: expect.objectContaining({ openaiRetention: null }),
+        }),
+      );
+    });
+  });
+});

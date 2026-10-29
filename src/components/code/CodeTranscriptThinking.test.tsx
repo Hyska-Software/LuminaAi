@@ -181,7 +181,16 @@ function CodeTranscript() {
   );
 }
 
+/**
+ * Header agregado do bloco Thinking: no layout Code o tempo inclui ferramentas e
+ * comandos ("Trabalhou por …"); no Chat o bloco resume o raciocínio do modelo
+ * ("Pensou por …") — diferença de copy por layout (task-6).
+ */
 const thinkingHeader = (): HTMLElement =>
+  screen.getByRole('button', { name: /Trabalhou por 4s/ });
+
+/** O mesmo bloco já no layout Chat (copy de raciocínio). */
+const chatThinkingHeader = (): HTMLElement =>
   screen.getByRole('button', { name: /Pensou por 4s/ });
 
 /** Itens da lista Markdown do raciocínio (o `getByText` não atravessa o `<code>`). */
@@ -248,8 +257,10 @@ describe('CodeTranscriptThinking — Thinking em Markdown no layout Code', () =>
       'Descreva a tarefa… @ para arquivos, / para comandos',
     );
 
-    // O bloco "Thinking" começa recolhido e anuncia a duração do turno.
+    // O bloco "Thinking" começa recolhido e, no Code, anuncia o turno inteiro
+    // ("Trabalhou por …") — não a copy de raciocínio do Chat.
     expect(thinkingHeader()).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Pensou por 4s/ })).toBeNull();
     expect(screen.queryByText('Pensou')).toBeNull();
     expect(screen.queryByText('Analisando')).toBeNull();
 
@@ -330,6 +341,10 @@ describe('CodeTranscriptThinking — Thinking em Markdown no layout Code', () =>
     expect(screen.getByRole('textbox', { name: 'Mensagem para o Lumina' })).toBeTruthy();
     expect(screen.queryByRole('textbox', { name: 'Tarefa para o agente' })).toBeNull();
 
+    // A copy do mesmo bloco acompanha o layout: Chat volta a "Pensou por …".
+    expect(chatThinkingHeader()).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Trabalhou por 4s/ })).toBeNull();
+
     // O transcript e o bloco expandido continuam intactos.
     expect(screen.getByRole('log')).toBeTruthy();
     expect(screen.getByText('Analisando').tagName).toBe('STRONG');
@@ -356,11 +371,14 @@ describe('CodeTranscriptThinking — Thinking em Markdown no layout Code', () =>
     expect(screen.getByText('Como posso ajudar?')).toBeTruthy();
     expect(screen.queryByRole('log')).toBeNull();
     expect(screen.queryByText('Analisando')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Trabalhou por 4s/ })).toBeNull();
 
-    // Ao voltar ao Code, o transcript remonta com o mesmo raciocínio em Markdown.
+    // Ao voltar ao Code, o transcript remonta com o mesmo raciocínio em Markdown
+    // e o header agregado do Code.
     act(() => {
       useUiStore.setState({ layoutMode: 'code' });
     });
+    expect(thinkingHeader()).toBeTruthy();
     await user.click(thinkingHeader());
     expect(screen.getByText('Analisando').tagName).toBe('STRONG');
     expect(bulletTexts(container)).toContain('leu src/app.ts');

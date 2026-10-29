@@ -7,6 +7,7 @@
 //! model does not accept the requested protocol).
 
 pub mod anthropic;
+pub mod cache;
 pub mod google;
 pub mod openai_chat;
 pub mod openai_responses;
@@ -273,6 +274,13 @@ pub struct CompletionRequest {
     pub reasoning: ReasoningRequest,
     pub max_output_tokens: Option<u32>,
     pub temperature: Option<f32>,
+    /// Explicit cache plan chosen by the harness (`providers::cache::plan`).
+    ///
+    /// The adapters apply it to the final wire body (`cache::apply`) right after
+    /// `build_body` and before the prefix digest. `None` keeps the body exactly
+    /// as it was before F4; the harness owns the decision (capabilities +
+    /// settings + request index), the provider layer only lowers it.
+    pub cache_plan: Option<cache::CachePlan>,
     pub cancel: CancellationToken,
 }
 
@@ -298,6 +306,18 @@ pub enum ProviderEvent {
         arguments: String,
     },
     Usage(UsageInfo),
+    /// Safe, capped excerpt of the provider `usage` JSON — numeric counters,
+    /// `*_tokens_details`, cache blocks and the OpenCode gateway accounting
+    /// (`cache::usage_excerpt`). Emitted once per request right after `Usage`
+    /// and before `Done`; feeds `CacheSample.raw_usage` and the diagnostics
+    /// "Copiar usage bruto". Never carries prompts, content, headers or ids,
+    /// and is skipped when the provider sent no usage block.
+    UsageRaw(Value),
+    /// Canonical digest of the wire prefix of this request, emitted once per
+    /// attempt right after the body is built (before the HTTP stream). The
+    /// harness compares it with the previous request to detect prefix reuse and
+    /// attribute breaks; only the provider layer computes it (`cache::digest`).
+    CacheDigest(crate::domain::PrefixDigest),
     /// Raw assistant payload used for stateless replay in the next step.
     ProviderState(Value),
     /// End of the provider stream.
@@ -606,6 +626,43 @@ pub(crate) fn emit(sink: &EventSink, event: ProviderEvent) -> anyhow::Result<()>
     })
 }
 
+/// Emit the canonical prefix digest of one wire request.
+///
+/// Every adapter calls this right after `build_body` and before the HTTP/SSE
+/// stream, so the harness can classify prefix reuse (and attribute a break)
+/// even when the request fails. The digest is computed on the **final** body
+/// (`cache::apply` already ran, if F4 has plans); cache metadata is excluded
+/// from the hash by [`cache::digest`].
+pub(crate) fn emit_cache_digest(
+    request: &CompletionRequest,
+    protocol: WireProtocol,
+    body: &Value,
+    sink: &EventSink,
+) -> ProviderResult<()> {
+    let digest = cache::digest(protocol, &request.config.provider_id, body);
+    emit(sink, ProviderEvent::CacheDigest(digest)).map_err(to_provider_error)
+}
+
+/// Emit the safe raw usage excerpt for diagnostics, once per request, right
+/// after the normalized [`ProviderEvent::Usage`] and before `Done`.
+///
+/// `raw` is the provider usage object (`usage`, `usageMetadata` or the merged
+/// Anthropic usage); `cache::usage_excerpt` allowlists the meaningful counters
+/// and caps the size, and the event is skipped when nothing safe remains.
+pub(crate) fn emit_usage_raw(sink: &EventSink, raw: Option<&Value>) -> ProviderResult<()> {
+    let Some(raw) = raw else {
+        return Ok(());
+    };
+    let excerpt = cache::usage_excerpt(raw);
+    let Some(object) = excerpt.as_object() else {
+        return Ok(());
+    };
+    if object.is_empty() {
+        return Ok(());
+    }
+    emit(sink, ProviderEvent::UsageRaw(excerpt)).map_err(to_provider_error)
+}
+
 /// Recover the typed provider error from a failure raised inside the SSE
 /// callback (which is `anyhow` based).
 pub(crate) fn to_provider_error(error: anyhow::Error) -> ProviderError {
@@ -650,6 +707,73 @@ pub(crate) async fn send_stream(
         return Err(ProviderError::from_http(status.as_u16(), &body_text));
     }
     Ok(Some(response))
+}
+
+/// Wire fields added by the explicit cache mechanisms. A request-shape
+/// rejection naming one of them means the route does not support the field
+/// (PLAN §4.5 fallback: retry once without the plan, never loop).
+const CACHE_WIRE_FIELDS: &[&str] = &[
+    "cache_control",
+    "prompt_cache_key",
+    "prompt_cache_retention",
+    "prompt_cache_options",
+    "cachedcontent",
+    "ttl",
+];
+
+/// True when an error looks like "this route rejects the cache field I sent".
+///
+/// Only request-shape errors are considered (auth/quota/network are never
+/// caused by a cache field and must not be retried here).
+pub(crate) fn is_cache_capability_error(error: &ProviderError) -> bool {
+    if !matches!(
+        error,
+        ProviderError::BadRequest(_)
+            | ProviderError::UnsupportedCapability(_)
+            | ProviderError::Other(_)
+    ) {
+        return false;
+    }
+    if let Some(param) = error.param() {
+        let param = param.to_ascii_lowercase();
+        if CACHE_WIRE_FIELDS.iter().any(|field| param.contains(field)) {
+            return true;
+        }
+    }
+    let text = error.to_string().to_ascii_lowercase();
+    CACHE_WIRE_FIELDS.iter().any(|field| text.contains(field))
+}
+
+/// POST a body that may carry the explicit cache plan, with the plan's single
+/// fallback: when the provider rejects a cache field (HTTP 400 naming it), rebuild
+/// the body **without the plan** and retry exactly once.
+///
+/// The retried body has the same prefix digest as the first one (cache metadata
+/// is outside the hash), so the digest already emitted stays valid. Degradation
+/// is observable through `usage` (no cache read/write reported); the harness owns
+/// marking the epoch/route as degraded.
+pub(crate) async fn send_stream_with_cache_fallback<F>(
+    http: &reqwest::Client,
+    request: &CompletionRequest,
+    url: &str,
+    body: &Value,
+    without_plan: F,
+) -> ProviderResult<Option<reqwest::Response>>
+where
+    F: FnOnce() -> Value,
+{
+    match send_stream(http, request, url, body).await {
+        Ok(response) => Ok(response),
+        Err(error) if request.cache_plan.is_some() && is_cache_capability_error(&error) => {
+            eprintln!(
+                "[providers] {} rejeitou o cache explícito ({}); repetindo uma vez sem o plano",
+                request.config.provider_id, error
+            );
+            let clean = without_plan();
+            send_stream(http, request, url, &clean).await
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// System prompt plus any system message embedded in the neutral history.
@@ -757,6 +881,12 @@ pub(crate) fn make_usage(
         output_tokens: output,
         reasoning_tokens: reasoning,
         cached_tokens: cached,
+        // Cache counters are normalized from the raw provider JSON by
+        // `cache::normalize_usage` inside each adapter (`cache::apply_usage`).
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        uncached_input_tokens: None,
+        cache_reported: false,
         total_tokens: total,
         cost: None,
         duration_ms: None,
@@ -974,6 +1104,7 @@ mod smoke {
             reasoning,
             max_output_tokens: Some(1_024),
             temperature: None,
+            cache_plan: None,
             cancel,
         };
         let http = reqwest::Client::builder()
@@ -1033,6 +1164,18 @@ mod smoke {
                 ProviderEvent::Usage(usage) => {
                     result.trace.push("usage".to_string());
                     result.usage = Some(usage);
+                }
+                ProviderEvent::UsageRaw(raw) => {
+                    result
+                        .trace
+                        .push(format!("usage_raw({})", raw.to_string().len()));
+                }
+                ProviderEvent::CacheDigest(digest) => {
+                    result.trace.push(format!(
+                        "cache_digest({} seg, {} chars)",
+                        digest.segments.len(),
+                        digest.total_chars
+                    ));
                 }
                 ProviderEvent::Done => {
                     result.trace.push("done".to_string());
@@ -1425,6 +1568,7 @@ mod smoke {
             reasoning: ReasoningRequest::Auto,
             max_output_tokens: Some(1_024),
             temperature: None,
+            cache_plan: None,
             cancel: cancel.clone(),
         };
         let http = reqwest::Client::builder()
@@ -1734,6 +1878,7 @@ mod smoke {
             reasoning: ReasoningRequest::Auto,
             max_output_tokens: Some(64),
             temperature: None,
+            cache_plan: None,
             cancel: CancellationToken::new(),
         };
         let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
@@ -1809,6 +1954,139 @@ mod tests {
             .iter()
             .find(|(key, _)| key.eq_ignore_ascii_case(name))
             .map(|(_, value)| value.as_str())
+    }
+
+    /* ------------- cache plan rejection (F4b fallback) --------------- */
+
+    /// The single fallback only kicks in for request-shape errors that name a
+    /// cache field; auth/quota/network errors are never retried here.
+    #[test]
+    fn detects_cache_field_rejections_for_the_single_fallback() {
+        assert!(is_cache_capability_error(&ProviderError::BadRequest(
+            "unknown field `cache_control`".to_string()
+        )));
+        assert!(is_cache_capability_error(&ProviderError::Other(
+            "400: prompt_cache_retention is not supported for this model".to_string()
+        )));
+        assert!(is_cache_capability_error(
+            &ProviderError::UnsupportedCapability(StructuredError {
+                message: "unsupported capability".to_string(),
+                code: Some("subscription_sharing_unsupported_capability".to_string()),
+                param: Some("prompt_cache_key".to_string()),
+            })
+        ));
+        assert!(is_cache_capability_error(&ProviderError::BadRequest(
+            "invalid ttl for cache_control".to_string()
+        )));
+
+        assert!(!is_cache_capability_error(&ProviderError::BadRequest(
+            "model not found".to_string()
+        )));
+        assert!(
+            !is_cache_capability_error(&ProviderError::Unauthorized(
+                "cache_control in an auth message".to_string()
+            )),
+            "erro de auth nunca vira fallback de cache"
+        );
+        assert!(
+            !is_cache_capability_error(&ProviderError::Network(
+                "timeout while sending cache_control".to_string()
+            )),
+            "erro de rede nunca vira fallback de cache"
+        );
+        assert!(!is_cache_capability_error(&ProviderError::RateLimited(
+            "slow down".to_string()
+        )));
+    }
+
+    /* ------------------ cache digest emission (F0a) ------------------ */
+
+    /// Every adapter emits `ProviderEvent::CacheDigest` **before** the HTTP/SSE
+    /// stream and with the protocol of the wire body it just built. The turn is
+    /// pre-cancelled so the digest is the only event and no network is touched.
+    #[tokio::test]
+    async fn adapters_emit_the_cache_digest_before_streaming() {
+        use crate::domain::SegmentKind;
+
+        let http = reqwest::Client::new();
+        let cases = [
+            (
+                WireProtocol::OpenaiChat,
+                "glm-5.3-flash",
+                SegmentKind::System,
+            ),
+            (
+                WireProtocol::OpenaiResponses,
+                "gpt-6-luna",
+                SegmentKind::System,
+            ),
+            // Anthropic renders `tools` before `system`.
+            (
+                WireProtocol::Anthropic,
+                "claude-haiku-5-5",
+                SegmentKind::Tools,
+            ),
+            (
+                WireProtocol::Google,
+                "gemini-4-argon-contributor",
+                SegmentKind::System,
+            ),
+        ];
+        for (protocol, model_id, first_kind) in cases {
+            let request = CompletionRequest {
+                config: test_config("opencode-go", model_id),
+                protocols: vec![protocol],
+                history: vec![HistoryMessage::user("diga olá")],
+                system_prompt: "Você é o Lumina.".to_string(),
+                tools: vec![ToolDefinition {
+                    name: "echo".to_string(),
+                    description: "Devolve o texto recebido.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {"text": {"type": "string"}},
+                    }),
+                }],
+                reasoning: ReasoningRequest::Auto,
+                max_output_tokens: Some(64),
+                temperature: None,
+                cache_plan: None,
+                cancel: CancellationToken::new(),
+            };
+            request.cancel.cancel();
+            let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
+            stream_one(&http, &request, protocol, &sink)
+                .await
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "{}: turno cancelado antes do HTTP deveria terminar Ok: {error}",
+                        protocol.as_str()
+                    )
+                });
+            let event = events
+                .recv()
+                .await
+                .unwrap_or_else(|| panic!("{}: nenhum evento emitido", protocol.as_str()));
+            let digest = match event {
+                ProviderEvent::CacheDigest(digest) => digest,
+                other => panic!(
+                    "{}: primeiro evento deveria ser CacheDigest, veio {other:?}",
+                    protocol.as_str()
+                ),
+            };
+            assert_eq!(digest.protocol, protocol.as_str());
+            assert!(
+                !digest.segments.is_empty(),
+                "{}: digest sem segmentos",
+                protocol.as_str()
+            );
+            assert_eq!(
+                digest.segments[0].kind,
+                first_kind,
+                "{}: ordem dos segmentos fora do wire",
+                protocol.as_str()
+            );
+            assert!(digest.total_chars > 0);
+        }
     }
 
     /* -------------------- catalog-driven endpoints ------------------- */

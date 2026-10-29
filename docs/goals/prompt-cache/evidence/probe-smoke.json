@@ -1,0 +1,37 @@
+{
+  "generatedAt": "2026-10-29T16:15:58.544Z",
+  "fixture": "lumina-cache-probe-v1",
+  "providers": [
+    {
+      "provider": "anthropic",
+      "name": "Anthropic",
+      "cache": {
+        "mode": "explicit",
+        "minTokens": null,
+        "blockTokens": null,
+        "ttlOptions": [
+          "5m",
+          "1h"
+        ],
+        "supportsKey": false,
+        "supportsRetention": false,
+        "supportsExplicitBreakpoints": true,
+        "source": "family-default",
+        "reportsRead": true,
+        "reportsWrite": true
+      },
+      "routes": [
+        {
+          "route": "anthropic",
+          "model": "claude-fable-5",
+          "skipped": "sem credencial"
+        },
+        {
+          "route": "anthropic",
+          "model": "claude-fable-5-1",
+          "skipped": "sem credencial"
+        }
+      ]
+    }
+  ]
+}

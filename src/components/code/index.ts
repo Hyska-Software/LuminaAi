@@ -25,6 +25,9 @@ export type { CodeFileViewProps } from './CodeFileView';
 export { CodePlanView } from './CodePlanView';
 export type { CodePlanViewProps } from './CodePlanView';
 
+export { CodeTurnSummary } from './CodeTurnSummary';
+export type { CodeTurnSummaryProps } from './CodeTurnSummary';
+
 export { CodeCommitHistoryView } from './CodeCommitHistoryView';
 export type { CodeCommitHistoryViewProps, CodeCommitsTabTarget } from './CodeCommitHistoryView';
 

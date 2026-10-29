@@ -1,9 +1,19 @@
+import { useId } from 'react';
+
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
+import type { CacheConversationUi } from '@/lib/store/cacheStore';
 import type { ContextBreakdown, ContextStats } from '@/lib/types';
 import { cn, formatTokens } from '@/lib/utils';
+import { CacheChipSegment, CacheDiagnostics, cacheStateSentence } from './CacheHitChip';
 
 export interface ContextMeterProps {
   stats: ContextStats;
+  /**
+   * Cache de prompt do host (Code: `useCacheStore`). `undefined` desliga a
+   * seção de cache (hosts antigos); `null` mostra `—` + a nota honesta de
+   * "sem amostras" enquanto o primeiro request não chega.
+   */
+  cache?: CacheConversationUi | null;
   /** Mensagens resumidas na última compactação (quando o host souber). */
   compacted?: number | null;
   className?: string;
@@ -96,16 +106,19 @@ function compactedNote(count: number): string {
 }
 
 /**
- * Medidor de contexto do harness de código (WORKBENCH §4/§9).
+ * Medidor de contexto do harness de código (WORKBENCH §4/§9), agora com o
+ * indicador de cache de prompt ao lado do anel (PLAN §7).
  *
- * Chip compacto no header (anel + percentual) que abre um popover com o
- * detalhamento do contexto: `breakdown` em três partes (prompt de sistema /
- * definições de ferramentas / mensagens), valores estimados, barra segmentada
- * proporcional à janela e o limite de saída. Componente puro: os eventos
- * `context_stats` do backend atualizam o `codeStore` e o componente rerenderiza
- * no lugar (larguras animadas, valores tabulares, sem layout shift).
+ * Chip compacto no header (anel + percentual de contexto + divisor + `Zap` +
+ * `%` de cache) que abre um popover com o detalhamento do contexto e a seção
+ * "Cache de prompt" (último request, teto, barra lido/gravado/novo, acumulado,
+ * estado, última quebra, TTL e nº de amostras). Componente puro: os eventos
+ * `context_stats`/`cache_stats` do backend atualizam os stores e o componente
+ * rerenderiza no lugar (larguras animadas, valores tabulares, sem layout shift).
  */
-export function ContextMeter({ stats, compacted, className }: ContextMeterProps) {
+export function ContextMeter({ stats, cache, compacted, className }: ContextMeterProps) {
+  const cacheDescriptionId = useId();
+  const hasCache = cache !== undefined;
   const percent = clampPercent(stats.percent);
   const tier = tierFor(percent);
   const compactedCount = compacted ?? stats.compacted ?? 0;
@@ -144,8 +157,10 @@ export function ContextMeter({ stats, compacted, className }: ContextMeterProps)
         <button
           type="button"
           aria-label={`Contexto usado: ${percent}%`}
+          aria-describedby={hasCache ? cacheDescriptionId : undefined}
           className={cn(
-            'flex h-8 min-w-[4.25rem] shrink-0 items-center justify-center gap-1.5 rounded-full border px-2 text-[11px] font-medium tabular-nums',
+            'flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full border px-2 text-[11px] font-medium tabular-nums',
+            hasCache ? 'min-w-[7rem]' : 'min-w-[4.25rem]',
             'text-foreground-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
             tier.key === 'critical' ? 'border-danger/40' : 'border-border',
@@ -155,6 +170,14 @@ export function ContextMeter({ stats, compacted, className }: ContextMeterProps)
           <ContextRing percent={percent} tier={tier} />
           <span className="tabular-nums">{percent}%</span>
           <span className="sr-only"> — {tier.label}</span>
+          {hasCache ? (
+            <>
+              <CacheChipSegment cache={cache} />
+              <span id={cacheDescriptionId} className="sr-only">
+                {cacheStateSentence(cache)}
+              </span>
+            </>
+          ) : null}
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" aria-label="Detalhes do contexto" className="w-72 p-3 shadow-lg">
@@ -214,6 +237,12 @@ export function ContextMeter({ stats, compacted, className }: ContextMeterProps)
               </li>
             ))}
           </ul>
+
+          {hasCache ? (
+            <div className="border-t border-border pt-2">
+              <CacheDiagnostics cache={cache ?? null} />
+            </div>
+          ) : null}
 
           <div className="flex flex-col gap-1 border-t border-border pt-2 text-[11px] leading-snug text-foreground-muted">
             <p>Limite de saída: ~{formatTokens(stats.outputCap)}</p>

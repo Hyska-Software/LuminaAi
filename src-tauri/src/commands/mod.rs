@@ -3,6 +3,7 @@
 
 pub mod artifacts;
 pub mod attachments;
+pub mod cache;
 pub mod code;
 pub mod conversations;
 pub mod git;

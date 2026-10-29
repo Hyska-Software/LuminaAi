@@ -11,12 +11,14 @@ import { useRef, useState } from 'react';
 import {
   ApprovalCard,
   AskUserCard,
+  CacheHitChip,
   ContextMeter,
   PlanCard,
   type ApprovalDecisionOptions,
   type PlanAction,
 } from '@/components/agent';
-import { useCodeStore } from '@/lib/store';
+import { useAppStore, useCodeStore } from '@/lib/store';
+import { useCacheStore } from '@/lib/store/cacheStore';
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -172,13 +174,37 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
   );
 }
 
-/** Medidor de contexto do header (chip compacto com anel + popover). */
+/**
+ * Medidor do header: chip compacto com anel de contexto + `%` de cache.
+ *
+ * O `cacheStore` é a fonte do cache (evento `cache_stats` por request +
+ * restauração via `get_cache_stats`); `Settings.cache.showIndicator` só
+ * esconde o indicador, a medição continua. Sem contexto (payload antigo ou
+ * sessão sem snapshot) o chip cai para a variante cache-first. O container não
+ * esconde mais o medidor abaixo de 1024px (`hidden lg:block` removido): o
+ * requisito é mostrar em tempo real, então ele encolhe/reserva largura em vez
+ * de sumir.
+ */
 export function CodeContextMeterChip({ conversationId }: { conversationId: string }) {
   const stats = useCodeStore((state) => state.byConversation[conversationId]?.context);
-  if (!stats) return null;
+  const cache = useCacheStore((state) => state.byConversation[conversationId] ?? null);
+  const showCacheIndicator = useAppStore(
+    (state) => state.settings.cache?.showIndicator !== false,
+  );
+  const showCache = showCacheIndicator && cache != null;
+
+  if (!stats) {
+    if (!showCache) return null;
+    return (
+      <div className="hidden sm:block">
+        <CacheHitChip cache={cache} />
+      </div>
+    );
+  }
+
   return (
-    <div className="hidden lg:block">
-      <ContextMeter stats={stats} />
+    <div className="hidden sm:block">
+      <ContextMeter stats={stats} cache={showCache ? cache : undefined} />
     </div>
   );
 }

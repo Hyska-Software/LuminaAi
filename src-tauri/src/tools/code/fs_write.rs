@@ -19,7 +19,7 @@ pub static WRITE_FILE_SPEC: ToolSpec = ToolSpec {
     mutating: true,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Leia um arquivo existente antes de sobrescrevê-lo com `write_file` (a política exige leitura prévia e versão fresca). Para mudanças pontuais prefira `edit_file`.",
+    guidance: "Read an existing file before overwriting it with `write_file` (the policy requires a prior read and a fresh version). For targeted changes prefer `edit_file`.",
 };
 
 pub static EDIT_FILE_SPEC: ToolSpec = ToolSpec {
@@ -31,7 +31,7 @@ pub static EDIT_FILE_SPEC: ToolSpec = ToolSpec {
     mutating: true,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `edit_file` para alterações cirúrgicas: `old_string` precisa ser único (ou use `replace_all`). Inclua contexto suficiente para não bater em trechos parecidos e releia o arquivo se receber FS_STALE_VERSION.",
+    guidance: "Use `edit_file` for surgical changes: `old_string` must be unique (or use `replace_all`). Include enough context to avoid matching similar snippets and reread the file if you get FS_STALE_VERSION.",
 };
 
 pub fn definition() -> ToolDefinition {

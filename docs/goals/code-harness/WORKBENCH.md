@@ -99,9 +99,48 @@ O `ChatView` existente continua sendo a única instância (preserva draft/scroll
 
 ### 5.1 Fecho de turno
 
-Ao fim de cada turno, um separador discreto `Trabalhou por 4m 29s · 38,2k tokens · 2 arquivos ·
-+42 −7` com ações `Ver alterações` / `Reverter turno` / `Copiar resumo`. Colapsável (o conteúdo do
-turno pode ser recolhido) — resolve transcripts longos (padrão Paseo).
+Ao fim de cada turno do layout Code, o transcript termina com um **card de resumo** do que
+foi feito — o "Edited N files" dos agentes de código, adaptado ao design system:
+
+```
+┌ ▣ 2 arquivos alterados ─────────────────────────────┐
+│   +42  −7                                           │
+├─────────────────────────────────────────────────────┤
+│  ▤ src/app.ts                               +12 −3  │
+│  ▤ docs/DESIGN.md                           +30 −4  │
+│  ▤ src/lib/utils.ts                          +0 −0  │
+│                               Todos os 3 arquivos ⌄ │
+└─────────────────────────────────────────────────────┘
+```
+
+- **Fonte**: `ChatMessage.toolCalls[].presentation` com `kind: "file_change"`
+  (`write_file`/`edit_file`, persistido junto da mensagem). Uma linha por path — edições
+  repetidas no turno somam `added`/`removed` e o último `kind` vence —, ordenada por path;
+  chamadas que falharam ficam de fora. Como o dado já é persistido, o card reaparece ao
+  reabrir a sessão e nenhum IPC/payload novo é necessário. Arquivos alterados por processos
+  externos (`run_command`, ex.: formatador/gerador) não passam pelo journal e por isso não
+  entram no card: eles aparecem no painel Alterações com origem git (limitação conhecida).
+- **Colapso**: 4 linhas por padrão; acima disso, botão full-width **Todos os N arquivos** /
+  **Mostrar menos** (`aria-expanded`/`aria-controls`, chevron 150ms). Título
+  "N arquivos alterados" (singular "1 arquivo alterado"), totais `+N −M` com
+  `tabular-nums` e os tokens `success`/`danger` (nada de hex solto).
+- **Abrir diff**: cada linha é um botão (só quando a sessão tem workspace) que abre o diff
+  daquele arquivo como **aba central**, exatamente como o painel Alterações faz
+  (`uiStore.openCodeDiff` → `CodeDiffView`, fechável no tab strip). O alvo leva o patch
+  persistido da última edição do turno como `knownDiff` (sem IPC); quando o payload não tem o
+  patch, a aba busca `get_file_diff`. Sessão sem workspace mantém as linhas informativas.
+  Acessibilidade: `aria-label="Abrir diff de <path>"`, hover/foco visíveis.
+- **Só no Code e só no fim**: a montagem (`src/components/chat/MessageItem.tsx`) checa
+  `layoutMode === "code"` e o fim do streaming; turnos cancelados/erro mostram as edições
+  parciais porque elas são reais. O card não existe no layout Chat.
+- **Sem duplicar o fecho do "Thinking"**: tempo/tokens continuam no header do bloco
+  ("Trabalhou por Xs" no Code, §5.2.1); o card resume **arquivos**.
+- **Acessibilidade**: grupo `aria-label="Resumo do turno"`, lista semântica, ícones
+  decorativos `aria-hidden`, foco visível e paths truncados com `title` completo.
+- **Implementação**: `src/lib/codeTurnSummary.ts` (view model puro) +
+  `src/components/code/CodeTurnSummary.tsx` (card) + montagem em
+  `src/components/chat/MessageItem.tsx`. Testes: `codeTurnSummary.test.ts` (agregação),
+  `CodeTurnSummary.test.tsx` (card/colapso) e `MessageList.test.tsx` (só Code/não streaming).
 
 ### 5.2 Cards de tool (removidos do transcript)
 
@@ -142,6 +181,10 @@ estilo `Think/Edit/Pwsh`:
   - demais tools: saída/resultado sob demanda (região rolável, `tabindex=0`).
 - Toda linha expansível usa `aria-expanded`/`aria-controls`; a linha tem nome acessível
   (`aria-label`) com o texto completo ("Leu src/app.ts").
+- Header do bloco ao concluir: **"Trabalhou por Xs"** no layout Code (o tempo do turno inclui as
+  ferramentas, não só o raciocínio); **"Pensou por Xs"** fica no layout Chat. Ao vivo os títulos
+  continuam por fase ("Pensando…", "Executando ferramentas…") e turnos sem raciocínio exposto
+  mostram "N passos".
 - Tools do Chat (web/skills/artefatos) mantêm os grupos/resumos existentes (páginas, domínios,
   chips) sem mudança — a diferença Chat × Code é intencional e preservada.
 
@@ -428,6 +471,8 @@ Microcopy-chave:
 - Erro de path: "O caminho fica fora do workspace. Permitir acesso?" (nunca "operação inválida").
 - Contexto: "Contexto em 78% — o próximo passo deve compactar automaticamente."
 - Fim de turno: "Trabalhou por 4m 29s" / "Pronta para revisar" / "2 arquivos alterados".
+- Fecho do turno (card): "N arquivos alterados" / "1 arquivo alterado" / "Todos os N arquivos" /
+  "Mostrar menos".
 
 ## 14. Responsivo
 
@@ -454,6 +499,7 @@ Microcopy-chave:
 | `TodoCard` / `ContextMeter` / `JobsBar` | estados, contadores, ações (plano/tarefas/jobs no popover do composer) |
 | `Composer` (novos) | `@` (busca, chips, faixa de linhas, backspace), `/` (filtro, teclado, execução), modo de permissão/Plano no Code, popover Plano/tarefas/jobs, placeholder por estado |
 | `chatStore` | aplicação de eventos novos (aprov/plan/todo/changes/context/job), `presentation` persistida (não renderizada no transcript), tolerância a eventos desconhecidos |
+| `CodeTurnSummary` | agregação das edições por path e totais, singular/plural, recolher/expandir (4 linhas), só no layout Code e com o turno encerrado, clique abre o diff na aba central (com `knownDiff` ou fallback `get_file_diff`) |
 | `uiStore` | workspace ativo, abas por workspace, painel/aba, persistência e merge |
 
 ## 16. Não-objetivos desta fase (registrados)

@@ -318,10 +318,10 @@ pub async fn suggest_commit_message(
         .await
         .unwrap_or_default();
     let user_text = format!(
-        "Arquivos alterados:\n{}\n\nDiff (resumo de 1 linha de contexto):\n{}",
+        "Changed files:\n{}\n\nDiff (1-line context summary):\n{}",
         files.join("\n"),
         if diff.trim().is_empty() {
-            "(sem diff textual — arquivos novos ou binários)".to_string()
+            "(no textual diff — new or binary files)".to_string()
         } else {
             diff
         }
@@ -348,11 +348,11 @@ pub async fn suggest_commit_message(
     let request = crate::harness::batch::BatchRequest {
         provider_id: &settings.default_provider,
         model_id: &settings.default_model,
-        system_prompt: "Você escreve mensagens de commit objetivas em português do Brasil. \
-                        Responda APENAS a mensagem, em uma linha, no formato \
-                        `tipo(escopo): descrição`, com no máximo 72 caracteres, no imperativo. \
-                        Tipos: feat, fix, refactor, test, docs, chore, perf. Não use ponto final, \
-                        aspas, Markdown nem explicações.",
+        system_prompt: "You write concise commit messages in Brazilian Portuguese. \
+                        Reply with ONLY the message, in one line, in the format \
+                        `type(scope): description`, max 72 characters, imperative mood. \
+                        Types: feat, fix, refactor, test, docs, chore, perf. Do not use a \
+                        trailing period, quotes, Markdown or explanations.",
         user_text: &user_text,
         max_output_tokens: 200,
         temperature: Some(0.2),

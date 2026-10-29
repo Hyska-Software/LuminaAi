@@ -35,10 +35,7 @@ impl QuestionRegistry {
     }
 
     /// Registra o pedido e devolve o receptor que a tool deve aguardar.
-    pub fn register_request(
-        &self,
-        request: AskUserRequest,
-    ) -> oneshot::Receiver<AskUserResponse> {
+    pub fn register_request(&self, request: AskUserRequest) -> oneshot::Receiver<AskUserResponse> {
         let (tx, rx) = oneshot::channel();
         let id = request.id.clone();
         self.pending.lock().insert(
@@ -72,11 +69,13 @@ impl QuestionRegistry {
         requests
     }
 
+    #[allow(dead_code)]
     pub fn has_pending(&self, request_id: &str) -> bool {
         self.pending.lock().contains_key(request_id)
     }
 
     /// Cancela todos os pedidos de uma sessão (fim do turno Code).
+    #[allow(dead_code)]
     pub fn cancel_for_conversation(&self, conversation_id: &str) -> usize {
         let mut pending = self.pending.lock();
         let ids: Vec<String> = pending
@@ -97,6 +96,7 @@ impl QuestionRegistry {
         count
     }
 
+    #[allow(dead_code)]
     pub fn cancel_all(&self) -> usize {
         let pending: Vec<(String, PendingQuestion)> = self.pending.lock().drain().collect();
         let count = pending.len();
@@ -189,7 +189,9 @@ pub fn normalize_questions(
             .map(str::to_string)
             .unwrap_or_else(|| format!("q{}", index + 1));
         if !seen_ids.insert(id.clone()) {
-            return Err(format!("ASK_USER_INVALID: id de pergunta duplicado: `{id}`"));
+            return Err(format!(
+                "ASK_USER_INVALID: id de pergunta duplicado: `{id}`"
+            ));
         }
         let mut options = Vec::new();
         if let Some(raw_options) = item.get("options").and_then(|value| value.as_array()) {

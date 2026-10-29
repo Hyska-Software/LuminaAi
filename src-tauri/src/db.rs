@@ -14,12 +14,13 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::domain::{
     conversation_mode_or_default, now_ms, ApprovalDecision, ApprovalRule, ApprovalScope, Artifact,
-    ArtifactKind, AttachmentInfo, ChatMessage, Conversation, ConversationDetail, FileChangeKind,
-    LibraryArtifact, MessageRole, MessageStatus, PermissionMode, UsageInfo, Workspace,
-    CONVERSATION_MODE_CHAT,
+    ArtifactKind, AttachmentInfo, CacheBreakReason, CacheSample, CacheState, ChatMessage,
+    Conversation, ConversationDetail, FileChangeKind, LibraryArtifact, MessageRole, MessageStatus,
+    PermissionMode, SegmentDigest, UsageInfo, Workspace, CONVERSATION_MODE_CHAT,
 };
 
 /* ------------------------------------------------------------------ */
@@ -140,7 +141,18 @@ CREATE TABLE IF NOT EXISTS usage_log (
   cached_tokens    INTEGER,
   total_tokens     INTEGER,
   cost             REAL,
-  created_at       INTEGER NOT NULL
+  -- Cache de prompt (docs/goals/prompt-cache/PLAN.md §5.3). Granularidade
+  -- continua 1 linha por turno (billing); a verdade por request de wire fica em
+  -- `cache_samples`. Bancos antigos ganham estas colunas na migração aditiva.
+  cache_read_tokens     INTEGER,
+  cache_write_tokens    INTEGER,
+  uncached_input_tokens INTEGER,
+  cache_hit_percent     REAL,
+  cache_epoch           INTEGER,
+  prefix_hash           TEXT,
+  break_reason          TEXT,
+  protocol              TEXT,
+  created_at            INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS meta (
@@ -218,6 +230,116 @@ CREATE TABLE IF NOT EXISTS approval_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_approval_rules_scope ON approval_rules(scope, scope_id);
 CREATE INDEX IF NOT EXISTS idx_approval_rules_tool ON approval_rules(tool);
+
+/* ---- cache de prompt (docs/goals/prompt-cache/PLAN.md §4.4/§5.3) ---- */
+
+-- System prompt + tools congelados por sessão (F2.1/F3.1). A chave natural é
+-- (conversa, snapshot_key) com snapshot_key = provider|model|profile|workspace|prompt_version.
+CREATE TABLE IF NOT EXISTS prompt_snapshots (
+  conversation_id TEXT NOT NULL,
+  snapshot_key    TEXT NOT NULL,
+  provider_id     TEXT NOT NULL,
+  model_id        TEXT NOT NULL,
+  profile         TEXT NOT NULL,
+  workspace_id    TEXT,
+  prompt_version  INTEGER NOT NULL,
+  system_text     TEXT NOT NULL,
+  tools_json      TEXT NOT NULL,
+  stable_hash     TEXT NOT NULL,
+  tools_hash      TEXT NOT NULL,
+  created_at      INTEGER NOT NULL,
+  invalidated_at  INTEGER,
+  PRIMARY KEY (conversation_id, snapshot_key)
+);
+
+-- Decisão de render congelada por mensagem (F2.7a): imagem vs. texto, anexo
+-- truncado, replay bruto vs. fallback neutro. Nunca é recalculada em silêncio.
+CREATE TABLE IF NOT EXISTS render_decisions (
+  message_id   TEXT NOT NULL,
+  kind         TEXT NOT NULL,
+  digest       TEXT NOT NULL,
+  payload      TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  PRIMARY KEY (message_id, kind)
+);
+
+-- Contexto/plano/modo na cauda do replay (F2.5a/F2.5b): append-only, posição
+-- exata por (after_message_id, after_step) + desempate estável `seq`. O texto é
+-- renderizado como user-role marcado; o dedupe é por conversa + sha256 do texto.
+CREATE TABLE IF NOT EXISTS surface_items (
+  id               TEXT PRIMARY KEY,
+  conversation_id  TEXT NOT NULL,
+  after_message_id TEXT,
+  after_step       INTEGER,
+  seq              INTEGER NOT NULL,
+  kind             TEXT NOT NULL,
+  digest           TEXT NOT NULL,
+  text             TEXT NOT NULL,
+  created_at       INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_surface_items_dedupe
+  ON surface_items(conversation_id, digest);
+CREATE INDEX IF NOT EXISTS idx_surface_items_order
+  ON surface_items(conversation_id, after_message_id, after_step, seq);
+CREATE INDEX IF NOT EXISTS idx_surface_items_conv
+  ON surface_items(conversation_id, created_at);
+
+-- Estado canônico por conversa (F1.1): último prefixo/digest, epoch e agregados.
+CREATE TABLE IF NOT EXISTS cache_state (
+  conversation_id      TEXT PRIMARY KEY,
+  provider_id          TEXT,
+  model_id             TEXT,
+  protocol             TEXT,
+  epoch                INTEGER NOT NULL DEFAULT 0,
+  prefix_hash          TEXT,
+  prefix_segments      TEXT, -- JSON compacto (cap de 500 segmentos)
+  prompt_snapshot_hash TEXT,
+  -- Watermark do corte de emergência do histórico do Chat (F2b, PLAN §4.3):
+  -- `seq` da primeira mensagem incluída; NULL = histórico sem corte. Só avança
+  -- em saltos (≥20% do budget) e em fronteira de turno, nunca 1 mensagem/turno.
+  chat_cut_seq         INTEGER,
+  cache_read           INTEGER NOT NULL DEFAULT 0,
+  cache_write          INTEGER NOT NULL DEFAULT 0,
+  uncached             INTEGER NOT NULL DEFAULT 0,
+  samples              INTEGER NOT NULL DEFAULT 0,
+  last_hit_percent     REAL,
+  last_ceiling_percent REAL,
+  last_at              INTEGER,
+  last_break_reason    TEXT,
+  last_break_detail    TEXT,
+  updated_at           INTEGER NOT NULL
+);
+
+-- Amostra por request de wire (criada na F0b.3; a amostra nasce em memória na
+-- F0a.2; §4.7). Fonte canônica do agregado/benchmark; retenção de 500/conversa.
+CREATE TABLE IF NOT EXISTS cache_samples (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id    TEXT NOT NULL,
+  turn_id            TEXT,
+  step               INTEGER NOT NULL,
+  provider_id        TEXT,
+  model_id           TEXT,
+  protocol           TEXT,
+  epoch              INTEGER NOT NULL,
+  prefix_hash        TEXT,
+  input_total        INTEGER,
+  cache_read         INTEGER,
+  cache_write        INTEGER,
+  uncached           INTEGER,
+  hit_percent        REAL,
+  ceiling_percent    REAL,
+  prefix_tokens_est  INTEGER,
+  delta_tokens_est   INTEGER,
+  eligible           INTEGER NOT NULL DEFAULT 1,
+  excluded_reason    TEXT,
+  state              TEXT NOT NULL,
+  break_reason       TEXT,
+  break_detail       TEXT,
+  raw_usage          TEXT,
+  created_at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cache_samples_conv
+  ON cache_samples(conversation_id, created_at);
 ";
 
 /* ------------------------------------------------------------------ */
@@ -355,6 +477,190 @@ pub struct NewApprovalRule<'a> {
     pub matcher: &'a str,
     pub pattern: &'a str,
     pub decision: ApprovalDecision,
+}
+
+/* ------------------------------------------------------------------ */
+/* Cache de prompt: linhas persistidas (PLAN §5.3)                     */
+/* ------------------------------------------------------------------ */
+
+/// Retenção de `cache_samples` por conversa (PLAN §5.3): quando a 501ª amostra
+/// chega, as mais antigas são descartadas em rotação. O agregado continua
+/// disponível em `cache_state`.
+pub const CACHE_SAMPLES_RETENTION: u32 = 500;
+
+/// Cap do JSON de `cache_state.prefix_segments` (PLAN §5.3). Os segmentos são
+/// gravados do início do prefixo: truncar o fim preserva a comparação do head.
+pub const CACHE_STATE_MAX_SEGMENTS: usize = 500;
+
+/// Item da superfície append-only (`surface_items`, PLAN §4.4): contexto
+/// dinâmico (runtime/plan/todo/mode/workspace/date) posicionado na cauda exata
+/// do replay por `(after_message_id, after_step, seq)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfaceItemRecord {
+    pub id: String,
+    pub conversation_id: String,
+    /// Mensagem após a qual o item entra (`None` = início do replay).
+    pub after_message_id: Option<String>,
+    /// Passo do replay multi-step (`None` = fim do grupo da mensagem).
+    pub after_step: Option<u32>,
+    /// Desempate estável entre itens no mesmo ponto (append-only).
+    pub seq: u32,
+    pub kind: String,
+    /// SHA-256 do `text` (hex), usado no dedupe por conversa.
+    pub digest: String,
+    pub text: String,
+    pub created_at: i64,
+}
+
+impl SurfaceItemRecord {
+    /// Item novo: `id`/`digest`/`created_at` gerados aqui (`digest` =
+    /// [`surface_digest`]). A posição (`after_message_id`/`after_step`/`seq`) é
+    /// do chamador (replay do harness).
+    pub fn new(
+        conversation_id: impl Into<String>,
+        after_message_id: Option<&str>,
+        after_step: Option<u32>,
+        kind: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Self {
+        let text = text.into();
+        let digest = surface_digest(&text);
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            conversation_id: conversation_id.into(),
+            after_message_id: after_message_id.map(str::to_string),
+            after_step,
+            seq: 0,
+            kind: kind.into(),
+            digest,
+            text,
+            created_at: now_ms(),
+        }
+    }
+
+    /// Define o desempate no mesmo ponto (builder; devolve o próprio item).
+    pub fn with_seq(mut self, seq: u32) -> Self {
+        self.seq = seq;
+        self
+    }
+}
+
+/// SHA-256 (hex) do texto de um `surface_item`; é o `digest` do dedupe
+/// `UNIQUE(conversation_id, digest)`.
+pub fn surface_digest(text: &str) -> String {
+    sha256_hex(text.as_bytes())
+}
+
+/// Estado canônico de cache por conversa (`cache_state`, PLAN §5.3). Guarda o
+/// último prefixo/digest, o epoch e o agregado consumido pelo `get_cache_stats`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CacheStateRecord {
+    pub conversation_id: String,
+    pub provider_id: Option<String>,
+    pub model_id: Option<String>,
+    pub protocol: Option<String>,
+    pub epoch: u32,
+    pub prefix_hash: Option<String>,
+    /// Segmentos do prefixo do último request (JSON compacto, cap 500).
+    pub prefix_segments: Option<Vec<SegmentDigest>>,
+    pub prompt_snapshot_hash: Option<String>,
+    /// Watermark do corte de emergência do histórico do Chat (F2b, PLAN §4.3):
+    /// `seq` da primeira mensagem incluída; `None` = histórico sem corte. O
+    /// harness só avança em saltos (≥20% do budget) e em fronteira de turno.
+    pub chat_cut_seq: Option<u32>,
+    pub cache_read: u32,
+    pub cache_write: u32,
+    pub uncached: u32,
+    pub samples: u32,
+    pub last_hit_percent: Option<f32>,
+    pub last_ceiling_percent: Option<f32>,
+    pub last_at: Option<i64>,
+    pub last_break_reason: Option<CacheBreakReason>,
+    pub last_break_detail: Option<String>,
+    pub updated_at: i64,
+}
+
+impl CacheStateRecord {
+    /// Estado vazio de uma conversa, com `updated_at` = agora.
+    pub fn new(conversation_id: impl Into<String>) -> Self {
+        Self {
+            conversation_id: conversation_id.into(),
+            updated_at: now_ms(),
+            ..Self::default()
+        }
+    }
+}
+
+/// `prompt_snapshots`: system prompt + tools congelados por sessão (PLAN §4.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptSnapshotRecord {
+    pub conversation_id: String,
+    /// `provider|model|profile|workspace|prompt_version`.
+    pub snapshot_key: String,
+    pub provider_id: String,
+    pub model_id: String,
+    pub profile: String,
+    pub workspace_id: Option<String>,
+    pub prompt_version: i64,
+    pub system_text: String,
+    pub tools_json: String,
+    pub stable_hash: String,
+    pub tools_hash: String,
+    pub created_at: i64,
+    pub invalidated_at: Option<i64>,
+}
+
+/// `render_decisions`: decisão de render congelada por (mensagem, tipo) para o
+/// replay nunca recalcular imagem/anexo/replay de uma mensagem já enviada.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderDecisionRecord {
+    pub message_id: String,
+    /// image | document | attachment | replay
+    pub kind: String,
+    pub digest: String,
+    /// JSON opaco da decisão (a referência congelada).
+    pub payload: String,
+    pub created_at: i64,
+}
+
+/// Agregado da sessão a partir de `cache_samples` (fonte canônica do
+/// `get_cache_stats`). Somas token-weighted e contagem de amostras elegíveis.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CacheSessionAggregate {
+    pub samples: u32,
+    pub eligible_samples: u32,
+    pub input_total: u32,
+    pub cache_read: u32,
+    pub cache_write: u32,
+    pub uncached: u32,
+    /// Somas restritas às amostras elegíveis (base do hit% de sessão/steady).
+    pub eligible_input_total: u32,
+    pub eligible_cache_read: u32,
+}
+
+impl CacheSessionAggregate {
+    /// `Σ cache_read / Σ input_total` de todas as amostras (ciclo de vida).
+    pub fn hit_percent(&self) -> Option<f32> {
+        percent_of(self.cache_read, self.input_total)
+    }
+
+    /// `Σ cache_read / Σ input_total` das amostras elegíveis (meta de sessão).
+    pub fn eligible_hit_percent(&self) -> Option<f32> {
+        percent_of(self.eligible_cache_read, self.eligible_input_total)
+    }
+}
+
+/// Metadados opcionais de cache de prompt para a linha de `usage_log` (1 por
+/// turno, billing). `record_usage` grava só os campos derivados de `UsageInfo`;
+/// [`Db::record_usage_with_cache`] aceita também epoch/prefixo/quebra/protocolo.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UsageLogCache<'a> {
+    /// Quando `None`, é derivado de `UsageInfo` (read/total*100 se reportado).
+    pub cache_hit_percent: Option<f32>,
+    pub cache_epoch: Option<u32>,
+    pub prefix_hash: Option<&'a str>,
+    pub break_reason: Option<CacheBreakReason>,
+    pub protocol: Option<&'a str>,
 }
 
 /* ------------------------------------------------------------------ */
@@ -519,6 +825,62 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Migração aditiva e idempotente da tabela `usage_log`: bancos criados antes do
+/// cache de prompt ganham as colunas de cache do §5.3 do plano. Nenhuma linha é
+/// perdida; reabrir o banco não recria nada. As colunas novas são preenchidas
+/// apenas por [`Db::record_usage_with_cache`] (e derivadas de `UsageInfo` em
+/// [`Db::record_usage`]) — linhas antigas ficam com `NULL` ("não reportado").
+fn migrate_usage_log_schema(conn: &Connection) -> Result<()> {
+    const CACHE_COLUMNS: &[(&str, &str)] = &[
+        (
+            "cache_read_tokens",
+            "ALTER TABLE usage_log ADD COLUMN cache_read_tokens INTEGER",
+        ),
+        (
+            "cache_write_tokens",
+            "ALTER TABLE usage_log ADD COLUMN cache_write_tokens INTEGER",
+        ),
+        (
+            "uncached_input_tokens",
+            "ALTER TABLE usage_log ADD COLUMN uncached_input_tokens INTEGER",
+        ),
+        (
+            "cache_hit_percent",
+            "ALTER TABLE usage_log ADD COLUMN cache_hit_percent REAL",
+        ),
+        (
+            "cache_epoch",
+            "ALTER TABLE usage_log ADD COLUMN cache_epoch INTEGER",
+        ),
+        (
+            "prefix_hash",
+            "ALTER TABLE usage_log ADD COLUMN prefix_hash TEXT",
+        ),
+        (
+            "break_reason",
+            "ALTER TABLE usage_log ADD COLUMN break_reason TEXT",
+        ),
+        ("protocol", "ALTER TABLE usage_log ADD COLUMN protocol TEXT"),
+    ];
+    for (column, ddl) in CACHE_COLUMNS {
+        ensure_column(conn, "usage_log", column, ddl)?;
+    }
+    Ok(())
+}
+
+/// Migração aditiva e idempotente da tabela `cache_state`: bancos criados antes
+/// do watermark do histórico do Chat (F2b) ganham `chat_cut_seq` (`NULL` =
+/// histórico sem corte). Nenhuma linha é perdida; reabrir o banco não recria a
+/// coluna.
+fn migrate_cache_state_schema(conn: &Connection) -> Result<()> {
+    ensure_column(
+        conn,
+        "cache_state",
+        "chat_cut_seq",
+        "ALTER TABLE cache_state ADD COLUMN chat_cut_seq INTEGER",
+    )
+}
+
 /* ------------------------------------------------------------------ */
 /* Enum <-> TEXT helpers                                               */
 /* ------------------------------------------------------------------ */
@@ -629,6 +991,68 @@ fn approval_decision_from_str(raw: &str) -> ApprovalDecision {
     }
 }
 
+/// `CacheState` <-> TEXT de `cache_samples.state` e `cache_state.last_*`. Os
+/// slugs espelham o `#[serde(rename_all = "snake_case")]` do contrato de IPC.
+/// Valor desconhecido cai em `Cold` (nunca promove um estado sem evidência).
+fn cache_state_to_str(state: CacheState) -> &'static str {
+    match state {
+        CacheState::Cold => "cold",
+        CacheState::Warming => "warming",
+        CacheState::Stable => "stable",
+        CacheState::Degraded => "degraded",
+        CacheState::Unsupported => "unsupported",
+        CacheState::ProviderPolicy => "provider_policy",
+    }
+}
+
+fn cache_state_from_str(raw: &str) -> CacheState {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "warming" => CacheState::Warming,
+        "stable" => CacheState::Stable,
+        "degraded" => CacheState::Degraded,
+        "unsupported" => CacheState::Unsupported,
+        "provider_policy" => CacheState::ProviderPolicy,
+        _ => CacheState::Cold,
+    }
+}
+
+/// `CacheBreakReason` <-> TEXT de `cache_samples.break_reason` e
+/// `cache_state.last_break_reason` (slugs snake_case do contrato).
+fn cache_break_reason_to_str(reason: CacheBreakReason) -> &'static str {
+    match reason {
+        CacheBreakReason::FirstRequest => "first_request",
+        CacheBreakReason::SystemPrompt => "system_prompt",
+        CacheBreakReason::ToolDefinitions => "tool_definitions",
+        CacheBreakReason::HistoryRewrite => "history_rewrite",
+        CacheBreakReason::HeadTrim => "head_trim",
+        CacheBreakReason::Compaction => "compaction",
+        CacheBreakReason::ModelSwitch => "model_switch",
+        CacheBreakReason::ProtocolFallback => "protocol_fallback",
+        CacheBreakReason::Attachments => "attachments",
+        CacheBreakReason::ConfigChange => "config_change",
+        CacheBreakReason::TtlExpired => "ttl_expired",
+        CacheBreakReason::ProviderPolicy => "provider_policy",
+    }
+}
+
+fn cache_break_reason_from_str(raw: &str) -> Option<CacheBreakReason> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "first_request" => Some(CacheBreakReason::FirstRequest),
+        "system_prompt" => Some(CacheBreakReason::SystemPrompt),
+        "tool_definitions" => Some(CacheBreakReason::ToolDefinitions),
+        "history_rewrite" => Some(CacheBreakReason::HistoryRewrite),
+        "head_trim" => Some(CacheBreakReason::HeadTrim),
+        "compaction" => Some(CacheBreakReason::Compaction),
+        "model_switch" => Some(CacheBreakReason::ModelSwitch),
+        "protocol_fallback" => Some(CacheBreakReason::ProtocolFallback),
+        "attachments" => Some(CacheBreakReason::Attachments),
+        "config_change" => Some(CacheBreakReason::ConfigChange),
+        "ttl_expired" => Some(CacheBreakReason::TtlExpired),
+        "provider_policy" => Some(CacheBreakReason::ProviderPolicy),
+        _ => None,
+    }
+}
+
 /// True when the error is a SQLite constraint violation (path de workspace
 /// duplicado, id repetido, …), usado para devolver mensagens amigáveis.
 fn is_constraint_violation(error: &rusqlite::Error) -> bool {
@@ -664,6 +1088,38 @@ fn like_pattern(query: &str) -> String {
 
 fn u32_from_db(value: Option<i64>) -> Option<u32> {
     value.and_then(|v| u32::try_from(v).ok())
+}
+
+/// Soma agregada do SQL (`SUM` devolve `i64`) com clamp em `u32::MAX`.
+fn u32_from_count(value: i64) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+fn f32_from_db(value: Option<f64>) -> Option<f32> {
+    value.map(|value| value as f32)
+}
+
+/// `Some(&str)` quando o texto (trim) não é vazio; usado para colunas nullable
+/// que o domínio representa como `String` (turn/provider/model/protocol).
+fn non_empty(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()).then_some(value)
+}
+
+/// Percentual `part / total * 100`; `None` quando não há denominador (nada
+/// reportado, nenhuma amostra) — nunca inventa 100%.
+fn percent_of(part: u32, total: u32) -> Option<f32> {
+    (total > 0).then(|| (part as f64 / total as f64 * 100.0) as f32)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(64);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 /* ------------------------------------------------------------------ */
@@ -744,6 +1200,124 @@ fn session_summary_from_row(row: &Row<'_>) -> rusqlite::Result<SessionSummary> {
         content: row.get(4)?,
         tokens: u32_from_db(row.get(5)?),
         created_at: row.get(6)?,
+    })
+}
+
+/// Colunas de `cache_samples` lidas por [`cache_sample_from_row`] (a ordem
+/// precisa bater com o mapper).
+const CACHE_SAMPLE_COLUMNS: &str = "turn_id, step, provider_id, model_id, protocol, epoch, \
+     input_total, cache_read, cache_write, uncached, hit_percent, ceiling_percent, \
+     prefix_tokens_est, delta_tokens_est, eligible, excluded_reason, state, break_reason, \
+     break_detail, raw_usage, created_at";
+
+/// Colunas de `cache_state` lidas por [`cache_state_from_row`] (ordem do mapper).
+const CACHE_STATE_COLUMNS: &str = "conversation_id, provider_id, model_id, protocol, epoch, \
+     prefix_hash, prefix_segments, prompt_snapshot_hash, chat_cut_seq, cache_read, cache_write, \
+     uncached, samples, last_hit_percent, last_ceiling_percent, last_at, last_break_reason, \
+     last_break_detail, updated_at";
+
+/// Colunas de `prompt_snapshots` lidas por [`prompt_snapshot_from_row`].
+const PROMPT_SNAPSHOT_COLUMNS: &str = "conversation_id, snapshot_key, provider_id, model_id, \
+     profile, workspace_id, prompt_version, system_text, tools_json, stable_hash, tools_hash, \
+     created_at, invalidated_at";
+
+/// Colunas de `surface_items` lidas por [`surface_item_from_row`].
+const SURFACE_ITEM_COLUMNS: &str = "id, conversation_id, after_message_id, after_step, seq, \
+     kind, digest, text, created_at";
+
+fn surface_item_from_row(row: &Row<'_>) -> rusqlite::Result<SurfaceItemRecord> {
+    Ok(SurfaceItemRecord {
+        id: row.get(0)?,
+        conversation_id: row.get(1)?,
+        after_message_id: row.get(2)?,
+        after_step: u32_from_db(row.get(3)?),
+        seq: u32_from_count(row.get(4)?),
+        kind: row.get(5)?,
+        digest: row.get(6)?,
+        text: row.get(7)?,
+        created_at: row.get(8)?,
+    })
+}
+
+fn cache_sample_from_row(row: &Row<'_>) -> rusqlite::Result<CacheSample> {
+    let state: String = row.get(16)?;
+    let break_reason: Option<String> = row.get(17)?;
+    let raw_usage: Option<String> = row.get(19)?;
+    Ok(CacheSample {
+        turn_id: row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+        step: u32_from_count(row.get(1)?),
+        provider_id: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+        model_id: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+        protocol: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+        epoch: u32_from_count(row.get(5)?),
+        input_total: u32_from_db(row.get(6)?).unwrap_or(0),
+        cache_read: u32_from_db(row.get(7)?).unwrap_or(0),
+        cache_write: u32_from_db(row.get(8)?).unwrap_or(0),
+        uncached: u32_from_db(row.get(9)?).unwrap_or(0),
+        hit_percent: f32_from_db(row.get(10)?),
+        ceiling_percent: f32_from_db(row.get(11)?),
+        prefix_tokens_est: u32_from_db(row.get(12)?).unwrap_or(0),
+        delta_tokens_est: u32_from_db(row.get(13)?).unwrap_or(0),
+        eligible: row.get::<_, i64>(14)? != 0,
+        excluded_reason: row.get(15)?,
+        state: cache_state_from_str(&state),
+        break_reason: break_reason.as_deref().and_then(cache_break_reason_from_str),
+        break_detail: row.get(18)?,
+        raw_usage: decode_opt_value(raw_usage),
+        at: row.get(20)?,
+    })
+}
+
+fn cache_state_from_row(row: &Row<'_>) -> rusqlite::Result<CacheStateRecord> {
+    let last_break_reason: Option<String> = row.get(16)?;
+    Ok(CacheStateRecord {
+        conversation_id: row.get(0)?,
+        provider_id: row.get(1)?,
+        model_id: row.get(2)?,
+        protocol: row.get(3)?,
+        epoch: u32_from_count(row.get(4)?),
+        prefix_hash: row.get(5)?,
+        prefix_segments: decode_opt::<Vec<SegmentDigest>>(row.get(6)?),
+        prompt_snapshot_hash: row.get(7)?,
+        chat_cut_seq: u32_from_db(row.get(8)?),
+        cache_read: u32_from_count(row.get(9)?),
+        cache_write: u32_from_count(row.get(10)?),
+        uncached: u32_from_count(row.get(11)?),
+        samples: u32_from_count(row.get(12)?),
+        last_hit_percent: f32_from_db(row.get(13)?),
+        last_ceiling_percent: f32_from_db(row.get(14)?),
+        last_at: row.get(15)?,
+        last_break_reason: last_break_reason.as_deref().and_then(cache_break_reason_from_str),
+        last_break_detail: row.get(17)?,
+        updated_at: row.get(18)?,
+    })
+}
+
+fn prompt_snapshot_from_row(row: &Row<'_>) -> rusqlite::Result<PromptSnapshotRecord> {
+    Ok(PromptSnapshotRecord {
+        conversation_id: row.get(0)?,
+        snapshot_key: row.get(1)?,
+        provider_id: row.get(2)?,
+        model_id: row.get(3)?,
+        profile: row.get(4)?,
+        workspace_id: row.get(5)?,
+        prompt_version: row.get(6)?,
+        system_text: row.get(7)?,
+        tools_json: row.get(8)?,
+        stable_hash: row.get(9)?,
+        tools_hash: row.get(10)?,
+        created_at: row.get(11)?,
+        invalidated_at: row.get(12)?,
+    })
+}
+
+fn render_decision_from_row(row: &Row<'_>) -> rusqlite::Result<RenderDecisionRecord> {
+    Ok(RenderDecisionRecord {
+        message_id: row.get(0)?,
+        kind: row.get(1)?,
+        digest: row.get(2)?,
+        payload: row.get(3)?,
+        created_at: row.get(4)?,
     })
 }
 
@@ -948,6 +1522,56 @@ fn refresh_conversation_stats(conn: &Connection, conversation_id: &str) -> Resul
     Ok(())
 }
 
+/// Remove os órfãos do cache de prompt quando a cauda de mensagens a partir de
+/// `message_id` (inclusive) é apagada: `render_decisions` e `surface_items`
+/// ancorados nessas mensagens não têm mais onde entrar no replay. Roda na
+/// transação de [`Db::delete_messages_from`], **antes** do DELETE das mensagens
+/// (a posição da âncora é lida de `messages`). Idempotente: se a âncora já não
+/// existe, só remove o que aponta diretamente para ela.
+fn delete_cache_rows_from_message(
+    conn: &Connection,
+    conversation_id: &str,
+    message_id: &str,
+) -> Result<()> {
+    let anchor_created_at: Option<i64> = conn
+        .query_row(
+            "SELECT created_at FROM messages WHERE id = ?1 AND conversation_id = ?2",
+            params![message_id, conversation_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("falha ao localizar a mensagem âncora da cauda")?;
+    let Some(created_at) = anchor_created_at else {
+        conn.execute(
+            "DELETE FROM render_decisions WHERE message_id = ?1",
+            [message_id],
+        )
+        .context("falha ao remover decisões de render órfãs")?;
+        conn.execute(
+            "DELETE FROM surface_items WHERE conversation_id = ?1 AND after_message_id = ?2",
+            params![conversation_id, message_id],
+        )
+        .context("falha ao remover itens de superfície órfãos")?;
+        return Ok(());
+    };
+    // Mesma ordem usada em `delete_messages_from`: `(created_at, id)`.
+    conn.execute(
+        "DELETE FROM render_decisions WHERE message_id IN (\
+           SELECT id FROM messages WHERE conversation_id = ?1 \
+             AND (created_at > ?2 OR (created_at = ?2 AND id >= ?3)))",
+        params![conversation_id, created_at, message_id],
+    )
+    .context("falha ao remover decisões de render da cauda")?;
+    conn.execute(
+        "DELETE FROM surface_items WHERE conversation_id = ?1 AND after_message_id IN (\
+           SELECT id FROM messages WHERE conversation_id = ?1 \
+             AND (created_at > ?2 OR (created_at = ?2 AND id >= ?3)))",
+        params![conversation_id, created_at, message_id],
+    )
+    .context("falha ao remover itens de superfície da cauda")?;
+    Ok(())
+}
+
 /// Best-effort removal of an artifact file and its `<artifact-id>` folder.
 /// Only directories that look like `.../artifacts/<id>` are removed.
 pub(crate) fn remove_artifact_files(artifact_id: &str, path: &str) {
@@ -1014,6 +1638,11 @@ impl Db {
         migrate_conversations_schema(conn)?;
         // Biblioteca: `favorite` + `conversation_id` nullable (uploads do usuário).
         migrate_artifacts_schema(conn)?;
+        // Cache de prompt: colunas aditivas em `usage_log` (as tabelas novas são
+        // criadas pelo próprio `SCHEMA` com `IF NOT EXISTS`).
+        migrate_usage_log_schema(conn)?;
+        // Watermark do histórico do Chat: coluna aditiva em `cache_state` (F2b).
+        migrate_cache_state_schema(conn)?;
         Ok(())
     }
 
@@ -1158,6 +1787,14 @@ impl Db {
         };
         {
             let tx = conn.unchecked_transaction()?;
+            // Órfãos do cache de prompt: decisões de render são chaveadas por
+            // `message_id` (sem `conversation_id`), então a limpeza precisa rodar
+            // antes do DELETE das mensagens. As demais tabelas têm a conversa.
+            tx.execute(
+                "DELETE FROM render_decisions WHERE message_id IN \
+                 (SELECT id FROM messages WHERE conversation_id = ?1)",
+                [id],
+            )?;
             tx.execute("DELETE FROM messages WHERE conversation_id = ?1", [id])?;
             tx.execute("DELETE FROM artifacts WHERE conversation_id = ?1", [id])?;
             // Trilha/journal/resumos da sessão de código.
@@ -1169,6 +1806,11 @@ impl Db {
                 "DELETE FROM approval_rules WHERE scope = 'session' AND scope_id = ?1",
                 [id],
             )?;
+            // Cache de prompt (surface/snapshots/estado/amostras) da sessão.
+            tx.execute("DELETE FROM surface_items WHERE conversation_id = ?1", [id])?;
+            tx.execute("DELETE FROM prompt_snapshots WHERE conversation_id = ?1", [id])?;
+            tx.execute("DELETE FROM cache_state WHERE conversation_id = ?1", [id])?;
+            tx.execute("DELETE FROM cache_samples WHERE conversation_id = ?1", [id])?;
             tx.execute("DELETE FROM conversations WHERE id = ?1", [id])?;
             tx.commit()?;
         }
@@ -1937,6 +2579,9 @@ impl Db {
             )
             .optional()?;
         if let Some(created_at) = target_created_at {
+            // Órfãos do cache de prompt da cauda (PLAN §4.4: apagados no mesmo
+            // passo em que a mensagem âncora sai do replay).
+            delete_cache_rows_from_message(&tx, conversation_id, message_id)?;
             tx.execute(
                 "DELETE FROM messages WHERE conversation_id = ?1 \
                  AND (created_at > ?2 OR (created_at = ?2 AND id >= ?3))",
@@ -2158,6 +2803,10 @@ impl Db {
 
     /* ---------------- usage ---------------- */
 
+    /// Registra o uso de um turno em `usage_log` (billing; 1 linha por turno,
+    /// conforme §5.3 do plano). Os contadores de cache de `UsageInfo` são
+    /// gravados normalizados; epoch/prefixo/quebra/protocolo ficam `NULL` até
+    /// existirem — use [`Db::record_usage_with_cache`] para preenchê-los.
     pub fn record_usage(
         &self,
         conversation_id: &str,
@@ -2166,12 +2815,48 @@ impl Db {
         model_id: &str,
         usage: &UsageInfo,
     ) -> anyhow::Result<()> {
+        self.record_usage_with_cache(
+            conversation_id,
+            message_id,
+            provider_id,
+            model_id,
+            usage,
+            &UsageLogCache::default(),
+        )
+    }
+
+    /// Como [`Db::record_usage`], mas aceita os metadados de cache de prompt
+    /// (epoch, prefixo, razão de quebra e protocolo). `cache_hit_percent` é
+    /// derivado de `UsageInfo` (`cache_read / input_total * 100`) quando
+    /// `cache.cache_hit_percent` é `None` e o provedor reportou cache — se não
+    /// reportou, fica `NULL` (nunca 100%).
+    pub fn record_usage_with_cache(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        provider_id: &str,
+        model_id: &str,
+        usage: &UsageInfo,
+        cache: &UsageLogCache<'_>,
+    ) -> anyhow::Result<()> {
+        let cache_usage = usage.cache_usage();
+        let hit_percent = cache.cache_hit_percent.or_else(|| {
+            if !cache_usage.reported {
+                return None;
+            }
+            percent_of(
+                cache_usage.cache_read_tokens.unwrap_or(0),
+                cache_usage.input_total_tokens.unwrap_or(0),
+            )
+        });
         let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO usage_log (conversation_id, message_id, provider_id, model_id, \
              input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, \
-             cost, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             cost, cache_read_tokens, cache_write_tokens, uncached_input_tokens, \
+             cache_hit_percent, cache_epoch, prefix_hash, break_reason, protocol, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
+                     ?17, ?18, ?19)",
             params![
                 conversation_id,
                 message_id,
@@ -2183,6 +2868,14 @@ impl Db {
                 usage.cached_tokens.map(i64::from),
                 usage.total_tokens.map(i64::from),
                 usage.cost,
+                cache_usage.cache_read_tokens.map(i64::from),
+                cache_usage.cache_write_tokens.map(i64::from),
+                cache_usage.uncached_input_tokens.map(i64::from),
+                hit_percent.map(f64::from),
+                cache.cache_epoch.map(i64::from),
+                cache.prefix_hash,
+                cache.break_reason.map(cache_break_reason_to_str),
+                cache.protocol,
                 now_ms(),
             ],
         )
@@ -2196,7 +2889,8 @@ impl Db {
         const SUM_COLUMNS: &str = "COUNT(*), COALESCE(SUM(input_tokens), 0), \
              COALESCE(SUM(output_tokens), 0), COALESCE(SUM(reasoning_tokens), 0), \
              COALESCE(SUM(cached_tokens), 0), COALESCE(SUM(total_tokens), 0), \
-             COALESCE(SUM(cost), 0.0)";
+             COALESCE(SUM(cost), 0.0), COALESCE(SUM(cache_read_tokens), 0), \
+             COALESCE(SUM(cache_write_tokens), 0), COALESCE(SUM(uncached_input_tokens), 0)";
 
         fn stats(row: &Row<'_>, offset: usize) -> rusqlite::Result<serde_json::Value> {
             let requests: i64 = row.get(offset)?;
@@ -2206,6 +2900,9 @@ impl Db {
             let cached_tokens: i64 = row.get(offset + 4)?;
             let total_tokens: i64 = row.get(offset + 5)?;
             let cost: f64 = row.get(offset + 6)?;
+            let cache_read_tokens: i64 = row.get(offset + 7)?;
+            let cache_write_tokens: i64 = row.get(offset + 8)?;
+            let uncached_input_tokens: i64 = row.get(offset + 9)?;
             Ok(serde_json::json!({
                 "requests": requests,
                 "inputTokens": input_tokens,
@@ -2214,6 +2911,9 @@ impl Db {
                 "cachedTokens": cached_tokens,
                 "totalTokens": total_tokens,
                 "cost": cost,
+                "cacheReadTokens": cache_read_tokens,
+                "cacheWriteTokens": cache_write_tokens,
+                "uncachedInputTokens": uncached_input_tokens,
             }))
         }
 
@@ -2276,8 +2976,460 @@ impl Db {
         }))
     }
 
+    /* ---------------- cache de prompt (PLAN §5.3) ---------------- */
+
+    /// Persiste uma amostra de cache por request de wire e aplica a retenção de
+    /// [`CACHE_SAMPLES_RETENTION`] amostras por conversa: quando a 501ª chega, a
+    /// mais antiga cai em rotação (o agregado já está em `cache_state`).
+    /// `prefix_hash` é o hash canônico do prefixo do request, quando houver.
+    /// Devolve o `id` da linha inserida.
+    pub fn insert_cache_sample(
+        &self,
+        conversation_id: &str,
+        sample: &CacheSample,
+        prefix_hash: Option<&str>,
+    ) -> anyhow::Result<i64> {
+        let conversation_id = conversation_id.trim();
+        if conversation_id.is_empty() {
+            return Err(anyhow::anyhow!("a amostra de cache precisa de uma conversa"));
+        }
+        let created_at = if sample.at > 0 { sample.at } else { now_ms() };
+        let raw_usage = sample.raw_usage.as_ref().map(encode_json).transpose()?;
+        let conn = self.conn.lock();
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO cache_samples (conversation_id, turn_id, step, provider_id, model_id, \
+             protocol, epoch, prefix_hash, input_total, cache_read, cache_write, uncached, \
+             hit_percent, ceiling_percent, prefix_tokens_est, delta_tokens_est, eligible, \
+             excluded_reason, state, break_reason, break_detail, raw_usage, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+            params![
+                conversation_id,
+                non_empty(&sample.turn_id),
+                i64::from(sample.step),
+                non_empty(&sample.provider_id),
+                non_empty(&sample.model_id),
+                non_empty(&sample.protocol),
+                i64::from(sample.epoch),
+                prefix_hash.and_then(non_empty),
+                i64::from(sample.input_total),
+                i64::from(sample.cache_read),
+                i64::from(sample.cache_write),
+                i64::from(sample.uncached),
+                sample.hit_percent.map(f64::from),
+                sample.ceiling_percent.map(f64::from),
+                i64::from(sample.prefix_tokens_est),
+                i64::from(sample.delta_tokens_est),
+                if sample.eligible { 1i64 } else { 0i64 },
+                &sample.excluded_reason,
+                cache_state_to_str(sample.state),
+                sample.break_reason.map(cache_break_reason_to_str),
+                &sample.break_detail,
+                &raw_usage,
+                created_at,
+            ],
+        )
+        .context("falha ao registrar a amostra de cache")?;
+        let id = tx.last_insert_rowid();
+        tx.execute(
+            "DELETE FROM cache_samples WHERE conversation_id = ?1 AND id NOT IN (\
+               SELECT id FROM cache_samples WHERE conversation_id = ?1 \
+                ORDER BY id DESC LIMIT ?2)",
+            params![conversation_id, i64::from(CACHE_SAMPLES_RETENTION)],
+        )
+        .context("falha ao aplicar a retenção das amostras de cache")?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// Amostras de cache da conversa, **mais recentes primeiro** (`limit` 0
+    /// devolve vazio). É a fonte do `recent` do `CacheStatsView` (diagnóstico).
+    pub fn list_cache_samples(
+        &self,
+        conversation_id: &str,
+        limit: u32,
+    ) -> anyhow::Result<Vec<CacheSample>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock();
+        let sql = format!(
+            "SELECT {CACHE_SAMPLE_COLUMNS} FROM cache_samples \
+             WHERE conversation_id = ?1 ORDER BY id DESC LIMIT ?2"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![conversation_id, i64::from(limit)], |row| {
+            cache_sample_from_row(row)
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar as amostras de cache")
+    }
+
+    /// Agregado canônico da sessão a partir de `cache_samples`: somas
+    /// token-weighted de `input_total`/read/write/uncached (ciclo de vida) e as
+    /// mesmas somas restritas às amostras elegíveis (base do hit% de sessão).
+    pub fn cache_session_aggregate(
+        &self,
+        conversation_id: &str,
+    ) -> anyhow::Result<CacheSessionAggregate> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT COUNT(*), \
+                    COALESCE(SUM(CASE WHEN eligible <> 0 THEN 1 ELSE 0 END), 0), \
+                    COALESCE(SUM(input_total), 0), \
+                    COALESCE(SUM(cache_read), 0), \
+                    COALESCE(SUM(cache_write), 0), \
+                    COALESCE(SUM(uncached), 0), \
+                    COALESCE(SUM(CASE WHEN eligible <> 0 THEN input_total ELSE 0 END), 0), \
+                    COALESCE(SUM(CASE WHEN eligible <> 0 THEN cache_read ELSE 0 END), 0) \
+               FROM cache_samples WHERE conversation_id = ?1",
+            [conversation_id],
+            |row| {
+                Ok(CacheSessionAggregate {
+                    samples: u32_from_count(row.get(0)?),
+                    eligible_samples: u32_from_count(row.get(1)?),
+                    input_total: u32_from_count(row.get(2)?),
+                    cache_read: u32_from_count(row.get(3)?),
+                    cache_write: u32_from_count(row.get(4)?),
+                    uncached: u32_from_count(row.get(5)?),
+                    eligible_input_total: u32_from_count(row.get(6)?),
+                    eligible_cache_read: u32_from_count(row.get(7)?),
+                })
+            },
+        )
+        .context("falha ao agregar as amostras de cache da sessão")
+    }
+
+    /// Upsert do estado canônico de cache da conversa (`cache_state`): 1 linha
+    /// por conversa, atualizada a cada request. `prefix_segments` é gravado como
+    /// JSON com cap de [`CACHE_STATE_MAX_SEGMENTS`] segmentos; `updated_at` = 0
+    /// vira `now_ms()`. `chat_cut_seq` = 0 não é um `seq` válido (o `seq` do
+    /// replay começa em 1) e é normalizado para `NULL` ("sem corte").
+    pub fn upsert_cache_state(&self, state: &CacheStateRecord) -> anyhow::Result<()> {
+        let conversation_id = state.conversation_id.trim();
+        if conversation_id.is_empty() {
+            return Err(anyhow::anyhow!("o estado de cache precisa de uma conversa"));
+        }
+        let prefix_segments = state
+            .prefix_segments
+            .as_ref()
+            .map(|segments| {
+                let capped = &segments[..segments.len().min(CACHE_STATE_MAX_SEGMENTS)];
+                encode_json(capped)
+            })
+            .transpose()?;
+        // Watermark 0 não existe no replay: grava NULL (histórico sem corte).
+        let chat_cut_seq = state.chat_cut_seq.filter(|seq| *seq > 0);
+        let updated_at = if state.updated_at > 0 {
+            state.updated_at
+        } else {
+            now_ms()
+        };
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO cache_state (conversation_id, provider_id, model_id, protocol, epoch, \
+             prefix_hash, prefix_segments, prompt_snapshot_hash, chat_cut_seq, cache_read, \
+             cache_write, uncached, samples, last_hit_percent, last_ceiling_percent, last_at, \
+             last_break_reason, last_break_detail, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
+                     ?17, ?18, ?19) \
+             ON CONFLICT(conversation_id) DO UPDATE SET \
+               provider_id = excluded.provider_id, \
+               model_id = excluded.model_id, \
+               protocol = excluded.protocol, \
+               epoch = excluded.epoch, \
+               prefix_hash = excluded.prefix_hash, \
+               prefix_segments = excluded.prefix_segments, \
+               prompt_snapshot_hash = excluded.prompt_snapshot_hash, \
+               chat_cut_seq = excluded.chat_cut_seq, \
+               cache_read = excluded.cache_read, \
+               cache_write = excluded.cache_write, \
+               uncached = excluded.uncached, \
+               samples = excluded.samples, \
+               last_hit_percent = excluded.last_hit_percent, \
+               last_ceiling_percent = excluded.last_ceiling_percent, \
+               last_at = excluded.last_at, \
+               last_break_reason = excluded.last_break_reason, \
+               last_break_detail = excluded.last_break_detail, \
+               updated_at = excluded.updated_at",
+            params![
+                conversation_id,
+                &state.provider_id,
+                &state.model_id,
+                &state.protocol,
+                i64::from(state.epoch),
+                &state.prefix_hash,
+                &prefix_segments,
+                &state.prompt_snapshot_hash,
+                chat_cut_seq.map(i64::from),
+                i64::from(state.cache_read),
+                i64::from(state.cache_write),
+                i64::from(state.uncached),
+                i64::from(state.samples),
+                state.last_hit_percent.map(f64::from),
+                state.last_ceiling_percent.map(f64::from),
+                state.last_at,
+                state.last_break_reason.map(cache_break_reason_to_str),
+                &state.last_break_detail,
+                updated_at,
+            ],
+        )
+        .context("falha ao gravar o estado de cache da conversa")?;
+        Ok(())
+    }
+
+    /// Estado canônico de cache da conversa (último request/epoch) ou `None`.
+    pub fn get_cache_state(
+        &self,
+        conversation_id: &str,
+    ) -> anyhow::Result<Option<CacheStateRecord>> {
+        let conn = self.conn.lock();
+        let sql = format!("SELECT {CACHE_STATE_COLUMNS} FROM cache_state WHERE conversation_id = ?1");
+        conn.query_row(&sql, [conversation_id], |row| cache_state_from_row(row))
+            .optional()
+            .context("falha ao ler o estado de cache da conversa")
+    }
+
+    /// Insere um `surface_item` **idempotente por digest**
+    /// (`UNIQUE(conversation_id, digest)`): devolve `true` quando a linha entrou
+    /// e `false` quando o mesmo conteúdo já existia na conversa (ou o `id` já
+    /// estava ocupado). O chamador fornece a posição; use [`SurfaceItemRecord::new`].
+    pub fn insert_surface_item(&self, item: &SurfaceItemRecord) -> anyhow::Result<bool> {
+        if item.id.trim().is_empty() {
+            return Err(anyhow::anyhow!("o item de superfície precisa de um id"));
+        }
+        if item.conversation_id.trim().is_empty() {
+            return Err(anyhow::anyhow!("o item de superfície precisa de uma conversa"));
+        }
+        if item.kind.trim().is_empty() {
+            return Err(anyhow::anyhow!("o item de superfície precisa de um tipo"));
+        }
+        if item.digest.trim().is_empty() {
+            return Err(anyhow::anyhow!("o item de superfície precisa de um digest"));
+        }
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "INSERT OR IGNORE INTO surface_items (id, conversation_id, after_message_id, \
+                 after_step, seq, kind, digest, text, created_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    &item.id,
+                    &item.conversation_id,
+                    &item.after_message_id,
+                    item.after_step.map(i64::from),
+                    i64::from(item.seq),
+                    &item.kind,
+                    &item.digest,
+                    &item.text,
+                    item.created_at,
+                ],
+            )
+            .context("falha ao inserir o item de superfície")?;
+        Ok(changed == 1)
+    }
+
+    /// Itens da conversa em ordem de append (ordem de inserção no banco, que é a
+    /// ordem em que a superfície cresceu). O harness posiciona cada item no
+    /// replay pelo par `(after_message_id, after_step, seq)`.
+    pub fn list_surface_items(
+        &self,
+        conversation_id: &str,
+    ) -> anyhow::Result<Vec<SurfaceItemRecord>> {
+        let conn = self.conn.lock();
+        let sql = format!(
+            "SELECT {SURFACE_ITEM_COLUMNS} FROM surface_items \
+             WHERE conversation_id = ?1 ORDER BY rowid ASC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([conversation_id], |row| surface_item_from_row(row))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar os itens de superfície")
+    }
+
+    /// Remove um item de superfície pelo id (restrito à conversa). `false`
+    /// quando não existia.
+    pub fn delete_surface_item(
+        &self,
+        conversation_id: &str,
+        id: &str,
+    ) -> anyhow::Result<bool> {
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "DELETE FROM surface_items WHERE conversation_id = ?1 AND id = ?2",
+                params![conversation_id, id],
+            )
+            .context("falha ao remover o item de superfície")?;
+        Ok(changed > 0)
+    }
+
+    /// Remove os itens ancorados na mensagem `message_id` **ou depois dela** no
+    /// replay — mesma ordem `(created_at, id)` usada pela poda de mensagens —,
+    /// limpando os órfãos quando a cauda é cancelada/regenerada/truncada
+    /// (PLAN §4.4). Itens sem âncora (`after_message_id = NULL`, início do
+    /// replay) e itens ancorados em mensagens anteriores ficam. Devolve quantos
+    /// itens foram removidos. Se a âncora já não existir, remove apenas os itens
+    /// que apontam diretamente para ela (idempotente).
+    pub fn delete_surface_items_after(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+    ) -> anyhow::Result<usize> {
+        let conn = self.conn.lock();
+        let tx = conn.unchecked_transaction()?;
+        let anchor_created_at: Option<i64> = tx
+            .query_row(
+                "SELECT created_at FROM messages WHERE id = ?1 AND conversation_id = ?2",
+                params![message_id, conversation_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("falha ao localizar a mensagem âncora dos itens de superfície")?;
+        let removed = match anchor_created_at {
+            Some(created_at) => tx.execute(
+                "DELETE FROM surface_items WHERE conversation_id = ?1 AND after_message_id IN (\
+                   SELECT id FROM messages WHERE conversation_id = ?1 \
+                     AND (created_at > ?2 OR (created_at = ?2 AND id >= ?3)))",
+                params![conversation_id, created_at, message_id],
+            ),
+            None => tx.execute(
+                "DELETE FROM surface_items WHERE conversation_id = ?1 AND after_message_id = ?2",
+                params![conversation_id, message_id],
+            ),
+        }
+        .context("falha ao remover os itens de superfície da cauda")?;
+        tx.commit()?;
+        Ok(removed)
+    }
+
+    /// Grava (ou substitui) o `prompt_snapshot` congelado de uma sessão. O par
+    /// `(conversation_id, snapshot_key)` identifica o snapshot; um novo upsert
+    /// substitui o conteúdo (usado na invalidação explícita com epoch novo).
+    pub fn upsert_prompt_snapshot(
+        &self,
+        snapshot: &PromptSnapshotRecord,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO prompt_snapshots (conversation_id, snapshot_key, provider_id, \
+             model_id, profile, workspace_id, prompt_version, system_text, tools_json, \
+             stable_hash, tools_hash, created_at, invalidated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+             ON CONFLICT(conversation_id, snapshot_key) DO UPDATE SET \
+               provider_id = excluded.provider_id, \
+               model_id = excluded.model_id, \
+               profile = excluded.profile, \
+               workspace_id = excluded.workspace_id, \
+               prompt_version = excluded.prompt_version, \
+               system_text = excluded.system_text, \
+               tools_json = excluded.tools_json, \
+               stable_hash = excluded.stable_hash, \
+               tools_hash = excluded.tools_hash, \
+               created_at = excluded.created_at, \
+               invalidated_at = excluded.invalidated_at",
+            params![
+                &snapshot.conversation_id,
+                &snapshot.snapshot_key,
+                &snapshot.provider_id,
+                &snapshot.model_id,
+                &snapshot.profile,
+                &snapshot.workspace_id,
+                snapshot.prompt_version,
+                &snapshot.system_text,
+                &snapshot.tools_json,
+                &snapshot.stable_hash,
+                &snapshot.tools_hash,
+                snapshot.created_at,
+                snapshot.invalidated_at,
+            ],
+        )
+        .context("falha ao gravar o snapshot de prompt da sessão")?;
+        Ok(())
+    }
+
+    /// Snapshot de prompt congelado de uma sessão (`snapshot_key` específica).
+    pub fn get_prompt_snapshot(
+        &self,
+        conversation_id: &str,
+        snapshot_key: &str,
+    ) -> anyhow::Result<Option<PromptSnapshotRecord>> {
+        let conn = self.conn.lock();
+        let sql = format!(
+            "SELECT {PROMPT_SNAPSHOT_COLUMNS} FROM prompt_snapshots \
+             WHERE conversation_id = ?1 AND snapshot_key = ?2"
+        );
+        conn.query_row(&sql, params![conversation_id, snapshot_key], |row| {
+            prompt_snapshot_from_row(row)
+        })
+        .optional()
+        .context("falha ao ler o snapshot de prompt da sessão")
+    }
+
+    /// Grava (ou substitui) a decisão de render congelada de
+    /// `(message_id, kind)`. Replay usa [`Db::get_render_decision`] /
+    /// [`Db::list_render_decisions`] e nunca recalcula uma mensagem já enviada.
+    pub fn upsert_render_decision(
+        &self,
+        decision: &RenderDecisionRecord,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO render_decisions (message_id, kind, digest, payload, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5) \
+             ON CONFLICT(message_id, kind) DO UPDATE SET \
+               digest = excluded.digest, \
+               payload = excluded.payload, \
+               created_at = excluded.created_at",
+            params![
+                &decision.message_id,
+                &decision.kind,
+                &decision.digest,
+                &decision.payload,
+                decision.created_at,
+            ],
+        )
+        .context("falha ao gravar a decisão de render")?;
+        Ok(())
+    }
+
+    /// Decisão de render congelada de uma mensagem para um tipo (`image`,
+    /// `document`, `attachment`, `replay`), ou `None` se ainda não existe.
+    pub fn get_render_decision(
+        &self,
+        message_id: &str,
+        kind: &str,
+    ) -> anyhow::Result<Option<RenderDecisionRecord>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT message_id, kind, digest, payload, created_at FROM render_decisions \
+             WHERE message_id = ?1 AND kind = ?2",
+            params![message_id, kind],
+            |row| render_decision_from_row(row),
+        )
+        .optional()
+        .context("falha ao ler a decisão de render")
+    }
+
+    /// Todas as decisões de render congeladas de uma mensagem (replay v2).
+    pub fn list_render_decisions(
+        &self,
+        message_id: &str,
+    ) -> anyhow::Result<Vec<RenderDecisionRecord>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT message_id, kind, digest, payload, created_at FROM render_decisions \
+             WHERE message_id = ?1 ORDER BY kind ASC",
+        )?;
+        let rows = stmt.query_map([message_id], |row| render_decision_from_row(row))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar as decisões de render da mensagem")
+    }
+
     /// Deletes every conversation, message, attachment, artifact, code-harness
-    /// record (workspaces/journal/eventos/resumos/regras) and meta key.
+    /// record (workspaces/journal/eventos/resumos/regras), prompt-cache record
+    /// (snapshots/decisões de render/surface/estado/amostras) and meta key.
     pub fn reset(&self) -> anyhow::Result<()> {
         let conn = self.conn.lock();
         let tx = conn.unchecked_transaction()?;
@@ -2286,6 +3438,11 @@ impl Db {
             "artifacts",
             "attachments",
             "usage_log",
+            "render_decisions",
+            "surface_items",
+            "cache_samples",
+            "cache_state",
+            "prompt_snapshots",
             "code_events",
             "file_journal",
             "session_summaries",
@@ -2309,7 +3466,10 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Citation, MessageStatus, ToolCallRecord, ToolCallStatus, TraceStep};
+    use crate::domain::{
+        CacheBreakReason, CacheState, Citation, MessageStatus, SegmentKind, ToolCallRecord,
+        ToolCallStatus, TraceStep,
+    };
 
     fn test_db() -> Db {
         Db::open_in_memory().expect("in-memory database")
@@ -2444,6 +3604,10 @@ mod tests {
             output_tokens: Some(20),
             reasoning_tokens: Some(5),
             cached_tokens: Some(2),
+            cache_read_tokens: Some(2),
+            cache_write_tokens: None,
+            uncached_input_tokens: None,
+            cache_reported: false,
             total_tokens: Some(30),
             cost: Some(0.001),
             duration_ms: Some(1500),
@@ -3058,6 +4222,7 @@ mod tests {
             total_tokens: Some(input + output),
             cost: Some(0.5),
             duration_ms: None,
+            ..UsageInfo::default()
         };
         db.record_usage(
             "conv-1",
@@ -4166,5 +5331,1130 @@ mod tests {
             .expect("resumos")
             .is_empty());
         assert!(db.list_approval_rules().expect("regras").is_empty());
+    }
+
+    /* -------------------------------------------------------------- */
+    /* Cache de prompt (F0b.3): schema, migração, CRUD e agregado      */
+    /* -------------------------------------------------------------- */
+
+    /// Nomes dos objetos do schema (`type` = `table` | `index`).
+    fn schema_objects(conn: &Connection, kind: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = ?1 ORDER BY name")
+            .expect("inspecionar sqlite_master");
+        let names = stmt
+            .query_map([kind], |row| row.get::<_, String>(0))
+            .expect("listar objetos do schema")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("coletar objetos do schema");
+        names
+    }
+
+    fn indexed_segment(index: u32) -> SegmentDigest {
+        let mut sha256 = [0u8; 32];
+        sha256[..4].copy_from_slice(&index.to_le_bytes());
+        SegmentDigest {
+            kind: SegmentKind::Message,
+            index,
+            sha256,
+            chars: 10,
+        }
+    }
+
+    /// Amostra de cache representativa: número do passo e instante controlados.
+    fn cache_sample_at(step: u32, at: i64) -> CacheSample {
+        CacheSample {
+            turn_id: "turn-1".to_string(),
+            step,
+            provider_id: "anthropic".to_string(),
+            model_id: "claude-sonnet-5".to_string(),
+            protocol: "anthropic".to_string(),
+            epoch: 2,
+            input_total: 1_000,
+            cache_read: 900,
+            cache_write: 0,
+            uncached: 100,
+            hit_percent: Some(90.0),
+            ceiling_percent: Some(98.5),
+            prefix_tokens_est: 900,
+            delta_tokens_est: 100,
+            eligible: true,
+            excluded_reason: None,
+            state: CacheState::Stable,
+            break_reason: None,
+            break_detail: None,
+            raw_usage: Some(serde_json::json!({ "cache_read_input_tokens": 900 })),
+            at,
+        }
+    }
+
+    fn prompt_snapshot_for(conversation_id: &str) -> PromptSnapshotRecord {
+        PromptSnapshotRecord {
+            conversation_id: conversation_id.to_string(),
+            snapshot_key: "anthropic|claude-sonnet-5|chat|ws-1|3".to_string(),
+            provider_id: "anthropic".to_string(),
+            model_id: "claude-sonnet-5".to_string(),
+            profile: "chat".to_string(),
+            workspace_id: Some("ws-1".to_string()),
+            prompt_version: 3,
+            system_text: "system prompt congelado".to_string(),
+            tools_json: "[{\"name\":\"web_search\"}]".to_string(),
+            stable_hash: "stable-hash".to_string(),
+            tools_hash: "tools-hash".to_string(),
+            created_at: 1_000,
+            invalidated_at: None,
+        }
+    }
+
+    fn render_decision_for(message_id: &str, kind: &str) -> RenderDecisionRecord {
+        RenderDecisionRecord {
+            message_id: message_id.to_string(),
+            kind: kind.to_string(),
+            digest: "digest-a".to_string(),
+            payload: "{\"mode\":\"text\"}".to_string(),
+            created_at: 1_000,
+        }
+    }
+
+    #[test]
+    fn new_databases_create_the_prompt_cache_schema() {
+        let db = test_db();
+        let conn = db.conn.lock();
+
+        let tables = schema_objects(&conn, "table");
+        for table in [
+            "prompt_snapshots",
+            "render_decisions",
+            "surface_items",
+            "cache_state",
+            "cache_samples",
+        ] {
+            assert!(
+                tables.iter().any(|name| name == table),
+                "tabela {table} ausente: {tables:?}"
+            );
+        }
+
+        let usage_columns: Vec<String> = table_columns(&conn, "usage_log")
+            .expect("colunas de usage_log")
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        for column in [
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "uncached_input_tokens",
+            "cache_hit_percent",
+            "cache_epoch",
+            "prefix_hash",
+            "break_reason",
+            "protocol",
+        ] {
+            assert!(
+                usage_columns.iter().any(|name| name == column),
+                "coluna {column} ausente de usage_log: {usage_columns:?}"
+            );
+        }
+
+        // `cache_state` novo já nasce com o watermark do Chat (F2b).
+        let cache_state_columns: Vec<String> = table_columns(&conn, "cache_state")
+            .expect("colunas de cache_state")
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert!(
+            cache_state_columns.iter().any(|name| name == "chat_cut_seq"),
+            "coluna chat_cut_seq ausente de cache_state: {cache_state_columns:?}"
+        );
+
+        let indexes = schema_objects(&conn, "index");
+        for index in [
+            "idx_surface_items_dedupe",
+            "idx_surface_items_order",
+            "idx_surface_items_conv",
+            "idx_cache_samples_conv",
+        ] {
+            assert!(
+                indexes.iter().any(|name| name == index),
+                "índice {index} ausente: {indexes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn migrates_legacy_usage_log_with_cache_columns_preserving_rows() {
+        let temp = TempDir::new("lumina-db-cache-migrate");
+        let path = temp.path.join("lumina.db");
+        {
+            // Banco anterior ao cache de prompt: `usage_log` sem as colunas novas.
+            let conn = Connection::open(&path).expect("abrir banco legado");
+            conn.execute_batch(
+                "CREATE TABLE usage_log (
+                   id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                   conversation_id  TEXT,
+                   message_id       TEXT,
+                   provider_id      TEXT,
+                   model_id         TEXT,
+                   input_tokens     INTEGER,
+                   output_tokens    INTEGER,
+                   reasoning_tokens INTEGER,
+                   cached_tokens    INTEGER,
+                   total_tokens     INTEGER,
+                   cost             REAL,
+                   created_at       INTEGER NOT NULL
+                 );
+                 INSERT INTO usage_log
+                   (conversation_id, message_id, provider_id, model_id, input_tokens,
+                    output_tokens, created_at)
+                   VALUES ('conv-legado', 'msg-legado', 'opencode-go', 'glm-5.3-flash',
+                           10, 20, 5);",
+            )
+            .expect("schema legado de usage_log");
+        }
+
+        let db = Db::open(&path).expect("migrar banco legado");
+        {
+            let conn = db.conn.lock();
+            let columns: Vec<String> = table_columns(&conn, "usage_log")
+                .expect("colunas migradas")
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+            for column in [
+                "cache_read_tokens",
+                "cache_write_tokens",
+                "uncached_input_tokens",
+                "cache_hit_percent",
+                "cache_epoch",
+                "prefix_hash",
+                "break_reason",
+                "protocol",
+            ] {
+                assert!(
+                    columns.iter().any(|name| name == column),
+                    "coluna {column} não migrada: {columns:?}"
+                );
+            }
+            // A linha antiga sobrevive à migração com as colunas novas em NULL.
+            let (input_tokens, cache_read): (i64, Option<i64>) = conn
+                .query_row(
+                    "SELECT input_tokens, cache_read_tokens FROM usage_log \
+                     WHERE message_id = 'msg-legado'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("linha legada preservada");
+            assert_eq!(input_tokens, 10);
+            assert_eq!(cache_read, None);
+        }
+
+        // O banco migrado continua operável: amostras e uso com cache funcionam.
+        let sample = cache_sample_at(1, 1_000);
+        let sample_id = db
+            .insert_cache_sample("conv-legado", &sample, Some("prefix-hash"))
+            .expect("amostra no banco migrado");
+        assert!(sample_id > 0);
+        db.record_usage_with_cache(
+            "conv-legado",
+            "msg-novo",
+            "anthropic",
+            "claude-sonnet-5",
+            &UsageInfo {
+                input_tokens: Some(100),
+                cache_read_tokens: Some(80),
+                cache_write_tokens: Some(10),
+                uncached_input_tokens: Some(10),
+                cache_reported: true,
+                ..UsageInfo::default()
+            },
+            &UsageLogCache {
+                cache_epoch: Some(1),
+                protocol: Some("anthropic"),
+                ..UsageLogCache::default()
+            },
+        )
+        .expect("uso com cache no banco migrado");
+        drop(db);
+
+        // Migração idempotente: reabrir não perde nada nem duplica colunas.
+        let reopened = Db::open(&path).expect("reabrir banco migrado");
+        assert_eq!(
+            reopened.list_cache_samples("conv-legado", 10).expect("amostras").len(),
+            1
+        );
+        let usage_rank: i64 = {
+            let conn = reopened.conn.lock();
+            conn.query_row("SELECT COUNT(*) FROM usage_log", [], |row| row.get(0))
+                .expect("contar usage_log")
+        };
+        assert_eq!(usage_rank, 2);
+    }
+
+    #[test]
+    fn migrates_legacy_cache_state_with_the_chat_cut_watermark() {
+        let temp = TempDir::new("lumina-db-chat-cut-migrate");
+        let path = temp.path.join("lumina.db");
+        {
+            // `cache_state` do F0b.3, antes do watermark do histórico do Chat.
+            let conn = Connection::open(&path).expect("abrir banco legado");
+            conn.execute_batch(
+                "CREATE TABLE cache_state (
+                   conversation_id      TEXT PRIMARY KEY,
+                   provider_id          TEXT,
+                   model_id             TEXT,
+                   protocol             TEXT,
+                   epoch                INTEGER NOT NULL DEFAULT 0,
+                   prefix_hash          TEXT,
+                   prefix_segments      TEXT,
+                   prompt_snapshot_hash TEXT,
+                   cache_read           INTEGER NOT NULL DEFAULT 0,
+                   cache_write          INTEGER NOT NULL DEFAULT 0,
+                   uncached             INTEGER NOT NULL DEFAULT 0,
+                   samples              INTEGER NOT NULL DEFAULT 0,
+                   last_hit_percent     REAL,
+                   last_ceiling_percent REAL,
+                   last_at              INTEGER,
+                   last_break_reason    TEXT,
+                   last_break_detail    TEXT,
+                   updated_at           INTEGER NOT NULL
+                 );
+                 INSERT INTO cache_state
+                   (conversation_id, provider_id, model_id, protocol, epoch, cache_read,
+                    samples, last_hit_percent, updated_at)
+                   VALUES ('conv-legado', 'anthropic', 'claude-sonnet-5', 'anthropic', 2, 900,
+                           1, 97.5, 1700000000000);",
+            )
+            .expect("schema legado de cache_state");
+        }
+
+        let db = Db::open(&path).expect("migrar banco legado");
+        {
+            let conn = db.conn.lock();
+            let columns: Vec<String> = table_columns(&conn, "cache_state")
+                .expect("colunas migradas")
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+            assert!(
+                columns.iter().any(|name| name == "chat_cut_seq"),
+                "coluna chat_cut_seq não migrada: {columns:?}"
+            );
+            // A linha antiga sobrevive com o watermark NULL (= sem corte).
+            let (epoch, cache_read, chat_cut_seq): (i64, i64, Option<i64>) = conn
+                .query_row(
+                    "SELECT epoch, cache_read, chat_cut_seq FROM cache_state \
+                     WHERE conversation_id = 'conv-legado'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("linha legada preservada");
+            assert_eq!(epoch, 2);
+            assert_eq!(cache_read, 900);
+            assert_eq!(chat_cut_seq, None);
+        }
+
+        // O mapper enxerga a coluna migrada como `None` (sem corte).
+        let stored = db
+            .get_cache_state("conv-legado")
+            .expect("get legado")
+            .expect("presente");
+        assert_eq!(stored.chat_cut_seq, None);
+        assert_eq!(stored.cache_read, 900);
+
+        // Upsert grava o watermark no banco migrado.
+        let mut updated = stored.clone();
+        updated.epoch = 3;
+        updated.chat_cut_seq = Some(17);
+        updated.updated_at = 1_700_000_000_100;
+        db.upsert_cache_state(&updated).expect("upsert no banco migrado");
+        assert_eq!(
+            db.get_cache_state("conv-legado").expect("get 2").expect("presente"),
+            updated
+        );
+        drop(db);
+
+        // Migração idempotente: reabrir mantém a coluna e o valor.
+        let reopened = Db::open(&path).expect("reabrir banco migrado");
+        let persisted = reopened
+            .get_cache_state("conv-legado")
+            .expect("get 3")
+            .expect("presente");
+        assert_eq!(persisted.chat_cut_seq, Some(17));
+        let columns = {
+            let conn = reopened.conn.lock();
+            table_columns(&conn, "cache_state").expect("colunas reabertas")
+        };
+        assert_eq!(
+            columns.iter().filter(|(name, _)| name == "chat_cut_seq").count(),
+            1,
+            "a coluna não pode duplicar ao reabrir"
+        );
+    }
+
+    #[test]
+    fn record_usage_with_cache_persists_columns_and_usage_summary_aggregates() {
+        let db = test_db();
+        let usage = UsageInfo {
+            input_tokens: Some(100),
+            cache_read_tokens: Some(70),
+            cache_write_tokens: Some(20),
+            uncached_input_tokens: Some(10),
+            cache_reported: true,
+            ..UsageInfo::default()
+        };
+        db.record_usage_with_cache(
+            "conv-1",
+            "msg-1",
+            "anthropic",
+            "claude-sonnet-5",
+            &usage,
+            &UsageLogCache {
+                cache_epoch: Some(3),
+                prefix_hash: Some("abc123"),
+                break_reason: Some(CacheBreakReason::TtlExpired),
+                protocol: Some("anthropic"),
+                ..UsageLogCache::default()
+            },
+        )
+        .expect("uso com cache");
+
+        // `record_usage` (assinatura antiga, usada pelo harness) grava os campos
+        // derivados de `UsageInfo` e deriva o hit% quando o provedor reportou.
+        db.record_usage(
+            "conv-2",
+            "msg-2",
+            "openai",
+            "gpt-6-luna",
+            &UsageInfo {
+                input_tokens: Some(200),
+                cached_tokens: Some(40),
+                cache_reported: true,
+                ..UsageInfo::default()
+            },
+        )
+        .expect("uso legado com cache");
+
+        // `cache_hit_percent` explícito tem prioridade sobre o derivado.
+        db.record_usage_with_cache(
+            "conv-3",
+            "msg-3",
+            "openai",
+            "gpt-6-luna",
+            &usage,
+            &UsageLogCache {
+                cache_hit_percent: Some(42.5),
+                ..UsageLogCache::default()
+            },
+        )
+        .expect("hit explícito");
+
+        {
+            let conn = db.conn.lock();
+            let row: (
+                Option<i64>,
+                Option<i64>,
+                Option<i64>,
+                Option<f64>,
+                Option<i64>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ) = conn
+                .query_row(
+                    "SELECT cache_read_tokens, cache_write_tokens, uncached_input_tokens, \
+                     cache_hit_percent, cache_epoch, prefix_hash, break_reason, protocol \
+                     FROM usage_log WHERE message_id = 'msg-1'",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                        ))
+                    },
+                )
+                .expect("linha com cache");
+            assert_eq!(row.0, Some(70));
+            assert_eq!(row.1, Some(20));
+            assert_eq!(row.2, Some(10));
+            assert_eq!(row.3, Some(70.0));
+            assert_eq!(row.4, Some(3));
+            assert_eq!(row.5.as_deref(), Some("abc123"));
+            assert_eq!(row.6.as_deref(), Some("ttl_expired"));
+            assert_eq!(row.7.as_deref(), Some("anthropic"));
+
+            let derived: (Option<i64>, Option<f64>) = conn
+                .query_row(
+                    "SELECT cache_read_tokens, cache_hit_percent FROM usage_log \
+                     WHERE message_id = 'msg-2'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("linha derivada");
+            assert_eq!(derived.0, Some(40));
+            assert_eq!(derived.1, Some(20.0));
+
+            let explicit: Option<f64> = conn
+                .query_row(
+                    "SELECT cache_hit_percent FROM usage_log WHERE message_id = 'msg-3'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("hit explícito");
+            assert_eq!(explicit, Some(42.5));
+        }
+
+        let summary = db.usage_summary().expect("summary");
+        assert_eq!(summary["totals"]["requests"], 3);
+        assert_eq!(summary["totals"]["cacheReadTokens"], 180);
+        assert_eq!(summary["totals"]["cacheWriteTokens"], 40);
+        assert_eq!(summary["totals"]["uncachedInputTokens"], 20);
+    }
+
+    #[test]
+    fn cache_samples_roundtrip_newest_first_with_session_aggregate() {
+        let db = test_db();
+        let first = cache_sample_at(1, 1_000);
+        let first_id = db
+            .insert_cache_sample("conv-1", &first, Some("prefix-1"))
+            .expect("amostra 1");
+        assert!(first_id > 0);
+
+        let mut second = cache_sample_at(2, 2_000);
+        second.eligible = false;
+        second.excluded_reason = Some("below_min".to_string());
+        second.state = CacheState::Warming;
+        second.break_reason = Some(CacheBreakReason::FirstRequest);
+        second.hit_percent = None;
+        second.ceiling_percent = None;
+        second.raw_usage = None;
+        db.insert_cache_sample("conv-1", &second, None)
+            .expect("amostra 2");
+
+        let samples = db.list_cache_samples("conv-1", 10).expect("listar");
+        assert_eq!(samples.len(), 2);
+        // Diagnóstico: a amostra mais recente vem primeiro.
+        assert_eq!(samples[0].step, 2);
+        assert_eq!(
+            serde_json::to_value(&samples[1]).expect("json amostra"),
+            serde_json::to_value(&first).expect("json esperado")
+        );
+        assert_eq!(
+            serde_json::to_value(&samples[0]).expect("json amostra 2"),
+            serde_json::to_value(&second).expect("json esperado 2")
+        );
+        // Isolamento por conversa e limite (0 = vazio).
+        assert!(db.list_cache_samples("conv-2", 10).expect("outra").is_empty());
+        assert_eq!(db.list_cache_samples("conv-1", 1).expect("limite").len(), 1);
+        assert!(db.list_cache_samples("conv-1", 0).expect("zero").is_empty());
+
+        // `prefix_hash` (ausente do contrato de IPC) também é persistido.
+        let stored_prefix: Option<String> = {
+            let conn = db.conn.lock();
+            conn.query_row(
+                "SELECT prefix_hash FROM cache_samples \
+                 WHERE conversation_id = 'conv-1' AND step = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("prefix_hash")
+        };
+        assert_eq!(stored_prefix.as_deref(), Some("prefix-1"));
+
+        let aggregate = db.cache_session_aggregate("conv-1").expect("agregado");
+        assert_eq!(aggregate.samples, 2);
+        assert_eq!(aggregate.eligible_samples, 1);
+        assert_eq!(aggregate.input_total, 2_000);
+        assert_eq!(aggregate.cache_read, 1_800);
+        assert_eq!(aggregate.cache_write, 0);
+        assert_eq!(aggregate.uncached, 200);
+        assert_eq!(aggregate.eligible_input_total, 1_000);
+        assert_eq!(aggregate.eligible_cache_read, 900);
+        assert_eq!(aggregate.hit_percent(), Some(90.0));
+        assert_eq!(aggregate.eligible_hit_percent(), Some(90.0));
+
+        // Sem amostras o agregado é neutro e não inventa hit%.
+        let empty = db.cache_session_aggregate("conv-vazia").expect("vazio");
+        assert_eq!(empty, CacheSessionAggregate::default());
+        assert_eq!(empty.hit_percent(), None);
+        assert_eq!(empty.eligible_hit_percent(), None);
+    }
+
+    #[test]
+    fn cache_samples_retention_keeps_the_most_recent_500() {
+        let db = test_db();
+        let total = CACHE_SAMPLES_RETENTION + 5;
+        for step in 0..total {
+            let mut sample = cache_sample_at(step, i64::from(step) + 1);
+            sample.input_total = step;
+            sample.cache_read = 0;
+            sample.uncached = step;
+            sample.prefix_tokens_est = 0;
+            sample.delta_tokens_est = step;
+            db.insert_cache_sample("conv-retencao", &sample, None)
+                .expect("inserir amostra");
+        }
+
+        let samples = db
+            .list_cache_samples("conv-retencao", total + 10)
+            .expect("listar após retenção");
+        assert_eq!(samples.len() as u32, CACHE_SAMPLES_RETENTION);
+        // As 5 mais antigas rodaram: a mais nova e a mais antiga mantida.
+        assert_eq!(samples[0].step, total - 1);
+        assert_eq!(
+            samples[samples.len() - 1].step,
+            total - CACHE_SAMPLES_RETENTION
+        );
+        let aggregate = db
+            .cache_session_aggregate("conv-retencao")
+            .expect("agregado");
+        assert_eq!(aggregate.samples, CACHE_SAMPLES_RETENTION);
+    }
+
+    #[test]
+    fn cache_state_upserts_roundtrips_and_caps_prefix_segments() {
+        let db = test_db();
+        assert!(db.get_cache_state("conv-1").expect("get vazio").is_none());
+
+        let mut state = CacheStateRecord::new("conv-1");
+        state.provider_id = Some("anthropic".to_string());
+        state.model_id = Some("claude-sonnet-5".to_string());
+        state.protocol = Some("anthropic".to_string());
+        state.epoch = 2;
+        state.prefix_hash = Some("prefix-sha".to_string());
+        state.prefix_segments = Some(vec![indexed_segment(0), indexed_segment(1)]);
+        state.prompt_snapshot_hash = Some("snapshot-sha".to_string());
+        state.chat_cut_seq = Some(42);
+        state.cache_read = 1_800;
+        state.cache_write = 100;
+        state.uncached = 100;
+        state.samples = 2;
+        state.last_hit_percent = Some(90.0);
+        state.last_ceiling_percent = Some(98.5);
+        state.last_at = Some(1_700_000_000_000);
+        state.last_break_reason = Some(CacheBreakReason::SystemPrompt);
+        state.last_break_detail = Some("system mudou".to_string());
+        state.updated_at = 1_700_000_000_100;
+
+        db.upsert_cache_state(&state).expect("upsert");
+        assert_eq!(
+            db.get_cache_state("conv-1").expect("get").expect("presente"),
+            state
+        );
+
+        // Upsert substitui (1 linha por conversa) os contadores e o epoch.
+        state.epoch = 3;
+        state.samples = 3;
+        state.last_hit_percent = None;
+        state.last_break_reason = Some(CacheBreakReason::ModelSwitch);
+        state.updated_at = 1_700_000_000_200;
+        db.upsert_cache_state(&state).expect("upsert 2");
+        assert_eq!(
+            db.get_cache_state("conv-1").expect("get 2").expect("presente"),
+            state
+        );
+        let rows: i64 = {
+            let conn = db.conn.lock();
+            conn.query_row(
+                "SELECT COUNT(*) FROM cache_state WHERE conversation_id = 'conv-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("contar cache_state")
+        };
+        assert_eq!(rows, 1);
+
+        // O JSON de `prefix_segments` tem cap de 500 segmentos (head preservado).
+        let mut capped = CacheStateRecord::new("conv-cap");
+        capped.prefix_segments = Some(
+            (0..CACHE_STATE_MAX_SEGMENTS as u32 + 10)
+                .map(indexed_segment)
+                .collect(),
+        );
+        db.upsert_cache_state(&capped).expect("upsert cap");
+        let stored = db
+            .get_cache_state("conv-cap")
+            .expect("get cap")
+            .expect("presente");
+        let segments = stored.prefix_segments.expect("segmentos");
+        assert_eq!(segments.len(), CACHE_STATE_MAX_SEGMENTS);
+        assert_eq!(segments[0], indexed_segment(0));
+
+        // JSON corrompido em banco antigo cai em `None` sem quebrar a leitura.
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "UPDATE cache_state SET prefix_segments = 'nao-e-json' \
+                 WHERE conversation_id = 'conv-cap'",
+                [],
+            )
+            .expect("corromper json");
+        }
+        assert_eq!(
+            db.get_cache_state("conv-cap")
+                .expect("get corrompido")
+                .expect("presente")
+                .prefix_segments,
+            None
+        );
+    }
+
+    #[test]
+    fn cache_state_chat_cut_watermark_roundtrips_and_partial_updates_keep_the_rest() {
+        let db = test_db();
+
+        // `NULL` = histórico do Chat sem corte: roundtrip com todos os campos.
+        let mut state = CacheStateRecord::new("conv-cut");
+        state.provider_id = Some("anthropic".to_string());
+        state.model_id = Some("claude-sonnet-5".to_string());
+        state.protocol = Some("anthropic".to_string());
+        state.epoch = 1;
+        state.prefix_hash = Some("prefix".to_string());
+        state.prefix_segments = Some(vec![indexed_segment(0)]);
+        state.prompt_snapshot_hash = Some("snapshot".to_string());
+        state.chat_cut_seq = None;
+        state.cache_read = 100;
+        state.cache_write = 10;
+        state.uncached = 5;
+        state.samples = 1;
+        state.last_hit_percent = Some(95.0);
+        state.last_ceiling_percent = Some(99.0);
+        state.last_at = Some(1_000);
+        state.last_break_reason = Some(CacheBreakReason::FirstRequest);
+        state.last_break_detail = Some("primeiro request".to_string());
+        state.updated_at = 2_000;
+        db.upsert_cache_state(&state).expect("upsert sem corte");
+        assert_eq!(
+            db.get_cache_state("conv-cut").expect("get").expect("presente"),
+            state
+        );
+
+        // Watermark definido: roundtrip exato do `seq` da primeira mensagem incluída.
+        state.chat_cut_seq = Some(42);
+        db.upsert_cache_state(&state).expect("upsert com corte");
+        let stored = db
+            .get_cache_state("conv-cut")
+            .expect("get 2")
+            .expect("presente");
+        assert_eq!(stored.chat_cut_seq, Some(42));
+        assert_eq!(stored, state);
+
+        // Atualização posterior do watermark (e do `updated_at`) não perde os
+        // demais campos da linha única da conversa.
+        state.chat_cut_seq = Some(60);
+        state.updated_at = 3_000;
+        db.upsert_cache_state(&state).expect("upsert watermark novo");
+        let updated = db
+            .get_cache_state("conv-cut")
+            .expect("get 3")
+            .expect("presente");
+        assert_eq!(updated.chat_cut_seq, Some(60));
+        assert_eq!(updated, state);
+        assert_eq!(updated.provider_id.as_deref(), Some("anthropic"));
+        assert_eq!(updated.cache_read, 100);
+        assert_eq!(updated.prefix_segments, state.prefix_segments);
+
+        // Voltar para `NULL` (fim do corte de emergência) também persiste.
+        state.chat_cut_seq = None;
+        db.upsert_cache_state(&state).expect("upsert sem corte 2");
+        let cleared = db
+            .get_cache_state("conv-cut")
+            .expect("get 4")
+            .expect("presente");
+        assert_eq!(cleared.chat_cut_seq, None);
+        assert_eq!(cleared, state);
+
+        // `Some(0)` não é um `seq` válido (o replay começa em 1): vira `NULL` e
+        // os outros campos continuam gravados.
+        state.chat_cut_seq = Some(0);
+        db.upsert_cache_state(&state).expect("upsert zero");
+        let normalized = db
+            .get_cache_state("conv-cut")
+            .expect("get 5")
+            .expect("presente");
+        assert_eq!(normalized.chat_cut_seq, None);
+        assert_eq!(normalized.cache_read, 100);
+        assert_eq!(normalized.prefix_hash.as_deref(), Some("prefix"));
+    }
+
+    #[test]
+    fn surface_items_dedupe_by_digest_and_list_in_append_order() {
+        let db = test_db();
+        let conversation = db
+            .create_conversation("Cache", "anthropic", "claude-sonnet-5")
+            .expect("conversa");
+        let first = user_message(&conversation.id, "oi", 1_000);
+        let second = assistant_message(&conversation.id, 2_000);
+        db.insert_message(&first).expect("mensagem 1");
+        db.insert_message(&second).expect("mensagem 2");
+
+        assert!(db
+            .insert_surface_item(&SurfaceItemRecord::new(
+                &conversation.id,
+                None,
+                None,
+                "runtime",
+                "runtime: chat",
+            ))
+            .expect("item inicial"));
+        let plan = SurfaceItemRecord::new(
+            &conversation.id,
+            Some(&first.id),
+            None,
+            "plan",
+            "plano v1",
+        )
+        .with_seq(1);
+        assert!(db.insert_surface_item(&plan).expect("item plano"));
+        let mode = SurfaceItemRecord::new(
+            &conversation.id,
+            Some(&first.id),
+            Some(2),
+            "mode",
+            "modo: edit",
+        );
+        assert!(db.insert_surface_item(&mode).expect("item modo"));
+        let workspace = SurfaceItemRecord::new(
+            &conversation.id,
+            Some(&second.id),
+            None,
+            "workspace",
+            "workspace: app",
+        );
+        assert!(db.insert_surface_item(&workspace).expect("item workspace"));
+
+        // Mesmo texto (mesmo digest, id novo) não duplica na mesma conversa.
+        let duplicate = SurfaceItemRecord::new(
+            &conversation.id,
+            Some(&second.id),
+            None,
+            "workspace",
+            "workspace: app",
+        );
+        assert_eq!(duplicate.digest, workspace.digest);
+        assert!(!db.insert_surface_item(&duplicate).expect("dedupe"));
+
+        // O dedupe é por conversa: em outra sessão o mesmo texto entra.
+        let other = db
+            .create_conversation("Outra", "anthropic", "claude-sonnet-5")
+            .expect("outra conversa");
+        assert!(db
+            .insert_surface_item(&SurfaceItemRecord::new(
+                &other.id,
+                None,
+                None,
+                "runtime",
+                "runtime: chat",
+            ))
+            .expect("mesmo texto em outra conversa"));
+
+        let items = db.list_surface_items(&conversation.id).expect("listar");
+        let kinds: Vec<&str> = items.iter().map(|item| item.kind.as_str()).collect();
+        assert_eq!(kinds, ["runtime", "plan", "mode", "workspace"]);
+        assert_eq!(items[0].digest, surface_digest("runtime: chat"));
+        assert_eq!(items[0].digest.len(), 64);
+        assert!(items[0].digest.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(items[1].after_message_id.as_deref(), Some(first.id.as_str()));
+        assert_eq!(items[1].seq, 1);
+        assert_eq!(items[2].after_step, Some(2));
+        assert_eq!(
+            items[3].after_message_id.as_deref(),
+            Some(second.id.as_str())
+        );
+        assert_eq!(db.list_surface_items(&other.id).expect("outra").len(), 1);
+
+        // Delete por id, restrito à conversa, idempotente.
+        assert!(db
+            .delete_surface_item(&conversation.id, &items[2].id)
+            .expect("delete"));
+        assert!(!db
+            .delete_surface_item(&conversation.id, &items[2].id)
+            .expect("delete 2"));
+        assert!(!db
+            .delete_surface_item(&other.id, &items[1].id)
+            .expect("delete de outra conversa"));
+        assert_eq!(
+            db.list_surface_items(&conversation.id).expect("após delete").len(),
+            3
+        );
+    }
+
+    #[test]
+    fn delete_surface_items_after_removes_only_the_anchored_tail() {
+        let db = test_db();
+        let conversation = db
+            .create_conversation("Cache", "anthropic", "claude-sonnet-5")
+            .expect("conversa");
+        let first = user_message(&conversation.id, "um", 1_000);
+        let second = assistant_message(&conversation.id, 2_000);
+        let third = user_message(&conversation.id, "três", 3_000);
+        for message in [&first, &second, &third] {
+            db.insert_message(message).expect("mensagem");
+        }
+        db.insert_surface_item(&SurfaceItemRecord::new(
+            &conversation.id,
+            None,
+            None,
+            "runtime",
+            "runtime: chat",
+        ))
+        .expect("inicial");
+        db.insert_surface_item(&SurfaceItemRecord::new(
+            &conversation.id,
+            Some(&first.id),
+            None,
+            "plan",
+            "plano",
+        ))
+        .expect("no primeiro");
+        db.insert_surface_item(&SurfaceItemRecord::new(
+            &conversation.id,
+            Some(&second.id),
+            None,
+            "mode",
+            "modo",
+        ))
+        .expect("no segundo");
+        db.insert_surface_item(&SurfaceItemRecord::new(
+            &conversation.id,
+            Some(&third.id),
+            None,
+            "workspace",
+            "workspace",
+        ))
+        .expect("no terceiro");
+
+        // Remove a partir de `second` inclusive: sobram início + ancorado no first.
+        assert_eq!(
+            db.delete_surface_items_after(&conversation.id, &second.id)
+                .expect("poda"),
+            2
+        );
+        let items = db.list_surface_items(&conversation.id).expect("após poda");
+        let kinds: Vec<&str> = items.iter().map(|item| item.kind.as_str()).collect();
+        assert_eq!(kinds, ["runtime", "plan"]);
+
+        // Âncora já removida: remove só o que aponta diretamente para ela.
+        assert_eq!(
+            db.delete_surface_items_after(&conversation.id, &second.id)
+                .expect("poda idempotente"),
+            0
+        );
+        assert_eq!(
+            db.delete_surface_items_after(&conversation.id, &first.id)
+                .expect("poda do restante"),
+            1
+        );
+        assert_eq!(
+            db.list_surface_items(&conversation.id).expect("final").len(),
+            1
+        );
+    }
+
+    #[test]
+    fn prompt_snapshots_and_render_decisions_roundtrip_and_upsert() {
+        let db = test_db();
+        assert!(db
+            .get_prompt_snapshot("conv-1", "anthropic|claude-sonnet-5|chat|ws-1|3")
+            .expect("get vazio")
+            .is_none());
+
+        let snapshot = prompt_snapshot_for("conv-1");
+        db.upsert_prompt_snapshot(&snapshot).expect("upsert");
+        assert_eq!(
+            db.get_prompt_snapshot("conv-1", &snapshot.snapshot_key)
+                .expect("get")
+                .expect("presente"),
+            snapshot
+        );
+
+        // Upsert na mesma chave substitui o conteúdo (invalidação explícita).
+        let mut invalidated = snapshot.clone();
+        invalidated.prompt_version = 4;
+        invalidated.system_text = "system prompt v2".to_string();
+        invalidated.invalidated_at = Some(2_000);
+        db.upsert_prompt_snapshot(&invalidated).expect("upsert 2");
+        let stored = db
+            .get_prompt_snapshot("conv-1", &snapshot.snapshot_key)
+            .expect("get 2")
+            .expect("presente");
+        assert_eq!(stored.prompt_version, 4);
+        assert_eq!(stored.invalidated_at, Some(2_000));
+        assert_eq!(stored.system_text, "system prompt v2");
+
+        // Chave diferente na mesma conversa é outro snapshot; outra conversa idem.
+        let mut other_key = snapshot.clone();
+        other_key.snapshot_key = "anthropic|claude-sonnet-5|code|ws-1|4".to_string();
+        db.upsert_prompt_snapshot(&other_key).expect("outra chave");
+        assert!(db
+            .get_prompt_snapshot("conv-1", &other_key.snapshot_key)
+            .expect("get outra chave")
+            .is_some());
+        assert!(db
+            .get_prompt_snapshot("conv-2", &snapshot.snapshot_key)
+            .expect("outra conversa")
+            .is_none());
+
+        // Decisões de render congeladas: get/upsert/list por mensagem.
+        assert!(db
+            .get_render_decision("msg-1", "image")
+            .expect("get vazio")
+            .is_none());
+        let decision = render_decision_for("msg-1", "image");
+        db.upsert_render_decision(&decision).expect("upsert");
+        assert_eq!(
+            db.get_render_decision("msg-1", "image")
+                .expect("get")
+                .expect("presente"),
+            decision
+        );
+        let mut updated = decision.clone();
+        updated.digest = "digest-b".to_string();
+        updated.payload = "{\"mode\":\"attachment\"}".to_string();
+        db.upsert_render_decision(&updated).expect("upsert 2");
+        assert_eq!(
+            db.get_render_decision("msg-1", "image")
+                .expect("get 2")
+                .expect("presente"),
+            updated
+        );
+        let attachment = render_decision_for("msg-1", "attachment");
+        db.upsert_render_decision(&attachment).expect("attachment");
+        let decisions = db.list_render_decisions("msg-1").expect("listar");
+        assert_eq!(decisions.len(), 2);
+        assert_eq!(decisions[0].kind, "attachment");
+        assert_eq!(decisions[1].kind, "image");
+    }
+
+    #[test]
+    fn delete_conversation_and_reset_clean_the_prompt_cache_rows() {
+        let db = test_db();
+        let conversation = db
+            .create_conversation("Cache", "anthropic", "claude-sonnet-5")
+            .expect("conversa");
+        let message = user_message(&conversation.id, "oi", 1_000);
+        db.insert_message(&message).expect("mensagem");
+        db.insert_surface_item(&SurfaceItemRecord::new(
+            &conversation.id,
+            Some(&message.id),
+            None,
+            "plan",
+            "plano",
+        ))
+        .expect("surface");
+        db.insert_cache_sample(&conversation.id, &cache_sample_at(1, 1_000), None)
+            .expect("amostra");
+        db.upsert_cache_state(&CacheStateRecord::new(&conversation.id))
+            .expect("estado");
+        db.upsert_prompt_snapshot(&prompt_snapshot_for(&conversation.id))
+            .expect("snapshot");
+        db.upsert_render_decision(&render_decision_for(&message.id, "image"))
+            .expect("decisão");
+
+        db.delete_conversation(&conversation.id)
+            .expect("apagar conversa");
+        assert!(db
+            .list_surface_items(&conversation.id)
+            .expect("surface")
+            .is_empty());
+        assert_eq!(
+            db.cache_session_aggregate(&conversation.id).expect("agregado"),
+            CacheSessionAggregate::default()
+        );
+        assert!(db.get_cache_state(&conversation.id).expect("estado").is_none());
+        assert!(db
+            .get_prompt_snapshot(&conversation.id, "anthropic|claude-sonnet-5|chat|ws-1|3")
+            .expect("snapshot")
+            .is_none());
+        assert!(db
+            .list_render_decisions(&message.id)
+            .expect("decisões")
+            .is_empty());
+
+        // `reset` limpa as tabelas de cache também.
+        let other = db
+            .create_conversation("Outra", "anthropic", "claude-sonnet-5")
+            .expect("outra conversa");
+        db.insert_surface_item(&SurfaceItemRecord::new(
+            &other.id,
+            None,
+            None,
+            "runtime",
+            "runtime: chat",
+        ))
+        .expect("surface reset");
+        db.insert_cache_sample(&other.id, &cache_sample_at(1, 1_000), None)
+            .expect("amostra reset");
+        db.upsert_cache_state(&CacheStateRecord::new(&other.id))
+            .expect("estado reset");
+        db.upsert_prompt_snapshot(&prompt_snapshot_for(&other.id))
+            .expect("snapshot reset");
+        db.upsert_render_decision(&render_decision_for("msg-reset", "image"))
+            .expect("decisão reset");
+
+        db.reset().expect("reset");
+        assert!(db.list_surface_items(&other.id).expect("surface").is_empty());
+        assert!(db.list_cache_samples(&other.id, 10).expect("amostras").is_empty());
+        assert!(db.get_cache_state(&other.id).expect("estado").is_none());
+        assert!(db
+            .get_prompt_snapshot(&other.id, "anthropic|claude-sonnet-5|chat|ws-1|3")
+            .expect("snapshot")
+            .is_none());
+        assert!(db
+            .list_render_decisions("msg-reset")
+            .expect("decisões")
+            .is_empty());
+    }
+
+    #[test]
+    fn deleting_messages_from_drops_the_prompt_cache_orphans_of_the_tail() {
+        let db = test_db();
+        let conversation = db
+            .create_conversation("Cache", "anthropic", "claude-sonnet-5")
+            .expect("conversa");
+        let first = user_message(&conversation.id, "um", 1_000);
+        let second = assistant_message(&conversation.id, 2_000);
+        let third = user_message(&conversation.id, "três", 3_000);
+        for message in [&first, &second, &third] {
+            db.insert_message(message).expect("mensagem");
+        }
+        db.insert_surface_item(&SurfaceItemRecord::new(
+            &conversation.id,
+            Some(&first.id),
+            None,
+            "plan",
+            "plano mantido",
+        ))
+        .expect("surface mantido");
+        db.insert_surface_item(&SurfaceItemRecord::new(
+            &conversation.id,
+            Some(&second.id),
+            None,
+            "mode",
+            "modo removido",
+        ))
+        .expect("surface removido");
+        db.upsert_render_decision(&render_decision_for(&first.id, "image"))
+            .expect("decisão mantida");
+        db.upsert_render_decision(&render_decision_for(&third.id, "replay"))
+            .expect("decisão removida");
+
+        db.delete_messages_from(&conversation.id, &second.id)
+            .expect("poda de mensagens");
+
+        assert_eq!(db.list_messages(&conversation.id).expect("mensagens").len(), 1);
+        let items = db.list_surface_items(&conversation.id).expect("surface");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, "plano mantido");
+        assert_eq!(db.list_render_decisions(&first.id).expect("mantida").len(), 1);
+        assert!(db
+            .list_render_decisions(&third.id)
+            .expect("removida")
+            .is_empty());
     }
 }

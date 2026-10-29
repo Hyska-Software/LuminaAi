@@ -82,7 +82,7 @@ Eventos (`TurnEvent`): `turn_started`, `step_started`, `reasoning_delta`, `reaso
 `presentation`), `artifact_created`, `usage`, `message_updated`, `title_updated`, `done`,
 `cancelled`, `error` e os eventos do harness de código: `approval_requested/resolved`,
 `tool_progress`, `file_changed`, `workspace_changes`, `todos_updated`, `plan_updated`,
-`context_stats`, `compacted`, `job_updated`, `profile_changed`.
+`context_stats`, `cache_stats`, `compacted`, `job_updated`, `profile_changed`.
 
 **Perfis de turno.** `TurnPayload.profile` (`chat` | `code`, default `chat`) seleciona o perfil do
 mesmo loop: prompt, catálogo de tools, política e orçamentos. O perfil `code` só é aceito em sessão
@@ -102,7 +102,22 @@ messages(id PK, conversation_id, role, content, reasoning, status, tool_calls JS
 attachments(id PK, name, mime_type, size, kind, text, page_count, width, height, file_path, created_at)
 artifacts(id PK, conversation_id NULL, message_id, name, mime_type, kind, language, size,
          created_at, path, favorite)
-usage_log(id, conversation_id, message_id, provider_id, model_id, tokens..., cost, created_at)
+usage_log(id, conversation_id, message_id, provider_id, model_id, tokens..., cache_read_tokens, cache_write_tokens, uncached_input_tokens, cache_hit_percent, cache_epoch, prefix_hash, break_reason, protocol, cost, created_at)
+-- cache de prompt (v1.10, docs/goals/prompt-cache/PLAN.md)
+prompt_snapshots(conversation_id, snapshot_key, provider_id, model_id, profile, workspace_id,
+                 prompt_version, system_text, tools_json, stable_hash, tools_hash, created_at,
+                 invalidated_at)
+surface_items(id PK, conversation_id, after_message_id, after_step, seq, kind, digest, text,
+              created_at)  -- contexto volátil na cauda; UNIQUE(conversation_id, digest)
+render_decisions(message_id, kind, digest, payload JSON, created_at)
+cache_state(conversation_id PK, provider_id, model_id, protocol, epoch, prefix_hash,
+            prefix_segments JSON, prompt_snapshot_hash, cache_read, cache_write, uncached,
+            samples, last_hit_percent, last_ceiling_percent, last_at, last_break_reason,
+            last_break_detail, updated_at)
+cache_samples(id PK, conversation_id, turn_id, step, provider_id, model_id, protocol, epoch,
+              prefix_hash, input_total, cache_read, cache_write, uncached, hit_percent,
+              ceiling_percent, prefix_tokens_est, delta_tokens_est, eligible, excluded_reason,
+              state, break_reason, break_detail, raw_usage JSON, created_at)
 -- harness de código (v1.9, docs/goals/code-harness/HARNESS.md §11)
 workspaces(id PK, name, path UNIQUE, created_at, updated_at, last_opened_at, pinned, trusted)
 code_events(id PK, conversation_id, turn_id NULL, seq, kind, payload JSON, created_at)
@@ -266,7 +281,7 @@ Fatos descobertos por sondagem (ver `docs/MODELS.md`):
 `harness::run_turn` executa:
 
 1. Carrega conversa e histórico, injeta anexos (texto extraído + imagens quando o modelo suporta).
-2. Monta o system prompt (`harness/prompt.rs`): identidade, idioma (pt-BR), regras de ferramentas, **guia de formatação Markdown/GFM** (ver §8.1), formato de **UI generativa**, formato de artefatos e citações.
+2. Monta o system prompt (`harness/prompt.rs`, instruções em inglês): identidade, idioma (regra de resposta em pt-BR), regras de ferramentas, **guia de formatação Markdown/GFM** (ver §8.1), formato de **UI generativa**, formato de artefatos e citações.
 3. Loop de até `max_steps`:
    - chama `providers::stream_completion` e reemite eventos;
    - acumula texto, reasoning e tool calls;
@@ -373,11 +388,50 @@ leitura, profundidade 1) e tools dinâmicas de servidores **MCP** (mcp__servidor
    (`harness/code/compaction.rs`, template de 8 seções, persistido em `session_summaries` e
    aplicado nos turnos seguintes).
 9. **Terminal PTY**: src-tauri/src/terminal/** (portable-pty/ConPTY) com open_terminal/write_terminal/esize_terminal/close_terminal/list_terminals e Channel<TerminalEvent>; o painel abre em xterm.js no cwd do workspace (terminal do usuário; o agente usa un_command/jobs).
-10. **Fecho do turno**: ile_journal → workspace_changes, context_stats, 	urn/ended em
-   `code_events` e cancelamento das aprovações pendentes da sessão.
+10. **Fecho do turno**: `file_journal` → `workspace_changes`, `context_stats`, `turn/ended` em
+   `code_events` e cancelamento das aprovações pendentes da sessão. O transcript do Code
+   termina cada turno com o card de resumo de arquivos alterados (dados das presentations
+   `file_change` persistidas; `docs/DESIGN.md` §6.3, `WORKBENCH.md` §5.1).
 
 Contratos completos (tools/eventos/comandos/UI): `docs/goals/code-harness/TOOLS.md`,
 `HARNESS.md` e `WORKBENCH.md`.
+
+### 8.4 Cache de prompt (v1.10)
+
+O harness mede o cache por **request de wire** (não por turno) e expõe em tempo
+real no medidor de contexto (Code: anel + selo `cache NN%`; Chat: chip
+cache-first no composer). A verdade é o `usage` reportado pelo provedor:
+`hit = cache_read / (cache_read + cache_write + uncached)`; sem reporte, `—`.
+
+- **Prefix digest** (`providers/cache.rs`): segmentos canônicos do body final
+  (system/tools/mensagens), SHA-256 encadeado; metadados de cache
+  (`cache_control`, `prompt_cache_key`, TTL) ficam **fora** do hash. O digest é
+  emitido antes do SSE (`ProviderEvent::CacheDigest`).
+- **Tracker** (`harness/cache`): compara o digest com o último request do epoch,
+  calcula `P`/`Δ`/`ceiling`, hit%, quebra (system/tools/histórico/compactação/
+  modelo/protocolo), estado (`cold`/`warming`/`stable`/`degraded`/`unsupported`/
+  `provider_policy`) e elegibilidade (`cold`, `not_reported`, `write_only`,
+  `below_min`, `unknown_min`). É persistido em `cache_state`/`cache_samples` e
+  restaurado no turno seguinte e após restart; `usage_log` ganha as colunas de
+  cache.
+- **Evento** `cache_stats` (uma amostra por request, nos dois perfis e no final
+  forçado); `get_cache_stats` restaura o agregado ao abrir a conversa.
+- **Mecanismos por protocolo**: Anthropic `cache_control` (breakpoints em
+  tools/system/cauda, TTL 1h), OpenAI `prompt_cache_key`/retenção/TTL, gateways
+  OpenCode com `x-opencode-session` e `usage.opencode.tokens`, Google implícito
+  (`cachedContentTokenCount`), DeepSeek hit/miss. Capacidades vêm do catálogo
+  (`provider.cache`/`model.cache`) e são refinadas pelo probe
+  (`scripts/probe-cache.mjs`, F4.0).
+- **Estabilidade de prefixo**: `prompt_snapshots` congela system prompt e tools
+  por sessão; o volátil (git/tree/plano/modo/data) vai em `surface_items` na
+  cauda, nunca no system prompt (o system precede o histórico nos 4 protocolos).
+- **Painel**: `ContextMeter` (Code) e `CacheHitChip` (Chat) mostram hit do último
+  request, sessão ponderada, teto `P/(P+Δ)`, estado, última quebra, TTL, economia
+  estimada e “copiar usage bruto”. `Settings.cache` controla o indicador, o TTL
+  Anthropic e a retenção OpenAI.
+
+Plano/evidência: `docs/goals/prompt-cache/{PLAN,GOAL,EVIDENCE}.md`; pesquisa por
+provedor/OpenCode/DSH: `docs/research/prompt-caching.md`.
 
 ### 8.1 Markdown do chat
 
@@ -400,7 +454,7 @@ O contrato completo (sintaxe suportada, decisões e matriz de testes) está em
 - **Segurança**: o Markdown nunca usa `innerHTML`; o HTML cru passa por
   allowlist (sem `script`/`style`/`iframe`/`on*`/`style` inline) e as URLs
   aceitas são apenas `http(s)`, `mailto:` e `#âncora`. O prompt (seção
-  **Formatação Markdown** em `harness/prompt.rs`) orienta o modelo a preferir
+  `# Markdown formatting` em `harness/prompt.rs`) orienta o modelo a preferir
   Markdown puro e nunca emitir HTML perigoso.
 - **Thinking do modelo**: o raciocínio visível (`ChatMessage.reasoning` e
   `trace[].reasoning`) usa o **mesmo** renderer pela variante
@@ -408,8 +462,9 @@ O contrato completo (sintaxe suportada, decisões e matriz de testes) está em
   `foreground-muted`, ritmo compacto), com a **mesma** sanitização/allowlist. A
   timeline (`src/lib/agentTrace.ts` → `AgentSteps`) devolve o Markdown **bruto
   por passo** (sem dividir por linha em branco nem remover marcadores de lista) e
-  preserva as diferenças entre layouts (Chat: resumos agrupados de tools; Code:
-  uma linha por chamada do harness). Contrato em `docs/MARKDOWN.md` §10.
+  preserva as diferenças entre layouts (Chat: resumos agrupados de tools e header
+  "Pensou por Xs"; Code: uma linha por chamada do harness e header "Trabalhou por
+  Xs"). Contrato em `docs/MARKDOWN.md` §10.
 - **Testes**: `src/components/chat/Markdown.test.tsx` (matriz funcional, incluindo
   a variante `thinking`), `Markdown.security.test.tsx` (vetores XSS/atributos/URLs
   nas duas variantes), `src/lib/__tests__/agentTrace.test.ts` (Markdown bruto por
@@ -614,6 +669,7 @@ open_data_dir, reset_app_data, get_catalog, refresh_catalog, list_remote_models,
 refresh_provider_models, openai_login_start, openai_login_wait,
 openai_login_cancel, openai_sign_out, openai_auth_status,
 list_conversations, create_conversation (mode: chat|code), get_conversation,
+get_cache_stats,  -- agregado/amostras de cache da conversa (medidor em tempo real)
 rename_conversation, delete_conversation, set_conversation_pinned,
 set_conversation_code_linked (Chat session → Code), search_conversations,
 truncate_conversation, export_conversation, import_attachments, get_attachment,

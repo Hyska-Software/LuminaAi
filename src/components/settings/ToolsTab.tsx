@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Copy, FolderOpen, Sparkles, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import type { CodeEnvironmentStatus, InterpreterInfo } from '@/lib/types';
+import type { CacheSettings, CodeEnvironmentStatus, InterpreterInfo } from '@/lib/types';
 import { MAX_STEPS_LIMIT, useAppStore, useUiStore } from '@/lib/store';
 import { cn, copyText } from '@/lib/utils';
 import { Badge, Button, IconButton, NativeSelect, Slider, Spinner, Switch } from '@/components/ui';
@@ -81,6 +81,14 @@ export function ToolsTab() {
   }, [environmentAttempt]);
 
   const temperatureEnabled = settings.temperature != null;
+  const cacheSettings: CacheSettings = {
+    showIndicator: settings.cache?.showIndicator ?? true,
+    anthropicTtl: settings.cache?.anthropicTtl ?? '1h',
+    openaiRetention: settings.cache?.openaiRetention ?? null,
+  };
+  const saveCacheSettings = (patch: Partial<CacheSettings>) => {
+    void saveSettings({ cache: { ...cacheSettings, ...patch } });
+  };
   const skills = environment?.skills ?? [];
   const originCounts = countSkillsByOrigin(skills);
 
@@ -151,6 +159,57 @@ export function ToolsTab() {
             onCheckedChange={(checked) => void saveSettings({ autoTitle: checked })}
             aria-label="Gerar título automático"
           />
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Cache de prompt"
+        description="Como o Lumina reaproveita o prefixo do prompt nos provedores que medem cache."
+      >
+        <SettingRow
+          label="Mostrar indicador"
+          description="Exibe o acerto de cache em tempo real no medidor de contexto do Code e no composer do Chat. Desligar só esconde o indicador: a medição continua."
+        >
+          <Switch
+            checked={cacheSettings.showIndicator}
+            onCheckedChange={(checked) => saveCacheSettings({ showIndicator: checked })}
+            aria-label="Mostrar indicador de cache"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label="TTL do cache (Anthropic)"
+          description="Quanto tempo o prefixo fica cacheado na API da Anthropic. 1 h custa 2× na gravação e reduz renovações no meio do turno; 5 min custa 1,25×."
+        >
+          <NativeSelect
+            value={cacheSettings.anthropicTtl}
+            onChange={(event) =>
+              saveCacheSettings({ anthropicTtl: event.target.value === '5m' ? '5m' : '1h' })
+            }
+            aria-label="TTL do cache da Anthropic"
+          >
+            <option value="1h">1 hora (padrão)</option>
+            <option value="5m">5 minutos</option>
+          </NativeSelect>
+        </SettingRow>
+
+        <SettingRow
+          label="Retenção do cache (OpenAI)"
+          description="Por quanto tempo a OpenAI mantém o prefixo no cache. Automático deixa o provedor decidir."
+        >
+          <NativeSelect
+            value={cacheSettings.openaiRetention ?? 'auto'}
+            onChange={(event) =>
+              saveCacheSettings({
+                openaiRetention: event.target.value === 'auto' ? null : event.target.value,
+              })
+            }
+            aria-label="Retenção do cache da OpenAI"
+          >
+            <option value="auto">Automático</option>
+            <option value="in_memory">Na memória</option>
+            <option value="24h">24 horas</option>
+          </NativeSelect>
         </SettingRow>
       </SettingsSection>
 

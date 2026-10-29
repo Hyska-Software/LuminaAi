@@ -181,8 +181,22 @@ pub struct UsageInfo {
     pub output_tokens: Option<u32>,
     #[serde(default)]
     pub reasoning_tokens: Option<u32>,
+    /// Legacy aggregate: tokens read from the provider cache (subset of input).
     #[serde(default)]
     pub cached_tokens: Option<u32>,
+    /// Tokens read from the prompt cache (normalized across protocols).
+    #[serde(default)]
+    pub cache_read_tokens: Option<u32>,
+    /// Tokens written to the prompt cache this request (Anthropic cache_creation,
+    /// OpenAI cache_write_tokens, ...).
+    #[serde(default)]
+    pub cache_write_tokens: Option<u32>,
+    /// Input tokens that were neither read from nor written to the cache.
+    #[serde(default)]
+    pub uncached_input_tokens: Option<u32>,
+    /// True when the provider reported cache counters for this request.
+    #[serde(default)]
+    pub cache_reported: bool,
     #[serde(default)]
     pub total_tokens: Option<u32>,
     #[serde(default)]
@@ -190,6 +204,258 @@ pub struct UsageInfo {
     /// Wall-clock duration of the turn in milliseconds.
     #[serde(default)]
     pub duration_ms: Option<u64>,
+}
+
+/// Normalized cache usage for one provider request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheUsage {
+    #[serde(default)]
+    pub cache_read_tokens: Option<u32>,
+    #[serde(default)]
+    pub cache_write_tokens: Option<u32>,
+    #[serde(default)]
+    pub uncached_input_tokens: Option<u32>,
+    #[serde(default)]
+    pub input_total_tokens: Option<u32>,
+    #[serde(default)]
+    pub reported: bool,
+}
+
+impl UsageInfo {
+    /// Cache view normalized from the flat usage fields.
+    pub fn cache_usage(&self) -> CacheUsage {
+        let read = self.cache_read_tokens.or(self.cached_tokens);
+        let write = self.cache_write_tokens;
+        let uncached = self.uncached_input_tokens;
+        let total = match (read, write, uncached) {
+            (Some(read), Some(write), Some(uncached)) => {
+                Some(read.saturating_add(write).saturating_add(uncached))
+            }
+            _ => self.input_tokens,
+        };
+        CacheUsage {
+            cache_read_tokens: read,
+            cache_write_tokens: write,
+            uncached_input_tokens: uncached,
+            input_total_tokens: total,
+            reported: self.cache_reported,
+        }
+    }
+
+    /// Fold cache counters from another usage sample (turn aggregation).
+    pub fn merge_cache(&mut self, other: &UsageInfo) {
+        if other.cache_reported || other.cache_read_tokens.is_some() {
+            self.cache_reported = true;
+        }
+        self.cache_read_tokens = add_optional(self.cache_read_tokens, other.cache_read_tokens);
+        self.cache_write_tokens = add_optional(self.cache_write_tokens, other.cache_write_tokens);
+        self.uncached_input_tokens =
+            add_optional(self.uncached_input_tokens, other.uncached_input_tokens);
+    }
+}
+
+fn add_optional(left: Option<u32>, right: Option<u32>) -> Option<u32> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.saturating_add(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    }
+}
+
+/// Cache state shown by the context meter (dashboard/monitor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheState {
+    /// First request of an epoch: nothing to reuse yet.
+    #[default]
+    Cold,
+    /// Requests are still populating the cache.
+    Warming,
+    /// Steady-state requests are being served from the cache.
+    Stable,
+    /// A persistent-prefix break happened (or the hit% dropped for a known cause).
+    Degraded,
+    /// Provider/gateway does not report or support prompt caching.
+    Unsupported,
+    /// Provider policy prevents reuse for this request (e.g. Gemini 4 <2.050 new tokens).
+    ProviderPolicy,
+}
+
+/// Why a persistent prefix was broken (or a request could not reuse it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheBreakReason {
+    FirstRequest,
+    SystemPrompt,
+    ToolDefinitions,
+    HistoryRewrite,
+    HeadTrim,
+    Compaction,
+    ModelSwitch,
+    ProtocolFallback,
+    Attachments,
+    ConfigChange,
+    TtlExpired,
+    ProviderPolicy,
+}
+
+/// One wire segment covered by the prompt-cache digest, in request order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SegmentKind {
+    System,
+    Tools,
+    Message,
+    /// Request-only tail (e.g. forced wrap-up) that is not part of the surface.
+    TransientTail,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SegmentDigest {
+    pub kind: SegmentKind,
+    pub index: u32,
+    /// SHA-256 of the canonical wire bytes of this segment.
+    pub sha256: [u8; 32],
+    /// Characters covered by the segment (used for the P/Δ estimate).
+    pub chars: u32,
+}
+
+/// Canonical digest of a provider request body, used to detect prefix reuse and
+/// attribute breaks. Cache metadata (`cache_control`, `prompt_cache_key`, TTL) is
+/// intentionally excluded so enabling caching never looks like a break.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrefixDigest {
+    pub protocol: String,
+    #[serde(default)]
+    pub segments: Vec<SegmentDigest>,
+    #[serde(default)]
+    pub total_chars: u32,
+    #[serde(default)]
+    pub estimated_tokens: u32,
+}
+
+impl PrefixDigest {
+    /// First index where `self` and `previous` diverge (`== len` when one is a
+    /// prefix of the other).
+    pub fn common_prefix_segments(&self, previous: &PrefixDigest) -> usize {
+        let mut index = 0;
+        while index < self.segments.len()
+            && index < previous.segments.len()
+            && self.segments[index].sha256 == previous.segments[index].sha256
+        {
+            index += 1;
+        }
+        index
+    }
+
+    /// Characters covered by the first `segments` segments.
+    pub fn chars_up_to(&self, segments: usize) -> u32 {
+        self.segments
+            .iter()
+            .take(segments)
+            .map(|segment| segment.chars)
+            .fold(0u32, u32::saturating_add)
+    }
+}
+
+/// One cache sample per provider request (wire request), emitted in real time.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheSample {
+    pub turn_id: String,
+    pub step: u32,
+    pub provider_id: String,
+    pub model_id: String,
+    pub protocol: String,
+    pub epoch: u32,
+    pub input_total: u32,
+    pub cache_read: u32,
+    pub cache_write: u32,
+    pub uncached: u32,
+    /// Provider-reported hit percent; `None` when the provider did not report cache.
+    #[serde(default)]
+    pub hit_percent: Option<f32>,
+    /// Theoretical ceiling `P/(P+Δ)` for this request.
+    #[serde(default)]
+    pub ceiling_percent: Option<f32>,
+    #[serde(default)]
+    pub prefix_tokens_est: u32,
+    #[serde(default)]
+    pub delta_tokens_est: u32,
+    pub eligible: bool,
+    #[serde(default)]
+    pub excluded_reason: Option<String>,
+    pub state: CacheState,
+    #[serde(default)]
+    pub break_reason: Option<CacheBreakReason>,
+    #[serde(default)]
+    pub break_detail: Option<String>,
+    /// Raw provider usage block (trimmed) for the diagnostics panel.
+    #[serde(default)]
+    pub raw_usage: Option<serde_json::Value>,
+    pub at: i64,
+}
+
+/// Aggregated cache view for a conversation (restored by `get_cache_stats`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheStats {
+    #[serde(default)]
+    pub hit_percent: Option<f32>,
+    #[serde(default)]
+    pub session_hit_percent: Option<f32>,
+    #[serde(default)]
+    pub steady_hit_percent: Option<f32>,
+    #[serde(default)]
+    pub ceiling_percent: Option<f32>,
+    #[serde(default)]
+    pub input_total: u32,
+    #[serde(default)]
+    pub cache_read: u32,
+    #[serde(default)]
+    pub cache_write: u32,
+    #[serde(default)]
+    pub uncached: u32,
+    pub eligible: bool,
+    #[serde(default)]
+    pub excluded_reason: Option<String>,
+    pub state: CacheState,
+    #[serde(default)]
+    pub epoch: u32,
+    #[serde(default)]
+    pub samples: u32,
+    #[serde(default)]
+    pub min_cacheable_tokens: Option<u32>,
+    #[serde(default)]
+    pub ttl_seconds: Option<u32>,
+    #[serde(default)]
+    pub break_reason: Option<CacheBreakReason>,
+    #[serde(default)]
+    pub break_detail: Option<String>,
+    #[serde(default)]
+    pub provider_policy: Option<String>,
+    pub at: i64,
+    #[serde(default)]
+    pub savings_usd: Option<f64>,
+}
+
+/// Snapshot returned by `get_cache_stats`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheStatsView {
+    pub conversation_id: String,
+    #[serde(default)]
+    pub current: Option<CacheStats>,
+    #[serde(default)]
+    pub session: Option<CacheStats>,
+    #[serde(default)]
+    pub epoch: u32,
+    #[serde(default)]
+    pub recent: Vec<CacheSample>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -680,6 +946,54 @@ pub struct SlidePreview {
 /* Settings                                                            */
 /* ------------------------------------------------------------------ */
 
+/// TTL accepted by the Anthropic prompt cache strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum CacheTtl {
+    #[serde(rename = "5m")]
+    FiveMinutes,
+    #[default]
+    #[serde(rename = "1h")]
+    OneHour,
+}
+
+impl CacheTtl {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::FiveMinutes => "5m",
+            Self::OneHour => "1h",
+        }
+    }
+
+    pub fn seconds(self) -> u32 {
+        match self {
+            Self::FiveMinutes => 300,
+            Self::OneHour => 3_600,
+        }
+    }
+}
+
+/// Prompt-cache preferences (docs/goals/prompt-cache/PLAN.md §5.4). There is no
+/// product "enabled" flag: rollback is a release rollback; `show_indicator` only
+/// hides the UI chip and never disables measurement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CacheSettings {
+    pub show_indicator: bool,
+    pub anthropic_ttl: CacheTtl,
+    /// `None` = adapter decides (probe-driven); e.g. `in_memory`/`24h`.
+    pub openai_retention: Option<String>,
+}
+
+impl Default for CacheSettings {
+    fn default() -> Self {
+        Self {
+            show_indicator: true,
+            anthropic_ttl: CacheTtl::OneHour,
+            openai_retention: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -736,6 +1050,8 @@ pub struct Settings {
     /// Onde o diff de um arquivo abre ao clicar em Alterações: `tab` (aba do
     /// chat, padrão) ou `panel` (inline no painel direito). Ver WORKBENCH §7.2.
     pub diff_open_mode: String,
+    /// Preferências de cache de prompt (medidor/indicador e parâmetros por provedor).
+    pub cache: CacheSettings,
 }
 
 impl Default for Settings {
@@ -773,6 +1089,7 @@ impl Default for Settings {
             code_default_permission_mode: PermissionMode::Edit,
             trust_workspaces_by_default: false,
             diff_open_mode: "tab".into(),
+            cache: CacheSettings::default(),
         }
     }
 }

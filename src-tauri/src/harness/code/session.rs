@@ -16,7 +16,6 @@ use serde_json::Value;
 use crate::db::{Db, StoredCodeEvent};
 use crate::domain::{ContextBreakdown, ContextStats, PlanState, PlanView, TodoItem, TodoStatus};
 
-pub const KIND_APPROVAL_ASKED: &str = "approval/asked";
 pub const KIND_APPROVAL_DECIDED: &str = "approval/decided";
 pub const KIND_PERMISSION_MODE: &str = "permission/mode";
 pub const KIND_PLAN_MODE: &str = "plan/mode";
@@ -26,24 +25,32 @@ pub const KIND_PLAN_APPROVED: &str = "plan/approved";
 pub const KIND_TODOS: &str = "todos";
 pub const KIND_CONTEXT_STATS: &str = "context/stats";
 pub const KIND_CONTEXT_COMPACTED: &str = "context/compacted";
-pub const KIND_CHANGES_SUMMARY: &str = "changes/summary";
 pub const KIND_REVERT: &str = "revert/performed";
 pub const KIND_TURN_ENDED: &str = "turn/ended";
-pub const KIND_TURN_INTERRUPTED: &str = "turn/interrupted";
 
 /// Feedback sintético quando uma revisão ficou órfã (aprovação expirou ou o
 /// turno terminou sem decisão): o card volta para planejamento com instrução.
 pub const STALE_REVIEW_FEEDBACK: &str = "A revisão não está mais ativa; reenvie o plano.";
 
 /// Grava um evento da sessão (JSON serializado).
-pub fn append(db: &Db, conversation_id: &str, turn_id: Option<&str>, kind: &str, payload: &Value) -> anyhow::Result<()> {
+pub fn append(
+    db: &Db,
+    conversation_id: &str,
+    turn_id: Option<&str>,
+    kind: &str,
+    payload: &Value,
+) -> anyhow::Result<()> {
     db.append_code_event(conversation_id, turn_id, kind, &payload.to_string())?;
     Ok(())
 }
 
 /// Último evento de um `kind` (com `seq`/`created_at` — o fold do plano precisa
 /// dos dois para ordenar e para o `updated_at` estável).
-pub fn latest_event(db: &Db, conversation_id: &str, kind: &str) -> anyhow::Result<Option<StoredCodeEvent>> {
+pub fn latest_event(
+    db: &Db,
+    conversation_id: &str,
+    kind: &str,
+) -> anyhow::Result<Option<StoredCodeEvent>> {
     db.latest_code_event(conversation_id, kind)
 }
 
@@ -51,7 +58,11 @@ fn decode<T: DeserializeOwned>(event: &StoredCodeEvent) -> Option<T> {
     serde_json::from_str::<T>(&event.payload).ok()
 }
 
-fn latest<T: DeserializeOwned>(db: &Db, conversation_id: &str, kind: &str) -> anyhow::Result<Option<T>> {
+fn latest<T: DeserializeOwned>(
+    db: &Db,
+    conversation_id: &str,
+    kind: &str,
+) -> anyhow::Result<Option<T>> {
     Ok(latest_event(db, conversation_id, kind)?.and_then(|event| decode::<T>(&event)))
 }
 
@@ -284,7 +295,12 @@ pub fn plan_view(db: &Db, conversation_id: &str) -> anyhow::Result<Option<PlanVi
 
 /// Registra o plano submetido para revisão (persistido **antes** da aprovação
 /// interativa, para o draft sobreviver a negação/crash — `TOOLS.md` §2.5).
-pub fn submit_plan(db: &Db, conversation_id: &str, turn_id: &str, markdown: &str) -> anyhow::Result<()> {
+pub fn submit_plan(
+    db: &Db,
+    conversation_id: &str,
+    turn_id: &str,
+    markdown: &str,
+) -> anyhow::Result<()> {
     append(
         db,
         conversation_id,
@@ -295,7 +311,12 @@ pub fn submit_plan(db: &Db, conversation_id: &str, turn_id: &str, markdown: &str
 }
 
 /// Persiste o feedback do "Continuar planejando" (volta o estado para Planning).
-pub fn plan_feedback(db: &Db, conversation_id: &str, turn_id: &str, feedback: &str) -> anyhow::Result<()> {
+pub fn plan_feedback(
+    db: &Db,
+    conversation_id: &str,
+    turn_id: &str,
+    feedback: &str,
+) -> anyhow::Result<()> {
     append(
         db,
         conversation_id,
@@ -337,7 +358,12 @@ pub fn todos(db: &Db, conversation_id: &str) -> anyhow::Result<Vec<TodoItem>> {
 }
 
 /// Substitui a lista inteira de tarefas (e emite para a UI pelo chamador).
-pub fn save_todos(db: &Db, conversation_id: &str, turn_id: &str, items: &[TodoItem]) -> anyhow::Result<()> {
+pub fn save_todos(
+    db: &Db,
+    conversation_id: &str,
+    turn_id: &str,
+    items: &[TodoItem],
+) -> anyhow::Result<()> {
     append(
         db,
         conversation_id,
@@ -393,7 +419,12 @@ pub fn compacted_messages(db: &Db, conversation_id: &str) -> u32 {
 }
 
 /// Persiste o uso de contexto do passo (chamado no fim de cada passo).
-pub fn save_context_stats(db: &Db, conversation_id: &str, turn_id: &str, stats: &ContextStats) -> anyhow::Result<()> {
+pub fn save_context_stats(
+    db: &Db,
+    conversation_id: &str,
+    turn_id: &str,
+    stats: &ContextStats,
+) -> anyhow::Result<()> {
     append(
         db,
         conversation_id,
@@ -404,8 +435,14 @@ pub fn save_context_stats(db: &Db, conversation_id: &str, turn_id: &str, stats: 
 }
 
 /// Resumo das alterações de um turno (journal) para o evento `WorkspaceChanges`.
-pub fn turn_changes(db: &Db, conversation_id: &str, turn_id: &str) -> Option<crate::domain::ChangesSummary> {
-    let entries = db.list_file_journal_for_turn(conversation_id, turn_id).ok()?;
+pub fn turn_changes(
+    db: &Db,
+    conversation_id: &str,
+    turn_id: &str,
+) -> Option<crate::domain::ChangesSummary> {
+    let entries = db
+        .list_file_journal_for_turn(conversation_id, turn_id)
+        .ok()?;
     if entries.is_empty() {
         return None;
     }
@@ -494,7 +531,9 @@ pub fn calibrate_context(stats: &ContextStats, actual_input_tokens: u32) -> Cont
     // Nunca deixa system/tools passarem do total real (arredondamento).
     let system_prompt = scale(stats.breakdown.system_prompt).min(actual);
     let tool_definitions = scale(stats.breakdown.tool_definitions).min(actual - system_prompt);
-    let messages = actual.saturating_sub(system_prompt).saturating_sub(tool_definitions);
+    let messages = actual
+        .saturating_sub(system_prompt)
+        .saturating_sub(tool_definitions);
     ContextStats {
         used: actual,
         window: stats.window,
@@ -547,7 +586,9 @@ mod tests {
         assert!(plan_view(&db, "conv-1").expect("plano").is_none());
         set_plan_mode(&db, "conv-1", true).expect("modo plano");
         assert!(plan_mode_active(&db, "conv-1").expect("modo"));
-        let view = plan_view(&db, "conv-1").expect("plano").expect("planejando");
+        let view = plan_view(&db, "conv-1")
+            .expect("plano")
+            .expect("planejando");
         assert_eq!(view.state, PlanState::Planning);
         assert_eq!(view.updated_at, last_event(&db, KIND_PLAN_MODE).created_at);
 
@@ -560,12 +601,18 @@ mod tests {
         let view = plan_view(&db, "conv-1").expect("plano").expect("revisando");
         assert_eq!(view.state, PlanState::Reviewing);
         assert!(view.markdown.unwrap().contains("# Plano"));
-        assert_eq!(view.updated_at, last_event(&db, KIND_PLAN_SUBMITTED).created_at);
+        assert_eq!(
+            view.updated_at,
+            last_event(&db, KIND_PLAN_SUBMITTED).created_at
+        );
 
         approve_plan(&db, "conv-1", "turn-1", None, false).expect("aprovar");
         let view = plan_view(&db, "conv-1").expect("plano").expect("aprovado");
         assert_eq!(view.state, PlanState::Approved);
-        assert_eq!(view.updated_at, last_event(&db, KIND_PLAN_APPROVED).created_at);
+        assert_eq!(
+            view.updated_at,
+            last_event(&db, KIND_PLAN_APPROVED).created_at
+        );
         assert!(!plan_mode_active(&db, "conv-1").expect("modo"));
     }
 
@@ -576,11 +623,16 @@ mod tests {
         submit_plan(&db, "conv-1", "turn-1", "# Draft").expect("plano");
         plan_feedback(&db, "conv-1", "turn-1", "inclua testes de erro").expect("feedback");
 
-        let view = plan_view(&db, "conv-1").expect("plano").expect("planejando");
+        let view = plan_view(&db, "conv-1")
+            .expect("plano")
+            .expect("planejando");
         assert_eq!(view.state, PlanState::Planning);
         assert_eq!(view.markdown.as_deref(), Some("# Draft"));
         assert_eq!(view.feedback.as_deref(), Some("inclua testes de erro"));
-        assert_eq!(view.updated_at, last_event(&db, KIND_PLAN_FEEDBACK).created_at);
+        assert_eq!(
+            view.updated_at,
+            last_event(&db, KIND_PLAN_FEEDBACK).created_at
+        );
 
         // Reenvio: volta a revisar e o feedback anterior contextualiza o card.
         submit_plan(&db, "conv-1", "turn-2", "# Draft revisado").expect("reenvio");
@@ -590,7 +642,14 @@ mod tests {
         assert_eq!(view.feedback.as_deref(), Some("inclua testes de erro"));
 
         // Markdown revisado na aprovação é o persistido.
-        approve_plan(&db, "conv-1", "turn-2", Some("# Aprovado pelo usuário"), true).expect("aprovar");
+        approve_plan(
+            &db,
+            "conv-1",
+            "turn-2",
+            Some("# Aprovado pelo usuário"),
+            true,
+        )
+        .expect("aprovar");
         let view = plan_view(&db, "conv-1").expect("plano").expect("aprovado");
         assert_eq!(view.state, PlanState::Approved);
         assert_eq!(view.markdown.as_deref(), Some("# Aprovado pelo usuário"));
@@ -605,12 +664,17 @@ mod tests {
         submit_plan(&db, "conv-1", "turn-1", "# Plano").expect("plano");
         approve_plan(&db, "conv-1", "turn-1", None, false).expect("aprovar");
         assert_eq!(
-            plan_view(&db, "conv-1").expect("plano").expect("aprovado").state,
+            plan_view(&db, "conv-1")
+                .expect("plano")
+                .expect("aprovado")
+                .state,
             PlanState::Approved
         );
 
         set_plan_mode(&db, "conv-1", true).expect("reativar plano");
-        let view = plan_view(&db, "conv-1").expect("plano").expect("planejando");
+        let view = plan_view(&db, "conv-1")
+            .expect("plano")
+            .expect("planejando");
         assert_eq!(view.state, PlanState::Planning);
         assert!(view.markdown.is_none());
         assert!(view.feedback.is_none());
@@ -631,7 +695,9 @@ mod tests {
         )
         .expect("turno encerrado");
 
-        let view = plan_view(&db, "conv-1").expect("plano").expect("planejando");
+        let view = plan_view(&db, "conv-1")
+            .expect("plano")
+            .expect("planejando");
         assert_eq!(view.state, PlanState::Planning);
         assert_eq!(view.markdown.as_deref(), Some("# Plano"));
         assert_eq!(view.feedback.as_deref(), Some(STALE_REVIEW_FEEDBACK));
@@ -680,7 +746,9 @@ mod tests {
         ];
         assert!(validate_todos(&parallel).is_err());
 
-        let overflow: Vec<TodoItem> = (0..51).map(|index| feedback(&format!("item {index}"))).collect();
+        let overflow: Vec<TodoItem> = (0..51)
+            .map(|index| feedback(&format!("item {index}")))
+            .collect();
         assert!(validate_todos(&overflow).is_err());
 
         let blank = vec![feedback("   ")];
@@ -707,7 +775,9 @@ mod tests {
         assert_eq!(stats.breakdown.tool_definitions, 500);
         assert_eq!(stats.breakdown.messages, 2_000 + 32 + 32);
         assert_eq!(
-            stats.breakdown.system_prompt + stats.breakdown.tool_definitions + stats.breakdown.messages,
+            stats.breakdown.system_prompt
+                + stats.breakdown.tool_definitions
+                + stats.breakdown.messages,
             stats.used
         );
         assert_eq!(stats.used, 3_564);
@@ -736,7 +806,9 @@ mod tests {
         assert_eq!(grown.messages, estimate.messages);
         assert_eq!(grown.compacted, estimate.compacted);
         assert_eq!(
-            grown.breakdown.system_prompt + grown.breakdown.tool_definitions + grown.breakdown.messages,
+            grown.breakdown.system_prompt
+                + grown.breakdown.tool_definitions
+                + grown.breakdown.messages,
             grown.used
         );
         assert!(grown.breakdown.system_prompt >= estimate.breakdown.system_prompt);
@@ -744,7 +816,10 @@ mod tests {
         // Uso real menor: encolhe proporcionalmente, sem underflow.
         let shrunk = calibrate_context(&estimate, 500);
         assert_eq!(shrunk.used, 500);
-        assert_eq!(shrunk.breakdown.messages, shrunk.used - shrunk.breakdown.system_prompt - shrunk.breakdown.tool_definitions);
+        assert_eq!(
+            shrunk.breakdown.messages,
+            shrunk.used - shrunk.breakdown.system_prompt - shrunk.breakdown.tool_definitions
+        );
 
         // Sem uso real (0) ou estimativa vazia: devolve a entrada.
         assert_eq!(calibrate_context(&estimate, 0).used, estimate.used);

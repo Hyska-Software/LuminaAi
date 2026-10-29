@@ -52,18 +52,18 @@ impl SubagentKind {
     fn instructions(self) -> &'static str {
         match self {
             Self::Explore => {
-                "Você é um subagente de exploração. Leia os arquivos relevantes, responda à \
-                 pergunta com caminhos e linhas concretas e volte um resumo objetivo. Você NÃO \
-                 pode editar arquivos nem rodar comandos — o pai fará as mudanças."
+                "You are an exploration subagent. Read the relevant files, answer the \
+                 question with concrete paths and line numbers, and return an objective summary. You \
+                 CANNOT edit files or run commands — the parent will make the changes."
             }
             Self::Review => {
-                "Você é um subagente revisor. Examine as alterações do repositório (git diff/status) \
-                 e o pedido do pai, aponte bugs, riscos, testes ausentes e sugestões concretas. \
-                 Você NÃO pode editar arquivos nem rodar comandos."
+                "You are a reviewer subagent. Examine the repository changes (git diff/status) \
+                 and the parent's request, point out bugs, risks, missing tests and concrete \
+                 suggestions. You CANNOT edit files or run commands."
             }
             Self::General => {
-                "Você é um subagente de apoio. Investigue o workspace e responda com um resumo \
-                 útil para outro agente. Você NÃO pode editar arquivos nem rodar comandos."
+                "You are a support subagent. Investigate the workspace and answer with a summary \
+                 useful to another agent. You CANNOT edit files or run commands."
             }
         }
     }
@@ -72,6 +72,8 @@ impl SubagentKind {
 /// Pedido de delegação vindo da tool `task`.
 #[derive(Debug, Clone)]
 pub struct SubagentRequest {
+    /// Conversa pai que originou a delegação (usado pelo runner/task tool).
+    #[allow(dead_code)]
     pub parent_conversation_id: String,
     pub workspace_id: Option<String>,
     pub provider_id: String,
@@ -157,19 +159,15 @@ async fn run_child(
     };
     let workspace_id = request.workspace_id.clone().or(parent.workspace_id.clone());
     let title = format!("Subagente: {}", truncate(request.description.trim(), 48));
-    let child = db.create_conversation_with_mode(
-        &title,
-        &provider_id,
-        &model_id,
-        CONVERSATION_MODE_CODE,
-    )?;
+    let child =
+        db.create_conversation_with_mode(&title, &provider_id, &model_id, CONVERSATION_MODE_CODE)?;
     db.set_conversation_workspace(&child.id, workspace_id.as_deref())?;
     // Filho é somente leitura: a política nega escrita/shell; o catálogo também
     // é reduzido a leitura (defesa em profundidade).
     db.set_conversation_permission_mode(&child.id, PermissionMode::ReadOnly)?;
 
     let instructions = format!(
-        "# Instruções do subagente\n\n{}\n\nPedido do agente pai: {}",
+        "# Subagent instructions\n\n{}\n\nParent agent request: {}",
         request.kind.instructions(),
         request.prompt.trim()
     );
@@ -230,13 +228,18 @@ mod tests {
 
     #[tokio::test]
     async fn runner_executes_a_child_turn_and_deletes_the_ephemeral_conversation() {
-        use crate::domain::{CONVERSATION_MODE_CODE, Settings};
+        use crate::domain::{Settings, CONVERSATION_MODE_CODE};
         use crate::harness::CredentialOverride;
         use crate::providers::ProviderEvent;
 
         let db = std::sync::Arc::new(crate::db::Db::open_in_memory().expect("db"));
         let parent = db
-            .create_conversation_with_mode("Pai", "opencode-go", "deepseek-v4.1-flash", CONVERSATION_MODE_CODE)
+            .create_conversation_with_mode(
+                "Pai",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                CONVERSATION_MODE_CODE,
+            )
             .expect("conversa pai");
         let streamer: crate::harness::ProviderStreamer = std::sync::Arc::new(|_request, sink| {
             Box::pin(async move {
@@ -247,7 +250,8 @@ mod tests {
                 Ok(())
             })
         });
-        let data_dir = std::env::temp_dir().join(format!("lumina-subagent-{}", uuid::Uuid::new_v4()));
+        let data_dir =
+            std::env::temp_dir().join(format!("lumina-subagent-{}", uuid::Uuid::new_v4()));
         let deps = HarnessDeps {
             app: None,
             db: db.clone(),
@@ -265,7 +269,7 @@ mod tests {
             observed: None,
             jobs: None,
             questions: None,
-        mcp: None,
+            mcp: None,
         };
         let settings = Settings::default();
         let runner = runner(&deps, &settings, &parent, 0);
@@ -298,7 +302,7 @@ mod tests {
         assert_eq!(SubagentKind::from_str("review"), SubagentKind::Review);
         assert_eq!(SubagentKind::from_str("explore"), SubagentKind::Explore);
         assert_eq!(SubagentKind::from_str("x"), SubagentKind::Explore);
-        assert!(SubagentKind::Review.instructions().contains("revisor"));
+        assert!(SubagentKind::Review.instructions().contains("reviewer"));
     }
 
     #[test]

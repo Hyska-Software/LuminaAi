@@ -23,7 +23,6 @@ use super::workspace::{enrich_workspace, project_info, workspace_path};
 /// tarefas vivem em [`crate::harness::code::session`] (projeção única, D9).
 pub const EVENT_APPROVAL_DECIDED: &str = crate::harness::code::session::KIND_APPROVAL_DECIDED;
 pub const EVENT_PERMISSION_MODE: &str = crate::harness::code::session::KIND_PERMISSION_MODE;
-pub const EVENT_CONTEXT_STATS: &str = crate::harness::code::session::KIND_CONTEXT_STATS;
 pub const EVENT_REVERT: &str = crate::harness::code::session::KIND_REVERT;
 
 fn map_err(error: impl std::fmt::Display) -> String {
@@ -95,7 +94,14 @@ async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSe
     let plan = degrade_orphan_review(plan, has_pending_plan_approval);
     let todos = crate::harness::code::session::todos(&state.db, conversation_id)
         .map_err(map_err)?;
-    let context = crate::harness::code::session::context_stats(&state.db, conversation_id);
+    // O `compacted` vem sempre da projeção canônica (`context/compacted`): o
+    // `/compact` manual só grava esse evento (D25), então sem o overlay o valor
+    // ficaria congelado no último `context/stats` até o próximo passo do turno.
+    let compacted = crate::harness::code::session::compacted_messages(&state.db, conversation_id);
+    let context = project_context(
+        crate::harness::code::session::context_stats(&state.db, conversation_id),
+        compacted,
+    );
 
     Ok(CodeSessionState {
         conversation_id: conversation_id.to_string(),
@@ -835,8 +841,58 @@ pub async fn revert_turn(
     Ok(reverted > 0)
 }
 
+/// Aplica o `compacted` da projeção canônica ao último `ContextStats` lido do
+/// log. Sem o overlay, o `/compact` manual (que não tem um turno para reescrever
+/// `context/stats`) deixaria o medidor com o valor antigo até o próximo passo do
+/// harness — bug D25. Sem stats persistido continua `None` (não inventa contexto).
+fn project_context(
+    context: Option<crate::domain::ContextStats>,
+    compacted: u32,
+) -> Option<crate::domain::ContextStats> {
+    context.map(|mut stats| {
+        stats.compacted = compacted;
+        stats
+    })
+}
+
+/// Projeta o `/compact` manual nos eventos canônicos (D25): grava
+/// `context/compacted` com o **mesmo payload da compactação automática**
+/// (`{messages, tokensFreed}`) via [`compaction::record_compaction`].
+///
+/// Nunca gravar payload parcial em `context/stats`: o fold daquele kind
+/// desserializa um `ContextStats` inteiro e um payload inválido fazia o
+/// `context` do `CodeSessionState` voltar a `None` (bug D25).
+fn record_manual_compaction(
+    db: &crate::db::Db,
+    conversation_id: &str,
+    covered_messages: u32,
+    tokens_freed: u32,
+) -> anyhow::Result<()> {
+    use crate::harness::code::compaction;
+    // O comando manual não roda dentro de um turno: `""` vira `None` no evento.
+    compaction::record_compaction(db, conversation_id, "", covered_messages, tokens_freed)
+}
+
 /// Compactação manual do contexto (`/compact`): resume o trecho antigo da
-/// conversa com uma chamada auxiliar e o aplica aos próximos turnos do modelo.
+/// conversa e o aplica aos próximos turnos do modelo.
+///
+/// **Cache-safe (F6.2):** o resumo é delegado a
+/// [`crate::harness::compaction::summarize_manual_for_conversation`], que monta o
+/// **prefixo normal** da sessão (system prompt congelado do snapshot, tools,
+/// histórico com replay/surface/resumo aplicado) e anexa `summary_instruction`
+/// como última mensagem de user — o provedor lê o prefixo cacheado em vez de
+/// pagar o prompt inteiro. O `cache_plan` do request normal também é reusado.
+/// (O antigo caminho de prompt próprio (`summary_system_prompt` +
+/// `batch::complete_text`) saiu do comando; `summary_system_prompt` pode ser
+/// removido do harness quando ninguém mais usar.)
+///
+/// **Contrato estável (D25):** a fronteira persistida é o ordinal de **mensagens
+/// cobertas** (`session_summaries.to_seq`), o mesmo da compactação automática —
+/// não o índice do histórico neutro. O evento gravado é `context/compacted`
+/// (`{messages, tokensFreed}`), que preserva o `context` do medidor; o
+/// `compacted` exibido por `get_code_session_state` vem da projeção
+/// ([`project_context`]). O helper não persiste nada: o comando grava
+/// resumo/evento só depois do `Some(outcome)`.
 #[tauri::command]
 pub async fn compact_session(
     app: tauri::AppHandle,
@@ -848,6 +904,8 @@ pub async fn compact_session(
         .get_conversation(&conversation_id)
         .map_err(map_err)?
         .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))?;
+    // Guarda amigável antes de resolver provider/credencial (o harness também
+    // devolve `None` para histórico curto/inválido).
     let messages = state
         .db
         .list_messages(&conversation_id)
@@ -855,26 +913,6 @@ pub async fn compact_session(
     if messages.len() < 8 {
         return Err("conversa curta demais para compactar".to_string());
     }
-    // Converte para o vocabulário do histórico neutro e escolhe o corte.
-    let history: Vec<crate::providers::HistoryMessage> = messages
-        .iter()
-        .map(|message| match message.role {
-            crate::domain::MessageRole::User => {
-                crate::providers::HistoryMessage::user(message.content.clone())
-            }
-            crate::domain::MessageRole::Assistant => {
-                crate::providers::HistoryMessage::assistant(message.content.clone())
-            }
-            crate::domain::MessageRole::System => {
-                crate::providers::HistoryMessage::system(message.content.clone())
-            }
-        })
-        .collect();
-    let Some(cut) = crate::harness::code::compaction::cut_index(&history) else {
-        return Err("não há trecho antigo suficiente para compactar".to_string());
-    };
-    let transcript = crate::harness::code::compaction::transcript(&history, cut);
-    let settings = crate::config::load_settings(&app);
     let deps = crate::harness::HarnessDeps {
         app: Some(app.clone()),
         db: state.db.clone(),
@@ -894,37 +932,37 @@ pub async fn compact_session(
         questions: Some(state.questions.clone()),
         mcp: Some(state.mcp.clone()),
     };
-    let request = crate::harness::batch::BatchRequest {
-        provider_id: &conversation.provider_id,
-        model_id: &conversation.model_id,
-        system_prompt: crate::harness::code::compaction::summary_system_prompt(),
-        user_text: &format!("Resuma o transcript abaixo:\n\n{transcript}"),
-        max_output_tokens: 1_200,
-        temperature: None,
-    };
-    let summary = tokio::time::timeout(
-        std::time::Duration::from_secs(90),
-        crate::harness::batch::complete_text(&deps, request),
+    let settings = crate::config::load_settings(&app);
+    // Prefixo normal + resumo + `cache_plan` montados pelo harness (cache-safe).
+    let outcome = crate::harness::compaction::summarize_manual_for_conversation(
+        &deps,
+        &conversation,
+        &settings,
     )
     .await
-    .map_err(|_| "a compactação excedeu o tempo limite".to_string())?
-    .map_err(|error| format!("falha ao compactar: {error:#}"))?;
-    let covered = i64::try_from(cut).unwrap_or(1).max(1);
+    .map_err(|error| format!("falha ao compactar: {error:#}"))?
+    .ok_or_else(|| "não há trecho antigo suficiente para compactar".to_string())?;
+
+    // `to_seq` = `outcome.covered` (ordinal estável de mensagens); a coluna
+    // `tokens` guarda a estimativa de tokens liberados (informativa).
     state
         .db
-        .insert_session_summary(&conversation_id, 1, covered, &summary, None)
+        .insert_session_summary(
+            &conversation_id,
+            1,
+            i64::from(outcome.covered),
+            &outcome.summary,
+            Some(outcome.tokens_freed),
+        )
         .map_err(map_err)?;
-    let payload = serde_json::json!({
-        "manual": true,
-        "coveredMessages": covered,
-        "summaryChars": summary.chars().count(),
-    })
-    .to_string();
-    state
-        .db
-        .append_code_event(&conversation_id, None, EVENT_CONTEXT_STATS, &payload)
-        .map_err(map_err)?;
-    let _ = settings;
+    // Projeção canônica da UI (D25): `context/compacted`, nunca `context/stats`.
+    record_manual_compaction(
+        &state.db,
+        &conversation_id,
+        outcome.covered,
+        outcome.tokens_freed,
+    )
+    .map_err(map_err)?;
     Ok(true)
 }
 
@@ -1242,5 +1280,83 @@ mod tests {
             db.list_approval_rules().expect("regras").is_empty(),
             "aprovação de plano não cria regra"
         );
+    }
+
+    /* -------------------------------------------------------------- */
+    /* /compact manual: cache-safe (F6.2) + projeção D25               */
+    /* -------------------------------------------------------------- */
+
+    /// O `/compact` manual agora delega ao helper cache-safe do harness; não pode
+    /// voltar a montar um request de resumo próprio (caminho não cache-safe).
+    /// O uso real é provado em compile-time pela chamada no comando; este teste
+    /// protege contra regressão textual (needles partidos para não casarem com o
+    /// próprio literal do teste).
+    #[test]
+    fn manual_compact_uses_the_harness_cache_safe_helper() {
+        let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/code.rs"));
+        assert!(
+            source.contains(concat!("summarize_manual", "_for_conversation")),
+            "o /compact manual deve delegar ao helper cache-safe do harness"
+        );
+        assert!(
+            !source.contains(concat!("summary_system", "_prompt()")),
+            "o manual não deve voltar a montar prompt próprio de sumarização"
+        );
+        assert!(
+            !source.contains(concat!("complete", "_text(")),
+            "o manual não deve voltar ao caminho de texto do batch (não cache-safe)"
+        );
+        // `to_seq`/projeção seguem vindo do outcome do helper.
+        assert!(source.contains(concat!("i64::from(outcome", ".covered)")));
+        assert!(source.contains(concat!("outcome", ".tokens_freed")));
+    }
+
+    #[test]
+    fn manual_compact_projection_keeps_context_and_updates_compacted() {
+        let (db, conversation_id) = db_with_conversation();
+        assert!(session::context_stats(&db, &conversation_id).is_none());
+
+        let stats = session::estimate_context(4_000, 8_000, 2_000, 200_000, 8_192, 10, 2, 0);
+        session::save_context_stats(&db, &conversation_id, "turn-1", &stats).expect("stats");
+        let before = session::context_stats(&db, &conversation_id).expect("contexto antes");
+        assert_eq!(before.compacted, 0);
+
+        // `/compact` manual grava só a projeção canônica (`context/compacted`).
+        record_manual_compaction(&db, &conversation_id, 7, 900).expect("compactação manual");
+
+        // D25: o fold do medidor continua lendo o `ContextStats` completo; antes
+        // do fix o payload parcial em `context/stats` zerava o `context`.
+        let after = session::context_stats(&db, &conversation_id).expect("contexto depois");
+        assert_eq!(after.used, stats.used);
+        assert_eq!(
+            after.compacted, 0,
+            "o manual não reescreve context/stats (payload exige ContextStats inteiro)"
+        );
+        assert_eq!(session::compacted_messages(&db, &conversation_id), 7);
+        // `get_code_session_state` projeta o compacted atualizado via overlay.
+        let projected = project_context(
+            Some(after),
+            session::compacted_messages(&db, &conversation_id),
+        )
+        .expect("contexto projetado");
+        assert_eq!(projected.compacted, 7);
+        assert_eq!(projected.used, stats.used);
+        assert!(
+            project_context(None, 7).is_none(),
+            "sem stats persistido não inventa contexto"
+        );
+
+        // Um segundo `/compact` atualiza a projeção (último evento vence).
+        record_manual_compaction(&db, &conversation_id, 9, 500).expect("segunda compactação");
+        assert_eq!(session::compacted_messages(&db, &conversation_id), 9);
+
+        // Resumo da compactação manual: `to_seq` = mensagens cobertas.
+        db.insert_session_summary(&conversation_id, 1, 9, "resumo manual", None)
+            .expect("resumo");
+        let latest = db
+            .latest_session_summary(&conversation_id)
+            .expect("ler resumo")
+            .expect("resumo persistido");
+        assert_eq!(latest.to_seq, 9);
     }
 }

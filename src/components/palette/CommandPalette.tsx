@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import { toast } from 'sonner';
+import { CacheDiagnosticsDialog } from '@/components/agent/CacheDiagnosticsDialog';
+import { CACHE_DIAGNOSTICS_EVENT } from '@/components/agent/cacheDiagnosticsRequest';
 import {
   Dialog,
   DialogContent,
@@ -152,6 +154,18 @@ export function CommandPalette() {
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const rowRefs = useRef(new Map<string, HTMLButtonElement | null>());
+
+  /**
+   * Diagnóstico de cache (F5.4). A paleta é o host persistente do dialog: ela
+   * continua montada quando fecha, então o painel sobrevive ao fechamento e
+   * pode ser aberto pela própria paleta ou pelo botão do popover do chip.
+   */
+  const [cacheDiagnosticsOpen, setCacheDiagnosticsOpen] = useState(false);
+  useEffect(() => {
+    const openDiagnostics = () => setCacheDiagnosticsOpen(true);
+    window.addEventListener(CACHE_DIAGNOSTICS_EVENT, openDiagnostics);
+    return () => window.removeEventListener(CACHE_DIAGNOSTICS_EVENT, openDiagnostics);
+  }, []);
 
   const actions = usePaletteActions();
   const parsed = useMemo(() => parsePaletteQuery(rawQuery), [rawQuery]);
@@ -390,169 +404,175 @@ export function CommandPalette() {
     : `${flat.length} ${flat.length === 1 ? 'resultado' : 'resultados'}`;
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent
-        showClose={false}
-        aria-describedby={undefined}
-        onEscapeKeyDown={handleEscapeKeyDown}
-        className="mt-[9vh] w-[640px] max-w-[calc(100vw-2rem)] flex-none gap-0 self-start overflow-hidden p-0"
-      >
-        <DialogTitle className="sr-only">Paleta de comandos</DialogTitle>
-        <DialogDescription className="sr-only">
-          Busque conversas ou execute comandos do Lumina. Use as setas para navegar, Enter para
-          executar e Esc para limpar a busca ou fechar.
-        </DialogDescription>
-
-        <div className="flex shrink-0 items-center gap-2.5 border-b border-border px-4">
-          <Search aria-hidden className="size-4 shrink-0 text-foreground-subtle" />
-          <input
-            ref={inputRef}
-            value={rawQuery}
-            onChange={(event) => {
-              setRawQuery(event.target.value);
-            }}
-            onKeyDown={handleInputKeyDown}
-            placeholder={placeholder}
-            aria-label="Buscar conversas ou comandos"
-            role="combobox"
-            aria-expanded
-            aria-controls="lumina-palette-list"
-            aria-autocomplete="list"
-            aria-activedescendant={activeItem ? optionDomId(activeItem.key) : undefined}
-            autoFocus
-            spellCheck={false}
-            autoComplete="off"
-            className="h-12 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-foreground-subtle"
-          />
-          {conversationSearch.loading ? (
-            <Spinner size="xs" label="Buscando conversas" className="text-foreground-subtle" />
-          ) : null}
-          <Kbd>Esc</Kbd>
-        </div>
-
-        <div className="max-h-[min(420px,calc(100vh-220px))] overflow-y-auto overscroll-contain">
-          <div
-            id="lumina-palette-list"
-            role="listbox"
-            aria-label="Comandos e conversas"
-            className={sections.length ? 'p-1.5' : 'hidden'}
-          >
-            {sections.map((section) => (
-              <div
-                key={section.id}
-                role="group"
-                aria-labelledby={`lumina-palette-section-${section.id}`}
-                className="flex flex-col"
-              >
-                <span
-                  id={`lumina-palette-section-${section.id}`}
-                  className="px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-foreground-subtle"
-                >
-                  {section.label}
-                </span>
-                {section.loading ? <LoadingRows /> : null}
-                {section.fallback ? (
-                  <p className="px-2.5 pb-1 text-[11px] leading-relaxed text-foreground-subtle">
-                    Busca no histórico indisponível; mostrando título e prévia.
-                  </p>
-                ) : null}
-                {section.items.map((item) =>
-                  item.kind === 'command' ? (
-                    <PaletteRow
-                      key={item.key}
-                      id={optionDomId(item.key)}
-                      action={item.action}
-                      labelRanges={item.labelRanges}
-                      descriptionRanges={item.descriptionRanges}
-                      active={item.key === activeKey}
-                      onActivate={() => setActiveKey(item.key)}
-                      onExecute={() => executeItem(item)}
-                      refCallback={(element) => {
-                        if (element) rowRefs.current.set(item.key, element);
-                        else rowRefs.current.delete(item.key);
-                      }}
-                    />
-                  ) : (
-                    <ConversationRow
-                      key={item.key}
-                      id={optionDomId(item.key)}
-                      conversation={item.conversation}
-                      titleRanges={item.titleRanges}
-                      previewRanges={item.previewRanges}
-                      active={item.key === activeKey}
-                      matchedInContent={
-                        hasQuery && item.titleRanges.length === 0 && item.previewRanges.length === 0
-                      }
-                      onActivate={() => setActiveKey(item.key)}
-                      onExecute={() => executeItem(item)}
-                      refCallback={(element) => {
-                        if (element) rowRefs.current.set(item.key, element);
-                        else rowRefs.current.delete(item.key);
-                      }}
-                    />
-                  ),
-                )}
-              </div>
-            ))}
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          showClose={false}
+          aria-describedby={undefined}
+          onEscapeKeyDown={handleEscapeKeyDown}
+          className="mt-[9vh] w-[640px] max-w-[calc(100vw-2rem)] flex-none gap-0 self-start overflow-hidden p-0"
+        >
+          <DialogTitle className="sr-only">Paleta de comandos</DialogTitle>
+          <DialogDescription className="sr-only">
+            Busque conversas ou execute comandos do Lumina. Use as setas para navegar, Enter para
+            executar e Esc para limpar a busca ou fechar.
+          </DialogDescription>
+  
+          <div className="flex shrink-0 items-center gap-2.5 border-b border-border px-4">
+            <Search aria-hidden className="size-4 shrink-0 text-foreground-subtle" />
+            <input
+              ref={inputRef}
+              value={rawQuery}
+              onChange={(event) => {
+                setRawQuery(event.target.value);
+              }}
+              onKeyDown={handleInputKeyDown}
+              placeholder={placeholder}
+              aria-label="Buscar conversas ou comandos"
+              role="combobox"
+              aria-expanded
+              aria-controls="lumina-palette-list"
+              aria-autocomplete="list"
+              aria-activedescendant={activeItem ? optionDomId(activeItem.key) : undefined}
+              autoFocus
+              spellCheck={false}
+              autoComplete="off"
+              className="h-12 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-foreground-subtle"
+            />
+            {conversationSearch.loading ? (
+              <Spinner size="xs" label="Buscando conversas" className="text-foreground-subtle" />
+            ) : null}
+            <Kbd>Esc</Kbd>
           </div>
-          {sections.length === 0 ? (
-            conversationSearch.loading ? (
-              <LoadingRows />
-            ) : (
-              <EmptyState query={parsed.query} scope={parsed.scope} />
-            )
-          ) : null}
-        </div>
-
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border px-3 py-2 text-[11px] text-foreground-subtle">
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="flex items-center gap-1">
-              <Kbd>↑</Kbd>
-              <Kbd>↓</Kbd>
-              navegar
-            </span>
-            <span className="flex items-center gap-1">
-              <Kbd>↵</Kbd>
-              executar
-            </span>
-            {activeItem?.kind === 'conversation' ? (
+  
+          <div className="max-h-[min(420px,calc(100vh-220px))] overflow-y-auto overscroll-contain">
+            <div
+              id="lumina-palette-list"
+              role="listbox"
+              aria-label="Comandos e conversas"
+              className={sections.length ? 'p-1.5' : 'hidden'}
+            >
+              {sections.map((section) => (
+                <div
+                  key={section.id}
+                  role="group"
+                  aria-labelledby={`lumina-palette-section-${section.id}`}
+                  className="flex flex-col"
+                >
+                  <span
+                    id={`lumina-palette-section-${section.id}`}
+                    className="px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-foreground-subtle"
+                  >
+                    {section.label}
+                  </span>
+                  {section.loading ? <LoadingRows /> : null}
+                  {section.fallback ? (
+                    <p className="px-2.5 pb-1 text-[11px] leading-relaxed text-foreground-subtle">
+                      Busca no histórico indisponível; mostrando título e prévia.
+                    </p>
+                  ) : null}
+                  {section.items.map((item) =>
+                    item.kind === 'command' ? (
+                      <PaletteRow
+                        key={item.key}
+                        id={optionDomId(item.key)}
+                        action={item.action}
+                        labelRanges={item.labelRanges}
+                        descriptionRanges={item.descriptionRanges}
+                        active={item.key === activeKey}
+                        onActivate={() => setActiveKey(item.key)}
+                        onExecute={() => executeItem(item)}
+                        refCallback={(element) => {
+                          if (element) rowRefs.current.set(item.key, element);
+                          else rowRefs.current.delete(item.key);
+                        }}
+                      />
+                    ) : (
+                      <ConversationRow
+                        key={item.key}
+                        id={optionDomId(item.key)}
+                        conversation={item.conversation}
+                        titleRanges={item.titleRanges}
+                        previewRanges={item.previewRanges}
+                        active={item.key === activeKey}
+                        matchedInContent={
+                          hasQuery && item.titleRanges.length === 0 && item.previewRanges.length === 0
+                        }
+                        onActivate={() => setActiveKey(item.key)}
+                        onExecute={() => executeItem(item)}
+                        refCallback={(element) => {
+                          if (element) rowRefs.current.set(item.key, element);
+                          else rowRefs.current.delete(item.key);
+                        }}
+                      />
+                    ),
+                  )}
+                </div>
+              ))}
+            </div>
+            {sections.length === 0 ? (
+              conversationSearch.loading ? (
+                <LoadingRows />
+              ) : (
+                <EmptyState query={parsed.query} scope={parsed.scope} />
+              )
+            ) : null}
+          </div>
+  
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border px-3 py-2 text-[11px] text-foreground-subtle">
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="flex items-center gap-1">
-                <Kbd>{modKey}</Kbd>
-                <Kbd>↵</Kbd>
-                {activeItem.conversation.pinned ? 'desafixar' : 'fixar'}
+                <Kbd>↑</Kbd>
+                <Kbd>↓</Kbd>
+                navegar
               </span>
-            ) : null}
-            <span className="flex items-center gap-1">
-              <Kbd>esc</Kbd>
-              {rawQuery ? 'limpar busca' : 'fechar'}
+              <span className="flex items-center gap-1">
+                <Kbd>↵</Kbd>
+                executar
+              </span>
+              {activeItem?.kind === 'conversation' ? (
+                <span className="flex items-center gap-1">
+                  <Kbd>{modKey}</Kbd>
+                  <Kbd>↵</Kbd>
+                  {activeItem.conversation.pinned ? 'desafixar' : 'fixar'}
+                </span>
+              ) : null}
+              <span className="flex items-center gap-1">
+                <Kbd>esc</Kbd>
+                {rawQuery ? 'limpar busca' : 'fechar'}
+              </span>
+              {!rawQuery ? (
+                <span className="hidden sm:inline">&gt; comandos · # conversas</span>
+              ) : null}
             </span>
-            {!rawQuery ? (
-              <span className="hidden sm:inline">&gt; comandos · # conversas</span>
-            ) : null}
-          </span>
-          <span className="tabular-nums">
-            {conversationSearch.loading && flat.length === 0 ? (
-              'Buscando conversas…'
-            ) : (
-              <>
-                {commandCount > 0
-                  ? `${commandCount} ${commandCount === 1 ? 'comando' : 'comandos'}`
-                  : null}
-                {commandCount > 0 && conversationCount > 0 ? ' · ' : null}
-                {conversationCount > 0
-                  ? `${conversationCount} ${conversationCount === 1 ? 'conversa' : 'conversas'}`
-                  : null}
-                {commandCount === 0 && conversationCount === 0 ? 'Nenhum resultado' : null}
-              </>
-            )}
-          </span>
-        </div>
-
-        <div aria-live="polite" className="sr-only">
-          {announcement}
-        </div>
-      </DialogContent>
-    </Dialog>
+            <span className="tabular-nums">
+              {conversationSearch.loading && flat.length === 0 ? (
+                'Buscando conversas…'
+              ) : (
+                <>
+                  {commandCount > 0
+                    ? `${commandCount} ${commandCount === 1 ? 'comando' : 'comandos'}`
+                    : null}
+                  {commandCount > 0 && conversationCount > 0 ? ' · ' : null}
+                  {conversationCount > 0
+                    ? `${conversationCount} ${conversationCount === 1 ? 'conversa' : 'conversas'}`
+                    : null}
+                  {commandCount === 0 && conversationCount === 0 ? 'Nenhum resultado' : null}
+                </>
+              )}
+            </span>
+          </div>
+  
+          <div aria-live="polite" className="sr-only">
+            {announcement}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <CacheDiagnosticsDialog
+        open={cacheDiagnosticsOpen}
+        onOpenChange={setCacheDiagnosticsOpen}
+      />
+    </>
   );
 }
 

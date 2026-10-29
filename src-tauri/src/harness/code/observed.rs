@@ -71,9 +71,7 @@ impl ObservedFiles {
         match entries.get(path) {
             None => ObservationState::Missing,
             Some(version) => {
-                if version.size == current.len() as u64
-                    && version.hash == hash_bytes(current)
-                {
+                if version.size == current.len() as u64 && version.hash == hash_bytes(current) {
                     ObservationState::Fresh
                 } else {
                     ObservationState::Stale
@@ -83,10 +81,12 @@ impl ObservedFiles {
     }
 
     /// Esquece um arquivo (ex.: removido pelo agente).
+    #[allow(dead_code)]
     pub fn forget(&self, path: &Path) {
         self.entries.lock().remove(path);
     }
 
+    #[allow(dead_code)]
     pub fn clear(&self) {
         self.entries.lock().clear();
     }
@@ -130,9 +130,6 @@ mod tests {
         let path = Path::new("C:/proj/a.ts");
         observed.record(path, b"conteudo");
         observed.forget(path);
-        assert_eq!(
-            observed.check(path, b"conteudo"),
-            ObservationState::Missing
-        );
+        assert_eq!(observed.check(path, b"conteudo"), ObservationState::Missing);
     }
 }

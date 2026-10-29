@@ -1,0 +1,122 @@
+{
+  "generatedAt": "2026-10-29T19:34:22.547Z",
+  "fixture": "lumina-cache-probe-v1",
+  "providers": [
+    {
+      "provider": "opencode-go",
+      "name": "OpenCode Go",
+      "cache": {
+        "mode": "explicit",
+        "minTokens": 2048,
+        "blockTokens": null,
+        "ttlOptions": [
+          "1h"
+        ],
+        "supportsKey": true,
+        "supportsRetention": false,
+        "supportsExplicitBreakpoints": true,
+        "source": "probe",
+        "reportsRead": true,
+        "reportsWrite": true
+      },
+      "routes": [
+        {
+          "route": "responses",
+          "model": "gpt-6-luna",
+          "authMode": "api",
+          "url": "https://opencode.ai/inference/go/openai/v1/responses",
+          "attempts": [
+            {
+              "attempt": 1,
+              "status": 200,
+              "cache": {
+                "input_tokens": 1116,
+                "cache_read": 0,
+                "cache_write": 1113,
+                "opencode": {
+                  "input": 3,
+                  "output": 5,
+                  "reasoning": 0,
+                  "cache_read": 0,
+                  "cache_write_5m": 1113,
+                  "cache_write_1h": 0
+                },
+                "raw": {
+                  "input_tokens": 1116,
+                  "output_tokens": 5,
+                  "total_tokens": 1121,
+                  "input_tokens_details": {
+                    "cached_tokens": 0,
+                    "cache_write_tokens": 1113
+                  },
+                  "output_tokens_details": {
+                    "reasoning_tokens": 0
+                  },
+                  "cost": 0,
+                  "opencode": {
+                    "billing_source": "go",
+                    "list_cost": 0.00014193,
+                    "allowance": 0.0005677,
+                    "tokens": {
+                      "input": 3,
+                      "output": 5,
+                      "reasoning": 0,
+                      "cache_read": 0,
+                      "cache_write_5m": 1113,
+                      "cache_write_1h": 0
+                    }
+                  }
+                }
+              },
+              "error": null
+            },
+            {
+              "attempt": 2,
+              "status": 200,
+              "cache": {
+                "input_tokens": 1116,
+                "cache_read": 1113,
+                "cache_write": 0,
+                "opencode": {
+                  "input": 3,
+                  "output": 5,
+                  "reasoning": 0,
+                  "cache_read": 1113,
+                  "cache_write_5m": 0,
+                  "cache_write_1h": 0
+                },
+                "raw": {
+                  "input_tokens": 1116,
+                  "output_tokens": 5,
+                  "total_tokens": 1121,
+                  "input_tokens_details": {
+                    "cached_tokens": 1113,
+                    "cache_write_tokens": 0
+                  },
+                  "output_tokens_details": {
+                    "reasoning_tokens": 0
+                  },
+                  "cost": 0,
+                  "opencode": {
+                    "billing_source": "go",
+                    "list_cost": 0.00001393,
+                    "allowance": 0.00005572,
+                    "tokens": {
+                      "input": 3,
+                      "output": 5,
+                      "reasoning": 0,
+                      "cache_read": 1113,
+                      "cache_write_5m": 0,
+                      "cache_write_1h": 0
+                    }
+                  }
+                }
+              },
+              "error": null
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

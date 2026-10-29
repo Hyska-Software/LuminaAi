@@ -1,0 +1,37 @@
+{
+  "generatedAt": "2026-10-29T17:36:06.123Z",
+  "fixture": "lumina-cache-probe-v1",
+  "providers": [
+    {
+      "provider": "openai",
+      "name": "OpenAI (ChatGPT)",
+      "cache": {
+        "mode": "auto",
+        "minTokens": 1024,
+        "blockTokens": 128,
+        "ttlOptions": [
+          "in_memory",
+          "24h"
+        ],
+        "supportsKey": true,
+        "supportsRetention": true,
+        "supportsExplicitBreakpoints": true,
+        "source": "family-default",
+        "reportsRead": true,
+        "reportsWrite": true
+      },
+      "routes": [
+        {
+          "route": "responses",
+          "model": "gpt-5",
+          "skipped": "sem credencial"
+        },
+        {
+          "route": "responses",
+          "model": "gpt-5-mini",
+          "skipped": "sem credencial"
+        }
+      ]
+    }
+  ]
+}

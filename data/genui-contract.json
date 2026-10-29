@@ -3,16 +3,16 @@
   "name": "Lumina Generative UI",
   "description": "Contrato único da UI generativa declarativa (blocos ```ui). É consumido pelo system prompt (Rust), pelo validador/ferramenta do agente (Rust) e pelo renderer (TypeScript). Alterar este arquivo exige atualizar a implementação dos dois lados — os testes de paridade (data/genui-fixtures.json) garantem que isso aconteça.",
   "format": {
-    "root": "objeto JSON { \"version\"?: 2, \"components\": [...] }; também aceita um array cru de componentes (normalizado).",
+    "root": "JSON object { \"version\"?: 2, \"components\": [...] }; a bare array of components is also accepted (normalized).",
     "version": 2,
     "notes": [
-      "Cada componente é { \"type\": string, \"props\"?: objeto, \"children\"?: array }.",
-      "`children` só é aceito em containers (card, stack, grid, tabs, reveal, callout).",
-      "Profundidade máxima de 8 níveis e no máximo 120 componentes por bloco.",
-      "Propriedades desconhecidas são ignoradas com aviso; nomes de props são exatamente os do contrato.",
-      "Formas antigas são normalizadas: chart com `labels`+`values`, keyvalue como objeto, list/steps items como strings.",
-      "Texto puro: Markdown não é renderizado dentro de props; nada de HTML/JS/CSS.",
-      "URLs em image.src/link.href precisam ser http(s); image.src também aceita data:image/png|jpeg|webp|gif."
+      "Each component is { \"type\": string, \"props\"?: object, \"children\"?: array }.",
+      "`children` is only accepted on containers (card, stack, grid, tabs, reveal, callout).",
+      "Maximum depth of 8 levels and at most 120 components per block.",
+      "Unknown properties are ignored with a warning; prop names are exactly the ones in the contract.",
+      "Legacy shapes are normalized: chart with `labels`+`values`, keyvalue as an object, list/steps items as strings.",
+      "Plain text: Markdown is not rendered inside props; no HTML/JS/CSS.",
+      "URLs in image.src/link.href must be http(s); image.src also accepts data:image/png|jpeg|webp|gif."
     ]
   },
   "blocks": {
@@ -56,27 +56,27 @@
     "wrench"
   ],
   "interactions": {
-    "description": "Componentes interativos são declarativos e seguros: nenhum código do agente é executado.",
+    "description": "Interactive components are declarative and safe: no agent code is executed.",
     "actionKinds": [
       {
         "kind": "prompt",
-        "label": "Sugerir pergunta",
-        "description": "Preenche o composer com o texto da ação; o usuário revisa e envia quando quiser.",
+        "label": "Suggest a question",
+        "description": "Fills the composer with the action text; the user reviews it and sends when ready.",
         "maxChars": 400
       },
       {
         "kind": "copy",
-        "label": "Copiar",
-        "description": "Copia o texto para a área de transferência do usuário.",
+        "label": "Copy",
+        "description": "Copies the text to the user's clipboard.",
         "maxChars": 4000
       }
     ],
     "rules": [
-      "Use `actions` para oferecer 1–4 próximos passos concretos depois de entregar a resposta.",
-      "Rótulos de ação: verbo + objeto curto (ex.: \"Comparar cenários\"), sem ponto final.",
-      "Ações `prompt` preenchem o composer — nunca enviam mensagem sozinhas.",
-      "No máximo uma ação `primary` por grupo; as demais são `secondary` ou `ghost`.",
-      "Não use `actions` quando a resposta já termina em uma pergunta simples ou quando não há próximo passo útil."
+      "Use `actions` to offer 1–4 concrete next steps after delivering the answer.",
+      "Action labels: verb + short object (e.g. \"Comparar cenários\"), no trailing period.",
+      "`prompt` actions fill the composer — they never send a message on their own.",
+      "At most one `primary` action per group; the others are `secondary` or `ghost`.",
+      "Do not use `actions` when the answer already ends with a simple question or when there is no useful next step."
     ]
   },
   "components": [
@@ -84,8 +84,8 @@
       "type": "card",
       "kind": "container",
       "category": "layout",
-      "summary": "Superfície com título/subtítulo/rodapé/ícone que agrupa uma unidade de conteúdo.",
-      "doc": "`title?` (≤ 80), `subtitle?` (≤ 160), `footer?` (≤ 120), `variant?` (`default|accent|muted`), `icon?`; aceita `children`.",
+      "summary": "Surface with a title/subtitle/footer/icon that groups one unit of content.",
+      "doc": "`title?` (≤ 80), `subtitle?` (≤ 160), `footer?` (≤ 120), `variant?` (`default|accent|muted`), `icon?`; accepts `children`.",
       "acceptsChildren": true,
       "props": {
         "title": {
@@ -118,8 +118,8 @@
       "type": "stack",
       "kind": "container",
       "category": "layout",
-      "summary": "Container flex para empilhar ou alinhar componentes.",
-      "doc": "`direction?` (`column|row`), `gap?` (`none|sm|md|lg`), `align?` (`start|center|end|stretch`), `justify?` (`start|center|between|end`), `wrap?` (boolean); aceita `children`.",
+      "summary": "Flex container for stacking or aligning components.",
+      "doc": "`direction?` (`column|row`), `gap?` (`none|sm|md|lg`), `align?` (`start|center|end|stretch`), `justify?` (`start|center|between|end`), `wrap?` (boolean); accepts `children`.",
       "acceptsChildren": true,
       "props": {
         "direction": {
@@ -170,8 +170,8 @@
       "type": "grid",
       "kind": "container",
       "category": "layout",
-      "summary": "Grade responsiva para métricas e cartões lado a lado.",
-      "doc": "`columns?` (1–4, padrão 2), `gap?` (`none|sm|md|lg`); aceita `children`; o número de filhos deve completar as colunas.",
+      "summary": "Responsive grid for metrics and cards side by side.",
+      "doc": "`columns?` (1–4, default 2), `gap?` (`none|sm|md|lg`); accepts `children`; the number of children must fill the columns.",
       "acceptsChildren": true,
       "props": {
         "columns": {
@@ -196,8 +196,8 @@
       "type": "tabs",
       "kind": "container",
       "category": "layout",
-      "summary": "Abas para alternar entre visões do mesmo assunto.",
-      "doc": "Aceita `children` com 1 painel por aba; cada painel precisa de `props.label` com o nome da aba (≤ 40 recomendado; limite rígido 80).",
+      "summary": "Tabs for switching between views of the same subject.",
+      "doc": "Accepts `children` with 1 panel per tab; each panel needs `props.label` with the tab name (≤ 40 recommended; hard limit 80).",
       "acceptsChildren": true,
       "props": {
         "label": {
@@ -211,8 +211,8 @@
       "type": "reveal",
       "kind": "container",
       "category": "layout",
-      "summary": "Seção recolhível para detalhes que não precisam ocupar espaço.",
-      "doc": "`title` (obrigatório, ≤ 80), `open?` (boolean, padrão false); aceita `children`.",
+      "summary": "Collapsible section for details that do not need to take up space.",
+      "doc": "`title` (required, ≤ 80), `open?` (boolean, default false); accepts `children`.",
       "acceptsChildren": true,
       "props": {
         "title": {
@@ -230,8 +230,8 @@
       "type": "section",
       "kind": "container",
       "category": "layout",
-      "summary": "Cabeçalho de seção (eyebrow, título, ícone, descrição e divisor) com conteúdo abaixo — sem moldura de card.",
-      "doc": "`title?` (≤ 100), `eyebrow?` (≤ 40), `description?` (≤ 200), `icon?`, `divider?`; aceita `children`. Use para feeds de notícias, listas numeradas e blocos temáticos.",
+      "summary": "Section header (eyebrow, title, icon, description and divider) with content below — no card frame.",
+      "doc": "`title?` (≤ 100), `eyebrow?` (≤ 40), `description?` (≤ 200), `icon?`, `divider?`; accepts `children`. Use for news feeds, numbered lists and themed blocks.",
       "acceptsChildren": true,
       "props": {
         "title": {
@@ -259,7 +259,7 @@
       "type": "divider",
       "kind": "leaf",
       "category": "layout",
-      "summary": "Separador horizontal com rótulo opcional.",
+      "summary": "Horizontal separator with an optional label.",
       "doc": "`label?` (≤ 40).",
       "acceptsChildren": false,
       "props": {
@@ -273,8 +273,8 @@
       "type": "table",
       "kind": "leaf",
       "category": "data",
-      "summary": "Tabela de dados compacta com cabeçalho fixo.",
-      "doc": "`columns` (2–10 strings, ≤ 60 chars), `rows` (1–200 arrays de células), `caption?` (≤ 160).",
+      "summary": "Compact data table with a fixed header.",
+      "doc": "`columns` (2–10 strings, ≤ 60 chars), `rows` (1–200 arrays of cells), `caption?` (≤ 160).",
       "acceptsChildren": false,
       "props": {
         "columns": {
@@ -317,8 +317,8 @@
       "type": "chart",
       "kind": "leaf",
       "category": "data",
-      "summary": "Gráfico SVG de barras, linha ou pizza para séries numéricas.",
-      "doc": "`type` (`bar|line|pie`), `data` (2–60 `{label, value}`), `title` (recomendado: métrica + unidade, ≤ 80), `suffix?` (unidade, ≤ 12).",
+      "summary": "SVG bar, line or pie chart for numeric series.",
+      "doc": "`type` (`bar|line|pie`), `data` (2–60 `{label, value}`), `title` (recommended: metric + unit, ≤ 80), `suffix?` (unit, ≤ 12).",
       "acceptsChildren": false,
       "props": {
         "type": {
@@ -367,7 +367,7 @@
       "type": "stat",
       "kind": "leaf",
       "category": "data",
-      "summary": "Métrica única com rótulo, valor e tendência.",
+      "summary": "Single metric with label, value and trend.",
       "doc": "`label` (≤ 32), `value` (≤ 20), `trend?` (`up|down|flat`), `hint?` (≤ 100).",
       "acceptsChildren": false,
       "props": {
@@ -399,8 +399,8 @@
       "type": "progress",
       "kind": "leaf",
       "category": "data",
-      "summary": "Barra de progresso para uma fração concluída.",
-      "doc": "`value` (0–`max`), `max?` (padrão 100), `label?` (≤ 60), `suffix?` (≤ 12).",
+      "summary": "Progress bar for a completed fraction.",
+      "doc": "`value` (0–`max`), `max?` (default 100), `label?` (≤ 60), `suffix?` (≤ 12).",
       "acceptsChildren": false,
       "props": {
         "value": {
@@ -429,7 +429,7 @@
       "type": "timeline",
       "kind": "leaf",
       "category": "data",
-      "summary": "Linha do tempo de eventos com status.",
+      "summary": "Timeline of events with status.",
       "doc": "`items` (2–20 `{title, time?, description?, status?}`; status `done|active|pending|error`).",
       "acceptsChildren": false,
       "props": {
@@ -475,8 +475,8 @@
       "type": "steps",
       "kind": "leaf",
       "category": "data",
-      "summary": "Passos numerados com passo atual destacado.",
-      "doc": "`items` (2–16 `{title, description?}`), `current?` (índice 1-based do passo atual; 0 = nenhum). Mantenha `description` curto; traços, fórmulas e configurações longas vão em `table`/`code`.",
+      "summary": "Numbered steps with the current step highlighted.",
+      "doc": "`items` (2–16 `{title, description?}`), `current?` (1-based index of the current step; 0 = none). Keep `description` short; long traces, formulas and settings go in `table`/`code`.",
       "acceptsChildren": false,
       "props": {
         "items": {
@@ -514,8 +514,8 @@
       "type": "checklist",
       "kind": "leaf",
       "category": "data",
-      "summary": "Lista com ícone/estado por item (simulações, etapas, capacidades).",
-      "doc": "`items` (1–20 `{label, description?, status? (`done|active|pending|disabled|error`), icon?}`). Use para simulações e etapas com estado.",
+      "summary": "List with an icon/state per item (simulations, stages, capabilities).",
+      "doc": "`items` (1–20 `{label, description?, status? (`done|active|pending|disabled|error`), icon?}`). Use for simulations and stages with status.",
       "acceptsChildren": false,
       "props": {
         "items": {
@@ -560,8 +560,8 @@
       "type": "keyvalue",
       "kind": "leaf",
       "category": "data",
-      "summary": "Pares rótulo/valor para especificações curtas.",
-      "doc": "`items` (1–20 `{label, value}`) — para muitas linhas use `table`.",
+      "summary": "Label/value pairs for short specifications.",
+      "doc": "`items` (1–20 `{label, value}`) — for many rows use `table`.",
       "acceptsChildren": false,
       "props": {
         "items": {
@@ -594,8 +594,8 @@
       "type": "list",
       "kind": "leaf",
       "category": "data",
-      "summary": "Lista com marcadores ou numerada, com descrições opcionais.",
-      "doc": "`items` (1–40 strings ou `{text, description?, href?, icon?, status?}`), `ordered?` (boolean). Com `href`, o item vira link externo.",
+      "summary": "Bulleted or numbered list with optional descriptions.",
+      "doc": "`items` (1–40 strings or `{text, description?, href?, icon?, status?}`), `ordered?` (boolean). With `href`, the item becomes an external link.",
       "acceptsChildren": false,
       "props": {
         "items": {
@@ -647,8 +647,8 @@
       "type": "code",
       "kind": "leaf",
       "category": "content",
-      "summary": "Bloco de código com realce e botão copiar.",
-      "doc": "`code` (até 20.000 chars), `language?`, `title?` (nome do arquivo).",
+      "summary": "Code block with syntax highlighting and a copy button.",
+      "doc": "`code` (up to 20,000 chars), `language?`, `title?` (file name).",
       "acceptsChildren": false,
       "props": {
         "code": {
@@ -670,7 +670,7 @@
       "type": "quote",
       "kind": "leaf",
       "category": "content",
-      "summary": "Citação curta com atribuição.",
+      "summary": "Short quote with attribution.",
       "doc": "`text` (≤ 600), `cite?` (≤ 120).",
       "acceptsChildren": false,
       "props": {
@@ -689,8 +689,8 @@
       "type": "text",
       "kind": "leaf",
       "category": "content",
-      "summary": "Parágrafo de texto puro dentro da UI generativa.",
-      "doc": "`text` (obrigatório, ≤ 1200), `variant?` (`body|muted|lead|strong|small`). Texto puro: Markdown não é renderizado dentro de props.",
+      "summary": "Plain text paragraph inside the generative UI.",
+      "doc": "`text` (required, ≤ 1200), `variant?` (`body|muted|lead|strong|small`). Plain text: Markdown is not rendered inside props.",
       "acceptsChildren": false,
       "props": {
         "text": {
@@ -715,8 +715,8 @@
       "type": "callout",
       "kind": "container",
       "category": "content",
-      "summary": "Destaque colorido de informação/aviso — DESCONTINUADO: não emitir em novas respostas.",
-      "doc": "NÃO EMITA em novas respostas: `callout` (caixa colorida de nota) foi descontinuado. Notas/ressalvas vão em Markdown normal; status curtos em `badge`. Mantido apenas para renderizar mensagens antigas (`variant?`, `title?`, `text?`, children opcionais).",
+      "summary": "Colored info/warning highlight — DEPRECATED: do not emit in new responses.",
+      "doc": "DO NOT EMIT in new responses: `callout` (colored note box) was deprecated. Notes/caveats go in plain Markdown; short statuses in `badge`. Kept only to render old messages (`variant?`, `title?`, `text?`, optional children).",
       "acceptsChildren": true,
       "props": {
         "variant": {
@@ -743,7 +743,7 @@
       "type": "badge",
       "kind": "leaf",
       "category": "content",
-      "summary": "Etiqueta curta de status.",
+      "summary": "Short status label.",
       "doc": "`label` (≤ 24), `tone?` (`neutral|accent|success|warning|danger|outline`), `icon?`.",
       "acceptsChildren": false,
       "props": {
@@ -773,8 +773,8 @@
       "type": "image",
       "kind": "leaf",
       "category": "content",
-      "summary": "Imagem remota ou data URI com legenda.",
-      "doc": "`src` (http(s) ou data:image/png|jpeg|webp|gif), `alt` (obrigatório, ≤ 160), `caption?` (≤ 160), `size?` (`full|thumb|avatar`), `aspect?` (`auto|video|square|wide`). Em `stack` `direction: row`, use `size: thumb` para miniaturas.",
+      "summary": "Remote image or data URI with a caption.",
+      "doc": "`src` (http(s) or data:image/png|jpeg|webp|gif), `alt` (required, ≤ 160), `caption?` (≤ 160), `size?` (`full|thumb|avatar`), `aspect?` (`auto|video|square|wide`). In a `stack` with `direction: row`, use `size: thumb` for thumbnails.",
       "acceptsChildren": false,
       "props": {
         "src": {
@@ -815,8 +815,8 @@
       "type": "source",
       "kind": "leaf",
       "category": "content",
-      "summary": "Chip de fonte/link externo com o nome do site.",
-      "doc": "`label` (domínio/site, ≤ 80), `href` (http(s)), `title?` (≤ 120) — abre no navegador padrão; use em `stack` `direction: row` (com `wrap`) para listas de fontes.",
+      "summary": "External source/link chip with the site name.",
+      "doc": "`label` (domain/site, ≤ 80), `href` (http(s)), `title?` (≤ 120) — opens in the default browser; use in a `stack` with `direction: row` (and `wrap`) for source lists.",
       "acceptsChildren": false,
       "props": {
         "label": {
@@ -838,7 +838,7 @@
       "type": "link",
       "kind": "leaf",
       "category": "content",
-      "summary": "Link externo que abre no navegador padrão.",
+      "summary": "External link that opens in the default browser.",
       "doc": "`href` (http(s)), `label` (≤ 80).",
       "acceptsChildren": false,
       "props": {
@@ -857,8 +857,8 @@
       "type": "actions",
       "kind": "leaf",
       "category": "interaction",
-      "summary": "Linha de ações sugeridas que preenchem o composer ou copiam texto.",
-      "doc": "`items` (1–4 `{label, prompt? OU copy?, tone? (`primary|secondary|ghost`), icon?}`), `align?` (`start|end`); `prompt` preenche o composer.",
+      "summary": "Row of suggested actions that fill the composer or copy text.",
+      "doc": "`items` (1–4 `{label, prompt? OR copy?, tone? (`primary|secondary|ghost`), icon?}`), `align?` (`start|end`); `prompt` fills the composer.",
       "acceptsChildren": false,
       "props": {
         "items": {
@@ -914,8 +914,8 @@
       "type": "choices",
       "kind": "leaf",
       "category": "interaction",
-      "summary": "Grupo de opções interativo (rádio, checkbox ou segmentado) com contagem e envio da seleção ao composer.",
-      "doc": "`options` (2–12 `{label, description?, icon?}`), `mode?` (`single|multiple`), `layout?` (`list|segmented`), `label?` (≤ 80), `default?` (labels pré-selecionadas), `countLabel?` (≤ 60, ex.: \"Capacidades habilitadas\"), `submitLabel?` (≤ 40, ex.: \"Aplicar configuração\"), `submitPrefix?` (≤ 300). A interação é local; o envio preenche o composer com o prefixo + seleção — nunca envia sozinho.",
+      "summary": "Interactive options group (radio, checkbox or segmented) with a count and a submit that sends the selection to the composer.",
+      "doc": "`options` (2–12 `{label, description?, icon?}`), `mode?` (`single|multiple`), `layout?` (`list|segmented`), `label?` (≤ 80), `default?` (pre-selected labels), `countLabel?` (≤ 60, e.g. \"Capacidades habilitadas\"), `submitLabel?` (≤ 40, e.g. \"Aplicar configuração\"), `submitPrefix?` (≤ 300). The interaction is local; submitting fills the composer with the prefix + selection — it never sends on its own.",
       "acceptsChildren": false,
       "props": {
         "label": {
@@ -1002,7 +1002,7 @@
       },
       "message": "A raiz tem componentes demais.",
       "hint": "Agrupe tudo em um `card` ou `stack` raiz e distribua o conteúdo dentro dele.",
-      "prompt": "Agrupe o conteúdo em 1 `card`/`stack` raiz (máx. 4 componentes raiz)."
+      "prompt": "Group the content into 1 root `card`/`stack` (max. 4 root components)."
     },
     {
       "id": "ui.card-title",
@@ -1011,7 +1011,7 @@
       "category": "structure",
       "message": "Card de topo sem `title`: a hierarquia fica ambígua.",
       "hint": "Adicione um `title` curto ou use `stack`/`divider` se não for um cartão.",
-      "prompt": "Todo `card` de topo precisa de `title`."
+      "prompt": "Every top-level `card` needs a `title`."
     },
     {
       "id": "ui.card-nested",
@@ -1020,7 +1020,7 @@
       "category": "structure",
       "message": "Card dentro de card duplica a hierarquia.",
       "hint": "Use `stack`, `divider` ou `callout` para separar seções internas.",
-      "prompt": "Nunca aninhe `card` dentro de `card`."
+      "prompt": "Never nest `card` inside `card`."
     },
     {
       "id": "ui.callout-style",
@@ -1029,7 +1029,7 @@
       "category": "structure",
       "message": "Caixa de destaque colorida (`callout`) não faz parte do padrão do chat.",
       "hint": "Escreva notas e ressalvas em Markdown normal (texto ou citação); status curtos vão em `badge`. Não emita `callout`.",
-      "prompt": "NUNCA use `callout` (caixa colorida de nota): ressalvas vão em Markdown; status em `badge`."
+      "prompt": "NEVER use `callout` (colored note box): caveats go in Markdown; status in `badge`."
     },
     {
       "id": "ui.cards-count",
@@ -1041,7 +1041,7 @@
       },
       "message": "Muitos cards no mesmo bloco.",
       "hint": "No máximo 4 cards; combine métricas em `grid` de `stat`.",
-      "prompt": "Máximo 4 `card` por bloco."
+      "prompt": "At most 4 `card` per block."
     },
     {
       "id": "ui.grid-orphans",
@@ -1050,7 +1050,7 @@
       "category": "structure",
       "message": "O número de filhos do `grid` não completa as colunas.",
       "hint": "Ajuste `columns` ou o número de filhos para fechar as linhas.",
-      "prompt": "Em `grid`, o número de filhos deve completar as colunas."
+      "prompt": "In `grid`, the number of children must fill the columns."
     },
     {
       "id": "ui.grid-crowded",
@@ -1062,7 +1062,7 @@
       },
       "message": "Grid com muitos filhos por linha.",
       "hint": "Divida em mais de um grid ou reduza o conteúdo.",
-      "prompt": "No máximo 3 filhos por coluna em `grid`."
+      "prompt": "At most 3 children per column in `grid`."
     },
     {
       "id": "ui.divider-count",
@@ -1074,7 +1074,7 @@
       },
       "message": "Divisores demais fragmentam o conteúdo.",
       "hint": "Prefira espaçamento entre grupos a divisores.",
-      "prompt": "Use no máximo 2 `divider`."
+      "prompt": "Use at most 2 `divider`."
     },
     {
       "id": "ui.empty-container",
@@ -1083,7 +1083,7 @@
       "category": "structure",
       "message": "Container sem filhos não tem conteúdo.",
       "hint": "Remova o container vazio ou adicione filhos.",
-      "prompt": "Não emita containers vazios."
+      "prompt": "Do not emit empty containers."
     },
     {
       "id": "ui.chart-title",
@@ -1092,7 +1092,7 @@
       "category": "data",
       "message": "Gráfico sem `title`.",
       "hint": "O título deve dizer a métrica e a unidade.",
-      "prompt": "Todo `chart` precisa de `title`."
+      "prompt": "Every `chart` needs a `title`."
     },
     {
       "id": "ui.chart-points-min",
@@ -1104,7 +1104,7 @@
       },
       "message": "Gráfico com menos de 2 pontos.",
       "hint": "Para um valor único use `stat`; `chart` é para séries.",
-      "prompt": "`chart` precisa de 2+ pontos; valor único vai em `stat`."
+      "prompt": "`chart` needs 2+ points; a single value goes in `stat`."
     },
     {
       "id": "ui.chart-pie-slices",
@@ -1116,7 +1116,7 @@
       },
       "message": "Gráfico de pizza com fatias demais fica ilegível.",
       "hint": "Agrupe categorias menores em \"Outros\" ou use barras.",
-      "prompt": "Pizza: no máximo 7 fatias."
+      "prompt": "Pie: at most 7 slices."
     },
     {
       "id": "ui.table-columns",
@@ -1128,7 +1128,7 @@
       },
       "message": "Tabela com muitas colunas.",
       "hint": "Mostre as colunas essenciais; o restante pode virar artefato CSV.",
-      "prompt": "Tabela: no máximo 8 colunas."
+      "prompt": "Table: at most 8 columns."
     },
     {
       "id": "ui.table-arity",
@@ -1137,7 +1137,7 @@
       "category": "data",
       "message": "Há linha com número de células diferente das colunas.",
       "hint": "Cada linha deve ter exatamente uma célula por coluna.",
-      "prompt": "Cada linha da tabela deve ter o mesmo número de colunas."
+      "prompt": "Each table row must have the same number of cells as the columns."
     },
     {
       "id": "ui.stat-long",
@@ -1163,7 +1163,7 @@
       },
       "message": "Lista muito longa.",
       "hint": "Divida em seções ou use `table`.",
-      "prompt": "`list`: no máximo 20 itens."
+      "prompt": "`list`: at most 20 items."
     },
     {
       "id": "ui.timeline-long",
@@ -1175,7 +1175,7 @@
       },
       "message": "Linha do tempo muito longa.",
       "hint": "Mostre os eventos principais; o restante pode virar texto.",
-      "prompt": "`timeline`: no máximo 12 itens."
+      "prompt": "`timeline`: at most 12 items."
     },
     {
       "id": "ui.steps-long",
@@ -1187,7 +1187,7 @@
       },
       "message": "Passos demais para uma UI compacta.",
       "hint": "Agrupe etapas ou use `timeline`.",
-      "prompt": "`steps`: no máximo 10 itens."
+      "prompt": "`steps`: at most 10 items."
     },
     {
       "id": "ui.keyvalue-long",
@@ -1199,7 +1199,7 @@
       },
       "message": "Muitos pares chave/valor.",
       "hint": "Use `table` quando passar de 12 linhas.",
-      "prompt": "`keyvalue`: no máximo 12 pares."
+      "prompt": "`keyvalue`: at most 12 pairs."
     },
     {
       "id": "ui.tabs-count",
@@ -1211,7 +1211,7 @@
       },
       "message": "Abas demais.",
       "hint": "Mantenha de 2 a 4 abas com objetivos distintos.",
-      "prompt": "`tabs`: no máximo 6 abas (ideal 2–4)."
+      "prompt": "`tabs`: at most 6 tabs (2–4 ideal)."
     },
     {
       "id": "ui.density",
@@ -1224,7 +1224,7 @@
       },
       "message": "UI densa demais para uma mensagem de chat.",
       "hint": "Reduza ao essencial; conteúdo longo pertence ao Markdown ou a um artefato.",
-      "prompt": "UI compacta: ~60 componentes e 6 níveis no máximo."
+      "prompt": "Compact UI: ~60 components and at most 6 levels."
     },
     {
       "id": "ui.markdown-in-props",
@@ -1233,7 +1233,7 @@
       "category": "copy",
       "message": "Há sintaxe Markdown dentro de props (não é renderizada).",
       "hint": "Props são texto puro; use Markdown só fora do bloco `ui`.",
-      "prompt": "Props são texto puro: nada de `**`, `#` ou links Markdown dentro do bloco."
+      "prompt": "Props are plain text: no `**`, `#` or Markdown links inside the block."
     },
     {
       "id": "ui.emoji",
@@ -1242,7 +1242,7 @@
       "category": "copy",
       "message": "Emoji decorativo em título/rótulo de UI.",
       "hint": "Emojis só quando o conteúdo do usuário os trouxer.",
-      "prompt": "Sem emojis decorativos em títulos/rótulos."
+      "prompt": "No decorative emojis in titles/labels."
     },
     {
       "id": "ui.label-period",
@@ -1251,7 +1251,7 @@
       "category": "copy",
       "message": "Rótulo terminando com ponto final.",
       "hint": "Rótulos curtos vão sem pontuação final.",
-      "prompt": "Sem ponto final em rótulos e botões."
+      "prompt": "No trailing period in labels and buttons."
     },
     {
       "id": "ui.shouting",
@@ -1260,7 +1260,7 @@
       "category": "copy",
       "message": "Texto em caixa alta demais.",
       "hint": "Use capitalização normal (sentence case).",
-      "prompt": "Sem CAIXA ALTA em rótulos."
+      "prompt": "No ALL CAPS in labels."
     },
     {
       "id": "ui.duplicate-action",
@@ -1269,7 +1269,7 @@
       "category": "interaction",
       "message": "Ações repetidas no mesmo bloco.",
       "hint": "Cada ação deve ter um objetivo distinto.",
-      "prompt": "Ações com rótulos distintos."
+      "prompt": "Actions with distinct labels."
     },
     {
       "id": "ui.action-primary",
@@ -1278,7 +1278,7 @@
       "category": "interaction",
       "message": "Mais de uma ação primária.",
       "hint": "Só uma ação principal; as demais ficam `secondary` ou `ghost`.",
-      "prompt": "No máximo 1 ação `primary` por bloco."
+      "prompt": "At most 1 `primary` action per block."
     },
     {
       "id": "ui.action-label-long",
@@ -1290,7 +1290,7 @@
       },
       "message": "Rótulo de ação longo.",
       "hint": "Use verbo + objeto curto (ex.: \"Comparar custos\").",
-      "prompt": "Rótulos de `actions`: verbo + objeto, ≤ 40 chars."
+      "prompt": "`actions` labels: verb + object, ≤ 40 chars."
     },
     {
       "id": "ui.section-header",
@@ -1299,7 +1299,7 @@
       "category": "structure",
       "message": "Seção sem cabeçalho não agrega hierarquia.",
       "hint": "Informe `title` (ou `eyebrow`) na `section`, ou use um `stack` se não houver título.",
-      "prompt": "Toda `section` precisa de `title` ou `eyebrow`."
+      "prompt": "Every `section` needs a `title` or `eyebrow`."
     },
     {
       "id": "ui.choices-submit",
@@ -1308,8 +1308,8 @@
       "category": "interaction",
       "message": "Grupo de escolhas sem ação de envio.",
       "hint": "Defina `submitLabel` para o usuário enviar a seleção ao agente (o clique preenche o composer).",
-      "prompt": "Toda `choices` precisa de `submitLabel`."
+      "prompt": "Every `choices` needs a `submitLabel`."
     }
   ],
-  "promptIntro": "Você pode renderizar interfaces declarativas na conversa usando um bloco cercado com a linguagem `ui` e um objeto JSON. A interface valida o JSON e desenha apenas componentes da whitelist — nada de HTML, JS ou CSS arbitrário."
+  "promptIntro": "You can render declarative interfaces in the conversation using a fenced block with the `ui` language and a JSON object. The interface validates the JSON and draws only components from the whitelist — no arbitrary HTML, JS or CSS."
 }

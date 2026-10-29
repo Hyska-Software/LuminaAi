@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "generatedAt": "2026-10-29",
+  "description": "Fixture do benchmark de cache de prompt (docs/goals/prompt-cache/PLAN.md §9.2). Versão 1: cenário longo sintético (120 requests) para ciclos, cenário E2E live (>=10 turnos) e cenário Code.",
+  "scenarios": {
+    "long": {
+      "requests": 120,
+      "systemFillerChars": 36000,
+      "initialPrefixTokensEst": 9000,
+      "deltaTokensEst": 180,
+      "prefixGrowthTokensPerRequest": 180,
+      "sessionId": "lumina-cache-bench-long",
+      "note": "P_est cresce ~180 tokens/request; ΣP ≈ 8.4M, cold+write ≈ 1,7% do input; ceiling≥98% a partir do request ~28."
+    },
+    "e2e": {
+      "turns": 12,
+      "turnsMin": 10,
+      "provider": "opencode-go",
+      "protocol": "anthropic",
+      "model": "claude-haiku-5-5",
+      "ttl": "1h",
+      "note": "run_turn real com DB/data_dir temp; coleta TurnEvent::CacheStats; baseline com catálogo sem provider.cache (plan=None)."
+    },
+    "code": {
+      "requests": 12,
+      "toolResultTokens": 1000,
+      "compactionAtRequest": 6,
+      "note": "Perfil Code: edição + shell + plano + compactação no meio."
+    }
+  },
+  "acceptance": {
+    "steadyRequestsFrom": 3,
+    "steadyCeilingMinPercent": 98,
+    "steadyHitMinPercent": 98,
+    "steadyHitHardFailBelowPercent": 90,
+    "lifecycleMinPercent": 98,
+    "lifecycleMinOnlyWhenColdWriteDeltaRatioLeqPercent": 2,
+    "repetitions": 5,
+    "statistics": [
+      "p50",
+      "p10",
+      "mean",
+      "min"
+    ],
+    "rawArtifact": "docs/goals/prompt-cache/evidence/bench-*.json"
+  },
+  "providerId": "opencode-go",
+  "modelId": "claude-haiku-5-5",
+  "turns": [
+    "Turn 1: responda apenas OK. (bench de cache; prefixo estável, resposta curta)",
+    "Turn 2: responda apenas OK. (bench de cache; prefixo estável, resposta curta)",
+    "Turn 3: responda apenas OK. (bench de cache; prefixo estável, resposta curta)",
+    "Turn 4: responda apenas OK. (bench de cache; prefixo estável, resposta curta)",
+    "Turn 5: responda apenas OK. (bench de cache; prefixo estável, resposta curta)",
+    "Turn 6: responda apenas OK. (bench de cache; prefixo estável, resposta curta)",
+    "Turn 7: responda apenas OK. (bench de cache; prefixo estável, resposta curta)",
+    "Turn 8: responda apenas OK. (bench de cache; prefixo estável, resposta curta)",
+    "Turn 9: responda apenas OK. (bench de cache; prefixo estável, resposta curta)",
+    "Turn 10: responda apenas OK. (bench de cache; prefixo estável, resposta curta)",
+    "Turn 11: responda apenas OK. (bench de cache; prefixo estável, resposta curta)",
+    "Turn 12: responda apenas OK. (bench de cache; prefixo estável, resposta curta)"
+  ]
+}

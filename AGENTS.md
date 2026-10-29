@@ -38,6 +38,18 @@ Observação: `cargo` usa um target dir compartilhado. Se aparecer `Blocking wai
 
 > **UI generativa**: `data/genui-contract.json` é a fonte única (componentes, props, limites, regras de design, ações). Mudou o contrato? Atualize `data/genui-fixtures.json` e **as duas implementações** (`src/lib/genui` e `src-tauri/src/tools/genui`), depois rode `pnpm test` e `cargo test --lib` — o teste de paridade falha de propósito se divergirem. Não duplique listas de componentes/limites/regras em outros arquivos.
 
+## Skills Krypton — somente quando pedido
+
+As skills de fluxo **Krypton** (`krypton-planning`, `krypton-execution`, `krypton-vps-codex-app`) são **opt-in explícito**:
+
+- Use-as **apenas** quando o usuário pedir de forma explícita, por exemplo: "use a skill krypton-planning", "planeje no fluxo Krypton", "execute este plano com krypton-execution".
+- **Não** carregue/execute uma skill Krypton por iniciativa própria, por inferência ("a tarefa parece grande") ou porque a tarefa envolve planejamento/execução em várias etapas.
+- Em caso de dúvida sobre a intenção, **pergunte ao usuário** antes de carregar a skill; não presuma.
+- Sem pedido explícito, siga o fluxo normal deste `AGENTS.md` (leitura dos docs, TDD, verificação e entrega descritos abaixo).
+- Quando autorizado, carregue a skill com a ferramenta de skills e siga as instruções dela na íntegra, sem substituí-las por aproximações.
+
+> Não confundir com as **skills embutidas do produto** em `src-tauri/skills/**` (as skills que o próprio app carrega e executa em tempo de execução): aquelas são funcionalidade do app e não são afetadas por esta regra.
+
 ## Testes (TDD)
 
 - Toda funcionalidade nova entra com teste automatizado **antes/durante** a implementação.

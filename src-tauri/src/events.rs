@@ -6,7 +6,7 @@
 use serde::Serialize;
 
 use crate::domain::{
-    Artifact, ChatMessage, Citation, ToolCallRecord, TurnResult, UsageInfo,
+    Artifact, CacheSample, ChatMessage, Citation, ToolCallRecord, TurnResult, UsageInfo,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -50,6 +50,9 @@ pub enum TurnEvent {
     ArtifactCreated { artifact: Artifact },
     /// Token usage for the turn (may be emitted once at the end).
     Usage { usage: UsageInfo },
+    /// Cache telemetry for one provider request (wire request), emitted per step
+    /// in both profiles so the context meter can show cache hit in real time.
+    CacheStats { sample: CacheSample },
     /// A persisted message snapshot (used for resync / title updates).
     MessageUpdated { message: ChatMessage },
     /// Conversation title was auto-generated.

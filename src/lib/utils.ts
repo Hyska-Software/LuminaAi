@@ -61,7 +61,8 @@ export function formatDuration(ms?: number | null): string {
 
 /**
  * Duration of a thinking phase shown in the timeline header: rounded to whole
- * seconds so "Pensou por 10s" does not flicker while streaming.
+ * seconds so "Pensou por 10s" (Chat) / "Trabalhou por 10s" (Code) does not
+ * flicker while streaming.
  */
 export function formatThinkingDuration(ms?: number | null): string | null {
   if (ms == null || !Number.isFinite(ms) || ms < 0) return null;

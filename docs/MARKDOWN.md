@@ -225,7 +225,7 @@ contrato) + testes existentes.
   `<pre>` preservado, caret de streaming por classe; CSS `.lumina-prose`
   completo (h5/h6, alertas, footnotes, task lists, `details`, `.katex-error`) e
   `external.ts` com `mailto:`.
-- **Prompt** (`harness-dev`): seção `# Formatação Markdown` gerada à mão a partir
+- **Prompt** (`harness-dev`): seção `# Markdown formatting` (texto em inglês) gerada à mão a partir
   do contrato §4 (blocos, inline, math, fences especiais, regras de uso),
   fronteira explícita tabela Markdown × bloco `ui`, HTML seguro permitido e
   proibições; testes Rust de contrato (`prompt_documents_markdown_formatting`,
@@ -325,10 +325,11 @@ contrato de sintaxe desta §4** — não há dialeto reduzido no Thinking.
   o bloco recolhe (ou permanece recolhido, com a opção **Raciocínio recolhido por
   padrão**).
 - **Diferenças de layout preservadas**: Chat mostra tools de web/skills/artefatos
-  como resumos agrupados (domínios, páginas, chips de arquivo); Code mostra uma
-  linha por chamada do harness (`ToolCallRow`: verbo + alvo + status/exit/duração
-  + diff/saída). Header, shimmer, contador, auto-recolher, composer variant,
-  welcome e chrome do Code não mudam.
+  como resumos agrupados (domínios, páginas, chips de arquivo) e o header agregado
+  **"Pensou por Xs"**; Code mostra uma linha por chamada do harness (`ToolCallRow`:
+  verbo + alvo + status/exit/duração + diff/saída) e o header agregado
+  **"Trabalhou por Xs"** (o tempo do turno inclui as ferramentas). Shimmer,
+  contador, auto-recolher, composer variant, welcome e chrome do Code não mudam.
 - **Testes**: `Markdown.test.tsx` (variante thinking + streaming + className),
   `Markdown.security.test.tsx` (mesmos vetores nas duas variantes),
   `src/lib/__tests__/agentTrace.test.ts` (Markdown bruto por passo),

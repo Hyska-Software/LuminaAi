@@ -64,7 +64,10 @@ pub async fn execute(ctx: &ToolCtx, call: &ToolCallRecord) -> ToolOutcome {
         return crate::tools::code::exec::run_mcp(&call_ctx, &call.name, args).await;
     }
     let Some(exec) = ToolExec::for_tool(&call.name) else {
-        return ToolOutcome::error(format!("TOOL_UNKNOWN: ferramenta desconhecida: {}", call.name));
+        return ToolOutcome::error(format!(
+            "TOOL_UNKNOWN: ferramenta desconhecida: {}",
+            call.name
+        ));
     };
     // Timeout do contrato aplicado pelo runtime (nunca "decorativo").
     match default_timeout_ms(&call.name) {
@@ -101,10 +104,8 @@ pub async fn execute_batch(ctx: &ToolCtx, calls: &[ToolCallRecord]) -> Vec<ToolO
         }
     }
     let mut outcomes: Vec<Option<ToolOutcome>> = vec![None; calls.len()];
-    let requests: Vec<ToolCallRequest> = indexed
-        .iter()
-        .map(|(_, request)| request.clone())
-        .collect();
+    let requests: Vec<ToolCallRequest> =
+        indexed.iter().map(|(_, request)| request.clone()).collect();
     for batch in plan(&requests) {
         let batch_futures = batch.iter().map(|&request_index| {
             let call = indexed[request_index].1.call.clone();
@@ -184,7 +185,7 @@ mod tests {
             observed: None,
             jobs: None,
             questions: None,
-        mcp: None,
+            mcp: None,
             subagent: None,
             skills_roots: Vec::new(),
             emit: None,

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import type { ContextStats } from '@/lib/types';
+import type { CacheSample, CacheStats, ContextStats } from '@/lib/types';
+import type { CacheConversationUi } from '@/lib/store/cacheStore';
 import { ContextMeter } from './ContextMeter';
 
 function makeStats(overrides: Partial<ContextStats> = {}): ContextStats {
@@ -14,6 +15,67 @@ function makeStats(overrides: Partial<ContextStats> = {}): ContextStats {
     breakdown: { systemPrompt: 100_000, toolDefinitions: 41_000, messages: 300_000 },
     ...overrides,
   };
+}
+
+const CACHE_AT = Date.now();
+
+function makeCacheStats(overrides: Partial<CacheStats> = {}): CacheStats {
+  return {
+    hitPercent: 98,
+    sessionHitPercent: 97,
+    steadyHitPercent: 98.2,
+    ceilingPercent: 98.6,
+    inputTotal: 250_000,
+    cacheRead: 240_000,
+    cacheWrite: 6_000,
+    uncached: 4_000,
+    eligible: true,
+    state: 'stable',
+    epoch: 1,
+    samples: 12,
+    ttlSeconds: 3600,
+    at: CACHE_AT,
+    ...overrides,
+  };
+}
+
+function makeCacheSample(overrides: Partial<CacheSample> = {}): CacheSample {
+  return {
+    turnId: 'turn-1',
+    step: 1,
+    providerId: 'opencode-go',
+    modelId: 'deepseek-v4.1-flash',
+    protocol: 'openai-chat',
+    epoch: 1,
+    inputTotal: 250_000,
+    cacheRead: 240_000,
+    cacheWrite: 6_000,
+    uncached: 4_000,
+    hitPercent: 98,
+    ceilingPercent: 98.6,
+    eligible: true,
+    state: 'stable',
+    at: CACHE_AT,
+    ...overrides,
+  };
+}
+
+function makeCache(overrides: Partial<CacheConversationUi> = {}): CacheConversationUi {
+  return {
+    current: makeCacheStats(),
+    session: makeCacheStats(),
+    epoch: 1,
+    samples: [makeCacheSample()],
+    lastBreak: null,
+    restored: true,
+    ...overrides,
+  };
+}
+
+function cacheDescription(button: HTMLElement): string {
+  const id = button.getAttribute('aria-describedby');
+  expect(id).toBeTruthy();
+  return document.getElementById(id as string)?.textContent ?? '';
 }
 
 function trigger(percent = 44): HTMLElement {
@@ -238,3 +300,125 @@ describe('ContextMeter — fallback e tempo real', () => {
     expect(dialog.querySelector('svg')).toBeNull();
   });
 });
+
+describe('ContextMeter — cache de prompt compacto', () => {
+  it('mostra anel de contexto + segmento de cache com largura reservada', () => {
+    const { container } = render(<ContextMeter stats={makeStats()} cache={makeCache()} />);
+
+    const button = trigger();
+    // O nome acessível do medidor continua o do contexto; o cache vira descrição.
+    expect(button.getAttribute('aria-label')).toBe('Contexto usado: 44%');
+    expect(button.textContent).toContain('44%');
+    expect(button.textContent).toContain('98%');
+    expect(button.className).toContain('h-8');
+    // Largura mínima reservada para não deslocar o anel quando o cache sai de — para 98%.
+    expect(button.className).toContain('min-w-[7rem]');
+    expect(button.className).toContain('tabular-nums');
+    expect(cacheDescription(button)).toBe('Cache de prompt: 98% de acerto — estável.');
+    // Anel de contexto + Zap (ambos decorativos).
+    expect(container.querySelectorAll('svg')).toHaveLength(2);
+  });
+
+  it('popover mostra a seção de cache, barra própria e mantém a barra de contexto', async () => {
+    render(<ContextMeter stats={makeStats()} cache={makeCache()} />);
+    const dialog = await openPopover();
+
+    expect(within(dialog).getByText('Cache de prompt')).toBeTruthy();
+    expect(within(dialog).getByText('98% de acerto')).toBeTruthy();
+    expect(within(dialog).getByText('Lido do cache')).toBeTruthy();
+    expect(within(dialog).getByText('Acumulado da sessão')).toBeTruthy();
+    expect(within(dialog).getByText('97% em 12 passos')).toBeTruthy();
+    expect(within(dialog).getByText('Teto deste request')).toBeTruthy();
+    expect(within(dialog).getByText('Estável')).toBeTruthy();
+    expect(within(dialog).getByText('12 amostras')).toBeTruthy();
+
+    const cacheBar = within(dialog).getByRole('progressbar', {
+      name: 'Acerto do cache de prompt',
+    });
+    expect(cacheBar.getAttribute('aria-valuenow')).toBe('98');
+    expect(cacheBar.getAttribute('aria-valuetext')).toBe('98% de acerto no cache');
+    // A barra do contexto continua no popover (duas progressbars, nomes distintos).
+    expect(within(dialog).getByRole('progressbar', { name: 'Contexto usado' })).toBeTruthy();
+    // Regra de a11y: o popover não ganha ícones SVG.
+    expect(dialog.querySelector('svg')).toBeNull();
+  });
+
+  it('sem prop cache o medidor fica exatamente como antes (hosts antigos)', async () => {
+    render(<ContextMeter stats={makeStats()} />);
+    const dialog = await openPopover();
+
+    expect(within(dialog).queryByText('Cache de prompt')).toBeNull();
+    expect(trigger().getAttribute('aria-describedby')).toBeNull();
+  });
+
+  it('cache null (antes do primeiro request) mostra — e a nota honesta', async () => {
+    render(<ContextMeter stats={makeStats()} cache={null} />);
+
+    const button = trigger();
+    expect(button.textContent).toContain('—');
+    expect(cacheDescription(button)).toBe('Cache de prompt: aguardando a primeira amostra.');
+
+    const dialog = await openPopover();
+    expect(
+      within(dialog).getByRole('status').textContent,
+    ).toBe('Sem amostras ainda. O acerto de cache aparece depois do primeiro passo.');
+  });
+
+  it('queda de cache mostra o motivo legível na seção', async () => {
+    const latest = makeCacheSample({
+      step: 4,
+      hitPercent: 41,
+      state: 'degraded',
+      breakReason: 'system_prompt',
+      cacheRead: 100_000,
+      cacheWrite: 0,
+      uncached: 145_000,
+      inputTotal: 245_000,
+    });
+    render(
+      <ContextMeter
+        stats={makeStats()}
+        cache={makeCache({
+          current: makeCacheStats({
+            hitPercent: 41,
+            state: 'degraded',
+            breakReason: 'system_prompt',
+            cacheRead: 100_000,
+            cacheWrite: 0,
+            uncached: 145_000,
+            inputTotal: 245_000,
+          }),
+          samples: [makeCacheSample({ step: 3, hitPercent: 98 }), latest],
+          lastBreak: { reason: 'Prompt de sistema mudou', detail: null, at: CACHE_AT },
+        })}
+      />,
+    );
+
+    const dialog = await openPopover();
+    expect(within(dialog).getByText('Cache caiu')).toBeTruthy();
+    expect(within(dialog).getByText('Prompt de sistema mudou')).toBeTruthy();
+    expect(within(dialog).getByRole('status').textContent).toBe(
+      'Cache caiu de 98% para 41% neste passo. Motivo: o prompt de sistema mudou.',
+    );
+  });
+
+  it('atualiza o cache sem fechar/remontar o popover aberto', async () => {
+    const { rerender } = render(<ContextMeter stats={makeStats()} cache={makeCache()} />);
+    const dialog = await openPopover();
+    expect(within(dialog).getByText('98% de acerto')).toBeTruthy();
+
+    rerender(
+      <ContextMeter
+        stats={makeStats({ percent: 55, used: 550_000 })}
+        cache={makeCache({
+          current: makeCacheStats({ hitPercent: 41, state: 'degraded' }),
+        })}
+      />,
+    );
+
+    expect(trigger(55)).toBeTruthy();
+    expect(screen.getByRole('dialog')).toBe(dialog);
+    expect(within(dialog).getByText('41% de acerto')).toBeTruthy();
+  });
+});
+

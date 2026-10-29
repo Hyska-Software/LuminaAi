@@ -24,6 +24,7 @@ import { api } from '@/lib/api';
 import { useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { AttachmentChips } from './AttachmentChips';
+import { CacheMeterChip } from './CacheMeterChip';
 import { CodeSessionControls } from './CodeSessionControls';
 import { filterSlashCommands, type SlashCommand } from './commands';
 import { MentionChips } from './MentionChips';
@@ -675,6 +676,9 @@ export function Composer() {
           )}
 
           <div className="ml-auto flex items-center gap-1.5">
+            {!isCodeLayout && activeConversationId ? (
+              <CacheMeterChip conversationId={activeConversationId} />
+            ) : null}
             <ModelPill onClick={() => setModelPickerOpen(true)} />
 
             {isStreaming ? (

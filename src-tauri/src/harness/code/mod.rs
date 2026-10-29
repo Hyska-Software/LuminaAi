@@ -3,6 +3,7 @@
 //! O loop é o mesmo de `harness::run_turn`; este módulo concentra o que muda no
 //! perfil de código:
 //! - `prompt`: system prompt próprio (ambiente, política, tools, projeto);
+//! - `compaction` (re-export de `harness::compaction`): resumo cache-safe compartilhado com o Chat;
 //! - `context`: contexto do turno (workspace, git, projeto, AGENTS.md, árvore);
 //! - `session`: projeções sobre `code_events` (plano, tarefas, contexto);
 //! - `observed`: política de leitura antes da escrita (CAS por hash);
@@ -10,7 +11,7 @@
 //!
 //! Preenchimento incremental (docs/goals/code-harness/PLAN.md §7–§8).
 
-pub mod compaction;
+pub use crate::harness::compaction;
 pub mod context;
 pub mod observed;
 pub mod prompt;

@@ -13,8 +13,8 @@ use crate::domain::UsageInfo;
 
 use super::sse;
 use super::{
-    as_u32, emit, image_data_url, make_usage, max_output_tokens, normalize_arguments, pointer_u32,
-    reasoning, send_stream, system_text, to_provider_error, valid_json_arguments,
+    as_u32, cache, emit, image_data_url, make_usage, max_output_tokens, normalize_arguments,
+    pointer_u32, reasoning, system_text, to_provider_error, valid_json_arguments,
     CompletionRequest, EventSink, HistoryMessage, HistoryRole, ProviderError, ProviderEvent,
     ProviderResult, WireProtocol,
 };
@@ -25,11 +25,23 @@ pub(crate) async fn stream(
     sink: &EventSink,
 ) -> ProviderResult<()> {
     let url = request.config.endpoint_for(WireProtocol::OpenaiChat)?;
-    let body = build_body(request);
-    let Some(response) = send_stream(http, request, &url, &body).await? else {
+    let mut body = build_body(request);
+    // F4b: the harness-owned plan lands on the final wire body before the
+    // digest; `digest(apply(body)) == digest(body)` is a contract (cache
+    // metadata is outside the hash), so the emitted digest stays valid.
+    cache::apply(
+        WireProtocol::OpenaiChat,
+        request.cache_plan.as_ref(),
+        &mut body,
+    );
+    super::emit_cache_digest(request, WireProtocol::OpenaiChat, &body, sink)?;
+    let Some(response) =
+        super::send_stream_with_cache_fallback(http, request, &url, &body, || build_body(request))
+            .await?
+    else {
         return Ok(());
     };
-    let mut handler = Handler::new(sink);
+    let mut handler = Handler::new(sink, request.config.provider_id.clone());
     let outcome = sse::stream_sse(response, &request.cancel, |event, data| {
         handler.on_event(event, data)
     })
@@ -211,15 +223,22 @@ struct ChatToolCall {
 
 struct Handler<'a> {
     sink: &'a EventSink,
+    /// Route that produced the request (used to gate the OpenCode gateway
+    /// `usage.opencode.tokens` fallback).
+    provider_id: String,
     usage: Option<UsageInfo>,
+    /// Verbatim final usage block (safe excerpt is emitted as `UsageRaw`).
+    raw_usage: Option<Value>,
     tools: BTreeMap<usize, ChatToolCall>,
 }
 
 impl<'a> Handler<'a> {
-    fn new(sink: &'a EventSink) -> Self {
+    fn new(sink: &'a EventSink, provider_id: String) -> Self {
         Self {
             sink,
+            provider_id,
             usage: None,
+            raw_usage: None,
             tools: BTreeMap::new(),
         }
     }
@@ -235,7 +254,8 @@ impl<'a> Handler<'a> {
             ))));
         }
         if let Some(usage) = value.get("usage").filter(|usage| !usage.is_null()) {
-            self.usage = Some(parse_usage(usage));
+            self.raw_usage = Some(usage.clone());
+            self.usage = Some(parse_usage(usage, &self.provider_id));
         }
         let Some(choices) = value.get("choices").and_then(Value::as_array) else {
             return Ok(());
@@ -346,6 +366,9 @@ impl<'a> Handler<'a> {
         if let Some(usage) = self.usage.take() {
             emit(self.sink, ProviderEvent::Usage(usage)).map_err(to_provider_error)?;
         }
+        // Safe raw usage excerpt for the diagnostics panel, right after the
+        // normalized usage and before the assistant state/Done.
+        super::emit_usage_raw(self.sink, self.raw_usage.as_ref())?;
         // Verbatim assistant payload for replays (needed to round-trip tool calls).
         emit(
             self.sink,
@@ -357,7 +380,7 @@ impl<'a> Handler<'a> {
     }
 }
 
-fn parse_usage(usage: &Value) -> UsageInfo {
+fn parse_usage(usage: &Value, provider_id: &str) -> UsageInfo {
     let input = pointer_u32(usage, "/prompt_tokens");
     let output = pointer_u32(usage, "/completion_tokens");
     let reasoning = pointer_u32(usage, "/completion_tokens_details/reasoning_tokens")
@@ -365,5 +388,228 @@ fn parse_usage(usage: &Value) -> UsageInfo {
     let cached = pointer_u32(usage, "/prompt_tokens_details/cached_tokens")
         .or_else(|| pointer_u32(usage, "/cache_read_input_tokens"));
     let total = pointer_u32(usage, "/total_tokens");
-    make_usage(input, output, reasoning, cached, total)
+    let mut info = make_usage(input, output, reasoning, cached, total);
+    // Normalized cache counters: OpenAI cached/write, DeepSeek hit/miss,
+    // Zai/DigitalOcean aliases and the OpenCode gateway block.
+    cache::apply_usage(
+        &mut info,
+        &cache::normalize_usage(WireProtocol::OpenaiChat, provider_id, usage),
+    );
+    info
+}
+
+/* ------------------------------------------------------------------ */
+/* Usage parsing tests                                                 */
+/* ------------------------------------------------------------------ */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_usage_fills_openai_cache_counters() {
+        let usage = parse_usage(
+            &json!({
+                "prompt_tokens": 12_000,
+                "completion_tokens": 300,
+                "prompt_tokens_details": {
+                    "cached_tokens": 4_000,
+                    "cache_write_tokens": 7_000,
+                },
+            }),
+            "openai",
+        );
+        assert!(usage.cache_reported);
+        assert_eq!(usage.cached_tokens, Some(4_000), "alias legado");
+        assert_eq!(usage.cache_read_tokens, Some(4_000));
+        assert_eq!(usage.cache_write_tokens, Some(7_000));
+        assert_eq!(usage.uncached_input_tokens, Some(1_000));
+        assert_eq!(usage.input_tokens, Some(12_000));
+    }
+
+    #[test]
+    fn parse_usage_fills_deepseek_hit_and_miss_counters() {
+        let usage = parse_usage(
+            &json!({
+                "prompt_tokens": 10_000,
+                "completion_tokens": 500,
+                "prompt_cache_hit_tokens": 9_000,
+                "prompt_cache_miss_tokens": 1_000,
+            }),
+            "opencode-go",
+        );
+        assert!(usage.cache_reported);
+        assert_eq!(usage.cache_read_tokens, Some(9_000));
+        assert_eq!(usage.cached_tokens, Some(9_000), "alias legado preenchido");
+        assert_eq!(usage.cache_write_tokens, None);
+        assert_eq!(usage.uncached_input_tokens, Some(1_000));
+    }
+
+    #[test]
+    fn parse_usage_reads_the_opencode_gateway_block() {
+        let usage = parse_usage(
+            &json!({
+                "prompt_tokens": 1_200,
+                "completion_tokens": 300,
+                "opencode": {
+                    "tokens": {
+                        "input": 1_200,
+                        "cache_read": 8_000,
+                        "cache_write_5m": 0,
+                        "cache_write_1h": 2_000,
+                    }
+                }
+            }),
+            "opencode-go",
+        );
+        assert!(usage.cache_reported);
+        assert_eq!(usage.cache_read_tokens, Some(8_000));
+        assert_eq!(usage.cache_write_tokens, Some(2_000));
+        assert_eq!(usage.uncached_input_tokens, Some(1_200));
+    }
+
+    #[test]
+    fn parse_usage_without_cache_counters_is_not_reported() {
+        let usage = parse_usage(
+            &json!({"prompt_tokens": 100, "completion_tokens": 10}),
+            "openai",
+        );
+        assert!(!usage.cache_reported);
+        assert_eq!(usage.cache_read_tokens, None);
+        assert_eq!(usage.uncached_input_tokens, Some(100));
+    }
+
+    fn test_request() -> CompletionRequest {
+        let catalog = crate::catalog::CatalogFile::load().expect("catalog.json carrega");
+        let provider = catalog
+            .provider("opencode-go")
+            .expect("provider opencode-go");
+        let model = catalog
+            .model("opencode-go", "glm-5.3-flash")
+            .expect("glm-5.3-flash")
+            .clone();
+        CompletionRequest {
+            config: crate::providers::ProviderConfig {
+                provider_id: provider.id.clone(),
+                provider_name: provider.name.clone(),
+                base_url: provider.base_url.clone(),
+                api_key: "sk-test".to_string(),
+                model,
+                session_id: "session-1".to_string(),
+                user_agent: "Lumina/test".to_string(),
+                endpoints: provider.endpoints.clone(),
+                request_profile: crate::catalog::RequestProfile::Standard,
+                auth_mode: crate::catalog::ProviderAuth::ApiKey,
+                extra_headers: Vec::new(),
+            },
+            protocols: vec![WireProtocol::OpenaiChat],
+            history: vec![HistoryMessage::user("oi")],
+            system_prompt: "Você é o Lumina.".to_string(),
+            tools: vec![crate::providers::ToolDefinition {
+                name: "echo".to_string(),
+                description: "Ecoa.".to_string(),
+                parameters: json!({"type": "object"}),
+            }],
+            reasoning: crate::providers::ReasoningRequest::Auto,
+            max_output_tokens: Some(64),
+            temperature: None,
+            cache_plan: None,
+            cancel: tokio_util::sync::CancellationToken::new(),
+        }
+    }
+
+    /// F4b: plan applied after `build_body` and before the digest; `None` keeps
+    /// the body byte-for-byte and the key/retention do not change the digest.
+    #[test]
+    fn cache_plan_is_applied_before_the_digest() {
+        let mut request = test_request();
+        let plain = build_body(&request);
+        let mut without_plan = build_body(&request);
+        cache::apply(WireProtocol::OpenaiChat, None, &mut without_plan);
+        assert_eq!(without_plan, plain, "sem plano o body não muda");
+
+        request.cache_plan = Some(cache::CachePlan {
+            mode: cache::CacheMode::Auto,
+            breakpoints: Vec::new(),
+            prompt_cache_key: Some("b".repeat(64)),
+            retention: Some("24h".to_string()),
+            ttl: None,
+        });
+        let mut planned = build_body(&request);
+        cache::apply(
+            WireProtocol::OpenaiChat,
+            request.cache_plan.as_ref(),
+            &mut planned,
+        );
+        assert_eq!(planned["prompt_cache_key"], json!("b".repeat(64)));
+        assert_eq!(planned["prompt_cache_retention"], json!("24h"));
+
+        let digest_plain = cache::digest(WireProtocol::OpenaiChat, "opencode-go", &plain);
+        let digest_planned = cache::digest(WireProtocol::OpenaiChat, "opencode-go", &planned);
+        assert_eq!(digest_plain.segments, digest_planned.segments);
+        assert_eq!(digest_plain.total_chars, digest_planned.total_chars);
+    }
+
+    /// B2: `UsageRaw` carries the safe usage excerpt, emitted once right after
+    /// `Usage` and before `Done`, never exposing prompt/content/secrets.
+    #[test]
+    fn usage_raw_is_emitted_after_usage_with_a_safe_excerpt() {
+        let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
+        {
+            let mut handler = Handler::new(&sink, "opencode-go".to_string());
+            handler
+                .on_event(
+                    None,
+                    r#"{"choices":[],"usage":{"prompt_tokens":1200,"completion_tokens":30,
+                        "prompt_tokens_details":{"cached_tokens":900},
+                        "prompt_cache_hit_tokens":900,"prompt_cache_miss_tokens":300,
+                        "opencode":{"tokens":{"input":1200,"cache_read":8000,"cache_write_1h":0}},
+                        "prompt":"SEGREDO","authorization":"Bearer sk-secret"}}"#,
+                )
+                .expect("chunk de usage");
+            handler.finish().expect("finish");
+        }
+
+        let mut order: Vec<&'static str> = Vec::new();
+        let mut raw = None;
+        while let Ok(event) = events.try_recv() {
+            match event {
+                ProviderEvent::Usage(_) => order.push("usage"),
+                ProviderEvent::UsageRaw(value) => {
+                    order.push("usage_raw");
+                    raw = Some(value);
+                }
+                ProviderEvent::Done => order.push("done"),
+                _ => {}
+            }
+        }
+        assert_eq!(order, vec!["usage", "usage_raw", "done"]);
+        let raw = raw.expect("UsageRaw emitido");
+        assert_eq!(raw["prompt_tokens_details"]["cached_tokens"], json!(900));
+        assert_eq!(raw["opencode"]["tokens"]["cache_read"], json!(8000));
+        assert_eq!(raw["prompt_cache_hit_tokens"], json!(900));
+        let serialized = raw.to_string();
+        assert!(!serialized.contains("SEGREDO"), "{serialized}");
+        assert!(!serialized.contains("sk-secret"), "{serialized}");
+        assert!(!serialized.contains("authorization"), "{serialized}");
+    }
+
+    #[test]
+    fn usage_raw_is_skipped_when_there_is_no_usage_block() {
+        let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
+        {
+            let mut handler = Handler::new(&sink, "opencode-go".to_string());
+            handler
+                .on_event(None, r#"{"choices":[{"delta":{"content":"oi"}}]}"#)
+                .expect("chunk de texto");
+            handler.finish().expect("finish");
+        }
+        let mut saw_usage_raw = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ProviderEvent::UsageRaw(_)) {
+                saw_usage_raw = true;
+            }
+        }
+        assert!(!saw_usage_raw, "sem usage não deve haver UsageRaw");
+    }
 }

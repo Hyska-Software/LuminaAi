@@ -108,8 +108,26 @@ Comportamento de request: o perfil é `standard`, sem headers beta. `temperature
 não é enviado para a família Claude (o harness já a omite; a API 2026-10-21
 removeu o parâmetro). Raciocínio segue a tabela do protocolo `anthropic` abaixo
 (`adaptive` + `output_config.effort` para modelos com esforço; `enabled` +
-`budget_tokens` ≥1024 para os que só têm orçamento). Prompt caching
-(`cache_control`) fica como melhoria futura.
+`budget_tokens` ≥1024 para os que só têm orçamento).
+
+## Cache de prompt
+
+O cache é medido por request de wire e exibido em tempo real no medidor de
+contexto (Code: anel de contexto + selo `cache NN%`; Chat: chip cache-first no
+composer). A definição é `cache_read / (cache_read + cache_write + uncached)` a
+partir do `usage` reportado pelo provedor; sem reporte, mostra `—`. O plano
+completo (fases, SLO 98–99%, diagnóstico e evidência) está em
+**`docs/goals/prompt-cache/PLAN.md`**; a pesquisa por provedor (mínimos, TTL,
+breakpoints, OpenCode e DeepSeek Harness) em
+**`docs/research/prompt-caching.md`**.
+
+| Protocolo | Mecanismo | Implementação no Lumina |
+| --- | --- | --- |
+| `anthropic` | explícito (`cache_control` em tools/system/messages, até 4 breakpoints, TTL 5m/1h) | `system` em blocos + 3 breakpoints e TTL 1h (`Settings.cache.anthropicTtl`); leitura de `cache_creation_input_tokens` |
+| `openai-responses` / `openai-chat` | automático por prefixo + `prompt_cache_key` (≤64), retenção/TTL | chave hash estável por conversa/rota/modelo/versão do prompt; retenção quando a rota suporta (perfil ChatGPT-plan só após probe) |
+| gateways OpenCode | roteamento/cache por `x-opencode-session` + bloco `usage.opencode.tokens` | session id estável por conversa; leitura de `cache_read`/`cache_write_5m`/`cache_write_1h` |
+| `google` | implícito (e explicit só se suportado) | prefixo estável, leitura de `cachedContentTokenCount`, classe “política do provedor” para a regra dos 2.050 tokens do Gemini 4 |
+| híbridos via openai-chat | automático; DeepSeek em disco | leitura de `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens` |
 
 ## Protocolos por modelo (Go — verificado em 2026-10-23)
 

@@ -22,7 +22,7 @@ pub static TODO_WRITE_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: false,
     profiles: &[TurnProfile::Code],
-    guidance: "Mantenha a lista de tarefas viva com `todo_write` (substitui a lista inteira): no máximo uma tarefa `in_progress`, itens curtos e concretos, marque `completed` assim que terminar e envie `[]` para limpar a lista.",
+    guidance: "Keep the task list up to date with `todo_write` (it replaces the whole list): at most one `in_progress` task, short and concrete items, mark `completed` as soon as you finish and send `[]` to clear the list.",
 };
 
 pub static SUBMIT_PLAN_SPEC: ToolSpec = ToolSpec {
@@ -34,7 +34,7 @@ pub static SUBMIT_PLAN_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: false,
     profiles: &[TurnProfile::Code],
-    guidance: "No modo Plano, use `submit_plan` para apresentar o plano antes de executar: comece com um heading, liste arquivos a tocar, passos, riscos e como verificar. Não inclua a implementação completa.",
+    guidance: "In Plan mode, use `submit_plan` to present the plan before executing: start with a heading, list files to touch, steps, risks and how to verify. Do not include the full implementation.",
 };
 
 pub static ASK_USER_SPEC: ToolSpec = ToolSpec {
@@ -46,7 +46,7 @@ pub static ASK_USER_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: false,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `ask_user` só quando uma decisão do usuário bloquear o trabalho (ambiguidade real); ofereça opções curtas com a recomendada primeiro e texto livre opcional.",
+    guidance: "Use `ask_user` only when a user decision blocks the work (real ambiguity); offer short options with the recommended one first and optional free text.",
 };
 
 pub fn definition() -> ToolDefinition {

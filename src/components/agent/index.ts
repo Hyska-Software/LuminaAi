@@ -31,6 +31,30 @@ export type {
 export { ContextMeter } from './ContextMeter';
 export type { ContextMeterProps } from './ContextMeter';
 
+export {
+  CacheChipSegment,
+  CacheDiagnostics,
+  CacheHitChip,
+  cacheAriaLabel,
+  cacheStateSentence,
+} from './CacheHitChip';
+export type { CacheDiagnosticsProps, CacheHitChipProps } from './CacheHitChip';
+
+export { CacheDiagnosticsDialog } from './CacheDiagnosticsDialog';
+export type { CacheDiagnosticsDialogProps } from './CacheDiagnosticsDialog';
+export { CACHE_DIAGNOSTICS_EVENT, requestCacheDiagnostics } from './cacheDiagnosticsRequest';
+export {
+  buildCacheDiagnostics,
+  cacheStateBadgeTone,
+  formatCacheTtl,
+  RECENT_BREAKS_LIMIT,
+} from './cacheDiagnostics';
+export type {
+  CacheBreakEntry,
+  CacheDiagnosticsInput,
+  CacheDiagnosticsView,
+} from './cacheDiagnostics';
+
 export { JobsBar } from './JobsBar';
 export type { JobsBarProps } from './JobsBar';
 

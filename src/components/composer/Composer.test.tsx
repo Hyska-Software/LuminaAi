@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { ProviderAuthStatus, ProviderInfo, ProviderKeyStatus } from '@/lib/types';
+import type { CacheStats, Conversation, ProviderAuthStatus, ProviderInfo, ProviderKeyStatus } from '@/lib/types';
+import type { CacheConversationUi } from '@/lib/store/cacheStore';
 
 const mocks = vi.hoisted(() => ({
   openExternalUrl: vi.fn(async () => true),
@@ -20,6 +21,7 @@ vi.mock('@/components/models/ModelPill', () => ({
 
 // Imported after the mocks above.
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { useCacheStore } from '@/lib/store/cacheStore';
 import { Composer } from './Composer';
 
 function openAiProvider(overrides: Partial<ProviderInfo> = {}): ProviderInfo {
@@ -93,6 +95,89 @@ function typeMessage(value = 'Olá'): void {
 const sendButton = (): HTMLButtonElement =>
   screen.getByRole('button', { name: 'Enviar mensagem' }) as HTMLButtonElement;
 
+function chatConversation(id = 'conv-chat'): Conversation {
+  return {
+    id,
+    title: 'Conversa de teste',
+    createdAt: 1,
+    updatedAt: 1,
+    pinned: false,
+    providerId: 'openai',
+    modelId: 'gpt-6.1-sol',
+    messageCount: 0,
+    mode: 'chat',
+  };
+}
+
+function cacheStats(overrides: Partial<CacheStats> = {}): CacheStats {
+  return {
+    hitPercent: 98,
+    sessionHitPercent: 97,
+    steadyHitPercent: 98.2,
+    ceilingPercent: 98.6,
+    inputTotal: 250_000,
+    cacheRead: 240_000,
+    cacheWrite: 6_000,
+    uncached: 4_000,
+    eligible: true,
+    state: 'stable',
+    epoch: 1,
+    samples: 12,
+    ttlSeconds: 3600,
+    at: Date.now(),
+    ...overrides,
+  };
+}
+
+function cacheUi(): CacheConversationUi {
+  return {
+    current: cacheStats(),
+    session: cacheStats(),
+    epoch: 1,
+    samples: [
+      {
+        turnId: 'turn-1',
+        step: 4,
+        providerId: 'openai',
+        modelId: 'gpt-6.1-sol',
+        protocol: 'openai-responses',
+        epoch: 1,
+        inputTotal: 250_000,
+        cacheRead: 240_000,
+        cacheWrite: 6_000,
+        uncached: 4_000,
+        hitPercent: 98,
+        ceilingPercent: 98.6,
+        eligible: true,
+        state: 'stable',
+        at: Date.now(),
+      },
+    ],
+    lastBreak: null,
+    restored: true,
+  };
+}
+
+function seedActiveChat(conversationId = 'conv-chat'): void {
+  useChatStore.setState({
+    activeId: conversationId,
+    conversations: [chatConversation(conversationId)],
+  });
+}
+
+function setShowCacheIndicator(showIndicator: boolean): void {
+  useAppStore.setState((state) => ({
+    settings: {
+      ...state.settings,
+      cache: {
+        showIndicator,
+        anthropicTtl: state.settings.cache?.anthropicTtl ?? '1h',
+        openaiRetention: state.settings.cache?.openaiRetention ?? null,
+      },
+    },
+  }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   useChatStore.setState({
@@ -101,7 +186,9 @@ beforeEach(() => {
     error: null,
     errorCode: null,
     errorHint: null,
+    activeId: null,
   });
+  useCacheStore.getState().reset();
   useUiStore.setState({ settingsOpen: false, layoutMode: 'chat' });
   seedApp({ auth: signedIn() });
 });
@@ -109,6 +196,9 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   seedApp({ provider: null, auth: null });
+  useChatStore.setState({ activeId: null, conversations: [] });
+  useCacheStore.getState().reset();
+  setShowCacheIndicator(true);
 });
 
 describe('Composer — gate de envio (D9)', () => {
@@ -195,5 +285,65 @@ describe('Composer — variant por layoutMode (Chat | Code)', () => {
     expect(screen.getByRole('button', { name: 'Criar arquivos' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Modo de permissão/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Modo Plano' })).toBeNull();
+  });
+});
+
+describe('Composer — chip de cache no Chat', () => {
+  it('mostra o chip cache-first antes do ModelPill quando a conversa ativa tem amostras', () => {
+    seedActiveChat();
+    useCacheStore.setState({ byConversation: { 'conv-chat': cacheUi() } });
+    render(<Composer />);
+
+    const chip = screen.getByRole('button', { name: 'Cache de prompt: 98% de acerto' });
+    const modelPill = screen.getByRole('button', { name: 'Modelo' });
+    // O chip fica antes do ModelPill na fileira de controles.
+    expect(
+      chip.compareDocumentPosition(modelPill) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(chip.className).toContain('h-8');
+  });
+
+  it('não mostra o chip sem conversa ativa', () => {
+    useCacheStore.setState({ byConversation: { 'conv-chat': cacheUi() } });
+    render(<Composer />);
+
+    expect(screen.queryByRole('button', { name: /^Cache de prompt:/ })).toBeNull();
+  });
+
+  it('não mostra o chip no layout Code (o header já hospeda o medidor)', () => {
+    seedActiveChat();
+    useCacheStore.setState({ byConversation: { 'conv-chat': cacheUi() } });
+    useUiStore.setState({ layoutMode: 'code' });
+    render(<Composer />);
+
+    expect(screen.queryByRole('button', { name: /^Cache de prompt:/ })).toBeNull();
+  });
+
+  it('respeita Settings.cache.showIndicator = false', () => {
+    seedActiveChat();
+    useCacheStore.setState({ byConversation: { 'conv-chat': cacheUi() } });
+    setShowCacheIndicator(false);
+    render(<Composer />);
+
+    expect(screen.queryByRole('button', { name: /^Cache de prompt:/ })).toBeNull();
+  });
+
+  it('não mostra o chip antes de existir amostra/restauração', () => {
+    seedActiveChat();
+    useCacheStore.setState({
+      byConversation: {
+        'conv-chat': {
+          current: null,
+          session: null,
+          epoch: 0,
+          samples: [],
+          lastBreak: null,
+          restored: true,
+        },
+      },
+    });
+    render(<Composer />);
+
+    expect(screen.queryByRole('button', { name: /^Cache de prompt:/ })).toBeNull();
   });
 });

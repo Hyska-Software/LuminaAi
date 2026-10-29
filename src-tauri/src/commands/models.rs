@@ -407,6 +407,7 @@ fn estimated_model(provider: &ProviderInfo, remote: &RemoteModel) -> ModelInfo {
         tags,
         status: "stable".into(),
         estimated: true,
+        cache: None,
     }
 }
 

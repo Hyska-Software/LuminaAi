@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
     listConversations: vi.fn(),
     createConversation: vi.fn(),
     getConversation: vi.fn(),
+    getCacheStats: vi.fn(),
     renameConversation: vi.fn(),
     deleteConversation: vi.fn(),
     setConversationPinned: vi.fn(),
@@ -129,6 +130,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetStores();
   mocks.api.listConversations.mockResolvedValue([]);
+  mocks.api.getConversation.mockResolvedValue(undefined);
+  mocks.api.getCacheStats.mockResolvedValue(null);
   mocks.api.listArtifacts.mockResolvedValue([]);
   mocks.api.renameConversation.mockResolvedValue(undefined);
   mocks.api.deleteConversation.mockResolvedValue(undefined);

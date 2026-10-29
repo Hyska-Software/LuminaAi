@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Copy, Pencil, RefreshCw, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
+import { CodeTurnSummary } from '@/components/code/CodeTurnSummary';
 import { AttachmentChips } from '@/components/composer/AttachmentChips';
 import { useReduceMotion } from '@/components/layout/hooks';
 import { Badge, Button, IconButton, Spinner } from '@/components/ui';
@@ -168,6 +169,14 @@ const AssistantMessageItem = memo(function AssistantMessageItem({ message, isStr
   const anyStreaming = useChatStore((state) => state.streaming !== null);
   const showTokenUsage = useAppStore((state) => state.settings.showTokenUsage);
   const artifacts = useUiStore((state) => state.artifacts);
+  const layoutMode = useUiStore((state) => state.layoutMode);
+  // Workspace da sessão: com ele o resumo do turno abre o diff de cada arquivo
+  // como aba central (WORKBENCH §7.2); sem workspace o card é informativo.
+  const workspaceId = useChatStore(
+    (state) =>
+      state.conversations.find((entry) => entry.id === message.conversationId)?.workspaceId ??
+      null,
+  );
 
   const attachments = message.attachments ?? [];
   const citations = message.citations ?? [];
@@ -260,6 +269,15 @@ const AssistantMessageItem = memo(function AssistantMessageItem({ message, isStr
           <div className="mt-2">
             <Badge tone="neutral">Cancelado</Badge>
           </div>
+        ) : null}
+
+        {/* Fecho do turno (DESIGN §6.3): só no layout Code e com o turno
+            encerrado — durante o streaming as edições ainda estão chegando.
+            Turnos cancelados/erro também mostram o resumo: as edições
+            parciais já são reais. Depois do selo "Cancelado", que qualifica o
+            turno, e antes do rodapé de ações. */}
+        {layoutMode === 'code' && !isStreaming ? (
+          <CodeTurnSummary message={message} workspaceId={workspaceId} />
         ) : null}
 
         {!isStreaming &&

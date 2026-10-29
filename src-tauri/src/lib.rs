@@ -66,6 +66,7 @@ pub fn run() {
             commands::conversations::list_conversations,
             commands::conversations::create_conversation,
             commands::conversations::get_conversation,
+            commands::cache::get_cache_stats,
             commands::conversations::rename_conversation,
             commands::conversations::delete_conversation,
             commands::conversations::set_conversation_pinned,

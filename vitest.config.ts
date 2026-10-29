@@ -13,5 +13,9 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     setupFiles: ['./vitest.setup.ts'],
     reporters: ['default'],
+    // The UI suite uses jsdom + user-event; the default 5 s is too tight when
+    // cargo/build jobs share the CPU (flaky ModelPill/ModelPicker timeouts).
+    testTimeout: 15_000,
+    hookTimeout: 15_000,
   },
 });

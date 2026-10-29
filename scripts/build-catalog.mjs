@@ -260,6 +260,60 @@ function buildModel(id, { docsEntry, verified, md, providerKind }) {
   };
 }
 
+/**
+ * Prompt-cache capabilities defaults per provider kind (docs/goals/prompt-cache).
+ * `minTokens: null` means unknown -> the request is excluded from the hit-rate
+ * target until `scripts/probe-cache.mjs` fills the measured value.
+ */
+function cacheDefaults(kind) {
+  if (kind === 'go' || kind === 'zen') {
+    return {
+      // Probe F4.0 (29/10): o gateway aceita cache_control no protocolo anthropic
+      // (Claude Haiku 5.5: write 1h=2127, read=2127 na 2ª chamada) e reporta
+      // usage.opencode.tokens.*. Mínimo conservador; modelos live ajustam.
+      mode: 'explicit',
+      minTokens: 2048,
+      blockTokens: null,
+      ttlOptions: ['1h'],
+      supportsKey: true,
+      supportsRetention: false,
+      supportsExplicitBreakpoints: true,
+      reportsRead: true,
+      reportsWrite: true,
+      source: 'probe',
+    };
+  }
+  if (kind === 'openai') {
+    return {
+      mode: 'auto',
+      minTokens: 1024,
+      blockTokens: 128,
+      ttlOptions: ['in_memory', '24h'],
+      supportsKey: true,
+      supportsRetention: true,
+      supportsExplicitBreakpoints: true,
+      reportsRead: true,
+      reportsWrite: true,
+      source: 'family-default',
+    };
+  }
+  if (kind === 'anthropic') {
+    return {
+      mode: 'explicit',
+      minTokens: null,
+      blockTokens: null,
+      ttlOptions: ['5m', '1h'],
+      supportsKey: false,
+      supportsRetention: false,
+      supportsExplicitBreakpoints: true,
+      reportsRead: true,
+      reportsWrite: true,
+      source: 'family-default',
+    };
+  }
+  return undefined;
+}
+
 function buildProvider({ id, name, shortName, description, baseUrl, defaultModelId, docsById, mdSource, kind, notes }) {
   const ids = new Set(Object.keys(docsById));
   if (kind === 'go') for (const id of Object.keys(verifiedById)) ids.add(id);
@@ -290,6 +344,7 @@ function buildProvider({ id, name, shortName, description, baseUrl, defaultModel
     defaultModelId,
     models,
     notes: notes ?? [],
+    cache: cacheDefaults(kind),
   };
 }
 
@@ -375,6 +430,7 @@ function buildOpenAiProvider() {
     defaultModelId,
     oauth: OPENAI_OAUTH,
     models,
+    cache: cacheDefaults('openai'),
     notes: [
       'O uso consome o limite do seu plano ChatGPT (o mesmo pool compartilhado por apps, Codex e ChatGPT Work).',
       'Contas Plus têm a janela de 5 h compartilhada; Pro não tem esse limite. Limites específicos deste app também podem valer.',
@@ -453,6 +509,7 @@ function buildAnthropicProvider() {
     authEnv: 'ANTHROPIC_API_KEY',
     defaultModelId,
     models,
+    cache: cacheDefaults('anthropic'),
     notes: [
       'Cobrança por token na sua conta Anthropic (pay-as-you-go) — este provedor não usa assinatura/plano.',
       'Crie ou revise a API key em https://platform.claude.com/settings/keys.',

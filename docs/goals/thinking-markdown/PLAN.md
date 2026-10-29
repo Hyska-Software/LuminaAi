@@ -1,8 +1,13 @@
 # PLAN — Markdown no Thinking (raciocínio do modelo) no Chat e no Code
 
-> Status: **em execução** (equipe: `ui-core` renderer/timeline, `ui-code` integração,
-> `verifier` verificação independente, Lead contrato/docs/verificação final).
-> Base: `docs/MARKDOWN.md` (contrato §4), `docs/DESIGN.md` §6.3,
+> Status: **concluído e verificado** (2026-10-28 — implementação + verificação
+> independente APROVADA, 0 falhas contratuais). Evidências, comandos e números
+> finais em **`EVIDENCE.md`**; relatório adversarial completo em
+> `.research/thinking-markdown-verify/REPORT.md`.
+> Equipe: `ui-core-renderer`/`ui-core-timeline` (renderer, timeline, header),
+> `ui-code` (integração do layout Code), `verifier` (verificação independente),
+> Lead (contrato, docs, verificação final).
+> Base: `docs/MARKDOWN.md` (contrato §4/§10), `docs/DESIGN.md` §6.3,
 > `docs/goals/code-harness/WORKBENCH.md` §5.2.1, `docs/ARCHITECTURE.md` §8.1.
 
 ## 1. Objetivo
@@ -74,6 +79,12 @@ existentes entre eles.
 9. **Sem mudança de backend.** O raciocínio já chega e é persistido como texto
    bruto (eventos `reasoning_delta`, `trace` em JSON no SQLite); nenhum ajuste
    em Rust é necessário — só o renderer/timeline do renderer.
+10. **Copy do header por layout (refinamento pedido com screenshot).** No layout
+    **Code** o título agregado do bloco passa a ser **"Trabalhou por Xs"** — o
+    tempo do turno inclui as ferramentas, não só o raciocínio; **"Pensou por Xs"
+    fica apenas no layout Chat**. Ao vivo os títulos continuam por fase
+    ("Pensando…", "Executando ferramentas…") e turnos sem raciocínio exposto
+    seguem "N passos" nos dois.
 
 ## 4. Contrato técnico
 
@@ -130,6 +141,8 @@ Linha de raciocínio:
 | task-4 | Layout Code: auditoria + teste de integração do transcript no modo Code (bloqueada por 1/2) | `ui-code` |
 | task-3 | Harness de verificação independente em `.research/thinking-markdown-verify/` | `verifier` |
 | task-5 | Execução da verificação independente (matriz, segurança, a11y, resiliência, comandos) | `verifier` |
+| task-6 | Header do Thinking por layout: "Trabalhou por Xs" no Code, "Pensou por Xs" só no Chat (+ testes) | `ui-core` |
+| task-7 | Teste de integração do transcript Code atualizado para a nova copy do header | `ui-code` |
 | — | Contrato, docs e verificação final | Lead |
 
 ## 6. Matriz de testes
@@ -152,27 +165,34 @@ um bloco; intercalamento e calls defensivas; trim; raciocínio vazio.
 `ul`/`li`, `h3`, tabela, code card + copiar, KaTeX, alerta pt-BR, task list, link
 externo); texto puro compatível; caret só no último bloco durante `reasoning`;
 **Chat** com resumos agrupados × **Code** com linhas por chamada, os dois com
-raciocínio Markdown; XSS inerte.
+raciocínio Markdown; XSS inerte; **título do header por layout** ("Pensou por Xs"
+no Chat, "Trabalhou por Xs" no Code, títulos ao vivo e "N passos" inalterados).
 
 **`src/components/code/CodeTranscriptThinking.test.tsx`** — integração: `ChatView`
 real no `layoutMode: 'code'` com sessão de código, raciocínio Markdown + tools por
-chamada + chrome do Code; troca para `chat` não quebra.
+chamada + chrome do Code, header "Trabalhou por 4s"; troca para `chat` mantém o
+transcript e passa a mostrar "Pensou por 4s"; separação de sessões preservada.
 
 **Verificação independente** — matriz adversária própria (58+ checks de sintaxe,
-vetores de segurança, resiliência, a11y, contagens de `pnpm typecheck`,
-`pnpm vitest run` dos arquivos acima, `pnpm test` completo e `pnpm build`).
+vetores de segurança, resiliência, a11y, copy do header por layout, contagens de
+`pnpm typecheck`, `pnpm vitest run` dos arquivos acima, `pnpm test` completo e
+`pnpm build`).
 
 ## 7. Critérios de aceitação
 
-- [ ] Markdown completo no Thinking nos **dois** layouts, com as diferenças de
+- [x] Markdown completo no Thinking nos **dois** layouts, com as diferenças de
       cada layout mantidas.
-- [ ] `pnpm typecheck` 0 erros; `pnpm test` verde (sem regressões na suíte atual);
-      `pnpm build` OK; `cargo test --lib` verde.
-- [ ] Sanitização da variante `thinking` idêntica à da resposta (0 vetores XSS).
-- [ ] Sem `any`/`@ts-ignore`; tokens apenas; aria/roles e microcopy pt-BR.
-- [ ] Docs atualizados (`MARKDOWN.md`, `DESIGN.md` §6.3,
+- [x] Header agregado do Thinking: **"Trabalhou por Xs"** no layout Code e
+      **"Pensou por Xs"** apenas no layout Chat (títulos ao vivo e "N passos"
+      inalterados).
+- [x] `pnpm typecheck` 0 erros; `pnpm test` verde (112 arquivos / 2.130 testes);
+      `pnpm build` OK; `cargo test --lib` verde (755 passed).
+- [x] Sanitização da variante `thinking` idêntica à da resposta (4.368 checks de
+      segurança independentes, 0 vetores XSS / 0 bypass).
+- [x] Sem `any`/`@ts-ignore`; tokens apenas; aria/roles e microcopy pt-BR.
+- [x] Docs atualizados (`MARKDOWN.md` §10, `DESIGN.md` §6.3,
       `WORKBENCH.md` §5.2.1, `ARCHITECTURE.md` §8.1) e registro de execução.
-- [ ] Verificação independente executada e sem bloqueadores.
+- [x] Verificação independente executada e sem bloqueadores (APROVADO).
 
 ## 8. Riscos e mitigação
 
@@ -187,5 +207,27 @@ vetores de segurança, resiliência, a11y, contagens de `pnpm typecheck`,
 
 ## 9. Registro de execução
 
-_(preenchido ao final: entregas por dono, comandos + resultados, achados da
-verificação independente e limitações conhecidas.)_
+**Concluído e verificado em 2026-10-28.** Detalhes completos em `EVIDENCE.md`.
+
+| Etapa | Dono | Resultado |
+| --- | --- | --- |
+| task-1 renderer `variant="thinking"` + CSS + testes | `ui-core-renderer` | 2 arquivos / 155 testes focados verdes; typecheck 0 |
+| task-2 timeline Markdown bruto + `AgentSteps` + testes | `ui-core-timeline` | 2 arquivos / 50 testes focados verdes; typecheck 0 |
+| task-4 integração/auditoria do layout Code | `ui-code` | 4 testes de integração verdes; nada a mudar em produção do Code |
+| task-6 header por layout ("Trabalhou por" no Code) | `ui-core-timeline` | 30 testes em `AgentSteps.test.tsx` verdes; typecheck 0 |
+| task-7 copy do header no teste do Code | `ui-code` | 4 testes verdes; typecheck 0 |
+| task-3/5 verificação independente | `verifier` | **4.922 checks / 0 falhas / 2 observações**; relatório final APROVADO |
+| Docs + validação final | Lead | typecheck 0; recorte 214 testes; suíte completa 2.130; build ok; cargo 755 |
+
+Verificação independente (resumo): matriz §4 **251 checks**; segurança/XSS via
+raciocínio **4.368 checks / 0 falhas** (79 vetores nas 2 variantes, paridade DOM
+thinking × default); `agentTrace` 37; `AgentSteps` 137; transcript real nos 2
+layouts 53; a11y 36; resiliência 40.
+
+Limitações conhecidas: jsdom não pinta CSS/libs de fences nem KaTeX (aparência
+verificada por classes/estrutura/regras/CSS de contraste); contraste AAA não é
+exigido (AA ok: 6,27:1 claro / 6,99:1 escuro); agrupamento de tools é por tipo de
+tool (comportamento anterior), não por `layoutMode`; 1 flake alheio à feature em
+`ModelPickerDialog.auth.test.tsx` sob carga concorrente (passou isolado e no
+rerun completo). O restante em `.research/thinking-markdown-verify/REPORT.md`
+§13/§14.

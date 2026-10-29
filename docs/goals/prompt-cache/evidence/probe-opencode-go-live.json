@@ -1,0 +1,218 @@
+{
+  "generatedAt": "2026-10-29T19:34:57.619Z",
+  "fixture": "lumina-cache-probe-v1",
+  "providers": [
+    {
+      "provider": "opencode-go",
+      "name": "OpenCode Go",
+      "cache": {
+        "mode": "explicit",
+        "minTokens": 2048,
+        "blockTokens": null,
+        "ttlOptions": [
+          "1h"
+        ],
+        "supportsKey": true,
+        "supportsRetention": false,
+        "supportsExplicitBreakpoints": true,
+        "source": "probe",
+        "reportsRead": true,
+        "reportsWrite": true
+      },
+      "routes": [
+        {
+          "route": "anthropic",
+          "model": "claude-haiku-5-5",
+          "authMode": "api",
+          "url": "https://opencode.ai/inference/go/anthropic/v1/messages",
+          "attempts": [
+            {
+              "attempt": 1,
+              "status": 200,
+              "cache": {
+                "input_tokens": 15,
+                "cache_read": 0,
+                "cache_write": 2127,
+                "opencode": {
+                  "input": 15,
+                  "output": 4,
+                  "reasoning": 0,
+                  "cache_read": 0,
+                  "cache_write_5m": 0,
+                  "cache_write_1h": 2127
+                },
+                "raw": {
+                  "input_tokens": 15,
+                  "output_tokens": 4,
+                  "cache_creation_input_tokens": 2127,
+                  "cache_read_input_tokens": 0,
+                  "output_tokens_details": {
+                    "thinking_tokens": 0
+                  },
+                  "cache_creation": {
+                    "ephemeral_1h_input_tokens": 2127,
+                    "ephemeral_5m_input_tokens": 0
+                  },
+                  "cost": 0,
+                  "opencode": {
+                    "billing_source": "go",
+                    "list_cost": 0.0004289,
+                    "allowance": 0.0017156,
+                    "tokens": {
+                      "input": 15,
+                      "output": 4,
+                      "reasoning": 0,
+                      "cache_read": 0,
+                      "cache_write_5m": 0,
+                      "cache_write_1h": 2127
+                    }
+                  }
+                }
+              },
+              "error": null
+            },
+            {
+              "attempt": 2,
+              "status": 200,
+              "cache": {
+                "input_tokens": 15,
+                "cache_read": 2127,
+                "cache_write": 0,
+                "opencode": {
+                  "input": 15,
+                  "output": 4,
+                  "reasoning": 0,
+                  "cache_read": 2127,
+                  "cache_write_5m": 0,
+                  "cache_write_1h": 0
+                },
+                "raw": {
+                  "input_tokens": 15,
+                  "output_tokens": 4,
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 2127,
+                  "output_tokens_details": {
+                    "thinking_tokens": 0
+                  },
+                  "cache_creation": {
+                    "ephemeral_1h_input_tokens": 0,
+                    "ephemeral_5m_input_tokens": 0
+                  },
+                  "cost": 0,
+                  "opencode": {
+                    "billing_source": "go",
+                    "list_cost": 0.00002477,
+                    "allowance": 0.00009908,
+                    "tokens": {
+                      "input": 15,
+                      "output": 4,
+                      "reasoning": 0,
+                      "cache_read": 2127,
+                      "cache_write_5m": 0,
+                      "cache_write_1h": 0
+                    }
+                  }
+                }
+              },
+              "error": null
+            }
+          ]
+        },
+        {
+          "route": "chat",
+          "model": "deepseek-v4-pro",
+          "authMode": "api",
+          "url": "https://opencode.ai/inference/go/openai/v1/chat/completions",
+          "attempts": [
+            {
+              "attempt": 1,
+              "status": 200,
+              "cache": {
+                "input_tokens": 1272,
+                "cache_read": 0,
+                "cache_write": 0,
+                "opencode": {
+                  "input": 1272,
+                  "output": 23,
+                  "reasoning": 21,
+                  "cache_read": 0,
+                  "cache_write_5m": 0,
+                  "cache_write_1h": 0
+                },
+                "raw": {
+                  "prompt_tokens": 1272,
+                  "completion_tokens": 23,
+                  "total_tokens": 1295,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 0
+                  },
+                  "completion_tokens_details": {
+                    "reasoning_tokens": 21
+                  },
+                  "cost": 0,
+                  "opencode": {
+                    "billing_source": "go",
+                    "list_cost": 0.00088506,
+                    "allowance": 0.00354024,
+                    "tokens": {
+                      "input": 1272,
+                      "output": 23,
+                      "reasoning": 21,
+                      "cache_read": 0,
+                      "cache_write_5m": 0,
+                      "cache_write_1h": 0
+                    }
+                  }
+                }
+              },
+              "error": null
+            },
+            {
+              "attempt": 2,
+              "status": 200,
+              "cache": {
+                "input_tokens": 1272,
+                "cache_read": 0,
+                "cache_write": 0,
+                "opencode": {
+                  "input": 1272,
+                  "output": 24,
+                  "reasoning": 22,
+                  "cache_read": 0,
+                  "cache_write_5m": 0,
+                  "cache_write_1h": 0
+                },
+                "raw": {
+                  "prompt_tokens": 1272,
+                  "completion_tokens": 24,
+                  "total_tokens": 1296,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 0
+                  },
+                  "completion_tokens_details": {
+                    "reasoning_tokens": 22
+                  },
+                  "cost": 0,
+                  "opencode": {
+                    "billing_source": "go",
+                    "list_cost": 0.00088704,
+                    "allowance": 0.00354816,
+                    "tokens": {
+                      "input": 1272,
+                      "output": 24,
+                      "reasoning": 22,
+                      "cache_read": 0,
+                      "cache_write_5m": 0,
+                      "cache_write_1h": 0
+                    }
+                  }
+                }
+              },
+              "error": null
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

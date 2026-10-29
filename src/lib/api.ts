@@ -15,6 +15,7 @@ import type {
   AskUserAnswer,
   AttachmentInfo,
   CatalogView,
+  CacheStatsView,
   CodeEnvironmentStatus,
   CodeSessionState,
   Conversation,
@@ -102,6 +103,9 @@ export const api = {
     }),
   getConversation: (id: string) =>
     invoke<ConversationDetail | null>('get_conversation', { id }),
+  /** Cache telemetry aggregate for the context-meter indicator. */
+  getCacheStats: (conversationId: string, limit?: number) =>
+    invoke<CacheStatsView>('get_cache_stats', { conversationId, limit }),
   renameConversation: (id: string, title: string) =>
     invoke<void>('rename_conversation', { id, title }),
   deleteConversation: (id: string) => invoke<void>('delete_conversation', { id }),

@@ -12,9 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::providers::{self, CompletionRequest, HistoryMessage, ProviderEvent};
 
-use super::{
-    provider_config, resolve_credential, resolve_model, resolve_protocols, HarnessDeps,
-};
+use super::{provider_config, resolve_credential, resolve_model, resolve_protocols, HarnessDeps};
 
 /// Requisição de texto único (sem tools).
 pub struct BatchRequest<'a> {
@@ -30,7 +28,10 @@ pub struct BatchRequest<'a> {
 ///
 /// Falhas de provedor são devolvidas com contexto; o chamador decide se é
 /// crítico (compactação) ou opcional (sugestão de commit).
-pub async fn complete_text(deps: &HarnessDeps, request: BatchRequest<'_>) -> anyhow::Result<String> {
+pub async fn complete_text(
+    deps: &HarnessDeps,
+    request: BatchRequest<'_>,
+) -> anyhow::Result<String> {
     let provider = deps
         .catalog
         .provider(request.provider_id)
@@ -58,6 +59,8 @@ pub async fn complete_text(deps: &HarnessDeps, request: BatchRequest<'_>) -> any
         max_output_tokens: Some(request.max_output_tokens.clamp(256, 4_096)),
         temperature: request.temperature,
         cancel: cancel.clone(),
+        // F4b: plano de cache explícito preenchido no wiring da F4.
+        cache_plan: None,
     };
 
     let text = Arc::new(Mutex::new(String::new()));
@@ -94,6 +97,47 @@ pub async fn complete_text(deps: &HarnessDeps, request: BatchRequest<'_>) -> any
     Ok(trimmed)
 }
 
+/// Executa uma completion **já montada** e devolve o texto final.
+///
+/// Usada pela compactação cache-safe (F3b): o request é o próprio request normal
+/// da conversa (system prompt, tools e histórico), com uma instrução de
+/// sumarização anexada no fim — então o provider reaproveita o prefixo cacheado.
+/// Nenhum evento é emitido para a UI.
+pub async fn complete_request(
+    deps: &HarnessDeps,
+    request: CompletionRequest,
+) -> anyhow::Result<String> {
+    let text = Arc::new(Mutex::new(String::new()));
+    let (sink, mut events) = tokio::sync::mpsc::unbounded_channel::<ProviderEvent>();
+    let reader = {
+        let text = text.clone();
+        tokio::spawn(async move {
+            while let Some(event) = events.recv().await {
+                if let ProviderEvent::TextDelta(delta) = event {
+                    text.lock().push_str(&delta);
+                }
+            }
+        })
+    };
+    let result = match &deps.streamer {
+        Some(streamer) => streamer(request, sink).await,
+        None => providers::stream_completion(&deps.http, request, sink).await,
+    };
+    if let Err(error) = result {
+        reader.abort();
+        return Err(error);
+    }
+    reader
+        .await
+        .map_err(|error| anyhow::anyhow!("leitor da completion falhou: {error}"))?;
+    let text = text.lock().clone();
+    let trimmed = text.trim().to_string();
+    if trimmed.is_empty() {
+        anyhow::bail!("o modelo não devolveu texto");
+    }
+    Ok(trimmed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,7 +162,7 @@ mod tests {
             observed: None,
             jobs: None,
             questions: None,
-        mcp: None,
+            mcp: None,
         }
     }
 

@@ -20,7 +20,7 @@ pub static GIT_STATUS_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `git_status` para saber o que mudou antes de editar ou commitar; é somente leitura e não altera o repositório.",
+    guidance: "Use `git_status` to see what changed before editing or committing; it is read-only and does not alter the repository.",
 };
 
 pub static GIT_DIFF_SPEC: ToolSpec = ToolSpec {
@@ -32,7 +32,7 @@ pub static GIT_DIFF_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `git_diff` para revisar mudanças antes de concluir; limite com `paths` quando o diff for grande.",
+    guidance: "Use `git_diff` to review changes before wrapping up; limit with `paths` when the diff is large.",
 };
 
 pub static GIT_LOG_SPEC: ToolSpec = ToolSpec {
@@ -44,7 +44,7 @@ pub static GIT_LOG_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `git_log` para entender o histórico recente e o estilo das mensagens de commit antes de propor mudanças.",
+    guidance: "Use `git_log` to understand the recent history and the style of commit messages before proposing changes.",
 };
 
 pub fn definition() -> ToolDefinition {

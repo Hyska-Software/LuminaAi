@@ -21,7 +21,7 @@ pub static READ_FILE_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `read_file` — não comandos de shell como `cat` — para inspecionar arquivos. Continue com `offset`/`limit` em arquivos grandes; leia um arquivo antes de editá-lo.",
+    guidance: "Use `read_file` — not shell commands like `cat` — to inspect files. Continue with `offset`/`limit` on large files; read a file before editing it.",
 };
 
 pub static LIST_DIR_SPEC: ToolSpec = ToolSpec {
@@ -33,7 +33,7 @@ pub static LIST_DIR_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `list_dir` para descobrir a estrutura antes de buscar ou editar; prefira `search_files`/`search_text` quando já souber o alvo.",
+    guidance: "Use `list_dir` to discover the structure before searching or editing; prefer `search_files`/`search_text` when you already know the target.",
 };
 
 pub static SEARCH_FILES_SPEC: ToolSpec = ToolSpec {
@@ -45,7 +45,7 @@ pub static SEARCH_FILES_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `search_files` para localizar arquivos por nome/padrão e `search_text` para localizar conteúdo; os resultados são relativos ao workspace.",
+    guidance: "Use `search_files` to locate files by name/pattern and `search_text` to locate content; results are relative to the workspace.",
 };
 
 pub static SEARCH_TEXT_SPEC: ToolSpec = ToolSpec {
@@ -57,7 +57,7 @@ pub static SEARCH_TEXT_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `search_text` com um trecho literal curto ou regex para achar o código relevante; refine com `glob`/`path` em vez de varrer o repositório inteiro.",
+    guidance: "Use `search_text` with a short literal snippet or a regex to find the relevant code; narrow with `glob`/`path` instead of scanning the whole repository.",
 };
 
 pub static READ_TOOL_OUTPUT_SPEC: ToolSpec = ToolSpec {
@@ -69,7 +69,7 @@ pub static READ_TOOL_OUTPUT_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: false,
     profiles: &[TurnProfile::Code],
-    guidance: "Quando um resultado vier truncado com um id de spill, use `read_tool_output` para ler o restante em páginas em vez de repetir o comando.",
+    guidance: "When a result comes back truncated with a spill id, use `read_tool_output` to page through the rest instead of repeating the command.",
 };
 
 pub fn definition() -> ToolDefinition {

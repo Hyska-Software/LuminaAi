@@ -1,0 +1,52 @@
+{
+  "generatedAt": "2026-10-29T19:34:13.465Z",
+  "fixture": "lumina-cache-probe-v1",
+  "providers": [
+    {
+      "provider": "opencode-go",
+      "name": "OpenCode Go",
+      "cache": {
+        "mode": "explicit",
+        "minTokens": 2048,
+        "blockTokens": null,
+        "ttlOptions": [
+          "1h"
+        ],
+        "supportsKey": true,
+        "supportsRetention": false,
+        "supportsExplicitBreakpoints": true,
+        "source": "probe",
+        "reportsRead": true,
+        "reportsWrite": true
+      },
+      "routes": [
+        {
+          "route": "google",
+          "model": "gemini-4-argon-contributor",
+          "authMode": "api",
+          "url": "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon-contributor:generateContent",
+          "attempts": [
+            {
+              "attempt": 1,
+              "status": 400,
+              "cache": {
+                "input_tokens": null,
+                "cache_read": null,
+                "cache_write": null,
+                "opencode": null,
+                "raw": {
+                  "error": {
+                    "code": 400,
+                    "status": "UNKNOWN",
+                    "message": "Upstream request failed: Model is unavailable."
+                  }
+                }
+              },
+              "error": null
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

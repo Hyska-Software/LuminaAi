@@ -5,6 +5,7 @@
  * a dead end.
  */
 import {
+  Activity,
   ArrowLeft,
   Braces,
   Code,
@@ -34,6 +35,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { requestCacheDiagnostics } from '@/components/agent/cacheDiagnosticsRequest';
 import { api } from '@/lib/api';
 import { conversationCitations } from '@/lib/citations';
 import { SETTINGS_TABS } from '@/lib/settingsTabs';
@@ -382,6 +384,20 @@ export function usePaletteActions(): PaletteAction[] {
     keywords: 'input escrever mensagem',
     run: focusComposer,
   });
+
+  // Diagnóstico de cache (F5.4): painel completo da conversa ativa. Fica perto
+  // dos comandos do Code porque o indicador nasce no medidor de contexto.
+  if (activeConversation) {
+    actions.push({
+      id: 'diagnostico-cache',
+      group: 'navegacao',
+      label: 'Diagnóstico de cache',
+      description: 'Amostras por request, quebras de prefixo e usage bruto da conversa ativa',
+      icon: Activity,
+      keywords: 'cache diagnóstico prompt tokens hit amostras usage provedor prefixo quebra',
+      run: requestCacheDiagnostics,
+    });
+  }
   actions.push({
     id: 'alternar-sidebar',
     group: 'navegacao',

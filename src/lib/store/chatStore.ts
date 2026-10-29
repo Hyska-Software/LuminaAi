@@ -21,6 +21,7 @@ import { filterConversationsForLayout } from '../conversations';
 import { reasoningForModel } from '../modelMenu';
 import { useAppStore } from './appStore';
 import { isCodeEvent, useCodeStore } from './codeStore';
+import { useCacheStore } from './cacheStore';
 import { useUiStore, type LayoutMode } from './uiStore';
 
 export interface StreamingState {
@@ -342,6 +343,21 @@ export const useChatStore = create<ChatState>()((set, get) => {
     }
   };
 
+  // Prompt-cache aggregate is authoritative in the backend; when a conversation
+  // is opened (even with messages cached) the chip must show the persisted
+  // session numbers before the next turn produces a fresh sample.
+  const syncCacheStats = async (conversationId?: string | null) => {
+    const target = conversationId ?? get().activeId;
+    if (!target) return;
+    try {
+      const view = await api.getCacheStats(target, 50);
+      if (get().activeId !== target) return;
+      useCacheStore.getState().seed(target, view);
+    } catch (error) {
+      console.error('failed to sync conversation cache stats', error);
+    }
+  };
+
   const runTurn = async (
     payload: TurnPayload,
     context: {
@@ -505,6 +521,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
             usage: { ...(message.usage ?? {}), ...event.usage },
           }));
           break;
+        case 'cache_stats':
+          useCacheStore.getState().applySample(context.conversationId, event.sample);
+          break;
         case 'message_updated':
           // The definitive message (persisted by the harness) already carries
           // the trace; flush pending deltas first so nothing is duplicated.
@@ -523,10 +542,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
           finished = true;
           applyResult(event.result);
           void useCodeStore.getState().refresh(context.conversationId);
+          // The per-request event carries only cache counters; TTL/min/savings
+          // come from the authoritative snapshot, so refresh it at turn end.
+          void syncCacheStats(context.conversationId);
           break;
         case 'cancelled':
           flush();
           finished = true;
+          void syncCacheStats(context.conversationId);
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
             status: 'cancelled',
@@ -538,6 +561,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         case 'error':
           flush();
           finished = true;
+          void syncCacheStats(context.conversationId);
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
             status: message.content ? 'complete' : 'error',
@@ -719,6 +743,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         // in the background, deletion, app reload): always reconcile them.
         rememberActive(id);
         await syncArtifacts(id);
+        void syncCacheStats(id);
         syncCodeSession(get().conversations.find((conversation) => conversation.id === id));
         return;
       }
@@ -743,6 +768,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           set({ loadingConversationId: null });
         }
         await syncArtifacts(id);
+        void syncCacheStats(id);
       } catch (error) {
         set({ loadingConversationId: null, error: String(error) });
       }

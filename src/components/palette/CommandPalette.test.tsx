@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   setConversationPinned: vi.fn(),
   saveSettings: vi.fn(),
   refreshCatalog: vi.fn(),
+  getCacheStats: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -170,6 +171,13 @@ beforeEach(() => {
   mocks.openSkillsDir.mockResolvedValue(undefined);
   mocks.saveSettings.mockResolvedValue({ settings: settings(), keys: [] });
   mocks.refreshCatalog.mockResolvedValue(undefined);
+  mocks.getCacheStats.mockResolvedValue({
+    conversationId: 'conv-1',
+    current: null,
+    session: null,
+    epoch: 0,
+    recent: [],
+  });
   baseState();
 });
 
@@ -811,5 +819,35 @@ describe('CommandPalette — sessões separadas Chat/Code', () => {
         'code',
       ),
     );
+  });
+});
+
+describe('CommandPalette — diagnóstico de cache (F5.4)', () => {
+  it('oferece o comando e abre o painel de diagnóstico da conversa ativa', async () => {
+    renderPalette();
+    typeQuery('diagnóstico de cache');
+
+    const option = await screen.findByRole('option', { name: /Diagnóstico de cache/ });
+    fireEvent.click(option);
+
+    const dialog = await screen.findByRole(
+      'dialog',
+      { name: 'Diagnóstico de cache' },
+      { timeout: 4_000 },
+    );
+    await waitFor(() => expect(mocks.getCacheStats).toHaveBeenCalledWith('conv-1', 50));
+    expect(useUiStore.getState().commandPaletteOpen).toBe(false);
+    expect(
+      await within(dialog).findByText('Sem amostras de cache nesta conversa'),
+    ).toBeTruthy();
+  });
+
+  it('não oferece o diagnóstico sem conversa ativa', async () => {
+    useChatStore.setState({ activeId: null });
+    renderPalette();
+    typeQuery('diagnóstico de cache');
+
+    expect(await screen.findByText(/Nenhum resultado para/)).toBeTruthy();
+    expect(screen.queryByRole('option', { name: /Diagnóstico de cache/ })).toBeNull();
   });
 });

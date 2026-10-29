@@ -393,21 +393,20 @@ fn compact_json(value: &Value) -> String {
 pub fn definition() -> ToolDefinition {
     ToolDefinition {
         name: "validate_ui".to_string(),
-        description: "Valida e normaliza o JSON de um bloco `ui` (UI generativa) antes de \
-                      escrevê-lo na resposta. Recebe o JSON completo do bloco e devolve \
-                      `{ ok, summary, errors, warnings, normalized }`: erros impedem a \
-                      renderização; avisos são sugestões de design. Sempre disponível; não conta \
-                      no orçamento de 6 chamadas de ferramentas de dados — idealmente no máximo 2 \
-                      vezes por resposta."
+        description: "Validates and normalizes the JSON of a `ui` block (generative UI) before \
+                      writing it into the answer. Receives the full block JSON and returns \
+                      `{ ok, summary, errors, warnings, normalized }`: errors block rendering; \
+                      warnings are design suggestions. Always available; does not count toward \
+                      the 6-call data-tool budget — ideally at most 2 times per response."
             .to_string(),
         parameters: json!({
             "type": "object",
             "properties": {
                 "block": {
                     "type": "string",
-                    "description": "JSON completo do bloco `ui` (o mesmo texto que ficaria entre \
-                                    ```ui e ```), com `{\"components\": [...]}` ou um array cru de \
-                                    componentes."
+                    "description": "Full JSON of the `ui` block (the same text that would go \
+                                    between ```ui and ```), with `{\"components\": [...]}` or a \
+                                    bare array of components."
                 }
             },
             "required": ["block"],
@@ -720,7 +719,9 @@ mod tests {
         assert!(definition.parameters["required"]
             .as_array()
             .is_some_and(|required| required.iter().any(|value| value == "block")));
-        assert!(definition.description.contains("não conta no orçamento"));
+        assert!(definition
+            .description
+            .contains("does not count toward the 6-call data-tool budget"));
     }
 
     #[test]

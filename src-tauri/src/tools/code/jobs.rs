@@ -20,7 +20,7 @@ pub static JOB_LIST_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: false,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `job_list` para ver jobs em background e o status de cada um; prefira `job_output` para acompanhar a saída de um job específico.",
+    guidance: "Use `job_list` to see background jobs and each one's status; prefer `job_output` to follow a specific job's output.",
 };
 
 pub static JOB_OUTPUT_SPEC: ToolSpec = ToolSpec {
@@ -32,7 +32,7 @@ pub static JOB_OUTPUT_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: false,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `job_output` com o `cursor` devolvido na chamada anterior para ler só o que é novo; `wait: true` espera até o timeout (padrão 30s, máximo 10min).",
+    guidance: "Use `job_output` with the `cursor` returned by the previous call to read only what is new; `wait: true` waits until the timeout (default 30s, maximum 10min).",
 };
 
 pub static JOB_KILL_SPEC: ToolSpec = ToolSpec {
@@ -44,7 +44,7 @@ pub static JOB_KILL_SPEC: ToolSpec = ToolSpec {
     mutating: true,
     requires_workspace: false,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `job_kill` quando a saída do job mostrar que ele não é mais necessário; o processo e os filhos são terminados.",
+    guidance: "Use `job_kill` when a job's output shows it is no longer needed; the process and its children are terminated.",
 };
 
 pub fn definition() -> ToolDefinition {

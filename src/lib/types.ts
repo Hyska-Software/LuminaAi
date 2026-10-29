@@ -42,6 +42,23 @@ export interface CostInfo {
   tiers?: unknown[];
 }
 
+export type CacheMode = 'auto' | 'explicit' | 'none';
+
+/** Prompt-cache capabilities of a provider/route or a model override. */
+export interface CacheInfo {
+  mode: CacheMode;
+  /** null/ausente = desconhecido (request fora da meta de hit%). */
+  minTokens?: number | null;
+  blockTokens?: number | null;
+  ttlOptions?: string[];
+  supportsKey?: boolean;
+  supportsRetention?: boolean;
+  supportsExplicitBreakpoints?: boolean;
+  reportsRead?: boolean;
+  reportsWrite?: boolean;
+  source?: 'family-default' | 'probe' | 'docs' | null;
+}
+
 export interface ModelInfo {
   id: string;
   name: string;
@@ -62,6 +79,8 @@ export interface ModelInfo {
   status: ModelStatus;
   /** Capabilities inferred because the model came from the account list. */
   estimated?: boolean;
+  /** Override de cache por modelo (sobre o default do provedor). */
+  cache?: CacheInfo | null;
 }
 
 /** How a provider is authenticated. Defaults to `api-key` for older catalogs. */
@@ -111,6 +130,8 @@ export interface ProviderInfo {
   oauth?: OAuthProviderInfo | null;
   models: ModelInfo[];
   notes: string[];
+  /** Capacidades de cache do provedor/rota (default por protocolo/família). */
+  cache?: CacheInfo | null;
 }
 
 export interface CatalogFile {
@@ -556,9 +577,100 @@ export interface UsageInfo {
   outputTokens?: number | null;
   reasoningTokens?: number | null;
   cachedTokens?: number | null;
+  /** Tokens read from the prompt cache (normalized across protocols). */
+  cacheReadTokens?: number | null;
+  /** Tokens written to the prompt cache by this request. */
+  cacheWriteTokens?: number | null;
+  /** Input tokens neither read from nor written to the cache. */
+  uncachedInputTokens?: number | null;
+  /** True when the provider reported cache counters. */
+  cacheReported?: boolean;
   totalTokens?: number | null;
   cost?: number | null;
   durationMs?: number | null;
+}
+
+export type CacheState =
+  | 'cold'
+  | 'warming'
+  | 'stable'
+  | 'degraded'
+  | 'unsupported'
+  | 'provider_policy';
+
+export type CacheBreakReason =
+  | 'first_request'
+  | 'system_prompt'
+  | 'tool_definitions'
+  | 'history_rewrite'
+  | 'head_trim'
+  | 'compaction'
+  | 'model_switch'
+  | 'protocol_fallback'
+  | 'attachments'
+  | 'config_change'
+  | 'ttl_expired'
+  | 'provider_policy';
+
+/** One cache sample per provider request (wire request). */
+export interface CacheSample {
+  turnId: string;
+  step: number;
+  providerId: string;
+  modelId: string;
+  protocol: string;
+  epoch: number;
+  inputTotal: number;
+  cacheRead: number;
+  cacheWrite: number;
+  uncached: number;
+  /** Provider-reported hit percent; null when the provider did not report cache. */
+  hitPercent?: number | null;
+  /** Theoretical ceiling `P/(P+Δ)` for this request. */
+  ceilingPercent?: number | null;
+  prefixTokensEst?: number;
+  deltaTokensEst?: number;
+  eligible: boolean;
+  excludedReason?: string | null;
+  state: CacheState;
+  breakReason?: CacheBreakReason | null;
+  breakDetail?: string | null;
+  /** Raw provider usage block (trimmed) for the diagnostics panel. */
+  rawUsage?: unknown;
+  at: number;
+}
+
+/** Aggregated cache view of a conversation/turn. */
+export interface CacheStats {
+  hitPercent?: number | null;
+  sessionHitPercent?: number | null;
+  steadyHitPercent?: number | null;
+  ceilingPercent?: number | null;
+  inputTotal: number;
+  cacheRead: number;
+  cacheWrite: number;
+  uncached: number;
+  eligible: boolean;
+  excludedReason?: string | null;
+  state: CacheState;
+  epoch?: number;
+  samples?: number;
+  minCacheableTokens?: number | null;
+  ttlSeconds?: number | null;
+  breakReason?: CacheBreakReason | null;
+  breakDetail?: string | null;
+  providerPolicy?: string | null;
+  at: number;
+  savingsUsd?: number | null;
+}
+
+/** Snapshot returned by `get_cache_stats`. */
+export interface CacheStatsView {
+  conversationId: string;
+  current?: CacheStats | null;
+  session?: CacheStats | null;
+  epoch: number;
+  recent?: CacheSample[];
 }
 
 export interface ChatMessage {
@@ -680,6 +792,7 @@ export type TurnEvent =
     }
   | { type: 'artifact_created'; artifact: Artifact }
   | { type: 'usage'; usage: UsageInfo }
+  | { type: 'cache_stats'; sample: CacheSample }
   | { type: 'message_updated'; message: ChatMessage }
   | { type: 'title_updated'; conversationId: string; title: string }
   | { type: 'done'; result: TurnResult }
@@ -871,6 +984,17 @@ export interface CodeEnvironmentStatus {
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
+export type CacheTtl = '5m' | '1h';
+
+/** Preferências de cache de prompt (docs/goals/prompt-cache/PLAN.md §5.4). */
+export interface CacheSettings {
+  /** Mostra o selo de cache; não desliga a medição. */
+  showIndicator: boolean;
+  anthropicTtl: CacheTtl;
+  /** null/ausente = adapter decide; ex.: 'in_memory' | '24h'. */
+  openaiRetention?: string | null;
+}
+
 export interface Settings {
   theme: ThemeMode;
   locale: 'pt-BR' | 'en';
@@ -928,6 +1052,8 @@ export interface Settings {
    * chat, padrão de fábrica) ou `panel` (inline no painel direito).
    */
   diffOpenMode?: 'tab' | 'panel';
+  /** Preferências de cache de prompt (backend sempre envia). */
+  cache?: CacheSettings;
 }
 
 export interface ProviderKeyStatus {

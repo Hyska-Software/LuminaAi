@@ -13,10 +13,9 @@ use serde_json::{json, Value};
 
 use super::sse;
 use super::{
-    as_u32, emit, image_base64, make_usage, max_output_tokens, normalize_arguments,
-    parse_arguments, reasoning, send_stream, system_text, to_provider_error, CompletionRequest,
-    EventSink, HistoryMessage, HistoryRole, ProviderError, ProviderEvent, ProviderResult,
-    WireProtocol,
+    as_u32, cache, emit, image_base64, make_usage, max_output_tokens, normalize_arguments,
+    parse_arguments, reasoning, system_text, to_provider_error, CompletionRequest, EventSink,
+    HistoryMessage, HistoryRole, ProviderError, ProviderEvent, ProviderResult, WireProtocol,
 };
 
 pub(crate) async fn stream(
@@ -25,11 +24,23 @@ pub(crate) async fn stream(
     sink: &EventSink,
 ) -> ProviderResult<()> {
     let url = request.config.endpoint_for(WireProtocol::Anthropic)?;
-    let body = build_body(request);
-    let Some(response) = send_stream(http, request, &url, &body).await? else {
+    let mut body = build_body(request);
+    // F4b: the harness-owned plan lands on the final wire body before the
+    // digest; `digest(apply(body)) == digest(body)` is a contract (cache
+    // metadata is outside the hash), so the emitted digest stays valid.
+    cache::apply(
+        WireProtocol::Anthropic,
+        request.cache_plan.as_ref(),
+        &mut body,
+    );
+    super::emit_cache_digest(request, WireProtocol::Anthropic, &body, sink)?;
+    let Some(response) =
+        super::send_stream_with_cache_fallback(http, request, &url, &body, || build_body(request))
+            .await?
+    else {
         return Ok(());
     };
-    let mut handler = Handler::new(sink);
+    let mut handler = Handler::new(sink, request.config.provider_id.clone());
     let outcome = sse::stream_sse(response, &request.cancel, |event, data| {
         handler.on_event(event, data)
     })
@@ -228,23 +239,32 @@ enum BlockState {
 
 struct Handler<'a> {
     sink: &'a EventSink,
+    /// Route that produced the request (used to gate the OpenCode gateway
+    /// `usage.opencode.tokens` fallback).
+    provider_id: String,
     blocks: BTreeMap<usize, BlockState>,
     input_tokens: Option<u32>,
     output_tokens: Option<u32>,
     reasoning_tokens: Option<u32>,
     cached_tokens: Option<u32>,
+    /// Cache counters merged across `message_start` and `message_delta`
+    /// (`input_tokens` arrives in the first, `output_tokens` is cumulative in
+    /// the latter; the cache fields may arrive in either).
+    raw_usage: Value,
     has_usage: bool,
 }
 
 impl<'a> Handler<'a> {
-    fn new(sink: &'a EventSink) -> Self {
+    fn new(sink: &'a EventSink, provider_id: String) -> Self {
         Self {
             sink,
+            provider_id,
             blocks: BTreeMap::new(),
             input_tokens: None,
             output_tokens: None,
             reasoning_tokens: None,
             cached_tokens: None,
+            raw_usage: json!({}),
             has_usage: false,
         }
     }
@@ -436,6 +456,13 @@ impl<'a> Handler<'a> {
         if let Some(value) = super::pointer_u32(usage, "/cache_read_input_tokens") {
             self.cached_tokens = Some(value);
         }
+        // Keep every cache counter seen (message_start and message_delta carry
+        // partial usage); `normalize_usage` runs on the merged object at the end.
+        if let (Some(target), Some(source)) = (self.raw_usage.as_object_mut(), usage.as_object()) {
+            for (key, value) in source {
+                target.insert(key.clone(), value.clone());
+            }
+        }
     }
 
     fn finish_tool(&mut self, index: usize) -> anyhow::Result<()> {
@@ -492,14 +519,27 @@ impl<'a> Handler<'a> {
         }
 
         if self.has_usage {
-            let usage = make_usage(
+            let mut usage = make_usage(
                 self.input_tokens,
                 self.output_tokens,
                 self.reasoning_tokens,
                 self.cached_tokens,
                 None,
             );
+            // Read + creation normalized (input total includes both; on
+            // Anthropic `input_tokens` is only the tail after the breakpoint).
+            cache::apply_usage(
+                &mut usage,
+                &cache::normalize_usage(
+                    WireProtocol::Anthropic,
+                    &self.provider_id,
+                    &self.raw_usage,
+                ),
+            );
             emit(self.sink, ProviderEvent::Usage(usage)).map_err(to_provider_error)?;
+            // Safe raw usage excerpt for the diagnostics panel (the merged
+            // message_start/message_delta counters), before the state/Done.
+            super::emit_usage_raw(self.sink, Some(&self.raw_usage))?;
         }
         emit(
             self.sink,
@@ -567,6 +607,7 @@ mod tests {
             reasoning,
             max_output_tokens: Some(64),
             temperature: Some(0.5),
+            cache_plan: None,
             cancel: CancellationToken::new(),
         }
     }
@@ -643,5 +684,149 @@ mod tests {
             body.get("temperature").is_none(),
             "temperature não deve ir junto de thinking: {body}"
         );
+    }
+
+    /// The usage arrives split across `message_start` (cache + input) and
+    /// `message_delta` (cumulative output): the handler must merge both before
+    /// normalizing read/creation/uncached.
+    #[tokio::test]
+    async fn handler_normalizes_cache_usage_across_message_events() {
+        let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
+        {
+            let mut handler = Handler::new(&sink, "anthropic".to_string());
+            handler
+                .on_event(
+                    Some("message_start"),
+                    r#"{"type":"message_start","message":{"usage":{"input_tokens":50,"cache_creation_input_tokens":1000,"cache_read_input_tokens":0,"output_tokens":1}}}"#,
+                )
+                .expect("message_start");
+            handler
+                .on_event(
+                    Some("message_delta"),
+                    r#"{"type":"message_delta","usage":{"output_tokens":120}}"#,
+                )
+                .expect("message_delta");
+            handler.finish().expect("finish");
+        }
+
+        let usage = loop {
+            match events.recv().await {
+                Some(ProviderEvent::Usage(usage)) => break usage,
+                Some(_) => continue,
+                None => panic!("evento Usage não emitido"),
+            }
+        };
+        assert!(usage.cache_reported);
+        assert_eq!(usage.cache_read_tokens, Some(0));
+        assert_eq!(usage.cache_write_tokens, Some(1_000));
+        assert_eq!(usage.uncached_input_tokens, Some(50));
+        assert_eq!(usage.cached_tokens, Some(0), "alias legado");
+        // `input_total = input + read + creation`, per the Anthropic contract.
+        assert_eq!(usage.cache_usage().input_total_tokens, Some(1_050));
+        assert_eq!(usage.output_tokens, Some(120));
+    }
+
+    /// F4b: the adapter lowers the harness plan onto the final body before the
+    /// digest. No plan → body byte-for-byte unchanged; with a plan, the cache
+    /// markers appear and the prefix digest stays identical.
+    #[test]
+    fn cache_plan_is_applied_before_the_digest() {
+        let mut request = direct_request(ReasoningRequest::Auto);
+        let plain = build_body(&request);
+
+        let mut without_plan = build_body(&request);
+        cache::apply(WireProtocol::Anthropic, None, &mut without_plan);
+        assert_eq!(without_plan, plain, "sem plano o body não muda");
+
+        request.cache_plan = Some(cache::CachePlan {
+            mode: cache::CacheMode::Explicit,
+            breakpoints: vec![
+                cache::CacheBreakpoint {
+                    target: cache::CacheBreakpointTarget::Tools,
+                    ttl: None,
+                },
+                cache::CacheBreakpoint {
+                    target: cache::CacheBreakpointTarget::System,
+                    ttl: None,
+                },
+                cache::CacheBreakpoint {
+                    target: cache::CacheBreakpointTarget::Tail,
+                    ttl: None,
+                },
+            ],
+            prompt_cache_key: None,
+            retention: None,
+            ttl: Some("1h".to_string()),
+        });
+
+        let mut planned = build_body(&request);
+        cache::apply(
+            WireProtocol::Anthropic,
+            request.cache_plan.as_ref(),
+            &mut planned,
+        );
+        assert!(planned["system"].is_array(), "system virou blocos");
+        assert_eq!(
+            planned["tools"][0]["cache_control"],
+            json!({"type": "ephemeral", "ttl": "1h"})
+        );
+
+        let digest_plain = cache::digest(WireProtocol::Anthropic, "anthropic", &plain);
+        let digest_planned = cache::digest(WireProtocol::Anthropic, "anthropic", &planned);
+        assert_eq!(digest_plain.segments, digest_planned.segments);
+        assert_eq!(digest_plain.total_chars, digest_planned.total_chars);
+    }
+
+    /// B2: `UsageRaw` carries the safe excerpt of the merged Anthropic usage
+    /// (message_start + message_delta), emitted once after `Usage`.
+    #[tokio::test]
+    async fn usage_raw_is_emitted_after_usage_with_a_safe_excerpt() {
+        let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
+        {
+            let mut handler = Handler::new(&sink, "opencode-go".to_string());
+            handler
+                .on_event(
+                    Some("message_start"),
+                    r#"{"type":"message_start","message":{"usage":{
+                        "input_tokens":50,"output_tokens":1,
+                        "cache_creation_input_tokens":2127,"cache_read_input_tokens":0,
+                        "cache_creation":{"ephemeral_1h_input_tokens":2127,"ephemeral_5m_input_tokens":0},
+                        "prompt":"SEGREDO","authorization":"Bearer sk-secret"}}}"#,
+                )
+                .expect("message_start");
+            handler
+                .on_event(
+                    Some("message_delta"),
+                    r#"{"type":"message_delta","usage":{"output_tokens":120}}"#,
+                )
+                .expect("message_delta");
+            handler.finish().expect("finish");
+        }
+
+        let mut order: Vec<&'static str> = Vec::new();
+        let mut raw = None;
+        while let Ok(event) = events.try_recv() {
+            match event {
+                ProviderEvent::Usage(_) => order.push("usage"),
+                ProviderEvent::UsageRaw(value) => {
+                    order.push("usage_raw");
+                    raw = Some(value);
+                }
+                ProviderEvent::Done => order.push("done"),
+                _ => {}
+            }
+        }
+        assert_eq!(order, vec!["usage", "usage_raw", "done"]);
+        let raw = raw.expect("UsageRaw emitido");
+        assert_eq!(raw["cache_creation_input_tokens"], json!(2_127));
+        assert_eq!(
+            raw["cache_creation"]["ephemeral_1h_input_tokens"],
+            json!(2_127)
+        );
+        assert_eq!(raw["output_tokens"], json!(120), "merge do message_delta");
+        let serialized = raw.to_string();
+        assert!(!serialized.contains("SEGREDO"), "{serialized}");
+        assert!(!serialized.contains("sk-secret"), "{serialized}");
+        assert!(!serialized.contains("authorization"), "{serialized}");
     }
 }

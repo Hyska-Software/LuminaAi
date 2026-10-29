@@ -233,7 +233,7 @@ tratado como dado. `read_tool_output` só lê spills da própria sessão.
 - Mudança de modo é **ação explícita do usuário** (chip ou `/permissoes`), registrada na sessão
   (`permission/mode` em `code_events`) e informada ao modelo **no mesmo turno**: a política relê
   `permission_mode`/`plan_mode` do banco a cada tool call e o loop anexa uma nota de
-  "Atualização de permissões" ao system prompt quando o estado muda entre passos.
+  "# Permission update" ao system prompt quando o estado muda entre passos.
 - Modo Plano é overlay (vale sobre qualquer modo), ativado por `/plan` ou chip, e tem **três
   saídas** no gate do card: **Aprovar e executar** (Plano off → Editar), **Aprovar e revisar cada
   edição** (Plano off → Revisar: cada escrita pede aprovação) e **Continuar planejando** (Plano
@@ -503,8 +503,8 @@ pub struct ContextStats { pub used: u32, pub window: u32, pub output_cap: u32, p
   tool_call ↔ tool_result), nunca inclui a última mensagem do usuário nem o último turno completo;
   retém ~20% da janela verbatim (recente).
 - **Resumo**: request auxiliar **não-streaming** com template fixo de 8 seções (adaptado do DSH,
-  em pt-BR): *Pedido principal · Decisões e arquitetura · Arquivos e código · Erros e correções ·
-  Jobs/processos pendentes · Trabalho em andamento · Próximo passo · Contexto crítico*. Regras:
+  prompt em inglês): *Main request · Decisions and architecture · Files and code · Errors and fixes ·
+  Pending jobs/processes · Work in progress · Next step · Critical context*. Regras:
   preservar paths/comandos/erros literais, não inventar, não mencionar a compactação.
 - **Persistência**: `session_summaries(conversation_id, from_seq, to_seq, content, tokens,
   created_at)` + evento `context/compacted`. O `build_history` do perfil Code insere o resumo no
@@ -528,8 +528,11 @@ pub struct ContextStats { pub used: u32, pub window: u32, pub output_cap: u32, p
 | formato de resposta/citações | 0,6k |
 | **total** | **~10–13k tokens** |
 
-- Prefixo estável primeiro (identidade/ambiente/política/tools) e volátil no fim (árvore/estado),
-  para maximizar cache do provider.
+- Prefixo estável primeiro (identidade/ambiente/política/tools) em um **snapshot persistido por
+  sessão** (`prompt_snapshots`); nada que muda em um turno normal entra no system prompt. O volátil
+  (árvore/estado/plano/modo) vira `surface_item` na **última mensagem** do request, nunca no fim do
+  system prompt: o system prompt precede o histórico nos 4 protocolos e qualquer mudança nele
+  invalida todas as mensagens. Detalhes: `docs/goals/prompt-cache/PLAN.md` §4.2–§4.4.
 - Árvore resumida: até 120 entradas / 2 níveis; se maior, agrupar (`src/ (412 arquivos, 18 dirs)`).
 - `AGENTS.md`: procurar do workspace root até o diretório de trabalho (se aninhado), concatenar com
   marcador de origem, cap 8 KB total; suportar também `.lumina/instructions.md` (opcional).

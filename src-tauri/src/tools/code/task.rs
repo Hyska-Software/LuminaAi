@@ -19,7 +19,7 @@ pub static TASK_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `task` quando precisar explorar/revisar uma área grande sem poluir seu contexto (ex.: `subagent_type: \"explore\"` para mapear arquivos, `\"review\"` para revisar o diff). O filho é somente leitura e não roda comandos; para mudanças, use suas próprias tools. Não delegue tarefas triviais.",
+    guidance: "Use `task` when you need to explore/review a large area without polluting your context (e.g. `subagent_type: \"explore\"` to map files, `\"review\"` to review the diff). The child is read-only and cannot run commands; for changes, use your own tools. Do not delegate trivial tasks.",
 };
 
 pub fn definition() -> ToolDefinition {

@@ -689,7 +689,7 @@ mod tests {
             .rule("ui.callout-style")
             .expect("regra ui.callout-style no contrato");
         assert_eq!(rule.severity, "warning");
-        assert!(rule.prompt.contains("NUNCA use `callout`"));
+        assert!(rule.prompt.contains("NEVER use `callout`"));
     }
 
     #[test]

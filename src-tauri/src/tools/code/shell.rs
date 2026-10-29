@@ -19,7 +19,7 @@ pub static RUN_COMMAND_SPEC: ToolSpec = ToolSpec {
     mutating: true,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `run_command` para compilar, testar, rodar linters e rodar git de leitura. Prefira os comandos de verificação do projeto; nunca rode comandos destrutivos sem necessidade. Saída longa volta truncada com id de spill.",
+    guidance: "Use `run_command` to compile, test, run linters and run read-only git commands. Prefer the project's verification commands; never run destructive commands without need. Long output comes back truncated with a spill id.",
 };
 
 pub static RUN_CHECKS_SPEC: ToolSpec = ToolSpec {
@@ -31,7 +31,7 @@ pub static RUN_CHECKS_SPEC: ToolSpec = ToolSpec {
     mutating: true,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `run_checks` para rodar a verificação detectada do projeto (test/lint/build). Sem `check`, roda a primeira (teste). Os ids/labels aparecem no contexto do projeto; o resultado traz exit code e saída. Comandos próprios continuam em `run_command`.",
+    guidance: "Use `run_checks` to run the project's detected verification (test/lint/build). Without `check`, it runs the first one (test). The ids/labels appear in the project context; the result includes the exit code and output. Custom commands still go through `run_command`.",
 };
 
 pub fn run_checks_definition() -> ToolDefinition {

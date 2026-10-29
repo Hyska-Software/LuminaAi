@@ -13,11 +13,12 @@ use tauri::Manager;
 use tokio_util::sync::CancellationToken;
 
 use crate::catalog::{CatalogFile, ModelInfo, ProviderAuth, ProviderInfo};
-use crate::db::{Db, StoredAttachment};
+use crate::db::{CacheStateRecord, Db, StoredAttachment, UsageLogCache};
 use crate::domain::{
-    now_ms, AttachmentInfo, ChatMessage, Citation, MessageRole, MessageStatus, ReasoningMode,
-    ReasoningSelection, Settings, ToolCallRecord, ToolCallStatus, TraceStep, TurnOptions,
-    TurnPayload, TurnProfile, TurnResult, UsageInfo, MAX_STEPS_LIMIT,
+    now_ms, AttachmentInfo, CacheBreakReason, CacheSample, CacheSettings, ChatMessage, Citation,
+    MessageRole, MessageStatus, PrefixDigest, ReasoningMode, ReasoningSelection, Settings,
+    ToolCallRecord, ToolCallStatus, TraceStep, TurnOptions, TurnPayload, TurnProfile, TurnResult,
+    UsageInfo, MAX_STEPS_LIMIT,
 };
 use crate::events::TurnEvent;
 use crate::providers::{
@@ -27,8 +28,11 @@ use crate::providers::{
 use crate::tools::{self, ToolOutcome, ToolRuntime};
 
 pub mod batch;
+pub mod cache;
 pub mod code;
+pub mod compaction;
 pub mod prompt;
+pub mod render;
 
 /// Tool calls executed concurrently per step.
 const MAX_PARALLEL_TOOLS: usize = 4;
@@ -48,6 +52,15 @@ const MAX_EVENT_TOOL_RESULT_CHARS: usize = 8_000;
 /// Tool result text sent to the model — keeps the context window sane when a
 /// fetched page or spreadsheet is huge.
 const MAX_MODEL_TOOL_RESULT_CHARS: usize = 24_000;
+/// Transient wrap-up instruction appended **only** to the forced final request
+/// (F2b, PLAN §4.3/§4.8): system prompt and tool catalog stay identical to the
+/// rest of the turn, so the forced request is an append-only extension of the
+/// previous one. It is a user message, is never persisted and never replayed in
+/// the next turn.
+const FORCED_WRAP_UP_MESSAGE: &str = "[wrap-up] You cannot call any more tools in this response. \
+     Answer now, in Markdown, using only the information already gathered in the results above. \
+     If any data was not confirmed, state that explicitly. Do not narrate the process: deliver \
+     the final answer.";
 
 /// Injectable provider transport used by the agent-loop tests: it replaces the
 /// real HTTP streaming with a deterministic fake, so the loop (tool execution,
@@ -502,6 +515,11 @@ struct StepAttempt {
     state: Option<Value>,
     usage: Option<UsageInfo>,
     tool_calls: Vec<StreamingToolCall>,
+    /// Canonical digest of the wire prefix of this request (prompt-cache
+    /// telemetry, F0a). Emitted by the provider adapters before the stream.
+    digest: Option<PrefixDigest>,
+    /// Safe raw usage slice of the provider (cache telemetry/popover, F6/B2).
+    raw_usage: Option<Value>,
 }
 
 enum AttemptOutcome {
@@ -592,6 +610,8 @@ async fn run_stream_attempt(
                         }
                     }
                     ProviderEvent::Usage(usage) => attempt.usage = Some(usage),
+                    ProviderEvent::UsageRaw(raw) => attempt.raw_usage = Some(raw),
+                    ProviderEvent::CacheDigest(digest) => attempt.digest = Some(digest),
                     ProviderEvent::ProviderState(state) => attempt.state = Some(state),
                     ProviderEvent::Done => {}
                 }
@@ -626,22 +646,648 @@ async fn run_provider_stream(
     }
 }
 
-/// Composição do system prompt do passo com as notas de mudança de modo
-/// acumuladas no turno. Sem notas, devolve o prompt base inalterado.
-fn compose_system_prompt(base: &str, notes: &[String]) -> String {
-    if notes.is_empty() {
-        return base.to_string();
+/// Wire protocol that served one request: the digest carries the protocol the
+/// provider actually used (`WireProtocol::as_str`). When the provider did not
+/// emit a digest, fall back to the first declared protocol so the cache sample
+/// is still labeled.
+fn attempt_protocol(digest: Option<&PrefixDigest>, protocols: &[WireProtocol]) -> String {
+    digest
+        .map(|digest| digest.protocol.clone())
+        .or_else(|| {
+            protocols
+                .first()
+                .map(|protocol| protocol.as_str().to_string())
+        })
+        .unwrap_or_default()
+}
+
+/* ------------------------------------------------------------------ */
+/* Prompt-cache persistence (F1.1, PLAN §4.7/§5.3)                     */
+/* ------------------------------------------------------------------ */
+
+/// Cache metadata of the last emitted sample, used by the turn's `usage_log`
+/// row (`record_usage_with_cache`) at the end of the turn.
+#[derive(Debug, Clone)]
+struct TurnUsageCache {
+    epoch: u32,
+    prefix_hash: Option<String>,
+    break_reason: Option<CacheBreakReason>,
+    protocol: String,
+}
+
+/// Loads the persisted `cache_state` of the conversation (seed do tracker de
+/// cache F1.1 + watermark do histórico do Chat F2b). A read failure never
+/// aborts the turn: it logs and continues without persisted state.
+fn load_persisted_cache_state(db: &Db, conversation_id: &str) -> Option<CacheStateRecord> {
+    match db.get_cache_state(conversation_id) {
+        Ok(record) => record,
+        Err(error) => {
+            eprintln!("lumina: falha ao ler o estado de cache: {error:#}");
+            None
+        }
     }
-    format!("{base}\n\n{}", notes.join("\n\n"))
+}
+
+/// Seeds the cache tracker from the persisted `cache_state` (F1.1).
+fn restore_cache_tracker(record: Option<&CacheStateRecord>) -> cache::CacheTracker {
+    record
+        .map(persisted_cache)
+        .map(cache::CacheTracker::from_persisted)
+        .unwrap_or_default()
+}
+
+/* ------------------------------------------------------------------ */
+/* Watermark do histórico do Chat (F2b, PLAN §4.3)                     */
+/* ------------------------------------------------------------------ */
+
+/// 1-based position (in `list_messages` order) of the first Chat message that
+/// the persisted watermark keeps in the history.
+///
+/// `chat_cut_seq` is only used when the persisted provider/model match the
+/// current turn and the message at that position is a turn boundary
+/// (`user`/`system`) — the history then never starts in the middle of an
+/// assistant group with tool results.
+fn chat_history_watermark(
+    messages: &[ChatMessage],
+    record: Option<&CacheStateRecord>,
+    provider_id: &str,
+    model_id: &str,
+) -> Option<u32> {
+    let record = record?;
+    let same_route = record.provider_id.as_deref() == Some(provider_id)
+        && record.model_id.as_deref() == Some(model_id);
+    if !same_route {
+        return None;
+    }
+    let seq = record.chat_cut_seq?;
+    if seq <= 1 {
+        return None; // seq 1 = nenhum corte do head
+    }
+    let message = messages.get((seq - 1) as usize)?;
+    matches!(message.role, MessageRole::User | MessageRole::System).then_some(seq)
+}
+
+/// Estimated chars of one persisted message (for the watermark jump size).
+fn chat_message_chars(message: &ChatMessage) -> usize {
+    let mut chars = message.content.chars().count();
+    if let Some(reasoning) = &message.reasoning {
+        chars += reasoning.chars().count();
+    }
+    for call in &message.tool_calls {
+        chars += call.name.chars().count() + call.arguments.chars().count();
+        if let Some(result) = &call.result {
+            chars += result.chars().count();
+        }
+    }
+    chars
+}
+
+/// Advances the Chat history watermark by a **large jump** (~half of the char
+/// budget) when the rebuilt history still exceeds the model budget.
+///
+/// Walks from the current head and picks the first `user`/`system` boundary
+/// after ~`budget / 2` removed chars, never past the newest message (the tail —
+/// including the current user message — is always kept). Returns the new
+/// 1-based `chat_cut_seq`, always greater than `current_seq` (never regresses).
+fn advance_chat_watermark(
+    messages: &[ChatMessage],
+    current_seq: u32,
+    budget: usize,
+) -> Option<u32> {
+    if messages.len() < 2 || budget == 0 {
+        return None;
+    }
+    let start = (current_seq.saturating_sub(1) as usize).min(messages.len() - 1);
+    let max_index = messages.len() - 1; // keep at least the newest message
+    if start >= max_index {
+        return None;
+    }
+    let target = budget / 2;
+    let mut removed = 0usize;
+    let mut fallback: Option<usize> = None;
+    let mut chosen: Option<usize> = None;
+    for index in start + 1..=max_index {
+        removed += chat_message_chars(&messages[index - 1]);
+        if matches!(
+            messages[index].role,
+            MessageRole::User | MessageRole::System
+        ) {
+            fallback = Some(index);
+            if removed >= target {
+                chosen = Some(index);
+                break;
+            }
+        }
+    }
+    let new_index = chosen.or(fallback)?;
+    if new_index <= start {
+        return None;
+    }
+    Some(u32::try_from(new_index + 1).unwrap_or(u32::MAX))
+}
+
+/// Persists the Chat history watermark, preserving every other `cache_state`
+/// field (the per-request cache telemetry re-writes the same row).
+fn persist_chat_watermark(
+    db: &Db,
+    conversation_id: &str,
+    record: Option<&CacheStateRecord>,
+    chat_cut_seq: Option<u32>,
+) {
+    let mut state = record
+        .cloned()
+        .unwrap_or_else(|| CacheStateRecord::new(conversation_id));
+    state.conversation_id = conversation_id.to_string();
+    // `seq` 1 não é um corte (primeira mensagem incluída); NULL = sem corte.
+    state.chat_cut_seq = chat_cut_seq.filter(|seq| *seq > 1);
+    state.updated_at = now_ms();
+    if let Err(error) = db.upsert_cache_state(&state) {
+        eprintln!("lumina: falha ao gravar o watermark do histórico do Chat: {error:#}");
+    }
+}
+
+/// Maps the storage record to the tracker seed (keeps `harness::cache` free of
+/// DB types).
+fn persisted_cache(record: &CacheStateRecord) -> cache::PersistedCache {
+    cache::PersistedCache {
+        provider_id: record.provider_id.clone(),
+        model_id: record.model_id.clone(),
+        protocol: record.protocol.clone(),
+        epoch: record.epoch,
+        prefix_segments: record.prefix_segments.clone(),
+        cache_read: record.cache_read,
+        cache_write: record.cache_write,
+        uncached: record.uncached,
+        samples: record.samples,
+        last_break_reason: record.last_break_reason,
+        last_break_detail: record.last_break_detail.clone(),
+    }
+}
+
+/// Sets the catalog `minTokens` of the request route on the tracker (F1.1).
+/// A protocol without capabilities keeps `None` → eligibility `unknown_min`.
+fn set_cache_capabilities(
+    tracker: &mut cache::CacheTracker,
+    provider: &ProviderInfo,
+    model: &ModelInfo,
+    protocol: &str,
+) {
+    if let Some(protocol) = WireProtocol::parse(protocol) {
+        let capabilities = providers::cache::capabilities_for(protocol, provider, model);
+        tracker.set_min_cacheable_tokens(capabilities.min_tokens);
+    }
+}
+
+/// Persists one cache sample: `cache_samples` (per request) + `cache_state`
+/// (epoch/prefix + lifecycle totals). Persistence failures are logged and never
+/// abort the turn (telemetry keeps flowing).
+fn record_cache_telemetry(
+    db: &Db,
+    conversation_id: &str,
+    tracker: &cache::CacheTracker,
+    sample: &CacheSample,
+    digest: Option<&PrefixDigest>,
+    prompt_snapshot_hash: Option<&str>,
+    chat_cut_seq: Option<u32>,
+    last_usage: &mut Option<TurnUsageCache>,
+) {
+    let prefix_hash = digest.map(cache::prefix_hash);
+    if let Err(error) = db.insert_cache_sample(conversation_id, sample, prefix_hash.as_deref()) {
+        eprintln!("lumina: falha ao registrar a amostra de cache: {error:#}");
+    }
+    let totals = tracker.totals();
+    let last_break = tracker.last_break();
+    let state = CacheStateRecord {
+        conversation_id: conversation_id.to_string(),
+        provider_id: Some(sample.provider_id.clone()),
+        model_id: Some(sample.model_id.clone()),
+        protocol: Some(sample.protocol.clone()),
+        epoch: sample.epoch,
+        prefix_hash: prefix_hash.clone(),
+        prefix_segments: digest.map(|digest| digest.segments.clone()),
+        prompt_snapshot_hash: prompt_snapshot_hash.map(str::to_string),
+        // Watermark do corte do Chat (F2b): preservado em todo upsert por
+        // request para o corte não "voltar" a cada amostra.
+        chat_cut_seq,
+        cache_read: totals.cache_read,
+        cache_write: totals.cache_write,
+        uncached: totals.uncached,
+        samples: tracker.total_samples(),
+        last_hit_percent: sample.hit_percent,
+        last_ceiling_percent: sample.ceiling_percent,
+        last_at: Some(sample.at),
+        last_break_reason: last_break.as_ref().map(|(reason, _)| *reason),
+        last_break_detail: last_break.and_then(|(_, detail)| detail),
+        updated_at: now_ms(),
+    };
+    if let Err(error) = db.upsert_cache_state(&state) {
+        eprintln!("lumina: falha ao gravar o estado de cache: {error:#}");
+    }
+    *last_usage = Some(TurnUsageCache {
+        epoch: sample.epoch,
+        prefix_hash,
+        break_reason: sample.break_reason,
+        protocol: sample.protocol.clone(),
+    });
+}
+
+/* ------------------------------------------------------------------ */
+/* Cache plan do request (F4 wiring)                                   */
+/* ------------------------------------------------------------------ */
+
+/// Monta o plano de cache explícito para o **primeiro** protocolo que será
+/// tentado (F4). O plano vale para o protocolo primário; um fallback de protocolo
+/// fica sem plano (epoch novo, PLAN §4.5). `show_indicator` é só UI: nunca
+/// desliga o plano. `None` = nada a adicionar ao body.
+fn cache_plan_for(
+    provider: &ProviderInfo,
+    model: &ModelInfo,
+    protocols: &[WireProtocol],
+    request: &CompletionRequest,
+    settings: &CacheSettings,
+) -> Option<providers::cache::CachePlan> {
+    let protocol = *protocols.first()?;
+    let capabilities = providers::cache::capabilities_for(protocol, provider, model);
+    providers::cache::plan_with_caps(protocol, &capabilities, request, settings)
+}
+
+/// Log resumido do plano aplicado (uma linha por turno; nunca loga a key crua).
+fn log_cache_plan(protocol: &str, plan: &providers::cache::CachePlan) {
+    let key = plan
+        .prompt_cache_key
+        .as_deref()
+        .map(|key| format!("{}…", key.chars().take(8).collect::<String>()))
+        .unwrap_or_else(|| "-".to_string());
+    eprintln!(
+        "lumina: cache plan ({protocol}): mode={:?} ttl={:?} retention={:?} key={key} breakpoints={}",
+        plan.mode,
+        plan.ttl,
+        plan.retention,
+        plan.breakpoints.len()
+    );
+}
+
+/* ------------------------------------------------------------------ */
+/* Prompt snapshot do Chat (F2a, PLAN §4.2)                            */
+/* ------------------------------------------------------------------ */
+
+/// System prompt + tool catalog frozen for the session (`prompt_snapshots`).
+struct FrozenPromptSnapshot {
+    /// Persisted identity (`provider|model|profile|workspace|version|config`).
+    #[allow(dead_code)]
+    snapshot_key: String,
+    /// SHA-256 of `system_prompt` (stored in `prompt_snapshots.stable_hash`).
+    stable_hash: String,
+    system_prompt: String,
+    tool_definitions: Vec<crate::providers::ToolDefinition>,
+    /// True when the frozen snapshot from a previous turn was reused.
+    #[allow(dead_code)]
+    reused: bool,
+}
+
+/// Loads (or creates and persists) the Chat prompt snapshot of a session.
+///
+/// The system prompt and the tool catalog are part of the cacheable prefix, so
+/// they are built **once per session/config** and reused byte-for-byte. A
+/// different provider/model/workspace/config (or `PROMPT_VERSION`) produces a
+/// different `snapshot_key`, never a stale prompt. Storage failures are logged
+/// and fall back to the freshly built snapshot (the turn never aborts).
+fn chat_prompt_snapshot(
+    db: &Db,
+    conversation: &crate::domain::Conversation,
+    provider: &ProviderInfo,
+    model: &ModelInfo,
+    options: &TurnOptions,
+    settings: &Settings,
+    skills: &[crate::tools::skills::Skill],
+) -> FrozenPromptSnapshot {
+    // 1) Catálogo canônico (ordem fixa) antes da identidade/hashes.
+    let tool_definitions = cache::snapshot::canonical_tools(&tools::definitions(options));
+    let config_hash =
+        cache::snapshot::config_hash(model, options, settings, skills, &tool_definitions);
+    let snapshot_key = cache::snapshot::snapshot_key(
+        &provider.id,
+        &model.id,
+        cache::snapshot::PROFILE_CHAT,
+        conversation.workspace_id.as_deref(),
+        prompt::PROMPT_VERSION,
+        &config_hash,
+    );
+
+    // 2) Reusa o snapshot congelado quando a config é a mesma.
+    match db.get_prompt_snapshot(&conversation.id, &snapshot_key) {
+        Ok(Some(record)) if record.invalidated_at.is_none() => {
+            if let Some(tool_definitions) = cache::snapshot::parse_tools(&record.tools_json) {
+                return FrozenPromptSnapshot {
+                    snapshot_key,
+                    stable_hash: record.stable_hash,
+                    system_prompt: record.system_text,
+                    tool_definitions,
+                    reused: true,
+                };
+            }
+            eprintln!(
+                "lumina: tools_json inválido no snapshot de prompt da sessão {}; reconstruindo",
+                conversation.id
+            );
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("lumina: falha ao ler o snapshot de prompt: {error:#}"),
+    }
+
+    // 3) Constrói uma única vez (data de sessão congelada) e persiste.
+    let session_date = prompt::session_date(conversation.created_at);
+    let system_prompt =
+        prompt::build_system_prompt(model, options, settings, skills, &session_date);
+    let stable_hash = cache::snapshot::stable_hash(&system_prompt);
+    let tools_json = cache::snapshot::tools_json(&tool_definitions);
+    if let Err(error) = db.upsert_prompt_snapshot(&crate::db::PromptSnapshotRecord {
+        conversation_id: conversation.id.clone(),
+        snapshot_key: snapshot_key.clone(),
+        provider_id: provider.id.clone(),
+        model_id: model.id.clone(),
+        profile: cache::snapshot::PROFILE_CHAT.to_string(),
+        workspace_id: conversation.workspace_id.clone(),
+        prompt_version: i64::from(prompt::PROMPT_VERSION),
+        system_text: system_prompt.clone(),
+        tools_json,
+        stable_hash: stable_hash.clone(),
+        tools_hash: cache::snapshot::tools_hash(&tool_definitions),
+        created_at: now_ms(),
+        invalidated_at: None,
+    }) {
+        eprintln!("lumina: falha ao gravar o snapshot de prompt: {error:#}");
+    }
+    FrozenPromptSnapshot {
+        snapshot_key,
+        stable_hash,
+        system_prompt,
+        tool_definitions,
+        reused: false,
+    }
+}
+
+/// Loads (or creates and persists) the **Code** prompt snapshot of a session.
+///
+/// The frozen text only carries stable session inputs (identity, environment,
+/// general policy, tools, editing rules, workspace path/project, `AGENTS.md`);
+/// the volatile state (git/tree/todos/plan/permission mode) goes to the runtime
+/// `surface_item`, never here (F3a). A different workspace/`AGENTS.md`/project/
+/// tool catalog/`PROMPT_VERSION` produces a different key, never a stale prompt.
+fn code_prompt_snapshot(
+    db: &Db,
+    conversation: &crate::domain::Conversation,
+    provider: &ProviderInfo,
+    model: &ModelInfo,
+    ctx: &code::context::CodeTurnContext,
+    settings: &Settings,
+    options: &TurnOptions,
+    tool_definitions: &[crate::providers::ToolDefinition],
+    mcp_prompt_section: &str,
+) -> FrozenPromptSnapshot {
+    let prompt_ctx = ctx.prompt_context();
+    let config_hash = cache::snapshot::code_config_hash(
+        model,
+        prompt_ctx.workspace_name.as_deref(),
+        prompt_ctx.workspace_path.as_deref(),
+        prompt_ctx.agents_md.as_deref(),
+        prompt_ctx.project.as_ref(),
+        std::env::consts::OS,
+        settings.shell_enabled,
+        options.delegation_depth,
+        options.system_prompt_override.as_deref(),
+        tool_definitions,
+    );
+    let snapshot_key = cache::snapshot::snapshot_key(
+        &provider.id,
+        &model.id,
+        cache::snapshot::PROFILE_CODE,
+        conversation.workspace_id.as_deref(),
+        code::prompt::PROMPT_VERSION,
+        &config_hash,
+    );
+
+    // Reusa o snapshot congelado quando a config é a mesma.
+    match db.get_prompt_snapshot(&conversation.id, &snapshot_key) {
+        Ok(Some(record)) if record.invalidated_at.is_none() => {
+            if let Some(tool_definitions) = cache::snapshot::parse_tools(&record.tools_json) {
+                return FrozenPromptSnapshot {
+                    snapshot_key,
+                    stable_hash: record.stable_hash,
+                    system_prompt: record.system_text,
+                    tool_definitions,
+                    reused: true,
+                };
+            }
+            eprintln!(
+                "lumina: tools_json inválido no snapshot de código da sessão {}; reconstruindo",
+                conversation.id
+            );
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("lumina: falha ao ler o snapshot de código: {error:#}"),
+    }
+
+    // Constrói uma única vez (data da sessão congelada; sem relógio) e persiste.
+    let session_date = prompt::session_date(conversation.created_at);
+    let tool_prompts = code_tool_prompts(ctx, settings, options.delegation_depth);
+    let mut system_prompt = code::prompt::build_system_prompt(
+        model,
+        &prompt_ctx,
+        &tool_prompts,
+        std::env::consts::OS,
+        &session_date,
+    );
+    // Tools de servidores MCP entram no prompt com nome wire e descrição (fazem
+    // parte do snapshot: mudam a key via tools_hash das definições).
+    if !mcp_prompt_section.is_empty() {
+        system_prompt.push_str(mcp_prompt_section);
+    }
+    // Subagente: instruções extras do pai também fazem parte do texto congelado.
+    if let Some(extra) = options
+        .system_prompt_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(extra);
+        system_prompt.push('\n');
+    }
+    let stable_hash = cache::snapshot::stable_hash(&system_prompt);
+    let tools_json = cache::snapshot::tools_json(tool_definitions);
+    if let Err(error) = db.upsert_prompt_snapshot(&crate::db::PromptSnapshotRecord {
+        conversation_id: conversation.id.clone(),
+        snapshot_key: snapshot_key.clone(),
+        provider_id: provider.id.clone(),
+        model_id: model.id.clone(),
+        profile: cache::snapshot::PROFILE_CODE.to_string(),
+        workspace_id: conversation.workspace_id.clone(),
+        prompt_version: i64::from(code::prompt::PROMPT_VERSION),
+        system_text: system_prompt.clone(),
+        tools_json,
+        stable_hash: stable_hash.clone(),
+        tools_hash: cache::snapshot::tools_hash(tool_definitions),
+        created_at: now_ms(),
+        invalidated_at: None,
+    }) {
+        eprintln!("lumina: falha ao gravar o snapshot de código: {error:#}");
+    }
+    FrozenPromptSnapshot {
+        snapshot_key,
+        stable_hash,
+        system_prompt,
+        tool_definitions: tool_definitions.to_vec(),
+        reused: false,
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Snapshot/tools do Code (compartilhado com o /compact manual, F6)     */
+/* ------------------------------------------------------------------ */
+
+/// Catálogo canônico de tools do Code + tools MCP (mesma ordem usada no snapshot
+/// congelado). Compartilhado entre o turno e o `/compact` manual.
+fn code_tool_definitions_with_mcp(
+    ctx: &code::context::CodeTurnContext,
+    settings: &Settings,
+    delegation_depth: u32,
+    mcp_tools: &[crate::mcp::McpToolInfo],
+) -> Vec<crate::providers::ToolDefinition> {
+    let mut definitions = code_tool_definitions(ctx, settings, delegation_depth);
+    // Tools de servidores MCP entram após as estáticas (nome wire) e o catálogo
+    // é canonicalizado para o replay deserializar igual.
+    for tool in mcp_tools {
+        definitions.push(crate::providers::ToolDefinition {
+            name: tool.wire_name.clone(),
+            description: format!("[{}] {}", tool.server, tool.description),
+            parameters: tool.input_schema.clone(),
+        });
+    }
+    cache::snapshot::canonical_tools(&definitions)
+}
+
+/// Seção de system prompt com as tools MCP (parte do snapshot congelado).
+fn mcp_tools_prompt_section(mcp_tools: &[crate::mcp::McpToolInfo]) -> String {
+    if mcp_tools.is_empty() {
+        return String::new();
+    }
+    let mut section = String::from("\n# MCP server tools\n\n");
+    section.push_str(
+        "These tools run on MCP servers configured by the user and require their approval on \
+         every call. Use them when appropriate; errors come back as `MCP_*`.\n\n",
+    );
+    for tool in mcp_tools {
+        section.push_str(&format!(
+            "- `{}` — [{}] {}\n",
+            tool.wire_name, tool.server, tool.description
+        ));
+    }
+    section
+}
+
+/* ------------------------------------------------------------------ */
+/* Superfície do Code (F3a, PLAN §4.4)                                 */
+/* ------------------------------------------------------------------ */
+
+/// Kind do `surface_item` com o estado volátil do turno do Code.
+const SURFACE_KIND_RUNTIME: &str = "runtime";
+/// Kind do `surface_item` com a nota de mudança de plano/permissão do turno
+/// (F3b: o modo não vai mais para o system prompt).
+const SURFACE_KIND_MODE: &str = "mode";
+
+/// Renderiza um `surface_item` como mensagem de **user marcada** (nunca
+/// `system`: o provedor hoista mensagens de system para o head cacheável).
+fn render_surface_item(item: &crate::db::SurfaceItemRecord) -> HistoryMessage {
+    HistoryMessage::user(format!(
+        "<contexto-da-sessao kind=\"{}\">\n{}\n</contexto-da-sessao>",
+        item.kind,
+        item.text.trim_end()
+    ))
+}
+
+/// Insere um `surface_item` ancorado na mensagem do usuário do turno. `None`
+/// quando o mesmo conteúdo já existia (dedupe) ou a persistência falhou (o turno
+/// segue sem o item novo).
+fn insert_surface_item_kind(
+    db: &Db,
+    conversation_id: &str,
+    anchor_message_id: &str,
+    kind: &str,
+    text: &str,
+) -> Option<crate::db::SurfaceItemRecord> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let item = crate::db::SurfaceItemRecord::new(
+        conversation_id,
+        Some(anchor_message_id),
+        None,
+        kind,
+        trimmed,
+    );
+    match db.insert_surface_item(&item) {
+        Ok(true) => Some(item),
+        Ok(false) => None,
+        Err(error) => {
+            eprintln!("lumina: falha ao inserir item de superfície `{kind}`: {error:#}");
+            None
+        }
+    }
+}
+
+/// Insere o contexto volátil do turno (`kind=runtime`).
+fn insert_runtime_surface_item(
+    db: &Db,
+    conversation_id: &str,
+    anchor_message_id: &str,
+    text: &str,
+) -> Option<crate::db::SurfaceItemRecord> {
+    insert_surface_item_kind(
+        db,
+        conversation_id,
+        anchor_message_id,
+        SURFACE_KIND_RUNTIME,
+        text,
+    )
+}
+
+/// Insere a nota de mudança de plano/permissão do turno (`kind=mode`, F3b).
+fn insert_mode_surface_note(
+    db: &Db,
+    conversation_id: &str,
+    anchor_message_id: &str,
+    text: &str,
+) -> Option<crate::db::SurfaceItemRecord> {
+    insert_surface_item_kind(
+        db,
+        conversation_id,
+        anchor_message_id,
+        SURFACE_KIND_MODE,
+        text,
+    )
+}
+
+/// Itens de superfície persistidos da conversa (append-only). Falha só loga: o
+/// turno continua sem a superfície antiga.
+fn load_surface_items(db: &Db, conversation_id: &str) -> Vec<crate::db::SurfaceItemRecord> {
+    match db.list_surface_items(conversation_id) {
+        Ok(items) => items,
+        Err(error) => {
+            eprintln!("lumina: falha ao ler a superfície da sessão: {error:#}");
+            Vec::new()
+        }
+    }
 }
 
 /// Rótulo curto do modo de permissão para a nota do prompt.
 fn permission_mode_label(mode: crate::domain::PermissionMode) -> &'static str {
     match mode {
-        crate::domain::PermissionMode::ReadOnly => "Leitura (somente leitura)",
-        crate::domain::PermissionMode::Edit => "Editar",
-        crate::domain::PermissionMode::Review => "Revisar (cada escrita pede aprovação)",
-        crate::domain::PermissionMode::Autonomous => "Autônomo",
+        crate::domain::PermissionMode::ReadOnly => "Read-only",
+        crate::domain::PermissionMode::Edit => "Edit",
+        crate::domain::PermissionMode::Review => "Review (every write requires approval)",
+        crate::domain::PermissionMode::Autonomous => "Autonomous",
     }
 }
 
@@ -654,25 +1300,25 @@ fn mode_update_note(
     previous_mode: crate::domain::PermissionMode,
     mode: crate::domain::PermissionMode,
 ) -> String {
-    let mut lines = vec!["# Atualização de permissões".to_string(), String::new()];
+    let mut lines = vec!["# Permission update".to_string(), String::new()];
     if plan_mode != previous_plan_mode {
         if plan_mode {
             lines.push(
-                "O **modo Plano foi ativado** pelo usuário: não altere arquivos nem execute \
-                 comandos mutantes; use `submit_plan` quando o plano estiver pronto."
+                "The user **enabled Plan mode**: do not modify files or run mutating \
+                 commands; use `submit_plan` when the plan is ready."
                     .to_string(),
             );
         } else {
             lines.push(
-                "O **modo Plano foi desativado** (plano aprovado ou revisão cancelada): você \
-                 pode trabalhar no workspace conforme o modo de permissão atual."
+                "The user **disabled Plan mode** (plan approved or review cancelled): you \
+                 can work in the workspace according to the current permission mode."
                     .to_string(),
             );
         }
     }
     if mode != previous_mode {
         lines.push(format!(
-            "O modo de permissão agora é **{}**.",
+            "The permission mode is now **{}**.",
             permission_mode_label(mode)
         ));
     }
@@ -705,10 +1351,7 @@ fn history_request_chars(history: &[HistoryMessage]) -> usize {
 
 /// Tool calls declaradas no histórico (overhead de 16 tokens por call).
 fn history_tool_call_count(history: &[HistoryMessage]) -> u32 {
-    let count: usize = history
-        .iter()
-        .map(|message| message.tool_calls.len())
-        .sum();
+    let count: usize = history.iter().map(|message| message.tool_calls.len()).sum();
     u32::try_from(count).unwrap_or(u32::MAX)
 }
 
@@ -883,19 +1526,50 @@ pub async fn run_turn(
 
     let supports_images = supports_images(&model);
     let messages = deps.db.list_messages(&payload.conversation_id)?;
-    // Perfil Code: aplica o último resumo de compactação persistido antes de
-    // montar o histórico (o transcript real continua no banco; o modelo vê o
-    // resumo no lugar das mensagens cobertas — HARNESS.md §10.3).
-    let stored_summary = match profile {
-        TurnProfile::Code => {
-            code::compaction::apply_stored_summary(&deps.db, &conversation.id, &messages)
-        }
-        TurnProfile::Chat => None,
+    // Estado persistido da conversa: watermark do histórico do Chat (F2b) +
+    // seed do tracker de cache (F1.1). Uma leitura por turno.
+    let persisted_cache_state = load_persisted_cache_state(&deps.db, &conversation.id);
+    // Superfície append-only do Code (F3a): contexto volátil dos turnos
+    // anteriores, posicionado pelo `after_message_id` no replay. O Chat ainda
+    // não usa surface items.
+    let stored_surface_items = if profile == TurnProfile::Code {
+        load_surface_items(&deps.db, &conversation.id)
+    } else {
+        Vec::new()
     };
-    let mut history = match stored_summary {
+    // Watermark do histórico do Chat: só vale quando provider/modelo batem com
+    // o estado persistido. Rota diferente (ou watermark fora de fronteira)
+    // reseta o corte — nunca reaproveita o head de outra config.
+    let mut chat_cut_seq = if profile == TurnProfile::Chat {
+        chat_history_watermark(
+            &messages,
+            persisted_cache_state.as_ref(),
+            &provider.id,
+            &model.id,
+        )
+    } else {
+        None
+    };
+    if profile == TurnProfile::Chat {
+        if let Some(record) = persisted_cache_state.as_ref() {
+            if record.chat_cut_seq.is_some() && chat_cut_seq.is_none() {
+                persist_chat_watermark(&deps.db, &conversation.id, Some(record), None);
+            }
+        }
+    }
+    // Perfil Code e Chat: aplica o último resumo de compactação persistido antes
+    // de montar o histórico (o transcript real continua no banco; o modelo vê o
+    // resumo no lugar das mensagens cobertas — HARNESS.md §10.3 / PLAN F2c).
+    let stored_summary = match profile {
+        TurnProfile::Code | TurnProfile::Chat => {
+            compaction::apply_stored_summary(&deps.db, &conversation.id, &messages)
+        }
+    };
+    let has_stored_summary = stored_summary.is_some();
+    let history_budget_chars = history_budget(&model);
+    let (mut history, mut history_anchors) = match stored_summary {
         Some((summary, cut)) => {
-            let mut compacted = vec![code::compaction::summary_message(&summary)];
-            compacted.extend(build_history(
+            let (tail, tail_anchors) = build_history(
                 &deps,
                 &messages[cut.min(messages.len())..],
                 &assistant_message.id,
@@ -903,19 +1577,51 @@ pub async fn run_turn(
                 &settings,
                 &model,
                 supports_images,
-            ));
-            compacted
+                &stored_surface_items,
+                cut.saturating_add(1),
+            );
+            let mut compacted = vec![compaction::summary_message(&summary)];
+            compacted.extend(tail);
+            let mut anchors = vec![0];
+            anchors.extend(tail_anchors);
+            (compacted, anchors)
         }
-        None => build_history(
-            &deps,
-            &messages,
-            &assistant_message.id,
-            &provider.id,
-            &settings,
-            &model,
-            supports_images,
-        ),
+        None => {
+            if profile == TurnProfile::Chat {
+                // F2b: o Chat NÃO corta dentro do `build_history`; o head é
+                // definido pelo watermark persistido (salto abaixo).
+                let visible_from = chat_cut_seq
+                    .map(|seq| (seq.saturating_sub(1) as usize).min(messages.len()))
+                    .unwrap_or(0);
+                build_history(
+                    &deps,
+                    &messages[visible_from..],
+                    &assistant_message.id,
+                    &provider.id,
+                    &settings,
+                    &model,
+                    supports_images,
+                    &[],
+                    visible_from.saturating_add(1),
+                )
+            } else {
+                build_history(
+                    &deps,
+                    &messages,
+                    &assistant_message.id,
+                    &provider.id,
+                    &settings,
+                    &model,
+                    supports_images,
+                    &stored_surface_items,
+                    1,
+                )
+            }
+        }
     };
+    // O watermark do Chat é o fallback de emergência da F2b e roda **depois** da
+    // tentativa de compactação cache-safe (F2c), logo antes do loop: o resumo
+    // tem prioridade e o corte por saltos só acontece se o resumo falhar.
     // `<app-data>` backs artifacts, `run_code` workspaces and the skills
     // catalog. Production resolves it from the app handle; tests inject a
     // temporary directory through `HarnessDeps::data_dir`.
@@ -993,58 +1699,110 @@ pub async fn run_turn(
     } else {
         Vec::new()
     };
+    // F2a/F3a: system prompt + catálogo de tools congelados por sessão em
+    // `prompt_snapshots`. No Chat o texto tem data de sessão fixa; no Code ele
+    // carrega só o que é estável (sem relógio/git/árvore/plano/modo) — o
+    // volátil vira `surface_item` abaixo, nunca head cacheável.
+    let session_date = prompt::session_date(conversation.created_at);
+    let chat_snapshot = if profile == TurnProfile::Chat {
+        Some(chat_prompt_snapshot(
+            &deps.db,
+            &conversation,
+            &provider,
+            &model,
+            &options,
+            &settings,
+            &skills,
+        ))
+    } else {
+        None
+    };
+    // Definições/prompts de tools do Code: entram na key/hashes do snapshot.
+    let code_tool_prompts_list = code_context
+        .as_ref()
+        .map(|ctx| code_tool_prompts(ctx, &settings, options.delegation_depth))
+        .unwrap_or_default();
+    let code_tool_definitions_canonical: Vec<crate::providers::ToolDefinition> =
+        match code_context.as_ref() {
+            Some(code_ctx) if profile == TurnProfile::Code => code_tool_definitions_with_mcp(
+                code_ctx,
+                &settings,
+                options.delegation_depth,
+                &mcp_tools,
+            ),
+            _ => Vec::new(),
+        };
+    // Seção MCP do system prompt (faz parte do snapshot congelado).
+    let mcp_prompt_section = mcp_tools_prompt_section(&mcp_tools);
+    let code_snapshot = match (profile, code_context.as_ref()) {
+        (TurnProfile::Code, Some(code_ctx)) => Some(code_prompt_snapshot(
+            &deps.db,
+            &conversation,
+            &provider,
+            &model,
+            code_ctx,
+            &settings,
+            &options,
+            &code_tool_definitions_canonical,
+            &mcp_prompt_section,
+        )),
+        _ => None,
+    };
     let system_prompt = match (profile, code_context.as_ref()) {
-        (TurnProfile::Code, Some(code_ctx)) => {
-            let prompt_ctx = code_ctx.prompt_context();
-            let tool_prompts = code_tool_prompts(code_ctx, &settings, options.delegation_depth);
-            let mut prompt = code::prompt::build_system_prompt(
+        (TurnProfile::Code, Some(code_ctx)) => match code_snapshot.as_ref() {
+            Some(snapshot) => snapshot.system_prompt.clone(),
+            None => code::prompt::build_system_prompt(
                 &model,
-                &prompt_ctx,
-                &tool_prompts,
+                &code_ctx.prompt_context(),
+                &code_tool_prompts_list,
                 std::env::consts::OS,
-                &chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
-            );
-            // Tools de servidores MCP entram no prompt com nome wire e descrição.
-            if !mcp_tools.is_empty() {
-                prompt.push_str("\n# Ferramentas de servidores MCP\n\n");
-                prompt.push_str(
-                    "Estas ferramentas rodam em servidores MCP configurados pelo usuário e \
-                     exigem aprovação dele a cada chamada. Use quando fizer sentido; erros voltam \
-                     como `MCP_*`.\n\n",
-                );
-                for tool in &mcp_tools {
-                    prompt.push_str(&format!(
-                        "- `{}` — [{}] {}\n",
-                        tool.wire_name, tool.server, tool.description
-                    ));
-                }
+                &session_date,
+            ),
+        },
+        _ => match chat_snapshot.as_ref() {
+            Some(snapshot) => snapshot.system_prompt.clone(),
+            None => {
+                prompt::build_system_prompt(&model, &options, &settings, &skills, &session_date)
             }
-            // Subagente: o harness do filho recebe instruções extras do pai.
-            if let Some(extra) = options.system_prompt_override.as_deref() {
-                prompt.push_str("\n\n");
-                prompt.push_str(extra.trim());
-                prompt.push('\n');
-            }
-            prompt
-        }
-        _ => prompt::build_system_prompt(&model, &options, &settings, &skills),
+        },
     };
     let tool_definitions = match (profile, code_context.as_ref()) {
-        (TurnProfile::Code, Some(code_ctx)) => {
-            let mut definitions =
-                code_tool_definitions(code_ctx, &settings, options.delegation_depth);
-            // Tools de servidores MCP entram após as estáticas (nome wire).
-            for tool in &mcp_tools {
-                definitions.push(crate::providers::ToolDefinition {
-                    name: tool.wire_name.clone(),
-                    description: format!("[{}] {}", tool.server, tool.description),
-                    parameters: tool.input_schema.clone(),
-                });
-            }
-            definitions
-        }
-        _ => tools::definitions(&options),
+        (TurnProfile::Code, Some(_)) => match code_snapshot.as_ref() {
+            Some(snapshot) => snapshot.tool_definitions.clone(),
+            None => code_tool_definitions_canonical.clone(),
+        },
+        _ => match chat_snapshot.as_ref() {
+            Some(snapshot) => snapshot.tool_definitions.clone(),
+            None => cache::snapshot::canonical_tools(&tools::definitions(&options)),
+        },
     };
+    let prompt_snapshot_hash = code_snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.stable_hash.as_str())
+        .or_else(|| {
+            chat_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.stable_hash.as_str())
+        });
+    // F3a: o contexto volátil do turno vira `surface_item` ancorado na mensagem
+    // do usuário (cauda append-only). O system prompt/tools não mudam com ele.
+    if profile == TurnProfile::Code {
+        if let Some(code_ctx) = code_context.as_ref() {
+            let has_todo_write = tool_definitions
+                .iter()
+                .any(|tool| tool.name == "todo_write");
+            let runtime_text =
+                code::prompt::build_runtime_context(&code_ctx.prompt_context(), has_todo_write);
+            if let Some(item) = insert_runtime_surface_item(
+                &deps.db,
+                &conversation.id,
+                &user_message.id,
+                &runtime_text,
+            ) {
+                history.push(render_surface_item(&item));
+            }
+        }
+    }
     let reasoning = reasoning_request(payload.reasoning.as_ref(), &model);
     let temperature = temperature_request(&options, &settings, &model);
     let max_output_tokens = Some(model.max_output.clamp(1_024, 32_768));
@@ -1136,7 +1894,108 @@ pub async fn run_turn(
         .as_ref()
         .map(|context| context.permission_mode)
         .unwrap_or(conversation.permission_mode);
-    let mut mode_notes: Vec<String> = Vec::new();
+    // Telemetria de cache de prompt (F1.1, PLAN §4.7): restaura o estado
+    // persistido da conversa (epoch/prefixo/totais) e emite+persiste uma
+    // `CacheSample` por request de wire (abaixo), nos dois perfis. O watermark
+    // do Chat (`chat_cut_seq`) é preservado em cada upsert (F2b).
+    let mut cache_tracker = restore_cache_tracker(persisted_cache_state.as_ref());
+    let mut last_usage_cache: Option<TurnUsageCache> = None;
+    // Log resumido do plano de cache (uma linha por turno, F4).
+    let mut cache_plan_logged = false;
+
+    // F2c: compactação cache-safe do **Chat** antes do loop (uma tentativa por
+    // turno — nada de loop infinito). Reusa system prompt + tools + histórico
+    // como prefixo, com o mesmo plano de cache do request normal. Se falhar, o
+    // turno segue com o histórico atual e o watermark do Chat continua como
+    // fallback de emergência na próxima reconstrução.
+    let mut chat_compacted = false;
+    if profile == TurnProfile::Chat && settings.auto_compact {
+        let mut summary_template = CompletionRequest {
+            config: provider_config(&provider, &model, &credential, &payload.conversation_id),
+            protocols: protocols.clone(),
+            history: history.clone(),
+            system_prompt: system_prompt.clone(),
+            tools: tool_definitions.clone(),
+            reasoning: reasoning.clone(),
+            max_output_tokens,
+            temperature,
+            cancel: cancel.clone(),
+            cache_plan: None,
+        };
+        summary_template.cache_plan = cache_plan_for(
+            &provider,
+            &model,
+            &protocols,
+            &summary_template,
+            &settings.cache,
+        );
+        let compacted = compaction::maybe_compact(
+            &deps,
+            &conversation.id,
+            &tool_turn_id,
+            &summary_template,
+            &mut history,
+            &mut history_anchors,
+            &messages,
+            model.context_window,
+            model.max_output.clamp(1_024, 32_768),
+            &on_event,
+            &cancel,
+        )
+        .await;
+        if let Some(outcome) = compacted {
+            chat_compacted = true;
+            // Epoch novo explícito: a próxima amostra reporta Compaction.
+            cache_tracker.trigger_epoch_break(CacheBreakReason::Compaction);
+            // O resumo passou a cobrir o head: o watermark não é mais
+            // necessário e é zerado (fallback só vale para turnos sem resumo).
+            chat_cut_seq = None;
+            persist_chat_watermark(
+                &deps.db,
+                &conversation.id,
+                persisted_cache_state.as_ref(),
+                None,
+            );
+            let _ = outcome;
+        }
+    }
+    // F2b (fallback de emergência): só corta por saltos se a compactação não
+    // rodou/fracassou — o resumo cache-safe tem prioridade e cobre o head.
+    if profile == TurnProfile::Chat && !has_stored_summary && !chat_compacted {
+        let mut guard = 0usize;
+        while history_request_chars(&history) > history_budget_chars {
+            guard += 1;
+            if guard > messages.len() {
+                break;
+            }
+            let Some(new_seq) =
+                advance_chat_watermark(&messages, chat_cut_seq.unwrap_or(1), history_budget_chars)
+            else {
+                break;
+            };
+            chat_cut_seq = Some(new_seq);
+            let visible_from = (new_seq.saturating_sub(1) as usize).min(messages.len());
+            let (rebuilt, rebuilt_anchors) = build_history(
+                &deps,
+                &messages[visible_from..],
+                &assistant_message.id,
+                &provider.id,
+                &settings,
+                &model,
+                supports_images,
+                &[],
+                visible_from.saturating_add(1),
+            );
+            history = rebuilt;
+            history_anchors = rebuilt_anchors;
+            persist_chat_watermark(
+                &deps.db,
+                &conversation.id,
+                persisted_cache_state.as_ref(),
+                Some(new_seq),
+            );
+        }
+    }
 
     while step_number < options.max_steps {
         if cancel.is_cancelled() {
@@ -1146,26 +2005,48 @@ pub async fn run_turn(
         // Contexto do perfil Code: compacta o histórico antigo quando a janela
         // aperta (resumo por chamada auxiliar; falha não derruba o turno).
         if profile == TurnProfile::Code && settings.auto_compact {
-            let covered = u32::try_from(messages.len()).unwrap_or(u32::MAX);
-            let compacted = code::compaction::maybe_compact(
+            let mut summary_template = CompletionRequest {
+                config: provider_config(&provider, &model, &credential, &payload.conversation_id),
+                protocols: protocols.clone(),
+                history: history.clone(),
+                system_prompt: system_prompt.clone(),
+                tools: tool_definitions.clone(),
+                reasoning: reasoning.clone(),
+                max_output_tokens,
+                temperature,
+                cancel: cancel.clone(),
+                cache_plan: None,
+            };
+            // F4: o resumo reusa o mesmo plano do request normal (mesmo
+            // system/tools) — cache-safe também no write/read do provider.
+            summary_template.cache_plan = cache_plan_for(
+                &provider,
+                &model,
+                &protocols,
+                &summary_template,
+                &settings.cache,
+            );
+            let compacted = compaction::maybe_compact(
                 &deps,
-                &provider.id,
-                &model.id,
                 &conversation.id,
                 &tool_turn_id,
-                covered,
+                &summary_template,
                 &mut history,
-                &system_prompt,
+                &mut history_anchors,
+                &messages,
                 model.context_window,
                 model.max_output.clamp(1_024, 32_768),
                 &on_event,
                 &cancel,
             )
             .await;
-            if compacted.is_some() {
-                // `covered` é o `to_seq` do resumo (total de mensagens cobertas,
-                // não um delta); o fold de `context/compacted` usa o último.
-                compacted_messages = covered;
+            if let Some(outcome) = compacted {
+                // `covered` é o `to_seq` do resumo (mensagens cobertas, não
+                // índice do histórico neutro — D15 corrigido).
+                compacted_messages = outcome.covered_messages;
+                // Epoch novo explícito: a próxima amostra reporta Compaction e
+                // não tenta reusar P/Δ do prefixo reescrito (F3b).
+                cache_tracker.trigger_epoch_break(CacheBreakReason::Compaction);
             }
         }
         step_number += 1;
@@ -1196,17 +2077,26 @@ pub async fn run_turn(
                         plan_mode: live_plan_mode,
                     },
                 );
-                mode_notes.push(mode_update_note(
+                // F3b: a mudança de modo NÃO vai para o system prompt (quebraria
+                // o prefixo). Ela vira um `surface_item` kind="mode" ancorado na
+                // user do turno, anexado como cauda user transitória nos passos
+                // seguintes e persistido para o replay dos próximos turnos.
+                let note = mode_update_note(
                     observed_plan_mode,
                     live_plan_mode,
                     observed_permission_mode,
                     live_permission_mode,
-                ));
+                );
+                if let Some(item) =
+                    insert_mode_surface_note(&deps.db, &conversation.id, &user_message.id, &note)
+                {
+                    history.push(render_surface_item(&item));
+                }
                 observed_plan_mode = live_plan_mode;
                 observed_permission_mode = live_permission_mode;
             }
         }
-        let step_system_prompt = compose_system_prompt(&system_prompt, &mode_notes);
+        let step_system_prompt = system_prompt.clone();
 
         // Estimativa do request prestes a rodar: a UI recebe o medidor em tempo
         // real a cada passo. Guardamos o valor para calibrar com o
@@ -1234,7 +2124,7 @@ pub async fn run_turn(
         // (401 → force_refresh → same step again).
         let mut auth_retried = false;
         let outcome = loop {
-            let request = CompletionRequest {
+            let mut request = CompletionRequest {
                 config: provider_config(&provider, &model, &credential, &payload.conversation_id),
                 protocols: protocols.clone(),
                 history: history.clone(),
@@ -1244,7 +2134,20 @@ pub async fn run_turn(
                 max_output_tokens,
                 temperature,
                 cancel: cancel.clone(),
+                // F4: preenchido logo abaixo pelo helper (plan_with_caps).
+                cache_plan: None,
             };
+            request.cache_plan =
+                cache_plan_for(&provider, &model, &protocols, &request, &settings.cache);
+            if !cache_plan_logged {
+                if let Some(plan) = request.cache_plan.as_ref() {
+                    log_cache_plan(
+                        protocols.first().map(WireProtocol::as_str).unwrap_or(""),
+                        plan,
+                    );
+                    cache_plan_logged = true;
+                }
+            }
             let outcome = run_stream_attempt(&deps, request, &on_event, &cancel).await;
             let retry = match &outcome {
                 AttemptOutcome::Failed { error, .. } => {
@@ -1271,29 +2174,41 @@ pub async fn run_turn(
             }
         };
 
-        let (step_text, step_reasoning, step_state, step_usage, streaming_calls, failure) =
-            match outcome {
-                AttemptOutcome::Cancelled => {
-                    cancelled = true;
-                    break;
-                }
-                AttemptOutcome::Completed(attempt) => (
-                    attempt.text,
-                    attempt.reasoning,
-                    attempt.state,
-                    attempt.usage,
-                    attempt.tool_calls,
-                    None,
-                ),
-                AttemptOutcome::Failed { attempt, error } => (
-                    attempt.text,
-                    attempt.reasoning,
-                    attempt.state,
-                    attempt.usage,
-                    attempt.tool_calls,
-                    Some(TurnFailure::from_anyhow(&error, &credential)),
-                ),
-            };
+        let (
+            step_text,
+            step_reasoning,
+            step_state,
+            step_usage,
+            step_digest,
+            step_raw_usage,
+            streaming_calls,
+            failure,
+        ) = match outcome {
+            AttemptOutcome::Cancelled => {
+                cancelled = true;
+                break;
+            }
+            AttemptOutcome::Completed(attempt) => (
+                attempt.text,
+                attempt.reasoning,
+                attempt.state,
+                attempt.usage,
+                attempt.digest,
+                attempt.raw_usage,
+                attempt.tool_calls,
+                None,
+            ),
+            AttemptOutcome::Failed { attempt, error } => (
+                attempt.text,
+                attempt.reasoning,
+                attempt.state,
+                attempt.usage,
+                attempt.digest,
+                attempt.raw_usage,
+                attempt.tool_calls,
+                Some(TurnFailure::from_anyhow(&error, &credential)),
+            ),
+        };
 
         if !step_reasoning.is_empty() {
             emit(&on_event, TurnEvent::ReasoningDone);
@@ -1302,17 +2217,55 @@ pub async fn run_turn(
             }
             full_reasoning.push_str(&step_reasoning);
         }
-        let step_input_tokens = step_usage
-            .as_ref()
-            .and_then(|usage| usage.input_tokens);
-        if let Some(usage) = step_usage {
-            merge_usage(&mut total_usage, &usage);
+        // Protocolo do request que acabou de rodar: o digest do provedor manda;
+        // sem ele, cai no primeiro protocolo declarado (só rotula a amostra).
+        let step_protocol = attempt_protocol(step_digest.as_ref(), &protocols);
+        // D23: o medidor de contexto passa a calibrar pelo input **total**
+        // normalizado (`read + write + uncached`). Na Anthropic o `input_tokens`
+        // cru EXCLUI o cache; em OpenAI/Google ele é inclusivo — o normalizador
+        // resolve os dois (PLAN §4.7).
+        let step_input_tokens = step_usage.as_ref().map(|usage| {
+            let counters = cache::prefix::counters(&step_protocol, usage);
+            if counters.input_total > 0 {
+                counters.input_total
+            } else {
+                usage.input_tokens.unwrap_or(0)
+            }
+        });
+        if let Some(usage) = &step_usage {
+            merge_usage(&mut total_usage, usage);
+        }
+        // Cache telemetry (F1.1): uma amostra por request de wire, emitida e
+        // persistida logo após o usage do passo nos dois perfis. Não substitui
+        // o `usage` do turno (que continua como total de billing).
+        if step_digest.is_some() || step_usage.is_some() || step_raw_usage.is_some() {
+            set_cache_capabilities(&mut cache_tracker, &provider, &model, &step_protocol);
+            let sample = cache_tracker.observe_with_raw(
+                &provider.id,
+                &model.id,
+                &step_protocol,
+                step_digest.as_ref(),
+                step_usage.as_ref(),
+                step_raw_usage.as_ref(),
+                step_number,
+                &tool_turn_id,
+            );
+            record_cache_telemetry(
+                &deps.db,
+                &conversation.id,
+                &cache_tracker,
+                &sample,
+                step_digest.as_ref(),
+                prompt_snapshot_hash,
+                chat_cut_seq,
+                &mut last_usage_cache,
+            );
+            emit(&on_event, TurnEvent::CacheStats { sample });
         }
         // Tempo real: o uso real do request recém-executado corrige a estimativa
         // (`HARNESS.md` §10.1). O histórico aqui ainda é o do request — a
         // resposta do modelo e os resultados das tools entram depois.
-        if let (Some(input_tokens), Some(estimate)) =
-            (step_input_tokens, step_context_stats.take())
+        if let (Some(input_tokens), Some(estimate)) = (step_input_tokens, step_context_stats.take())
         {
             if input_tokens > 0 {
                 let calibrated = code::session::calibrate_context(&estimate, input_tokens);
@@ -1480,27 +2433,36 @@ pub async fn run_turn(
                 step: step_number + 1,
             },
         );
-        let forced_system_prompt = compose_system_prompt(&system_prompt, &mode_notes);
-        let forced_prompt = format!(
-            "{forced_system_prompt}\n\n# Encerramento\n\
-             Você não pode chamar mais ferramentas nesta resposta. Responda agora, em Markdown, \
-             usando apenas as informações já coletadas nos resultados acima. Se algum dado não \
-             foi confirmado, deixe isso explícito. Não narre o processo: entregue a resposta final."
-        );
+        let forced_system_prompt = system_prompt.clone();
+        // F2b (D5): o wrap-up é uma cauda **transitória** de user anexada só a
+        // este request. System prompt e tool definitions continuam idênticos
+        // aos dos passos anteriores, então o digest do request final tem o do
+        // anterior como prefixo (0 quebra no tracker de cache).
+        let mut forced_history = history.clone();
+        forced_history.push(HistoryMessage::user(FORCED_WRAP_UP_MESSAGE));
         // Same single 401 → refresh → retry rule for the forced final answer.
         let mut forced_auth_retried = false;
         let outcome = loop {
-            let forced_request = CompletionRequest {
+            let mut forced_request = CompletionRequest {
                 config: provider_config(&provider, &model, &credential, &payload.conversation_id),
                 protocols: protocols.clone(),
-                history: history.clone(),
-                system_prompt: forced_prompt.clone(),
-                tools: Vec::new(),
+                history: forced_history.clone(),
+                system_prompt: forced_system_prompt.clone(),
+                tools: tool_definitions.clone(),
                 reasoning: reasoning.clone(),
                 max_output_tokens,
                 temperature,
                 cancel: cancel.clone(),
+                cache_plan: None,
             };
+            // F4: mesmo plano do restante do turno (system/tools idênticos).
+            forced_request.cache_plan = cache_plan_for(
+                &provider,
+                &model,
+                &protocols,
+                &forced_request,
+                &settings.cache,
+            );
             let outcome = run_stream_attempt(&deps, forced_request, &on_event, &cancel).await;
             let retry = match &outcome {
                 AttemptOutcome::Failed { error, .. } => {
@@ -1548,8 +2510,39 @@ pub async fn run_turn(
                     turn_failure = Some(failure);
                 }
             }
-            if let Some(usage) = forced_attempt.usage {
-                merge_usage(&mut total_usage, &usage);
+            if let Some(usage) = forced_attempt.usage.as_ref() {
+                merge_usage(&mut total_usage, usage);
+            }
+            // Cache telemetry da resposta final forçada: continua sendo um
+            // request de wire e precisa de amostra própria (F1.1), emitida e
+            // persistida no mesmo perfil/passo (`max_steps + 1`) do request.
+            if forced_attempt.digest.is_some()
+                || forced_attempt.usage.is_some()
+                || forced_attempt.raw_usage.is_some()
+            {
+                let forced_protocol = attempt_protocol(forced_attempt.digest.as_ref(), &protocols);
+                set_cache_capabilities(&mut cache_tracker, &provider, &model, &forced_protocol);
+                let sample = cache_tracker.observe_with_raw(
+                    &provider.id,
+                    &model.id,
+                    &forced_protocol,
+                    forced_attempt.digest.as_ref(),
+                    forced_attempt.usage.as_ref(),
+                    forced_attempt.raw_usage.as_ref(),
+                    step_number + 1,
+                    &tool_turn_id,
+                );
+                record_cache_telemetry(
+                    &deps.db,
+                    &conversation.id,
+                    &cache_tracker,
+                    &sample,
+                    forced_attempt.digest.as_ref(),
+                    prompt_snapshot_hash,
+                    chat_cut_seq,
+                    &mut last_usage_cache,
+                );
+                emit(&on_event, TurnEvent::CacheStats { sample });
             }
             let forced_reasoning = forced_attempt.reasoning;
             let forced_text = forced_attempt.text;
@@ -1649,12 +2642,26 @@ pub async fn run_turn(
     assistant_message.provider_id = Some(provider.id.clone());
     deps.db.update_message(&assistant_message)?;
 
-    if let Err(error) = deps.db.record_usage(
+    // `usage_log`: 1 linha por turno (billing) + metadados de cache do último
+    // sample (epoch/prefixo/quebra/protocolo) via `record_usage_with_cache`
+    // (F1.1). A verdade por request é `cache_samples`.
+    let usage_cache = match last_usage_cache.as_ref() {
+        Some(meta) => UsageLogCache {
+            cache_hit_percent: None,
+            cache_epoch: Some(meta.epoch),
+            prefix_hash: meta.prefix_hash.as_deref(),
+            break_reason: meta.break_reason,
+            protocol: Some(meta.protocol.as_str()),
+        },
+        None => UsageLogCache::default(),
+    };
+    if let Err(error) = deps.db.record_usage_with_cache(
         &conversation.id,
         &assistant_message.id,
         &provider.id,
         &model.id,
         &usage,
+        &usage_cache,
     ) {
         eprintln!("lumina: falha ao registrar usage: {error:#}");
     }
@@ -1716,14 +2723,15 @@ pub async fn run_turn(
 
     // Fecho do turno Code: alterações do turno, medidor de contexto e auditoria.
     if profile == TurnProfile::Code {
-        if let Some(summary) = code::session::turn_changes(&deps.db, &conversation.id, &tool_turn_id)
+        if let Some(summary) =
+            code::session::turn_changes(&deps.db, &conversation.id, &tool_turn_id)
         {
             emit(&on_event, TurnEvent::WorkspaceChanges { summary });
         }
         // Fecho: estimativa final do histórico efetivamente enviado ao modelo
         // (substitui o cálculo antigo baseado em `messages`/`all_tool_calls`,
         // que não refletia o request real).
-        let final_system_prompt = compose_system_prompt(&system_prompt, &mode_notes);
+        let final_system_prompt = system_prompt.clone();
         let stats = context_stats_estimate(
             &history,
             &final_system_prompt,
@@ -1955,22 +2963,44 @@ fn history_tool_call(call: &ToolCallRecord) -> HistoryToolCall {
 
 /// Tool result para o replay. Resultado ausente/vazio vira um output sintético:
 /// o provedor recusa uma tool call sem output, então nenhuma call fica órfã.
-fn tool_result_message(call: &ToolCallRecord) -> HistoryMessage {
-    let content = match call
-        .result
-        .as_deref()
-        .filter(|result| !result.trim().is_empty())
-    {
-        Some(result) => truncate_chars(result, MAX_MODEL_TOOL_RESULT_CHARS),
-        None => MISSING_TOOL_RESULT.to_string(),
+fn tool_result_message(call: &ToolCallRecord, pruned: Option<&String>) -> HistoryMessage {
+    // Decisão congelada na compactação manda: o replay é byte-a-byte entre
+    // turnos/restart (render_decisions, F6). Sem decisão, trunca como antes.
+    let content = match pruned {
+        Some(pruned) => pruned.clone(),
+        None => match call
+            .result
+            .as_deref()
+            .filter(|result| !result.trim().is_empty())
+        {
+            Some(result) => truncate_chars(result, MAX_MODEL_TOOL_RESULT_CHARS),
+            None => MISSING_TOOL_RESULT.to_string(),
+        },
     };
     HistoryMessage::tool_result(call.id.clone(), call.name.clone(), content)
+}
+
+/// Textos podados congelados em `render_decisions` para uma mensagem assistant
+/// (mapa `call_id` → texto podado). Erros só logam: o replay cai no original.
+fn frozen_tool_result_prunes(db: &Db, message_id: &str) -> HashMap<String, String> {
+    match db.get_render_decision(message_id, compaction::RENDER_KIND_TOOL_RESULT) {
+        Ok(Some(decision)) => serde_json::from_str(&decision.payload).unwrap_or_default(),
+        Ok(None) => HashMap::new(),
+        Err(error) => {
+            eprintln!("lumina: falha ao ler tool results podados do replay: {error:#}");
+            HashMap::new()
+        }
+    }
 }
 
 /* ------------------------------------------------------------------ */
 /* History                                                             */
 /* ------------------------------------------------------------------ */
 
+/// Constrói o histórico neutral e devolve também, para cada entrada, o ordinal
+/// **1-based da mensagem persistida** que a originou (`0` para `surface_item`).
+/// Esse mapa é o que permite à compactação gravar uma fronteira estável em
+/// mensagens (D15) e à poda remover a superfície coberta (F3b).
 fn build_history(
     deps: &HarnessDeps,
     messages: &[ChatMessage],
@@ -1979,18 +3009,33 @@ fn build_history(
     settings: &Settings,
     model: &ModelInfo,
     supports_images: bool,
-) -> Vec<HistoryMessage> {
-    let allowed_images = image_enabled_messages(messages, supports_images);
-    let mut groups: Vec<Vec<HistoryMessage>> = Vec::new();
+    surface_items: &[crate::db::SurfaceItemRecord],
+    first_message_seq: usize,
+) -> (Vec<HistoryMessage>, Vec<usize>) {
+    let allowed_images = render::frozen_image_inclusions(
+        deps.db.as_ref(),
+        messages,
+        supports_images,
+        MAX_HISTORY_IMAGE_BASE64_CHARS,
+    );
+    // Cada grupo guarda o id/ordinal da mensagem que o originou para posicionar
+    // os `surface_items` ancorados nela (F3a) e mapear o corte (F3b).
+    let mut groups: Vec<(Option<String>, usize, Vec<HistoryMessage>)> = Vec::new();
 
-    for message in messages {
+    for (position, message) in messages.iter().enumerate() {
         if message.id == current_assistant_id {
             continue;
         }
+        let ordinal = first_message_seq.saturating_add(position);
         match message.role {
             MessageRole::User => {
                 let mut history_message = HistoryMessage::user(message.content.clone());
-                if settings.include_attachments {
+                let include_attachments = render::frozen_include_attachments(
+                    deps.db.as_ref(),
+                    message,
+                    settings.include_attachments,
+                );
+                if include_attachments {
                     attach_user_attachments(
                         deps,
                         message,
@@ -2003,50 +3048,76 @@ fn build_history(
                 } else if history_message.text.trim().is_empty() {
                     history_message.text = "Analise o(s) anexo(s) a seguir.".to_string();
                 }
-                groups.push(vec![history_message]);
+                groups.push((Some(message.id.clone()), ordinal, vec![history_message]));
             }
             MessageRole::Assistant => {
                 // Ignore placeholders left behind by an interrupted run.
                 if message.status == MessageStatus::Streaming && message.content.is_empty() {
                     continue;
                 }
-                groups.push(assistant_history_group(message, provider_id, &model.id));
+                let pruned = if message.tool_calls.is_empty() {
+                    HashMap::new()
+                } else {
+                    frozen_tool_result_prunes(deps.db.as_ref(), &message.id)
+                };
+                groups.push((
+                    Some(message.id.clone()),
+                    ordinal,
+                    assistant_history_group(
+                        deps.db.as_ref(),
+                        message,
+                        provider_id,
+                        &model.id,
+                        &pruned,
+                    ),
+                ));
             }
             MessageRole::System => {
-                groups.push(vec![HistoryMessage::system(message.content.clone())]);
+                groups.push((
+                    Some(message.id.clone()),
+                    ordinal,
+                    vec![HistoryMessage::system(message.content.clone())],
+                ));
             }
         }
     }
 
-    // Trim oldest turns until the estimated context fits the model window.
-    let budget = history_budget(model);
-    let mut total = 0usize;
-    let mut keep_from = groups.len();
-    for index in (0..groups.len()).rev() {
-        let size: usize = groups[index].iter().map(history_message_size).sum();
-        if keep_from < groups.len() && total + size > budget {
-            break;
+    // F2b/F2c/F3b: o head do histórico é definido explicitamente pelos perfis
+    // (watermark/compactação) — não há mais corte deslizante por budget aqui.
+    // F3a: posiciona cada `surface_item` depois do grupo da mensagem âncora
+    // (a âncora é sempre uma mensagem `user` nesta fase; `after_step` ainda não
+    // é usado). Itens sem âncora vão para o início; itens de mensagens fora da
+    // janela visível são descartados (o contexto deles foi cortado).
+    let mut anchored: HashMap<String, Vec<&crate::db::SurfaceItemRecord>> = HashMap::new();
+    let mut unanchored: Vec<&crate::db::SurfaceItemRecord> = Vec::new();
+    for item in surface_items {
+        match item.after_message_id.as_deref() {
+            Some(anchor) => anchored.entry(anchor.to_string()).or_default().push(item),
+            None => unanchored.push(item),
         }
-        total += size;
-        keep_from = index;
     }
-    while keep_from < groups.len() {
-        let starts_with_user_or_system = groups
-            .get(keep_from)
-            .and_then(|group| group.first())
-            .map(|message| matches!(&message.role, HistoryRole::User | HistoryRole::System))
-            .unwrap_or(true);
-        if starts_with_user_or_system {
-            break;
+    let mut history: Vec<HistoryMessage> = Vec::new();
+    let mut anchors: Vec<usize> = Vec::new();
+    for item in unanchored {
+        history.push(render_surface_item(item));
+        anchors.push(0);
+    }
+    for (anchor, ordinal, group) in groups {
+        history.extend(group.iter().cloned());
+        anchors.extend(std::iter::repeat_n(ordinal, group.len()));
+        if let Some(anchor) = anchor {
+            if let Some(items) = anchored.get(&anchor) {
+                for item in items {
+                    history.push(render_surface_item(item));
+                    anchors.push(0);
+                }
+            }
         }
-        keep_from += 1;
     }
-
-    let history: Vec<HistoryMessage> = groups.into_iter().skip(keep_from).flatten().collect();
-    // O corte por orçamento sempre começa em user/system, então o pareamento do
-    // replay tem que sobreviver ao flatten.
+    // A expansão do replay tem que manter os tool results pareados; o contexto
+    // de turno é uma mensagem de user e não altera esse pareamento.
     debug_assert_tool_results_are_paired(&history);
-    history
+    (history, anchors)
 }
 
 /// Reconstrói uma mensagem assistant persistida no histórico neutro.
@@ -2059,20 +3130,22 @@ fn build_history(
 /// outro modelo/protocolo é inválido e o estado legado não descreve as tool
 /// calls, o que produziria tool results órfãos no provedor.
 fn assistant_history_group(
+    db: &Db,
     message: &ChatMessage,
     provider_id: &str,
     model_id: &str,
+    pruned: &HashMap<String, String>,
 ) -> Vec<HistoryMessage> {
-    let same_model = message.provider_id.as_deref() == Some(provider_id)
-        && message.model_id.as_deref() == Some(model_id);
-
-    if same_model {
+    // F6/B3: o modo de replay é decidido uma vez e congelado por mensagem;
+    // troca de modelo cai no fallback neutro sem reescrever a decisão.
+    let mode = render::frozen_replay_mode(db, message, provider_id, model_id);
+    if mode == render::ReplayMode::Steps {
         if let Some(steps) = message
             .provider_state
             .as_ref()
             .and_then(parse_provider_state_v2)
         {
-            return replay_steps_history(message, &steps);
+            return replay_steps_history(message, &steps, pruned);
         }
     }
 
@@ -2081,17 +3154,18 @@ fn assistant_history_group(
         .reasoning
         .clone()
         .filter(|reasoning| !reasoning.trim().is_empty());
-    // Estado legado (payload bruto de um único passo): só é seguro replayar
-    // quando não há tool calls persistidas, porque o payload não contém as
-    // chamadas. Envelope v2 inválido também é descartado aqui.
-    history_message.provider_state = message.provider_state.clone().filter(|state| {
-        same_model && message.tool_calls.is_empty() && !is_provider_state_v2(state)
-    });
+    // Estado legado (payload bruto de um único passo) só quando a decisão
+    // congelada é `Raw`; envelope v2 inválido e modelo diferente ficam neutros.
+    history_message.provider_state = if mode == render::ReplayMode::Raw {
+        message.provider_state.clone()
+    } else {
+        None
+    };
     history_message.tool_calls = message.tool_calls.iter().map(history_tool_call).collect();
 
     let mut group = vec![history_message];
     for call in &message.tool_calls {
-        group.push(tool_result_message(call));
+        group.push(tool_result_message(call, pruned.get(&call.id)));
     }
     group
 }
@@ -2099,7 +3173,11 @@ fn assistant_history_group(
 /// Reconstrói o turno multi-step a partir dos passos persistidos: um assistant
 /// por passo (texto + estado bruto + tool calls daquele passo) e, logo depois,
 /// os tool results correspondentes — a mesma ordem do loop em memória.
-fn replay_steps_history(message: &ChatMessage, steps: &[ReplayStep]) -> Vec<HistoryMessage> {
+fn replay_steps_history(
+    message: &ChatMessage,
+    steps: &[ReplayStep],
+    pruned: &HashMap<String, String>,
+) -> Vec<HistoryMessage> {
     let calls_by_id: HashMap<&str, &ToolCallRecord> = message
         .tool_calls
         .iter()
@@ -2125,7 +3203,7 @@ fn replay_steps_history(message: &ChatMessage, steps: &[ReplayStep]) -> Vec<Hist
         }
         group.push(assistant);
         for call in step_calls {
-            group.push(tool_result_message(call));
+            group.push(tool_result_message(call, pruned.get(&call.id)));
         }
     }
 
@@ -2145,7 +3223,7 @@ fn replay_steps_history(message: &ChatMessage, steps: &[ReplayStep]) -> Vec<Hist
             .collect();
         group.push(assistant);
         for call in unreferenced {
-            group.push(tool_result_message(call));
+            group.push(tool_result_message(call, pruned.get(&call.id)));
         }
     }
     group
@@ -2186,6 +3264,9 @@ fn history_budget(model: &ModelInfo) -> usize {
     window.saturating_mul(3).clamp(40_000, 600_000)
 }
 
+/// Estimativa de tamanho de uma mensagem neutral (usada só nos testes do
+/// orçamento histórico legado; o corte deslizante foi removido na F2c/F3b).
+#[cfg(test)]
 fn history_message_size(message: &HistoryMessage) -> usize {
     let mut size = message.text.chars().count();
     size += message.reasoning.as_deref().map(str::len).unwrap_or(0);
@@ -2203,39 +3284,6 @@ fn history_message_size(message: &HistoryMessage) -> usize {
             .unwrap_or(0);
     }
     size
-}
-
-fn image_enabled_messages(messages: &[ChatMessage], supports_images: bool) -> HashSet<String> {
-    let mut enabled = HashSet::new();
-    if !supports_images {
-        return enabled;
-    }
-    // Newest messages get the budget first, so the current turn always wins.
-    let mut remaining = MAX_HISTORY_IMAGE_BASE64_CHARS;
-    for message in messages.iter().rev() {
-        if message.role != MessageRole::User {
-            continue;
-        }
-        let cost: usize = message
-            .attachments
-            .iter()
-            .filter(|attachment| attachment.kind == "image")
-            .map(estimated_image_chars)
-            .sum();
-        if cost > 0 && cost <= remaining {
-            enabled.insert(message.id.clone());
-            remaining = remaining.saturating_sub(cost);
-        }
-        if remaining < 64 * 1024 {
-            break;
-        }
-    }
-    enabled
-}
-
-fn estimated_image_chars(attachment: &AttachmentInfo) -> usize {
-    let bytes = usize::try_from(attachment.size.max(0)).unwrap_or(usize::MAX);
-    bytes.saturating_mul(4) / 3 + 8
 }
 
 fn attach_user_attachments(
@@ -2380,9 +3428,7 @@ fn code_enabled_specs(
         .filter(|spec| has_workspace || !spec.requires_workspace)
         .filter(|spec| settings.shell_enabled || spec.name != "run_command")
         // Subagente: só leitura (sem shell/escrita/plano/perguntas/delegação).
-        .filter(|spec| {
-            !subagent || code::subagent::readonly_tools().contains(&spec.name)
-        })
+        .filter(|spec| !subagent || code::subagent::readonly_tools().contains(&spec.name))
         .collect()
 }
 
@@ -2532,6 +3578,8 @@ fn merge_usage(target: &mut UsageInfo, source: &UsageInfo) {
     target.output_tokens = add_tokens(target.output_tokens, source.output_tokens);
     target.reasoning_tokens = add_tokens(target.reasoning_tokens, source.reasoning_tokens);
     target.cached_tokens = add_tokens(target.cached_tokens, source.cached_tokens);
+    // Cache counters of the turn aggregate (read/write/uncached + reported).
+    target.merge_cache(source);
     target.total_tokens = add_tokens(target.total_tokens, source.total_tokens);
     target.cost = match (target.cost, source.cost) {
         (Some(left), Some(right)) => Some(left + right),
@@ -2659,6 +3707,7 @@ mod tests {
             tags: Vec::new(),
             status: "stable".to_string(),
             estimated: false,
+            cache: None,
         }
     }
 
@@ -2684,6 +3733,7 @@ mod tests {
             oauth: None,
             models: Vec::new(),
             notes: Vec::new(),
+            cache: None,
         }
     }
 
@@ -2844,7 +3894,8 @@ mod tests {
     }
 
     #[test]
-    fn image_budget_prefers_newest_messages() {
+    fn image_budget_prefers_newest_messages_and_is_frozen() {
+        let db = Db::open_in_memory().expect("db");
         let mut messages = Vec::new();
         for index in 0..3 {
             let mut message = ChatMessage::user("c", format!("msg {index}"));
@@ -2858,11 +3909,16 @@ mod tests {
             }];
             messages.push(message);
         }
-        let enabled = image_enabled_messages(&messages, true);
-        // Each 8 MB image costs ~10.7M base64 chars, so only one fits the 16M budget.
+        let enabled =
+            render::frozen_image_inclusions(&db, &messages, true, MAX_HISTORY_IMAGE_BASE64_CHARS);
+        // Cada imagem de 8 MB custa ~10.7M chars base64: só uma cabe nos 16M.
         assert_eq!(enabled.len(), 1);
         assert!(enabled.contains(&messages[2].id));
         assert!(!enabled.contains(&messages[0].id));
+        // Segunda chamada (turno seguinte) reusa as mesmas decisões.
+        let again =
+            render::frozen_image_inclusions(&db, &messages, true, MAX_HISTORY_IMAGE_BASE64_CHARS);
+        assert_eq!(enabled, again);
     }
 
     #[test]
@@ -2893,7 +3949,10 @@ mod agent_loop_tests {
         Modalities, ModelInfo, OAuthProviderInfo, ProviderAuth, ProviderInfo, RequestProfile,
         RequestProfiles,
     };
-    use crate::domain::{Conversation, MessageStatus, ToolCallStatus, TurnOptions, TurnPayload};
+    use crate::domain::{
+        CacheBreakReason, CacheSample, CacheState, Conversation, MessageStatus, SegmentDigest,
+        SegmentKind, ToolCallStatus, TurnOptions, TurnPayload,
+    };
     use crate::providers::StructuredError;
 
     struct TempDb {
@@ -2938,6 +3997,7 @@ mod agent_loop_tests {
             tags: Vec::new(),
             status: "stable".to_string(),
             estimated: false,
+            cache: None,
         };
         let provider = ProviderInfo {
             id: "opencode-go".to_string(),
@@ -2955,6 +4015,7 @@ mod agent_loop_tests {
             oauth: None,
             models: vec![model],
             notes: Vec::new(),
+            cache: None,
         };
         CatalogFile {
             version: 1,
@@ -2983,7 +4044,7 @@ mod agent_loop_tests {
             observed: None,
             jobs: None,
             questions: None,
-        mcp: None,
+            mcp: None,
         }
     }
 
@@ -3020,6 +4081,7 @@ mod agent_loop_tests {
             tags: Vec::new(),
             status: "stable".to_string(),
             estimated: false,
+            cache: None,
         }
     }
 
@@ -3055,6 +4117,7 @@ mod agent_loop_tests {
             }),
             models: vec![openai_model("gpt-6.1-sol")],
             notes: Vec::new(),
+            cache: None,
         }
     }
 
@@ -3085,7 +4148,7 @@ mod agent_loop_tests {
             observed: None,
             jobs: None,
             questions: None,
-        mcp: None,
+            mcp: None,
         }
     }
 
@@ -3163,6 +4226,7 @@ mod agent_loop_tests {
             tags: Vec::new(),
             status: "stable".to_string(),
             estimated: false,
+            cache: None,
         }
     }
 
@@ -3192,6 +4256,7 @@ mod agent_loop_tests {
             oauth: None,
             models: vec![anthropic_model("claude-sonnet-5-5")],
             notes: Vec::new(),
+            cache: None,
         }
     }
 
@@ -3222,7 +4287,7 @@ mod agent_loop_tests {
             observed: None,
             jobs: None,
             questions: None,
-        mcp: None,
+            mcp: None,
         }
     }
 
@@ -3309,6 +4374,234 @@ mod agent_loop_tests {
         emit(sink, ProviderEvent::Done);
     }
 
+    /* ---------------------------------------------------------------- */
+    /* Prompt-cache telemetry (F0a)                                      */
+    /* ---------------------------------------------------------------- */
+
+    /// Deterministic stand-in for the provider SHA-256: only equality of the
+    /// segments matters to the tracker, not the cryptographic strength.
+    fn fake_sha(seed: &str) -> [u8; 32] {
+        let mut sha = [0u8; 32];
+        let mut state: u64 = 0xcbf2_9ce4_8422_2325;
+        for byte in seed.as_bytes() {
+            state ^= u64::from(*byte);
+            state = state.wrapping_mul(0x0000_0100_0000_01b3);
+            let slot = (state % 32) as usize;
+            sha[slot] = sha[slot].wrapping_add((state >> 24) as u8).wrapping_add(1);
+        }
+        sha
+    }
+
+    fn digest_segment(kind: SegmentKind, text: &str) -> SegmentDigest {
+        SegmentDigest {
+            kind,
+            index: 0,
+            sha256: fake_sha(text),
+            chars: u32::try_from(text.chars().count()).unwrap_or(u32::MAX),
+        }
+    }
+
+    /// Canonical digest of a request, mirroring `providers::cache::digest`:
+    /// system → tools → one segment per message, in wire order.
+    fn request_digest(request: &CompletionRequest) -> PrefixDigest {
+        let mut segments = Vec::new();
+        segments.push(digest_segment(
+            SegmentKind::System,
+            &format!("system:{}", request.system_prompt),
+        ));
+        let tools = request
+            .tools
+            .iter()
+            .map(|tool| format!("{}:{}:{}", tool.name, tool.description, tool.parameters))
+            .collect::<Vec<_>>()
+            .join("\n");
+        segments.push(digest_segment(
+            SegmentKind::Tools,
+            &format!("tools:{tools}"),
+        ));
+        for message in &request.history {
+            let mut canonical = format!("{:?}:{}", message.role, message.text);
+            if let Some(reasoning) = &message.reasoning {
+                canonical.push_str(reasoning);
+            }
+            if let Some(tool_call_id) = &message.tool_call_id {
+                canonical.push_str(tool_call_id);
+            }
+            if let Some(tool_name) = &message.tool_name {
+                canonical.push_str(tool_name);
+            }
+            for call in &message.tool_calls {
+                canonical.push_str(&format!("{}:{}:{}", call.id, call.name, call.arguments));
+            }
+            segments.push(digest_segment(SegmentKind::Message, &canonical));
+        }
+        for (index, segment) in segments.iter_mut().enumerate() {
+            segment.index = u32::try_from(index).unwrap_or(u32::MAX);
+        }
+        let total_chars = segments
+            .iter()
+            .map(|segment| segment.chars)
+            .fold(0u32, u32::saturating_add);
+        PrefixDigest {
+            protocol: "openai-chat".to_string(),
+            segments,
+            total_chars,
+            estimated_tokens: total_chars / 4,
+        }
+    }
+
+    /// `cache_stats` events collected from the renderer channel, in order.
+    fn cache_samples(events: &Arc<Mutex<Vec<String>>>) -> Vec<CacheSample> {
+        events
+            .lock()
+            .expect("events lock")
+            .iter()
+            .filter_map(|json| {
+                let value: serde_json::Value = serde_json::from_str(json).ok()?;
+                if value.get("type")?.as_str()? != "cache_stats" {
+                    return None;
+                }
+                serde_json::from_value(value.get("sample")?.clone()).ok()
+            })
+            .collect()
+    }
+
+    /// Usage with normalized cache counters as the provider adapters send it.
+    fn usage_with_cache(input: u32, cached: u32) -> UsageInfo {
+        UsageInfo {
+            input_tokens: Some(input),
+            cached_tokens: Some(cached),
+            cache_read_tokens: Some(cached),
+            cache_reported: true,
+            ..Default::default()
+        }
+    }
+
+    /// Provider fake de um turno que aquece o cache: 2 tool calls + resposta
+    /// final, com hit 0% / 95% / 97% nos 3 requests de wire.
+    fn warming_streamer() -> ProviderStreamer {
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        Arc::new(move |request, sink| {
+            let digest = request_digest(&request);
+            let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let cached = match current {
+                0 => 0,
+                1 => 950,
+                _ => 970,
+            };
+            let usage = usage_with_cache(1_000, cached);
+            Box::pin(async move {
+                emit(&sink, ProviderEvent::CacheDigest(digest));
+                emit(&sink, ProviderEvent::Usage(usage));
+                if current < 2 {
+                    tool_call_stream(&sink, &format!("call-{current}"), "ferramenta_inexistente");
+                } else {
+                    text_stream(&sink, "Resposta final em duas frases.");
+                }
+                Ok(())
+            })
+        })
+    }
+
+    /// Provider fake de um turno de 1 request (resposta final imediata).
+    fn single_request_streamer(cached: u32, text: &'static str) -> ProviderStreamer {
+        Arc::new(move |request, sink| {
+            let digest = request_digest(&request);
+            let usage = usage_with_cache(1_000, cached);
+            Box::pin(async move {
+                emit(&sink, ProviderEvent::CacheDigest(digest));
+                emit(&sink, ProviderEvent::Usage(usage));
+                text_stream(&sink, text);
+                Ok(())
+            })
+        })
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* F2a: prompt snapshot do Chat (data fixa + tools determinísticas)  */
+    /* ---------------------------------------------------------------- */
+
+    /// Provider fake que captura o request final e responde texto.
+    fn capturing_streamer(
+        requests: Arc<Mutex<Vec<CompletionRequest>>>,
+        text: &'static str,
+    ) -> ProviderStreamer {
+        Arc::new(move |request, sink| {
+            let digest = request_digest(&request);
+            requests
+                .lock()
+                .expect("requests lock")
+                .push(request.clone());
+            let usage = usage_with_cache(1_000, 900);
+            Box::pin(async move {
+                emit(&sink, ProviderEvent::CacheDigest(digest));
+                emit(&sink, ProviderEvent::Usage(usage));
+                text_stream(&sink, text);
+                Ok(())
+            })
+        })
+    }
+
+    /// Inputs efetivos do `chat_prompt_snapshot` (mesmo cálculo do `run_turn`):
+    /// catálogo de skills dos dados de teste + gates efetivos do turno.
+    fn chat_snapshot_inputs(
+        deps: &HarnessDeps,
+        conversation: &Conversation,
+        payload: &TurnPayload,
+    ) -> (
+        ModelInfo,
+        ProviderInfo,
+        TurnOptions,
+        Settings,
+        Vec<crate::tools::skills::Skill>,
+    ) {
+        let settings = Settings::default();
+        let mut options = payload.options.clone();
+        options.web_search = options.web_search && settings.web_search_enabled;
+        options.create_files = options.create_files && settings.file_creation_enabled;
+        options.run_code = options.run_code && settings.code_execution_enabled;
+        let skills = tools::skills::catalog_enabled_with_roots(
+            &test_data_dir(),
+            &settings.disabled_skills,
+            &[],
+        )
+        .unwrap_or_default();
+        let model = catalog_model(deps, "deepseek-v4.1-flash");
+        let provider = deps
+            .catalog
+            .provider("opencode-go")
+            .cloned()
+            .expect("provider do fixture");
+        let _ = conversation;
+        (model, provider, options, settings, skills)
+    }
+
+    /// `snapshot_key` do Chat para os inputs dados (mesma função do run_turn).
+    fn chat_snapshot_key_for(
+        conversation: &Conversation,
+        model: &ModelInfo,
+        provider: &ProviderInfo,
+        options: &TurnOptions,
+        settings: &Settings,
+        skills: &[crate::tools::skills::Skill],
+    ) -> String {
+        let tools = cache::snapshot::canonical_tools(&tools::definitions(options));
+        let config = cache::snapshot::config_hash(model, options, settings, skills, &tools);
+        cache::snapshot::snapshot_key(
+            &provider.id,
+            &model.id,
+            cache::snapshot::PROFILE_CHAT,
+            conversation.workspace_id.as_deref(),
+            prompt::PROMPT_VERSION,
+            &config,
+        )
+    }
+
+    fn deps_for_key(temp: &TempDb) -> HarnessDeps {
+        let streamer: ProviderStreamer = Arc::new(|_request, _sink| Box::pin(async { Ok(()) }));
+        deps(temp.db.clone(), streamer)
+    }
+
     #[tokio::test]
     async fn discards_intermediate_narration_and_executes_tool_calls() {
         let temp = TempDb::new();
@@ -3392,17 +4685,28 @@ mod agent_loop_tests {
             .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
             .expect("conversation");
 
-        let calls: Arc<Mutex<Vec<bool>>> = Arc::new(Mutex::new(Vec::new()));
+        // (final forçado?, tem tools?) por request: o wrap-up agora é uma cauda
+        // de user e as tools continuam disponíveis no request forçado (F2b).
+        let calls: Arc<Mutex<Vec<(bool, bool)>>> = Arc::new(Mutex::new(Vec::new()));
         let streamer: ProviderStreamer = {
             let calls = calls.clone();
             Arc::new(move |request, sink| {
-                let has_tools = !request.tools.is_empty();
-                calls.lock().expect("calls lock").push(has_tools);
+                let forced = request
+                    .history
+                    .last()
+                    .map(|message| {
+                        message.role == HistoryRole::User && message.text.starts_with("[wrap-up]")
+                    })
+                    .unwrap_or(false);
+                calls
+                    .lock()
+                    .expect("calls lock")
+                    .push((forced, !request.tools.is_empty()));
                 Box::pin(async move {
-                    if has_tools {
-                        tool_call_stream(&sink, "call-loop", "ferramenta_inexistente");
-                    } else {
+                    if forced {
                         text_stream(&sink, "Resposta final baseada no que já foi coletado.");
+                    } else {
+                        tool_call_stream(&sink, "call-loop", "ferramenta_inexistente");
                     }
                     Ok(())
                 })
@@ -3420,10 +4724,11 @@ mod agent_loop_tests {
         .await
         .expect("turn should complete");
 
-        // Two tool-calling steps + one forced final-answer step without tools.
+        // Two tool-calling steps + one forced final-answer step that keeps the
+        // tool catalog (append-only prefix, F2b).
         assert_eq!(
             calls.lock().expect("calls lock").as_slice(),
-            &[true, true, false]
+            &[(false, true), (false, true), (true, true)]
         );
         assert_eq!(
             result.assistant_message.content,
@@ -3537,7 +4842,7 @@ mod agent_loop_tests {
                 let has_run_code = request.tools.iter().any(|tool| tool.name == "run_code");
                 let has_code_section = request
                     .system_prompt
-                    .contains("# Execução de código (`run_code`)");
+                    .contains("# Code execution (`run_code`)");
                 let has_skills = request.tools.iter().any(|tool| tool.name == "read_skill")
                     && request.system_prompt.contains("# Skills");
                 captured.lock().expect("captured lock").push((
@@ -3740,10 +5045,10 @@ mod agent_loop_tests {
         let prompts = prompts.lock().expect("prompts lock");
         assert!(!prompts.is_empty(), "nenhum prompt capturado");
         assert!(
-            prompts[0].contains("- `revisao-codigo` (codex · somente leitura):"),
+            prompts[0].contains("- `revisao-codigo` (codex · read-only):"),
             "skill externa ausente no catálogo do prompt"
         );
-        assert!(prompts[0].contains("repositórios externos"));
+        assert!(prompts[0].contains("external repositories"));
         drop(prompts);
 
         // A tool `list_skills` executou e devolveu a skill externa.
@@ -4124,7 +5429,7 @@ mod agent_loop_tests {
             .db
             .list_messages(&conversation.id)
             .expect("list messages");
-        let history = build_history(
+        let (history, _anchors) = build_history(
             &deps,
             &messages,
             &placeholder.id,
@@ -4132,6 +5437,8 @@ mod agent_loop_tests {
             &Settings::default(),
             &model,
             false,
+            &[],
+            1,
         );
 
         assert_eq!(
@@ -4186,7 +5493,7 @@ mod agent_loop_tests {
             .db
             .list_messages(&conversation.id)
             .expect("list messages");
-        let history = build_history(
+        let (history, _anchors) = build_history(
             &deps,
             &messages,
             &placeholder.id,
@@ -4194,6 +5501,8 @@ mod agent_loop_tests {
             &Settings::default(),
             &model,
             false,
+            &[],
+            1,
         );
 
         assert_eq!(
@@ -4248,7 +5557,7 @@ mod agent_loop_tests {
             .db
             .list_messages(&conversation.id)
             .expect("list messages");
-        let history = build_history(
+        let (history, _anchors) = build_history(
             &deps,
             &messages,
             &placeholder.id,
@@ -4256,6 +5565,8 @@ mod agent_loop_tests {
             &Settings::default(),
             &model,
             false,
+            &[],
+            1,
         );
 
         assert_eq!(history.len(), 2, "user + assistant: {history:?}");
@@ -4284,7 +5595,7 @@ mod agent_loop_tests {
             .db
             .list_messages(&conversation.id)
             .expect("list messages");
-        let history = build_history(
+        let (history, _anchors) = build_history(
             &deps,
             &messages,
             &placeholder.id,
@@ -4292,6 +5603,8 @@ mod agent_loop_tests {
             &Settings::default(),
             &other_model,
             false,
+            &[],
+            1,
         );
 
         assert_eq!(history.len(), 3, "fallback neutro: {history:?}");
@@ -4341,7 +5654,7 @@ mod agent_loop_tests {
             .db
             .list_messages(&conversation.id)
             .expect("list messages");
-        let history = build_history(
+        let (history, _anchors) = build_history(
             &deps,
             &messages,
             &placeholder.id,
@@ -4349,6 +5662,8 @@ mod agent_loop_tests {
             &Settings::default(),
             &model,
             false,
+            &[],
+            1,
         );
 
         assert_eq!(
@@ -5028,7 +6343,9 @@ mod agent_loop_tests {
             );
         }
         assert!(
-            tool_message.text.contains("Artefato: relatorio-trimestral.docx"),
+            tool_message
+                .text
+                .contains("Artefato: relatorio-trimestral.docx"),
             "cabeçalho do artefato ausente no resultado"
         );
         assert!(
@@ -5075,9 +6392,7 @@ mod agent_loop_tests {
         let data_dir = test_data_dir();
         std::fs::create_dir_all(&data_dir).expect("criar diretório de dados");
         let marker = "CONTEUDO-DA-CONVERSA-AURORA";
-        let content = format!(
-            "# Resumo do projeto\n{marker}\nReceita: R$ 4,82 milhões\n"
-        );
+        let content = format!("# Resumo do projeto\n{marker}\nReceita: R$ 4,82 milhões\n");
         let artifact = tools::artifacts::write_artifact(
             temp.db.as_ref(),
             &data_dir,
@@ -5169,9 +6484,16 @@ mod agent_loop_tests {
             "o texto do artefato de outra conversa precisa chegar inteiro"
         );
         assert!(
-            tool_message.text.contains("Conversa: Projeto Aurora (outra conversa)"),
+            tool_message
+                .text
+                .contains("Conversa: Projeto Aurora (outra conversa)"),
             "o cabeçalho precisa citar a conversa de origem: {}",
-            tool_message.text.lines().take(4).collect::<Vec<_>>().join(" | ")
+            tool_message
+                .text
+                .lines()
+                .take(4)
+                .collect::<Vec<_>>()
+                .join(" | ")
         );
         assert!(
             tool_message.text.chars().count() < MAX_MODEL_TOOL_RESULT_CHARS,
@@ -5430,10 +6752,8 @@ mod agent_loop_tests {
     #[tokio::test]
     async fn code_profile_reads_workspace_through_the_tool_registry() {
         let temp = TempDb::new();
-        let workspace_dir = std::env::temp_dir().join(format!(
-            "lumina-code-workspace-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let workspace_dir =
+            std::env::temp_dir().join(format!("lumina-code-workspace-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
         std::fs::write(
             workspace_dir.join("src/app.ts"),
@@ -5467,7 +6787,10 @@ mod agent_loop_tests {
             let requests = requests.clone();
             let step = step.clone();
             Arc::new(move |request, sink| {
-                requests.lock().expect("requests lock").push(request.clone());
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
                 let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Box::pin(async move {
                     if current == 0 {
@@ -5523,7 +6846,7 @@ mod agent_loop_tests {
         // Prompt de código (não o do Chat) e tools do perfil Code no wire.
         let requests = requests.lock().expect("requests lock").clone();
         assert_eq!(requests.len(), 2, "um request por passo do loop");
-        assert!(requests[0].system_prompt.contains("# Política de permissões"));
+        assert!(requests[0].system_prompt.contains("# Permission policy"));
         assert!(requests[0].system_prompt.contains("# Workspace"));
         assert!(requests[0].system_prompt.contains("demo"));
         let tool_names: Vec<&str> = requests[0]
@@ -5533,7 +6856,10 @@ mod agent_loop_tests {
             .collect();
         assert!(tool_names.contains(&"read_file"));
         assert!(tool_names.contains(&"edit_file"));
-        assert!(!tool_names.contains(&"validate_ui"), "tools do Chat não entram no Code");
+        assert!(
+            !tool_names.contains(&"validate_ui"),
+            "tools do Chat não entram no Code"
+        );
 
         // A tool leu o arquivo e o resultado chegou ao modelo no 2º passo.
         let tool_message = requests[1]
@@ -5546,7 +6872,10 @@ mod agent_loop_tests {
         assert!(tool_message.text.contains("export const a = 1;"));
         assert!(result.assistant_message.content.contains("duas constantes"));
         assert_eq!(result.assistant_message.tool_calls.len(), 1);
-        assert_eq!(result.assistant_message.tool_calls[0].status, ToolCallStatus::Done);
+        assert_eq!(
+            result.assistant_message.tool_calls[0].status,
+            ToolCallStatus::Done
+        );
 
         // Eventos do harness de código emitidos no turno.
         let raw = events.lock().expect("events lock").clone();
@@ -5569,7 +6898,10 @@ mod agent_loop_tests {
             context.used,
             "breakdown soma `used`: {context:?}"
         );
-        assert!(context.breakdown.system_prompt > 0, "system prompt no breakdown");
+        assert!(
+            context.breakdown.system_prompt > 0,
+            "system prompt no breakdown"
+        );
         assert!(
             context.breakdown.tool_definitions > 0,
             "definições de tools no breakdown"
@@ -5664,15 +6996,17 @@ mod agent_loop_tests {
         assert!(calibrated.0 < done_index);
         assert_eq!(
             calibrated.1["breakdown"]["systemPrompt"].as_u64().unwrap()
-                + calibrated.1["breakdown"]["toolDefinitions"].as_u64().unwrap()
+                + calibrated.1["breakdown"]["toolDefinitions"]
+                    .as_u64()
+                    .unwrap()
                 + calibrated.1["breakdown"]["messages"].as_u64().unwrap(),
             u64::from(REAL_INPUT_TOKENS),
             "breakdown calibrado soma o uso real"
         );
 
         // Último emitido == último persistido (snapshot consistente).
-        let persisted = code::session::context_stats(&temp.db, &conversation.id)
-            .expect("medidor persistido");
+        let persisted =
+            code::session::context_stats(&temp.db, &conversation.id).expect("medidor persistido");
         let last_emitted = stats_events.last().expect("último evento").1;
         // Compara o JSON como o renderer vê: `percent` é f32 e o valor persistido
         // passa por to_string/parse (mesma representação do evento).
@@ -5696,10 +7030,8 @@ mod agent_loop_tests {
     #[tokio::test]
     async fn plan_approval_unlocks_mutations_in_the_same_code_turn() {
         let temp = TempDb::new();
-        let workspace_dir = std::env::temp_dir().join(format!(
-            "lumina-code-plan-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let workspace_dir =
+            std::env::temp_dir().join(format!("lumina-code-plan-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
         let workspace = temp
             .db
@@ -5748,9 +7080,16 @@ mod agent_loop_tests {
             let requests = requests.clone();
             let step = step.clone();
             Arc::new(move |request, sink| {
-                requests.lock().expect("requests lock").push(request.clone());
+                let digest = request_digest(&request);
+                let usage = usage_with_cache(1_000, 800);
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
                 let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Box::pin(async move {
+                    emit(&sink, ProviderEvent::CacheDigest(digest));
+                    emit(&sink, ProviderEvent::Usage(usage));
                     match current {
                         0 => {
                             let arguments = serde_json::json!({
@@ -5774,7 +7113,10 @@ mod agent_loop_tests {
                             );
                             emit(
                                 &sink,
-                                ProviderEvent::ToolCallDone { index: 0, arguments },
+                                ProviderEvent::ToolCallDone {
+                                    index: 0,
+                                    arguments,
+                                },
                             );
                             emit(&sink, ProviderEvent::Done);
                         }
@@ -5801,7 +7143,10 @@ mod agent_loop_tests {
                             );
                             emit(
                                 &sink,
-                                ProviderEvent::ToolCallDone { index: 0, arguments },
+                                ProviderEvent::ToolCallDone {
+                                    index: 0,
+                                    arguments,
+                                },
                             );
                             emit(&sink, ProviderEvent::Done);
                         }
@@ -5845,21 +7190,53 @@ mod agent_loop_tests {
             .expect("chamada write_file");
         assert_eq!(write.status, ToolCallStatus::Done, "{:?}", write.result);
 
-        // 2) O prompt do passo 2 avisa o modelo da mudança de modo (D7).
+        // 2) F3b: a mudança de modo NÃO muda o system prompt — vira
+        // `surface_item` kind="mode" anexado como cauda user dos passos seguintes
+        // e persistido para o replay dos próximos turnos.
         let requests = requests.lock().expect("requests lock").clone();
-        assert_eq!(requests.len(), 3, "submit_plan → write_file → resposta final");
-        assert!(
-            requests[1]
-                .system_prompt
-                .contains("# Atualização de permissões"),
-            "{}",
-            requests[1].system_prompt
+        assert_eq!(
+            requests.len(),
+            3,
+            "submit_plan → write_file → resposta final"
         );
-        assert!(
-            requests[1].system_prompt.contains("modo Plano foi desativado"),
-            "{}",
-            requests[1].system_prompt
+        for request in &requests[1..] {
+            assert_eq!(
+                request.system_prompt, requests[0].system_prompt,
+                "mudança de modo não pode trocar o system prompt (F3b)"
+            );
+            assert_eq!(
+                cache::snapshot::tools_json(&request.tools),
+                cache::snapshot::tools_json(&requests[0].tools),
+                "mudança de modo não pode trocar as tools (F3b)"
+            );
+        }
+        assert!(!requests[1].system_prompt.contains("# Permission update"));
+        let mode_message = requests[1]
+            .history
+            .iter()
+            .find(|message| {
+                message
+                    .text
+                    .starts_with("<contexto-da-sessao kind=\"mode\">")
+                    && message.text.contains("disabled Plan mode")
+            })
+            .expect("surface item de modo na cauda do request");
+        assert_eq!(mode_message.role, HistoryRole::User);
+        let surface_items = temp
+            .db
+            .list_surface_items(&conversation.id)
+            .expect("superfície da sessão");
+        assert!(surface_items
+            .iter()
+            .any(|item| item.kind == "mode" && item.text.contains("disabled Plan mode")));
+        // O tracker não vê quebra de prefixo: a nota de modo é só cauda nova.
+        let samples = cache_samples(&events);
+        assert_eq!(samples.len(), 3, "um cache_stats por request de wire");
+        assert_eq!(
+            samples[1].break_reason, None,
+            "mode_notes não pode quebrar o system prompt (F3b)"
         );
+        assert_eq!(samples[2].break_reason, None);
 
         // 3) A UI recebeu `ProfileChanged` real: true no início, false depois.
         let joined = events.lock().expect("events lock").clone().join("\n");
@@ -5896,8 +7273,7 @@ mod agent_loop_tests {
             .db
             .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
             .expect("conversa chat");
-        let streamer: ProviderStreamer =
-            Arc::new(|_request, _sink| Box::pin(async { Ok(()) }));
+        let streamer: ProviderStreamer = Arc::new(|_request, _sink| Box::pin(async { Ok(()) }));
         let harness = deps(temp.db.clone(), streamer);
         let (channel, _events) = channel();
         let mut payload = payload(&conversation, 2);
@@ -5912,5 +7288,3127 @@ mod agent_loop_tests {
         .await
         .expect_err("perfil code exige sessão do Code");
         assert!(format!("{error:#}").contains("CONVERSATION_NOT_CODE"));
+    }
+
+    /// F0a.5 (PLAN §8.2): prova de integração mínima do cache de prompt.
+    ///
+    /// Provider fake emite `CacheDigest` (body final do request) + `Usage` com
+    /// cache; o loop roda 3 requests de wire e o harness precisa emitir 3
+    /// `cache_stats`, com hit% do provedor, P/Δ/ceiling do digest e 0 quebras a
+    /// partir do segundo request.
+    #[tokio::test]
+    async fn emits_one_cache_stats_event_per_wire_request() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                let digest = request_digest(&request);
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                // O cache aquece ao longo do turno: 0% (frio), 95%, 97%.
+                let cached = match current {
+                    0 => 0,
+                    1 => 950,
+                    _ => 970,
+                };
+                let usage = UsageInfo {
+                    input_tokens: Some(1_000),
+                    cached_tokens: Some(cached),
+                    cache_read_tokens: Some(cached),
+                    cache_reported: true,
+                    ..Default::default()
+                };
+                Box::pin(async move {
+                    emit(&sink, ProviderEvent::CacheDigest(digest));
+                    emit(&sink, ProviderEvent::Usage(usage));
+                    if current < 2 {
+                        tool_call_stream(
+                            &sink,
+                            &format!("call-{current}"),
+                            "ferramenta_inexistente",
+                        );
+                    } else {
+                        text_stream(&sink, "Resposta final em duas frases.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let (channel, events) = channel();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            payload(&conversation, 4),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno completo");
+
+        assert!(result
+            .assistant_message
+            .content
+            .contains("Resposta final em duas frases."));
+        let requests = requests.lock().expect("requests lock").clone();
+        assert_eq!(requests.len(), 3, "um request por passo do loop");
+
+        let samples = cache_samples(&events);
+        assert_eq!(samples.len(), 3, "um cache_stats por request de wire");
+        assert_eq!(
+            samples.iter().map(|sample| sample.step).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert!(samples
+            .iter()
+            .all(|sample| sample.provider_id == "opencode-go"));
+        assert!(samples
+            .iter()
+            .all(|sample| sample.model_id == "deepseek-v4.1-flash"));
+        assert!(samples
+            .iter()
+            .all(|sample| sample.protocol == "openai-chat"));
+        assert!(samples.iter().all(|sample| sample.epoch == 1));
+
+        // 1º request é frio (first_request); 2º e 3º estendem o prefixo sem quebrar.
+        assert_eq!(
+            samples[0].break_reason,
+            Some(CacheBreakReason::FirstRequest)
+        );
+        assert_eq!(samples[1].break_reason, None, "2º request sem quebra");
+        assert_eq!(samples[2].break_reason, None, "3º request sem quebra");
+        assert_eq!(samples[0].state, CacheState::Cold);
+        assert_eq!(samples[1].state, CacheState::Stable);
+        assert_eq!(samples[2].state, CacheState::Stable);
+        assert_eq!(samples[0].excluded_reason.as_deref(), Some("cold"));
+        // O fixture DeepSeek não declara `minTokens` no catálogo: as amostras
+        // medidas ficam fora da meta como `unknown_min` (PLAN §2.2) — hit%,
+        // estado e emissão continuam iguais.
+        assert_eq!(samples[1].excluded_reason.as_deref(), Some("unknown_min"));
+        assert_eq!(samples[2].excluded_reason.as_deref(), Some("unknown_min"));
+        assert!(!samples[1].eligible && !samples[2].eligible);
+
+        // hit% é sempre o do usage reportado pelo provedor.
+        assert_eq!(samples[0].hit_percent, Some(0.0));
+        assert_eq!(samples[1].hit_percent, Some(95.0));
+        assert_eq!(samples[2].hit_percent, Some(97.0));
+
+        // P/Δ/ceiling vêm do digest do body final comparado ao request anterior.
+        for index in 1..samples.len() {
+            let digest = request_digest(&requests[index]);
+            let previous = request_digest(&requests[index - 1]);
+            let estimate = cache::prefix::estimate(&digest, Some(&previous));
+            assert_eq!(samples[index].prefix_tokens_est, estimate.prefix_tokens);
+            assert_eq!(samples[index].delta_tokens_est, estimate.delta_tokens);
+            let ceiling =
+                cache::prefix::ceiling_percent(estimate.prefix_tokens, estimate.delta_tokens);
+            assert_eq!(samples[index].ceiling_percent, ceiling);
+            assert!(
+                samples[index].ceiling_percent.expect("ceiling do request") > 90.0,
+                "prefixo grande e Δ pequeno: {:?}",
+                samples[index]
+            );
+        }
+
+        // O usage do turno soma os campos de cache (billing continua por turno).
+        let usage = result
+            .assistant_message
+            .usage
+            .as_ref()
+            .expect("usage do turno");
+        assert_eq!(usage.input_tokens, Some(3_000));
+        assert_eq!(usage.cached_tokens, Some(1_920));
+        assert_eq!(usage.cache_read_tokens, Some(1_920));
+        assert!(usage.cache_reported);
+    }
+
+    /// F0a/F2b: o request final forçado também é um request de wire e precisa da
+    /// sua amostra (passo `max_steps + 1`). O wrap-up é uma cauda transitória de
+    /// user: system prompt e tools ficam idênticos e o tracker vê **0 quebra**.
+    #[tokio::test]
+    async fn forced_final_answer_emits_its_own_cache_stats() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                let digest = request_digest(&request);
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let cached = if current == 0 { 0 } else { 900 };
+                let usage = UsageInfo {
+                    input_tokens: Some(1_000),
+                    cached_tokens: Some(cached),
+                    cache_read_tokens: Some(cached),
+                    cache_reported: true,
+                    ..Default::default()
+                };
+                Box::pin(async move {
+                    emit(&sink, ProviderEvent::CacheDigest(digest));
+                    emit(&sink, ProviderEvent::Usage(usage));
+                    if current == 0 {
+                        // Só tool calls: o loop esgota `max_steps` e força o wrap-up.
+                        tool_call_stream(&sink, "call-1", "ferramenta_inexistente");
+                    } else {
+                        text_stream(&sink, "Resposta final forçada.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let (channel, events) = channel();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            payload(&conversation, 1),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno completo");
+
+        assert!(result
+            .assistant_message
+            .content
+            .contains("Resposta final forçada."));
+        let requests = requests.lock().expect("requests lock").clone();
+        assert_eq!(requests.len(), 2, "passo 1 + final forçado");
+        // F2b (D5): nada de trocar system/tools no request mais caro.
+        assert_eq!(
+            requests[1].system_prompt, requests[0].system_prompt,
+            "wrap-up não troca o system prompt"
+        );
+        assert_eq!(
+            requests[1]
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            requests[0]
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            "wrap-up mantém as tool definitions"
+        );
+        // A instrução é uma cauda transitória de user, anexada ao histórico.
+        let wrap_up = requests[1]
+            .history
+            .last()
+            .expect("cauda de wrap-up no request forçado");
+        assert_eq!(wrap_up.role, HistoryRole::User);
+        assert!(wrap_up.text.starts_with("[wrap-up]"));
+        // O wrap-up não é persistido no replay (o próximo turno não o vê).
+        let provider_state = result
+            .assistant_message
+            .provider_state
+            .as_ref()
+            .map(|state| state.to_string())
+            .unwrap_or_default();
+        assert!(!provider_state.contains("[wrap-up]"));
+
+        let samples = cache_samples(&events);
+        assert_eq!(samples.len(), 2, "um cache_stats por request de wire");
+        assert_eq!(samples[0].step, 1);
+        assert_eq!(samples[1].step, 2, "final forçado usa max_steps + 1");
+        assert_eq!(samples[1].epoch, samples[0].epoch);
+        assert_eq!(
+            samples[1].break_reason, None,
+            "o request forçado é prefixo append-only do anterior"
+        );
+        assert!(samples[1].prefix_tokens_est > 0);
+        assert_eq!(samples[1].state, CacheState::Warming);
+        assert_eq!(samples[1].hit_percent, Some(90.0));
+    }
+
+    /// F0a: o perfil Code emite `cache_stats` no mesmo caminho do Chat e um
+    /// turno de 2 requests de wire não quebra o prefixo persistente.
+    #[tokio::test]
+    async fn code_profile_emits_cache_stats_per_request() {
+        let temp = TempDb::new();
+        let workspace_dir = std::env::temp_dir().join(format!(
+            "lumina-cache-code-workspace-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
+        std::fs::write(
+            workspace_dir.join("src/app.ts"),
+            "export const a = 1;\nexport const b = 2;\n",
+        )
+        .expect("criar arquivo");
+        let workspace = temp
+            .db
+            .create_workspace("demo", &workspace_dir.to_string_lossy())
+            .expect("workspace");
+        temp.db
+            .set_workspace_trusted(&workspace.id, true)
+            .expect("confiar");
+        let conversation = temp
+            .db
+            .create_conversation_with_mode(
+                "Sessão de código",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa code");
+        temp.db
+            .set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("vincular workspace");
+
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                let digest = request_digest(&request);
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let cached = if current == 0 { 0 } else { 950 };
+                let usage = UsageInfo {
+                    input_tokens: Some(1_000),
+                    cached_tokens: Some(cached),
+                    cache_read_tokens: Some(cached),
+                    cache_reported: true,
+                    ..Default::default()
+                };
+                Box::pin(async move {
+                    emit(&sink, ProviderEvent::CacheDigest(digest));
+                    emit(&sink, ProviderEvent::Usage(usage));
+                    if current == 0 {
+                        let arguments = serde_json::json!({ "path": "src/app.ts" }).to_string();
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallStart {
+                                index: 0,
+                                id: "call-read".to_string(),
+                                name: "read_file".to_string(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallArgsDelta {
+                                index: 0,
+                                delta: arguments.clone(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallDone {
+                                index: 0,
+                                arguments,
+                            },
+                        );
+                        emit(&sink, ProviderEvent::Done);
+                    } else {
+                        text_stream(&sink, "O arquivo tem duas constantes.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.observed = Some(Arc::new(code::observed::ObservedFiles::new()));
+        let (channel, events) = channel();
+        let mut payload = payload(&conversation, 4);
+        payload.profile = TurnProfile::Code;
+        payload.content = "Leia src/app.ts e diga o que há nele.".to_string();
+        let _ = run_turn(
+            harness,
+            payload,
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno code completo");
+
+        let requests = requests.lock().expect("requests lock").clone();
+        assert_eq!(requests.len(), 2, "um request por passo do loop");
+        let samples = cache_samples(&events);
+        assert_eq!(samples.len(), 2, "um cache_stats por request de wire");
+        assert_eq!(
+            samples.iter().map(|sample| sample.step).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert!(samples
+            .iter()
+            .all(|sample| sample.provider_id == "opencode-go"));
+        assert_eq!(
+            samples[0].break_reason,
+            Some(CacheBreakReason::FirstRequest)
+        );
+        assert_eq!(samples[1].break_reason, None, "2º request sem quebra");
+        assert_eq!(samples[1].state, CacheState::Stable);
+        assert_eq!(samples[1].hit_percent, Some(95.0));
+        assert!(samples[1].prefix_tokens_est > 0);
+        let _ = workspace_dir;
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* F1.1: persistência/restauração do cache_state                     */
+    /* ---------------------------------------------------------------- */
+
+    /// F1.1 (c): falha de persistência de cache é logada e nunca derruba o
+    /// turno (`record_cache_telemetry` continua atualizando o usage do turno).
+    #[test]
+    fn cache_persistence_failure_is_logged_and_does_not_panic() {
+        let temp = TempDb::new();
+        let tracker = cache::CacheTracker::new();
+        let mut last_usage: Option<TurnUsageCache> = None;
+        // `conversation_id` vazio: `insert_cache_sample`/`upsert_cache_state`
+        // devolvem erro (apenas logado); o helper não pode entrar em pânico.
+        record_cache_telemetry(
+            &temp.db,
+            "",
+            &tracker,
+            &CacheSample::default(),
+            None,
+            None,
+            None,
+            &mut last_usage,
+        );
+        let last_usage = last_usage.expect("metadata de usage atualizada mesmo sem persistir");
+        assert_eq!(last_usage.epoch, 0);
+        assert_eq!(last_usage.protocol, "");
+    }
+
+    #[tokio::test]
+    async fn second_turn_restores_cache_state_and_extends_the_prefix() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        // Turno 1: cache esquenta no turno (3 requests de wire).
+        let (emitter, events) = channel();
+        run_turn(
+            deps(temp.db.clone(), warming_streamer()),
+            payload(&conversation, 4),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 1 completo");
+        let emitted = cache_samples(&events);
+        assert_eq!(emitted.len(), 3);
+
+        // O `cache_state` persistido bate com os eventos emitidos.
+        let record = temp
+            .db
+            .get_cache_state(&conversation.id)
+            .expect("ler estado de cache")
+            .expect("estado de cache gravado no turno 1");
+        assert_eq!(record.epoch, 1);
+        assert_eq!(record.samples, 3);
+        assert_eq!(record.cache_read, 1_920);
+        assert_eq!(record.cache_write, 0);
+        assert_eq!(record.uncached, 1_080);
+        assert_eq!(record.last_hit_percent, Some(97.0));
+        assert!(
+            record
+                .prefix_hash
+                .as_ref()
+                .is_some_and(|hash| hash.len() == 64),
+            "prefix_hash persistido: {:?}",
+            record.prefix_hash
+        );
+        assert!(record
+            .prefix_segments
+            .as_ref()
+            .is_some_and(|segments| !segments.is_empty()));
+
+        // `cache_samples` é a verdade por request (ordem inversa no storage).
+        let rows = temp
+            .db
+            .list_cache_samples(&conversation.id, 10)
+            .expect("listar amostras");
+        assert_eq!(rows.len(), 3);
+        for (event, row) in emitted.iter().zip(rows.iter().rev()) {
+            assert_eq!(event.step, row.step);
+            assert_eq!(event.epoch, row.epoch);
+            assert_eq!(event.hit_percent, row.hit_percent);
+            assert_eq!(event.ceiling_percent, row.ceiling_percent);
+            assert_eq!(event.state, row.state);
+            assert_eq!(event.prefix_tokens_est, row.prefix_tokens_est);
+            assert_eq!(event.delta_tokens_est, row.delta_tokens_est);
+            assert_eq!(event.break_reason, row.break_reason);
+        }
+        let usage = temp.db.usage_summary().expect("resumo de usage");
+        assert_eq!(
+            usage["totals"]["cacheReadTokens"],
+            serde_json::json!(1_920),
+            "usage_log do turno carrega cache_read: {usage}"
+        );
+        assert_eq!(usage["totals"]["cacheWriteTokens"], serde_json::json!(0));
+
+        // Turno 2: começa no mesmo epoch, sem quebra, e o hit sobe para 98%.
+        let (emitter, events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                single_request_streamer(980, "Segunda resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 2 completo");
+        let samples = cache_samples(&events);
+        assert_eq!(samples.len(), 1);
+        let first = &samples[0];
+        assert_eq!(first.epoch, 1, "epoch persistido continua no turno 2");
+        assert_ne!(first.state, CacheState::Cold, "não começa frio");
+        assert_eq!(
+            first.break_reason, None,
+            "primeiro request do turno 2 é extensão do prefixo do turno 1"
+        );
+        assert_eq!(first.state, CacheState::Stable);
+        assert_eq!(first.hit_percent, Some(98.0));
+        assert!(
+            first.prefix_tokens_est > 0,
+            "P comparado ao último digest persistido"
+        );
+        assert_eq!(
+            first.excluded_reason.as_deref(),
+            Some("unknown_min"),
+            "DeepSeek sem minTokens no catálogo"
+        );
+
+        let record = temp
+            .db
+            .get_cache_state(&conversation.id)
+            .expect("ler estado de cache")
+            .expect("estado de cache depois do turno 2");
+        assert_eq!(record.samples, 4);
+        assert_eq!(record.cache_read, 2_900);
+        assert_eq!(record.last_hit_percent, Some(98.0));
+        let aggregate = temp
+            .db
+            .cache_session_aggregate(&conversation.id)
+            .expect("agregado da sessão");
+        assert_eq!(aggregate.samples, 4);
+        assert_eq!(aggregate.cache_read, 2_900);
+        assert_eq!(aggregate.input_total, 4_000);
+    }
+
+    /// F1.1 (b): restart de verdade — uma nova conexão/harness lendo o mesmo
+    /// arquivo de DB restaura epoch/prefixo/totais e não quebra o prefixo.
+    #[tokio::test]
+    async fn restart_restores_the_cache_tracker_from_the_database() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                single_request_streamer(0, "Primeira resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 1 completo");
+        let persisted = temp
+            .db
+            .get_cache_state(&conversation.id)
+            .expect("ler estado")
+            .expect("estado gravado");
+        assert_eq!(persisted.epoch, 1);
+        assert_eq!(persisted.samples, 1);
+        assert!(persisted.prefix_segments.is_some());
+
+        // "Reinício do app": nova instância do Db/harness no mesmo arquivo.
+        let reopened = Arc::new(Db::open(&temp.path).expect("reabrir o banco"));
+        let (emitter, events) = channel();
+        run_turn(
+            deps(
+                reopened.clone(),
+                single_request_streamer(960, "Segunda resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 2 completo após restart");
+        let samples = cache_samples(&events);
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].epoch, 1, "epoch persistido sobrevive ao restart");
+        assert_ne!(samples[0].state, CacheState::Cold);
+        assert_eq!(samples[0].break_reason, None);
+        assert_eq!(samples[0].state, CacheState::Stable);
+        assert_eq!(samples[0].hit_percent, Some(96.0));
+        assert!(samples[0].prefix_tokens_est > 0);
+
+        // O tracker restaurado continua a contagem cumulativa após o restart.
+        let record = reopened
+            .get_cache_state(&conversation.id)
+            .expect("ler estado")
+            .expect("estado depois do restart");
+        assert_eq!(record.samples, 2);
+        assert_eq!(record.cache_read, 960);
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* F2a: prompt snapshot do Chat                                     */
+    /* ---------------------------------------------------------------- */
+
+    /// F2a (a)+(e): dois turnos da mesma sessão/config têm system prompt e tools
+    /// byte-a-byte idênticos (data de sessão fixa, catálogo canônico) e o
+    /// snapshot persistido é exatamente o request congelado.
+    #[tokio::test]
+    async fn chat_prompt_snapshot_is_byte_identical_across_turns() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        let first_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(first_requests.clone(), "Primeira resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 1 completo");
+
+        let second_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(second_requests.clone(), "Segunda resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 2 completo");
+
+        let first = first_requests
+            .lock()
+            .expect("requests lock")
+            .first()
+            .cloned()
+            .expect("request do turno 1");
+        let second = second_requests
+            .lock()
+            .expect("requests lock")
+            .first()
+            .cloned()
+            .expect("request do turno 2");
+
+        // Prefixo estável: mesmo system prompt e mesmo catálogo de tools.
+        assert_eq!(
+            first.system_prompt, second.system_prompt,
+            "system prompt byte-a-byte entre turnos da mesma sessão"
+        );
+        assert_eq!(
+            cache::snapshot::tools_json(&first.tools),
+            cache::snapshot::tools_json(&second.tools),
+            "catálogo de tools byte-a-byte entre turnos"
+        );
+        // Data congelada da sessão (nunca o relógio).
+        let session_date = prompt::session_date(conversation.created_at);
+        assert!(first
+            .system_prompt
+            .contains(&format!("Session date: {session_date}")));
+        assert!(!first.system_prompt.contains("Today is"));
+
+        // O snapshot persistido é o request congelado.
+        let key_deps = deps_for_key(&temp);
+        let payload_state = payload(&conversation, 2);
+        let (model, provider, options, settings, skills) =
+            chat_snapshot_inputs(&key_deps, &conversation, &payload_state);
+        let key = chat_snapshot_key_for(
+            &conversation,
+            &model,
+            &provider,
+            &options,
+            &settings,
+            &skills,
+        );
+        let record = temp
+            .db
+            .get_prompt_snapshot(&conversation.id, &key)
+            .expect("ler snapshot")
+            .expect("snapshot de prompt gravado");
+        assert_eq!(record.system_text, first.system_prompt);
+        assert_eq!(record.tools_json, cache::snapshot::tools_json(&first.tools));
+        assert_eq!(
+            record.stable_hash,
+            cache::snapshot::stable_hash(&first.system_prompt)
+        );
+        assert_eq!(record.tools_hash, cache::snapshot::tools_hash(&first.tools));
+        assert_eq!(record.prompt_version, i64::from(prompt::PROMPT_VERSION));
+        assert!(record.invalidated_at.is_none());
+
+        // `cache_state.prompt_snapshot_hash` aponta para o snapshot congelado.
+        let state = temp
+            .db
+            .get_cache_state(&conversation.id)
+            .expect("ler cache state")
+            .expect("cache state do turno");
+        assert_eq!(state.prompt_snapshot_hash, Some(record.stable_hash));
+    }
+
+    /// F2a (b): restart reusa o snapshot congelado (conteúdo sentinela prova
+    /// que o prompt não foi reconstruído).
+    #[tokio::test]
+    async fn restart_reuses_the_frozen_chat_prompt_snapshot() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let first_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(first_requests.clone(), "Primeira resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 1 completo");
+
+        let key_deps = deps_for_key(&temp);
+        let payload_state = payload(&conversation, 2);
+        let (model, provider, options, settings, skills) =
+            chat_snapshot_inputs(&key_deps, &conversation, &payload_state);
+        let key = chat_snapshot_key_for(
+            &conversation,
+            &model,
+            &provider,
+            &options,
+            &settings,
+            &skills,
+        );
+        let mut record = temp
+            .db
+            .get_prompt_snapshot(&conversation.id, &key)
+            .expect("ler snapshot")
+            .expect("snapshot gravado no turno 1");
+        // Congela um conteúdo sentinela: se o turno 2 reconstruir o prompt,
+        // o request não vai bater com ele.
+        record.system_text = "FROZEN-CHAT-SNAPSHOT".to_string();
+        record.stable_hash = cache::snapshot::stable_hash(&record.system_text);
+        record.tools_json = "[]".to_string();
+        temp.db
+            .upsert_prompt_snapshot(&record)
+            .expect("gravar snapshot sentinela");
+        let frozen_created_at = record.created_at;
+
+        // "Reinício do app": nova conexão ao mesmo DB.
+        let reopened = Arc::new(Db::open(&temp.path).expect("reabrir o banco"));
+        let second_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                reopened.clone(),
+                capturing_streamer(second_requests.clone(), "Segunda resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 2 completo após restart");
+
+        let second = second_requests
+            .lock()
+            .expect("requests lock")
+            .first()
+            .cloned()
+            .expect("request do turno 2");
+        assert_eq!(
+            second.system_prompt, "FROZEN-CHAT-SNAPSHOT",
+            "snapshot do Chat reusado após restart"
+        );
+        assert!(second.tools.is_empty(), "tools_json congelado reusado");
+        let after = reopened
+            .get_prompt_snapshot(&conversation.id, &key)
+            .expect("ler snapshot")
+            .expect("snapshot continua gravado");
+        assert_eq!(
+            after.created_at, frozen_created_at,
+            "snapshot não reescrito"
+        );
+        assert_eq!(after.system_text, "FROZEN-CHAT-SNAPSHOT");
+    }
+
+    /// F2a (c): mudança de settings (system_prompt) gera snapshot novo e nunca
+    /// reusa o prompt congelado de outra config.
+    #[tokio::test]
+    async fn changing_settings_creates_a_new_chat_snapshot() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let first_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(first_requests.clone(), "Primeira resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 1 completo");
+
+        let key_deps = deps_for_key(&temp);
+        let payload_state = payload(&conversation, 2);
+        let (model, provider, options, default_settings, skills) =
+            chat_snapshot_inputs(&key_deps, &conversation, &payload_state);
+        let first_key = chat_snapshot_key_for(
+            &conversation,
+            &model,
+            &provider,
+            &options,
+            &default_settings,
+            &skills,
+        );
+        let first_record = temp
+            .db
+            .get_prompt_snapshot(&conversation.id, &first_key)
+            .expect("ler snapshot")
+            .expect("snapshot do turno 1");
+
+        // Turno 2 com instruções do usuário diferentes: nova config/key.
+        let mut changed_settings = Settings::default();
+        changed_settings.system_prompt = "Sempre responda com uma citação.".to_string();
+        let second_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(second_requests.clone(), "Segunda resposta."),
+            ),
+            payload(&conversation, 2),
+            changed_settings.clone(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 2 completo");
+
+        let second = second_requests
+            .lock()
+            .expect("requests lock")
+            .first()
+            .cloned()
+            .expect("request do turno 2");
+        assert!(second
+            .system_prompt
+            .contains("Sempre responda com uma citação."));
+        assert_ne!(
+            second.system_prompt, first_record.system_text,
+            "config diferente não reusa o prompt congelado"
+        );
+
+        let second_key = chat_snapshot_key_for(
+            &conversation,
+            &model,
+            &provider,
+            &options,
+            &changed_settings,
+            &skills,
+        );
+        assert_ne!(second_key, first_key);
+        let second_record = temp
+            .db
+            .get_prompt_snapshot(&conversation.id, &second_key)
+            .expect("ler snapshot novo")
+            .expect("snapshot da config nova");
+        assert_eq!(second_record.system_text, second.system_prompt);
+        assert!(second_record.invalidated_at.is_none());
+        // O snapshot antigo continua no banco (sem invalidação explícita).
+        let first_after = temp
+            .db
+            .get_prompt_snapshot(&conversation.id, &first_key)
+            .expect("ler snapshot antigo")
+            .expect("snapshot antigo preservado");
+        assert_eq!(first_after.created_at, first_record.created_at);
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* F2b: watermark do histórico do Chat                              */
+    /* ---------------------------------------------------------------- */
+
+    fn watermark_messages(conversation_id: &str) -> Vec<ChatMessage> {
+        let mut assistant = ChatMessage::assistant(conversation_id);
+        assistant.content = "ok".to_string();
+        vec![
+            ChatMessage::user(conversation_id, "a".repeat(200_000)),
+            assistant,
+            ChatMessage::user(conversation_id, "b".repeat(200_000)),
+        ]
+    }
+
+    #[test]
+    fn chat_watermark_advances_in_a_large_jump_to_a_user_boundary() {
+        let messages = watermark_messages("conv-watermark");
+        // budget 300k → salto ~150k: pula o user1 (~200k) até o user2.
+        let new_seq = advance_chat_watermark(&messages, 1, 300_000).expect("salto de watermark");
+        assert_eq!(new_seq, 3);
+        assert_eq!(messages[(new_seq - 1) as usize].role, MessageRole::User);
+        // A mensagem mais nova nunca é removida (cauda preservada).
+        assert_eq!(new_seq as usize, messages.len());
+        // Nunca avança além da cauda.
+        assert!(advance_chat_watermark(&messages, new_seq, 1).is_none());
+    }
+
+    #[test]
+    fn chat_watermark_never_starts_at_an_assistant_message() {
+        let messages = watermark_messages("conv-watermark-2");
+        let seq = advance_chat_watermark(&messages, 1, 300_000).expect("salto");
+        assert_eq!(
+            messages[(seq - 1) as usize].role,
+            MessageRole::User,
+            "corte nunca começa em assistant (tool results do passo ficam pareados)"
+        );
+
+        let record = CacheStateRecord {
+            chat_cut_seq: Some(2),
+            provider_id: Some("opencode-go".to_string()),
+            model_id: Some("deepseek-v4.1-flash".to_string()),
+            ..CacheStateRecord::new("conv-watermark-2")
+        };
+        // Posição 2 é assistant: watermark inválido, ignorado.
+        assert_eq!(
+            chat_history_watermark(
+                &messages,
+                Some(&record),
+                "opencode-go",
+                "deepseek-v4.1-flash"
+            ),
+            None
+        );
+        // Rota diferente: ignora o watermark persistido.
+        assert_eq!(
+            chat_history_watermark(&messages, Some(&record), "outro", "modelo"),
+            None
+        );
+        // Mesma rota e fronteira de user: watermark válido.
+        let valid = CacheStateRecord {
+            chat_cut_seq: Some(3),
+            ..record
+        };
+        assert_eq!(
+            chat_history_watermark(
+                &messages,
+                Some(&valid),
+                "opencode-go",
+                "deepseek-v4.1-flash"
+            ),
+            Some(3)
+        );
+    }
+
+    /// F2b (a): turnos abaixo do budget mantêm a primeira mensagem do histórico
+    /// (sem o corte deslizante do D6).
+    #[tokio::test]
+    async fn chat_history_does_not_slide_below_budget() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        let first_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(first_requests.clone(), "Primeira resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 1");
+
+        let second_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(second_requests.clone(), "Segunda resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 2");
+
+        let first = first_requests.lock().expect("requests lock")[0]
+            .history
+            .first()
+            .cloned()
+            .expect("primeira mensagem do turno 1");
+        let second = second_requests.lock().expect("requests lock")[0]
+            .history
+            .first()
+            .cloned()
+            .expect("primeira mensagem do turno 2");
+        assert_eq!(first.role, HistoryRole::User);
+        assert_eq!(
+            first.text, second.text,
+            "o head do histórico não desliza entre turnos abaixo do budget"
+        );
+        let record = temp
+            .db
+            .get_cache_state(&conversation.id)
+            .expect("ler cache state")
+            .expect("cache state gravado");
+        assert_eq!(record.chat_cut_seq, None, "sem corte sem estourar o budget");
+    }
+
+    /// F2b (b)+(c): turno que estoura o budget avança o watermark em salto,
+    /// persiste no `cache_state`, o turno seguinte usa o mesmo corte (sem novo
+    /// slide) e o restart mantém o watermark.
+    #[tokio::test]
+    async fn chat_history_watermark_advances_in_a_jump_and_survives_restart() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let long = "x".repeat(200_000);
+
+        // Turno 1: só o user1 longo cabe no budget (300k chars do fixture).
+        let mut first_payload = payload(&conversation, 2);
+        first_payload.content = long.clone();
+        let first_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(first_requests.clone(), "Primeira resposta."),
+            ),
+            first_payload,
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 1");
+        let record = temp
+            .db
+            .get_cache_state(&conversation.id)
+            .expect("ler cache state")
+            .expect("estado do turno 1");
+        assert_eq!(record.chat_cut_seq, None, "abaixo do budget: sem watermark");
+
+        // Turno 2: user1 + assistant1 + user2 estoura o budget → salto de ~50%.
+        let mut second_payload = payload(&conversation, 2);
+        second_payload.content = long.clone();
+        let second_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(second_requests.clone(), "Segunda resposta."),
+            ),
+            second_payload,
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 2");
+        let record = temp
+            .db
+            .get_cache_state(&conversation.id)
+            .expect("ler cache state")
+            .expect("estado do turno 2");
+        assert_eq!(
+            record.chat_cut_seq,
+            Some(3),
+            "salto de 2 mensagens: o user2 é a primeira mensagem incluída"
+        );
+        let history2 = second_requests.lock().expect("requests lock")[0]
+            .history
+            .clone();
+        assert_eq!(
+            history2.first().map(|message| message.text.as_str()),
+            Some(long.as_str()),
+            "o próprio turno do salto já usa o novo corte"
+        );
+        assert!(history2.len() < 3, "head antigo cortado: {history2:?}");
+
+        // Turno 3: usa o mesmo corte, sem novo slide.
+        let third_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(third_requests.clone(), "Terceira resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 3");
+        let record = temp
+            .db
+            .get_cache_state(&conversation.id)
+            .expect("ler cache state")
+            .expect("estado do turno 3");
+        assert_eq!(record.chat_cut_seq, Some(3), "watermark nunca regride");
+        let history3 = third_requests.lock().expect("requests lock")[0]
+            .history
+            .clone();
+        assert_eq!(
+            history3.first().map(|message| message.text.as_str()),
+            Some(long.as_str()),
+            "o turno seguinte usa o mesmo corte (sem slide)"
+        );
+
+        // Restart: nova conexão ao mesmo DB mantém o watermark.
+        let reopened = Arc::new(Db::open(&temp.path).expect("reabrir o banco"));
+        let fourth_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                reopened.clone(),
+                capturing_streamer(fourth_requests.clone(), "Quarta resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 4 após restart");
+        let record = reopened
+            .get_cache_state(&conversation.id)
+            .expect("ler cache state")
+            .expect("estado após restart");
+        assert_eq!(record.chat_cut_seq, Some(3), "restart mantém o watermark");
+        let history4 = fourth_requests.lock().expect("requests lock")[0]
+            .history
+            .clone();
+        assert_eq!(
+            history4.first().map(|message| message.text.as_str()),
+            Some(long.as_str()),
+            "após restart o histórico continua no mesmo corte"
+        );
+    }
+
+    /// F2b: watermark persistido de outra rota é resetado (nunca reaproveita o
+    /// head de um provider/modelo diferente).
+    #[tokio::test]
+    async fn chat_watermark_resets_when_the_route_changes() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let first_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(first_requests.clone(), "Primeira resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 1");
+
+        // Simula estado de outra rota com watermark (ex.: troca de modelo).
+        let mut record = temp
+            .db
+            .get_cache_state(&conversation.id)
+            .expect("ler cache state")
+            .expect("estado do turno 1");
+        record.provider_id = Some("outro-provedor".to_string());
+        record.model_id = Some("outro-modelo".to_string());
+        record.chat_cut_seq = Some(2);
+        temp.db
+            .upsert_cache_state(&record)
+            .expect("gravar estado de outra rota");
+
+        let second_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(second_requests.clone(), "Segunda resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 2");
+        let history = second_requests.lock().expect("requests lock")[0]
+            .history
+            .clone();
+        assert_eq!(
+            history.first().map(|message| message.text.as_str()),
+            Some("Explique MCP em duas frases"),
+            "watermark de outra rota não corta o histórico"
+        );
+        let record = temp
+            .db
+            .get_cache_state(&conversation.id)
+            .expect("ler cache state")
+            .expect("estado do turno 2");
+        assert_eq!(
+            record.chat_cut_seq, None,
+            "watermark de rota diferente é resetado"
+        );
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* F3a: snapshot do Code + superfície append-only                   */
+    /* ---------------------------------------------------------------- */
+
+    /// Payload de uma sessão Code de teste (1 request por turno, resposta
+    /// textual imediata do provider fake).
+    fn code_payload(conversation: &Conversation) -> TurnPayload {
+        let mut payload = payload(conversation, 2);
+        payload.profile = TurnProfile::Code;
+        payload.content = "Explique a estrutura do projeto.".to_string();
+        payload
+    }
+
+    /// `snapshot_key` do Code para os inputs dados (mesma função do run_turn).
+    fn code_snapshot_key_for(
+        conversation: &Conversation,
+        ctx: &code::context::CodeTurnContext,
+        provider: &ProviderInfo,
+        model: &ModelInfo,
+        settings: &Settings,
+        options: &TurnOptions,
+        tools: &[crate::providers::ToolDefinition],
+    ) -> String {
+        let prompt_ctx = ctx.prompt_context();
+        let config = cache::snapshot::code_config_hash(
+            model,
+            prompt_ctx.workspace_name.as_deref(),
+            prompt_ctx.workspace_path.as_deref(),
+            prompt_ctx.agents_md.as_deref(),
+            prompt_ctx.project.as_ref(),
+            std::env::consts::OS,
+            settings.shell_enabled,
+            options.delegation_depth,
+            options.system_prompt_override.as_deref(),
+            tools,
+        );
+        cache::snapshot::snapshot_key(
+            &provider.id,
+            &model.id,
+            cache::snapshot::PROFILE_CODE,
+            conversation.workspace_id.as_deref(),
+            code::prompt::PROMPT_VERSION,
+            &config,
+        )
+    }
+
+    /// Cria um workspace Code real de teste e a conversa vinculada.
+    fn code_workspace(temp: &TempDb) -> (std::path::PathBuf, Conversation) {
+        let workspace_dir =
+            std::env::temp_dir().join(format!("lumina-f3a-ws-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
+        std::fs::write(workspace_dir.join("src/app.ts"), "export const a = 1;\n")
+            .expect("criar arquivo");
+        std::fs::write(
+            workspace_dir.join("AGENTS.md"),
+            "# Regras\n\nRode os testes antes de commitar.\n",
+        )
+        .expect("criar AGENTS.md");
+        let workspace = temp
+            .db
+            .create_workspace("demo", &workspace_dir.to_string_lossy())
+            .expect("workspace");
+        temp.db
+            .set_workspace_trusted(&workspace.id, true)
+            .expect("confiar");
+        let conversation = temp
+            .db
+            .create_conversation_with_mode(
+                "Sessão de código",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa code");
+        temp.db
+            .set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("vincular workspace");
+        // Recarrega para refletir `workspace_id` (usado na snapshot_key).
+        let conversation = temp
+            .db
+            .get_conversation(&conversation.id)
+            .expect("reler conversa")
+            .expect("conversa existente");
+        (workspace_dir, conversation)
+    }
+
+    fn runtime_surface_messages(history: &[HistoryMessage]) -> Vec<&HistoryMessage> {
+        history
+            .iter()
+            .filter(|message| message.text.starts_with("<contexto-da-sessao"))
+            .collect()
+    }
+
+    /// F3a (a)+(d)+(e): git/árvore/todos mudam entre turnos → o system prompt e
+    /// as tools continuam byte-idênticos (snapshot reusado), o contexto volátil
+    /// vira `surface_items` append-only renderizado como user e o tracker vê 0
+    /// quebra entre os turnos.
+    #[tokio::test]
+    async fn code_prompt_is_stable_and_runtime_context_is_appended() {
+        let temp = TempDb::new();
+        let (workspace_dir, conversation) = code_workspace(&temp);
+        let settings = Settings::default();
+
+        // Turno 1.
+        let first_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, first_events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(first_requests.clone(), "Primeira resposta."),
+            ),
+            code_payload(&conversation),
+            settings.clone(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 1 do Code");
+        let first = first_requests.lock().expect("requests")[0].clone();
+
+        // Muda o estado volátil do workspace (árvore) entre os turnos.
+        std::fs::write(workspace_dir.join("src/novo.ts"), "export const b = 2;\n")
+            .expect("criar novo.ts");
+
+        // Turno 2.
+        let second_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, second_events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(second_requests.clone(), "Segunda resposta."),
+            ),
+            code_payload(&conversation),
+            settings.clone(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 2 do Code");
+        let second = second_requests.lock().expect("requests")[0].clone();
+
+        // System prompt + tools congelados: nada de relógio/git/árvore/plano/modo.
+        assert_eq!(
+            first.system_prompt, second.system_prompt,
+            "system prompt do Code byte-a-byte entre turnos"
+        );
+        assert_eq!(
+            cache::snapshot::tools_json(&first.tools),
+            cache::snapshot::tools_json(&second.tools),
+            "tools do Code byte-a-byte entre turnos"
+        );
+        let session_date = prompt::session_date(conversation.created_at);
+        assert!(first
+            .system_prompt
+            .contains(&format!("Session date: {session_date}")));
+        for volatile in [
+            "Date: 20",
+            "Current mode",
+            "**Plan mode is active**",
+            "branch `",
+            "Structure (summary)",
+            "Current tasks",
+            "novo.ts",
+        ] {
+            assert!(
+                !first.system_prompt.contains(volatile),
+                "estado volátil `{volatile}` vazou para o system prompt"
+            );
+        }
+
+        // Superfície: um item por turno (árvore mudou), ancorado na user do turno.
+        let messages = temp.db.list_messages(&conversation.id).expect("mensagens");
+        let user_ids: Vec<&str> = messages
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .map(|message| message.id.as_str())
+            .collect();
+        assert_eq!(user_ids.len(), 2);
+        let items = temp
+            .db
+            .list_surface_items(&conversation.id)
+            .expect("superfície");
+        assert_eq!(
+            items.len(),
+            2,
+            "dois contextos de turno appendados: {items:?}"
+        );
+        assert!(items.iter().all(|item| item.kind == "runtime"));
+        assert_eq!(items[0].after_message_id.as_deref(), Some(user_ids[0]));
+        assert_eq!(items[1].after_message_id.as_deref(), Some(user_ids[1]));
+        assert_ne!(items[0].digest, items[1].digest, "árvore mudou → item novo");
+        assert!(items[1].text.contains("Current mode: **Edit**"));
+        assert!(items[1].text.contains("novo.ts"));
+
+        // Replay do turno 2: item antigo depois do grupo da user1 e o novo na
+        // cauda, sempre como mensagem de user (nunca system).
+        let runtime = runtime_surface_messages(&second.history);
+        assert_eq!(runtime.len(), 2, "superfície antiga + nova no replay");
+        assert!(runtime
+            .iter()
+            .all(|message| message.role == HistoryRole::User));
+        assert!(runtime
+            .iter()
+            .all(|message| message.text.ends_with("</contexto-da-sessao>")));
+        let first_item_index = second
+            .history
+            .iter()
+            .position(|message| message.text == render_surface_item(&items[0]).text)
+            .expect("item 1 no replay");
+        let second_item_index = second
+            .history
+            .iter()
+            .position(|message| message.text == render_surface_item(&items[1]).text)
+            .expect("item 2 no replay");
+        assert!(first_item_index < second_item_index);
+        assert_eq!(
+            second_item_index,
+            second.history.len() - 1,
+            "o contexto do turno corrente é a cauda do request"
+        );
+        assert_eq!(
+            first_item_index,
+            second
+                .history
+                .iter()
+                .position(|message| message.text == "Explique a estrutura do projeto.")
+                .expect("user 1")
+                + 1,
+            "item ancorado logo depois da frase do usuário"
+        );
+
+        // Tracker: 0 quebra entre os turnos (só a cauda nova difere).
+        let first_samples = cache_samples(&first_events);
+        let second_samples = cache_samples(&second_events);
+        assert_eq!(first_samples.len(), 1);
+        assert_eq!(second_samples.len(), 1);
+        assert_eq!(second_samples[0].break_reason, None);
+        assert_eq!(second_samples[0].epoch, first_samples[0].epoch);
+        assert!(second_samples[0].prefix_tokens_est > 0);
+
+        // O snapshot persistido é o request congelado do Code.
+        let ctx = code::context::build(&temp.db, &conversation).await;
+        let key_deps = deps_for_key(&temp);
+        let model = catalog_model(&key_deps, "deepseek-v4.1-flash");
+        let provider = key_deps
+            .catalog
+            .provider("opencode-go")
+            .cloned()
+            .expect("provider");
+        let tools = cache::snapshot::canonical_tools(&code_tool_definitions(&ctx, &settings, 0));
+        let key = code_snapshot_key_for(
+            &conversation,
+            &ctx,
+            &provider,
+            &model,
+            &settings,
+            &code_payload(&conversation).options,
+            &tools,
+        );
+        let record = temp
+            .db
+            .get_prompt_snapshot(&conversation.id, &key)
+            .expect("ler snapshot de código")
+            .expect("snapshot de código gravado");
+        assert_eq!(record.profile, "code");
+        assert_eq!(record.system_text, first.system_prompt);
+        assert_eq!(
+            record.stable_hash,
+            cache::snapshot::stable_hash(&first.system_prompt)
+        );
+        assert_eq!(
+            record.prompt_version,
+            i64::from(code::prompt::PROMPT_VERSION)
+        );
+        assert_eq!(record.tools_json, cache::snapshot::tools_json(&first.tools));
+    }
+
+    /// F3a (b)+(c): restart reusa o snapshot congelado do Code e a superfície
+    /// persistida; conteúdo de runtime repetido é deduplicado.
+    #[tokio::test]
+    async fn restart_reuses_the_code_snapshot_and_appended_surface() {
+        let temp = TempDb::new();
+        let (_workspace_dir, conversation) = code_workspace(&temp);
+        let settings = Settings::default();
+
+        let first_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(first_requests.clone(), "Primeira resposta."),
+            ),
+            code_payload(&conversation),
+            settings.clone(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 1 do Code");
+
+        // Calcula a key e congela um conteúdo sentinela: se o turno 2
+        // reconstruir o prompt, o request não bate com ele.
+        let ctx = code::context::build(&temp.db, &conversation).await;
+        let key_deps = deps_for_key(&temp);
+        let model = catalog_model(&key_deps, "deepseek-v4.1-flash");
+        let provider = key_deps
+            .catalog
+            .provider("opencode-go")
+            .cloned()
+            .expect("provider");
+        let options = code_payload(&conversation).options;
+        let tools = cache::snapshot::canonical_tools(&code_tool_definitions(
+            &ctx,
+            &settings,
+            options.delegation_depth,
+        ));
+        let key = code_snapshot_key_for(
+            &conversation,
+            &ctx,
+            &provider,
+            &model,
+            &settings,
+            &options,
+            &tools,
+        );
+        let mut record = temp
+            .db
+            .get_prompt_snapshot(&conversation.id, &key)
+            .expect("ler snapshot")
+            .expect("snapshot do turno 1");
+        record.system_text = "FROZEN-CODE-SNAPSHOT".to_string();
+        record.stable_hash = cache::snapshot::stable_hash(&record.system_text);
+        temp.db
+            .upsert_prompt_snapshot(&record)
+            .expect("gravar sentinela");
+        let frozen_created_at = record.created_at;
+        let items_after_turn_1 = temp
+            .db
+            .list_surface_items(&conversation.id)
+            .expect("superfície")
+            .len();
+        assert_eq!(items_after_turn_1, 1);
+
+        // "Reinício do app": nova conexão ao mesmo DB.
+        let reopened = Arc::new(Db::open(&temp.path).expect("reabrir o banco"));
+        let second_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                reopened.clone(),
+                capturing_streamer(second_requests.clone(), "Segunda resposta."),
+            ),
+            code_payload(&conversation),
+            settings.clone(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 2 após restart");
+        let second = second_requests.lock().expect("requests")[0].clone();
+        assert_eq!(
+            second.system_prompt, "FROZEN-CODE-SNAPSHOT",
+            "snapshot do Code reusado após restart"
+        );
+        assert_eq!(
+            cache::snapshot::tools_json(&second.tools),
+            record.tools_json,
+            "tools_json congelado reusado"
+        );
+        // Runtime idêntico ao turno 1 → dedupe: nenhum item novo, mas o antigo
+        // continua no replay (superfície persistida é reusada).
+        let items = reopened
+            .list_surface_items(&conversation.id)
+            .expect("superfície após restart");
+        assert_eq!(items.len(), 1, "conteúdo repetido é deduplicado");
+        let runtime = runtime_surface_messages(&second.history);
+        assert_eq!(runtime.len(), 1, "superfície persistida no replay");
+        assert_eq!(runtime[0].role, HistoryRole::User);
+        let after = reopened
+            .get_prompt_snapshot(&conversation.id, &key)
+            .expect("ler snapshot")
+            .expect("snapshot continua gravado");
+        assert_eq!(
+            after.created_at, frozen_created_at,
+            "snapshot não reescrito"
+        );
+        assert_eq!(after.system_text, "FROZEN-CODE-SNAPSHOT");
+    }
+
+    /// F3b: compactação cache-safe — o resumo reusa system/tools/histórico como
+    /// prefixo, a fronteira `to_seq` é estável em mensagens (D15), o epoch vira
+    /// `Compaction`, a superfície coberta é podada e restart reconstrói o mesmo
+    /// histórico.
+    #[tokio::test]
+    async fn compaction_reuses_the_prefix_and_reconstructs_the_cut_stably() {
+        let temp = TempDb::new();
+        let (_workspace_dir, conversation) = code_workspace(&temp);
+        let settings = Settings::default();
+        let long = "x".repeat(200_000);
+
+        // Fake com "cache" simulado: `cache_read` = chars do prefixo comum/4.
+        let captured: Arc<Mutex<Vec<(CompletionRequest, UsageInfo)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let previous: Arc<Mutex<Option<PrefixDigest>>> = Arc::new(Mutex::new(None));
+        let streamer: ProviderStreamer = {
+            let captured = captured.clone();
+            let previous = previous.clone();
+            Arc::new(move |request, sink| {
+                let digest = request_digest(&request);
+                let common_chars = previous
+                    .lock()
+                    .expect("previous digest")
+                    .as_ref()
+                    .map(|prev| digest.chars_up_to(digest.common_prefix_segments(prev)))
+                    .unwrap_or(0);
+                let cached = (common_chars / 4).min(900);
+                let usage = usage_with_cache(1_000, cached);
+                previous
+                    .lock()
+                    .expect("previous digest")
+                    .replace(digest.clone());
+                let summary_call = request
+                    .history
+                    .last()
+                    .map(|message| {
+                        message
+                            .text
+                            .starts_with("Summarize the transcript of this same conversation")
+                    })
+                    .unwrap_or(false);
+                captured
+                    .lock()
+                    .expect("captured")
+                    .push((request.clone(), usage.clone()));
+                Box::pin(async move {
+                    emit(&sink, ProviderEvent::CacheDigest(digest));
+                    emit(&sink, ProviderEvent::Usage(usage));
+                    if summary_call {
+                        text_stream(
+                            &sink,
+                            "## Main request\nResumo cache-safe do turno anterior.",
+                        );
+                    } else {
+                        text_stream(&sink, "Resposta final.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        // Turno 1: user curto (aquece a conversa, sem compactação).
+        let mut first_payload = code_payload(&conversation);
+        first_payload.content = "Contexto inicial curto.".to_string();
+        let (emitter, first_events) = channel();
+        run_turn(
+            deps(temp.db.clone(), streamer.clone()),
+            first_payload,
+            settings.clone(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 1");
+        assert_eq!(
+            temp.db
+                .list_surface_items(&conversation.id)
+                .expect("superfície")
+                .len(),
+            1
+        );
+
+        // Turno 2: user grande, mas histórico ainda abaixo do gatilho.
+        let mut warm_payload = code_payload(&conversation);
+        warm_payload.content = long.clone();
+        let (emitter, _warm_events) = channel();
+        run_turn(
+            deps(temp.db.clone(), streamer.clone()),
+            warm_payload,
+            settings.clone(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 2");
+
+        // Turno 3: user1 + assistant1 + user2 + assistant2 + user3 estoura o
+        // gatilho → compacta antes do request normal.
+        let mut second_payload = code_payload(&conversation);
+        second_payload.content = long.clone();
+        let (emitter, second_events) = channel();
+        run_turn(
+            deps(temp.db.clone(), streamer.clone()),
+            second_payload,
+            settings.clone(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 3");
+
+        // Requests do turno 3: resumo primeiro, request normal depois.
+        let captured_now = captured.lock().expect("captured").clone();
+        assert_eq!(
+            captured_now.len(),
+            4,
+            "turno 1 + turno 2 + resumo + request normal do turno 3"
+        );
+        let (summary_request, summary_usage) = &captured_now[2];
+        let (normal_request, _) = &captured_now[3];
+        let instruction = summary_request.history.last().expect("instrução no fim");
+        assert!(instruction
+            .text
+            .starts_with("Summarize the transcript of this same conversation"));
+        // O transcript do resumo cobriu o `surface_item` do turno 1 (poda).
+        assert!(
+            instruction.text.contains("Session runtime context"),
+            "o transcript deve incluir o texto do surface_item coberto"
+        );
+        // O resumo reusa o request normal como prefixo (system/tools/histórico).
+        assert_eq!(summary_request.system_prompt, normal_request.system_prompt);
+        assert_eq!(
+            cache::snapshot::tools_json(&summary_request.tools),
+            cache::snapshot::tools_json(&normal_request.tools)
+        );
+        let mut prefix_request = summary_request.clone();
+        prefix_request.history.pop();
+        let prefix_digest = request_digest(&prefix_request);
+        let summary_digest = request_digest(summary_request);
+        let estimate = cache::prefix::estimate(&summary_digest, Some(&prefix_digest));
+        assert_eq!(
+            estimate.common_segments as usize,
+            prefix_digest.segments.len(),
+            "o histórico normal é prefixo do request de resumo"
+        );
+        assert!(
+            summary_usage.cache_read_tokens.unwrap_or(0) > 0,
+            "o resumo leu o prefixo cacheado: {summary_usage:?}"
+        );
+
+        // Fronteira estável em MENSAGENS (D15): to_seq = mensagens cobertas.
+        let messages = temp.db.list_messages(&conversation.id).expect("mensagens");
+        let summary = temp
+            .db
+            .latest_session_summary(&conversation.id)
+            .expect("ler resumo")
+            .expect("resumo persistido");
+        let cut = usize::try_from(summary.to_seq).expect("to_seq");
+        assert_eq!(
+            summary.to_seq, 4,
+            "user1..assistant2 cobertos (mensagens, D15)"
+        );
+        assert_eq!(messages[cut].role, MessageRole::User);
+
+        // Poda: o runtime item ancorado na user1 (coberta) saiu do replay; o do
+        // turno 2 (user2, mantida) ficou.
+        let covered_ids: Vec<&str> = messages[..cut]
+            .iter()
+            .map(|message| message.id.as_str())
+            .collect();
+        let items_after = temp
+            .db
+            .list_surface_items(&conversation.id)
+            .expect("superfície após compactação");
+        assert!(
+            items_after.iter().all(|item| item
+                .after_message_id
+                .as_deref()
+                .map(|anchor| !covered_ids.contains(&anchor))
+                .unwrap_or(true)),
+            "superfície coberta deve ser podada: {items_after:?}"
+        );
+
+        // Epoch novo com causa Compaction no primeiro sample do turno 2.
+        let second_samples = cache_samples(&second_events);
+        assert_eq!(second_samples.len(), 1);
+        assert_eq!(
+            second_samples[0].break_reason,
+            Some(CacheBreakReason::Compaction)
+        );
+        let first_epoch = cache_samples(&first_events)[0].epoch;
+        assert!(
+            second_samples[0].epoch > first_epoch,
+            "epoch compaction incrementado"
+        );
+
+        // Turno seguinte: [resumo]+cauda byte-a-byte e extensão do prefixo.
+        let (emitter, third_events) = channel();
+        run_turn(
+            deps(temp.db.clone(), streamer.clone()),
+            code_payload(&conversation),
+            settings.clone(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 3");
+        let captured_now = captured.lock().expect("captured").clone();
+        let third_request = &captured_now.last().expect("request 3").0;
+        assert!(
+            third_request.history[0]
+                .text
+                .contains("[Summary of the previous conversation"),
+            "turno seguinte reconstrói [resumo]+cauda"
+        );
+        let third_digest = request_digest(third_request);
+        let normal_digest = request_digest(normal_request);
+        let estimate = cache::prefix::estimate(&third_digest, Some(&normal_digest));
+        assert_eq!(
+            estimate.common_segments as usize,
+            normal_digest.segments.len(),
+            "o turno seguinte estende o request compactado (0 quebra)"
+        );
+        assert_eq!(cache_samples(&third_events)[0].break_reason, None);
+
+        // Restart: mesma fronteira persistida reconstrói o mesmo prefixo.
+        let reopened = Arc::new(Db::open(&temp.path).expect("reabrir"));
+        let summary_after = reopened
+            .latest_session_summary(&conversation.id)
+            .expect("ler resumo")
+            .expect("resumo persistido após restart");
+        assert_eq!(summary_after.to_seq, summary.to_seq);
+        let (emitter, fourth_events) = channel();
+        run_turn(
+            deps(reopened.clone(), streamer.clone()),
+            code_payload(&conversation),
+            settings.clone(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 4 após restart");
+        let captured_now = captured.lock().expect("captured").clone();
+        let fourth_request = &captured_now.last().expect("request 4").0;
+        assert!(fourth_request.history[0]
+            .text
+            .contains("[Summary of the previous conversation"));
+        let fourth_digest = request_digest(fourth_request);
+        let estimate = cache::prefix::estimate(&fourth_digest, Some(&third_digest));
+        assert_eq!(
+            estimate.common_segments as usize,
+            third_digest.segments.len(),
+            "restart reconstrói o mesmo prefixo"
+        );
+        assert_eq!(cache_samples(&fourth_events)[0].break_reason, None);
+        // F4: o request de resumo carrega o mesmo plano do request normal.
+        assert_eq!(summary_request.cache_plan, normal_request.cache_plan);
+        assert!(
+            normal_request.cache_plan.is_some(),
+            "OpenAI-Chat tem plano (key estável) desde a F4"
+        );
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* F4 wiring: cache plan por request                                */
+    /* ---------------------------------------------------------------- */
+
+    fn cache_info(mode: &str, min_tokens: Option<u32>) -> crate::catalog::CacheInfo {
+        crate::catalog::CacheInfo {
+            mode: mode.to_string(),
+            min_tokens,
+            block_tokens: Some(128),
+            ttl_options: Vec::new(),
+            supports_key: true,
+            supports_retention: true,
+            supports_explicit_breakpoints: true,
+            reports_read: true,
+            reports_write: true,
+            source: Some("test".to_string()),
+        }
+    }
+
+    fn plan_catalog(
+        provider_id: &str,
+        model_id: &str,
+        protocol: &str,
+        family: &str,
+        provider_cache: Option<crate::catalog::CacheInfo>,
+        model_cache: Option<crate::catalog::CacheInfo>,
+    ) -> CatalogFile {
+        let model = ModelInfo {
+            id: model_id.to_string(),
+            name: model_id.to_string(),
+            family: family.to_string(),
+            protocols: vec![protocol.to_string()],
+            reasoning: false,
+            reasoning_options: Vec::new(),
+            attachment: false,
+            modalities: Default::default(),
+            context_window: 200_000,
+            max_output: 8_000,
+            cost: None,
+            release_date: None,
+            knowledge: None,
+            open_weights: false,
+            description: None,
+            tags: Vec::new(),
+            status: "stable".to_string(),
+            estimated: false,
+            cache: model_cache,
+        };
+        let provider = ProviderInfo {
+            id: provider_id.to_string(),
+            name: provider_id.to_string(),
+            short_name: "P".to_string(),
+            description: String::new(),
+            base_url: "https://example.invalid".to_string(),
+            console_url: String::new(),
+            endpoints: [(protocol.to_string(), "/x".to_string())]
+                .into_iter()
+                .collect(),
+            headers: Default::default(),
+            auth_env: "LUMINA_TEST_CACHE_PLAN_KEY".to_string(),
+            default_model_id: model_id.to_string(),
+            auth: Default::default(),
+            request_profiles: Default::default(),
+            oauth: None,
+            models: vec![model],
+            notes: Vec::new(),
+            cache: provider_cache,
+        };
+        CatalogFile {
+            version: 1,
+            generated_at: String::new(),
+            sources: serde_json::Value::Null,
+            providers: vec![provider],
+        }
+    }
+
+    /// Roda um turno Chat com um catálogo/fixture de plano e devolve os requests
+    /// capturados pelo provider fake.
+    async fn run_plan_turn(
+        temp: &TempDb,
+        catalog: CatalogFile,
+        provider_id: &str,
+        model_id: &str,
+        settings: Settings,
+        max_steps: u32,
+    ) -> Vec<CompletionRequest> {
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", provider_id, model_id)
+            .expect("conversa do fixture");
+        let mut payload = payload(&conversation, max_steps);
+        payload.provider_id = provider_id.to_string();
+        payload.model_id = model_id.to_string();
+        let (emitter, _events) = channel();
+        let mut harness = deps(
+            temp.db.clone(),
+            capturing_streamer(requests.clone(), "Resposta."),
+        );
+        harness.catalog = catalog;
+        run_turn(
+            harness,
+            payload,
+            settings,
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno do fixture de plano");
+        let captured = requests.lock().expect("requests lock").clone();
+        captured
+    }
+
+    /// F4 (a): OpenAI Responses recebe `prompt_cache_key` estável de 64 hex e
+    /// retention vinda de `Settings.cache`; `show_indicator` não desliga o plano.
+    #[tokio::test]
+    async fn openai_responses_plan_has_a_stable_key_and_retention() {
+        let temp = TempDb::new();
+        let catalog = plan_catalog(
+            "openai-direct",
+            "gpt-test",
+            "openai-responses",
+            "gpt",
+            None,
+            None,
+        );
+        let requests = run_plan_turn(
+            &temp,
+            catalog.clone(),
+            "openai-direct",
+            "gpt-test",
+            Settings::default(),
+            2,
+        )
+        .await;
+        let plan = requests[0]
+            .cache_plan
+            .as_ref()
+            .expect("OpenAI responsável por plano");
+        let key = plan.prompt_cache_key.as_deref().expect("prompt_cache_key");
+        assert_eq!(key.len(), 64, "key hex de 64 chars: {key}");
+        assert!(key.chars().all(|character| character.is_ascii_hexdigit()));
+        assert_eq!(plan.retention, None, "retention é opt-in");
+        assert!(
+            plan.breakpoints.is_empty(),
+            "OpenAI auto não usa breakpoints"
+        );
+
+        let mut retentive = Settings::default();
+        retentive.cache.openai_retention = Some("24h".to_string());
+        let requests = run_plan_turn(
+            &temp,
+            catalog.clone(),
+            "openai-direct",
+            "gpt-test",
+            retentive,
+            2,
+        )
+        .await;
+        assert_eq!(
+            requests[0]
+                .cache_plan
+                .as_ref()
+                .and_then(|plan| plan.retention.as_deref()),
+            Some("24h")
+        );
+
+        let mut hidden_indicator = Settings::default();
+        hidden_indicator.cache.show_indicator = false;
+        let requests = run_plan_turn(
+            &temp,
+            catalog,
+            "openai-direct",
+            "gpt-test",
+            hidden_indicator,
+            2,
+        )
+        .await;
+        assert!(
+            requests[0].cache_plan.is_some(),
+            "show_indicator é só UI: não desliga o plano"
+        );
+    }
+
+    /// F4 (b): Anthropic com `minTokens: null` no catálogo não escreve cache.
+    #[tokio::test]
+    async fn anthropic_plan_is_none_until_the_catalog_knows_the_minimum() {
+        let temp = TempDb::new();
+        let catalog = plan_catalog(
+            "anthropic-direct",
+            "claude-test",
+            "anthropic",
+            "claude",
+            None,
+            None,
+        );
+        let requests = run_plan_turn(
+            &temp,
+            catalog,
+            "anthropic-direct",
+            "claude-test",
+            Settings::default(),
+            2,
+        )
+        .await;
+        assert!(
+            requests[0].cache_plan.is_none(),
+            "minTokens desconhecido → sem write pago: {:?}",
+            requests[0].cache_plan
+        );
+    }
+
+    /// F4 (c)+(d): catálogo sintético com `minTokens=Some(1)` → breakpoints em
+    /// tools/system/tail e TTL de `Settings.cache.anthropic_ttl`.
+    #[tokio::test]
+    async fn anthropic_plan_uses_breakpoints_and_the_settings_ttl() {
+        use crate::domain::CacheTtl;
+
+        let temp = TempDb::new();
+        let catalog = plan_catalog(
+            "anthropic-direct",
+            "claude-test",
+            "anthropic",
+            "claude",
+            Some(cache_info("explicit", Some(1))),
+            None,
+        );
+        let requests = run_plan_turn(
+            &temp,
+            catalog.clone(),
+            "anthropic-direct",
+            "claude-test",
+            Settings::default(),
+            2,
+        )
+        .await;
+        let plan = requests[0]
+            .cache_plan
+            .as_ref()
+            .expect("plano Anthropic explícito");
+        assert_eq!(plan.mode, providers::cache::CacheMode::Explicit);
+        assert_eq!(plan.ttl.as_deref(), Some("1h"), "TTL default");
+        assert!(
+            plan.breakpoints.len() >= 3,
+            "tools + system + tail: {:?}",
+            plan.breakpoints
+        );
+        for (target, label) in [
+            (providers::cache::CacheBreakpointTarget::Tools, "tools"),
+            (providers::cache::CacheBreakpointTarget::System, "system"),
+            (providers::cache::CacheBreakpointTarget::Tail, "tail"),
+        ] {
+            assert!(
+                plan.breakpoints.iter().any(|point| point.target == target),
+                "breakpoint `{label}` ausente: {:?}",
+                plan.breakpoints
+            );
+        }
+
+        let mut five_minutes = Settings::default();
+        five_minutes.cache.anthropic_ttl = CacheTtl::FiveMinutes;
+        let requests = run_plan_turn(
+            &temp,
+            catalog,
+            "anthropic-direct",
+            "claude-test",
+            five_minutes,
+            2,
+        )
+        .await;
+        assert_eq!(
+            requests[0]
+                .cache_plan
+                .as_ref()
+                .and_then(|plan| plan.ttl.as_deref()),
+            Some("5m"),
+            "Settings.cache.anthropic_ttl reflete no plano"
+        );
+    }
+
+    /// F4 (e): Google usa só cache implícito → sem plano (nenhum campo no body).
+    #[tokio::test]
+    async fn google_plan_is_none() {
+        let temp = TempDb::new();
+        let catalog = plan_catalog(
+            "google-direct",
+            "gemini-test",
+            "google",
+            "gemini",
+            None,
+            None,
+        );
+        let requests = run_plan_turn(
+            &temp,
+            catalog,
+            "google-direct",
+            "gemini-test",
+            Settings::default(),
+            2,
+        )
+        .await;
+        assert!(requests[0].cache_plan.is_none());
+    }
+
+    /// F4 (f): o final forçado mantém o mesmo plano do restante do turno
+    /// (system/tools idênticos → mesma key).
+    #[tokio::test]
+    async fn forced_final_keeps_the_turn_cache_plan() {
+        let temp = TempDb::new();
+        let catalog = plan_catalog(
+            "openai-direct",
+            "gpt-test",
+            "openai-responses",
+            "gpt",
+            None,
+            None,
+        );
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "openai-direct", "gpt-test")
+            .expect("conversa");
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    if current == 0 {
+                        tool_call_stream(&sink, "call-1", "ferramenta_inexistente");
+                    } else {
+                        text_stream(&sink, "Resposta final forçada.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+        let mut payload = payload(&conversation, 1);
+        payload.provider_id = "openai-direct".to_string();
+        payload.model_id = "gpt-test".to_string();
+        let (emitter, _events) = channel();
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.catalog = catalog;
+        run_turn(
+            harness,
+            payload,
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno com final forçado");
+        let requests = requests.lock().expect("requests lock").clone();
+        assert_eq!(requests.len(), 2, "passo + final forçado");
+        let first_plan = requests[0].cache_plan.as_ref().expect("plano do passo");
+        let forced_plan = requests[1]
+            .cache_plan
+            .as_ref()
+            .expect("final forçado mantém o plano");
+        assert_eq!(first_plan, forced_plan, "mesmo plano no final forçado");
+        assert_eq!(
+            first_plan.prompt_cache_key, forced_plan.prompt_cache_key,
+            "mesma key (mesma sessão/provider/model/protocolo)"
+        );
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* F2c: compactação cache-safe do Chat                              */
+    /* ---------------------------------------------------------------- */
+
+    /// Persiste `exchanges` pares user/assistant antigos na conversa (histórico
+    /// longo para exercitar a compactação do Chat).
+    fn seed_chat_history(
+        temp: &TempDb,
+        conversation: &Conversation,
+        exchanges: usize,
+        chars: usize,
+    ) {
+        let base = 1_700_000_000_000i64;
+        for index in 0..exchanges {
+            let mut user = ChatMessage::user(&conversation.id, "x".repeat(chars));
+            user.created_at = base + (index as i64) * 2;
+            temp.db.insert_message(&user).expect("user seed");
+            let mut assistant = ChatMessage::assistant(&conversation.id);
+            assistant.content = format!("Resposta {index}.");
+            assistant.status = MessageStatus::Complete;
+            assistant.created_at = base + (index as i64) * 2 + 1;
+            temp.db.insert_message(&assistant).expect("assistant seed");
+        }
+    }
+
+    /// Fake do Chat com cache simulado: o request de resumo (última mensagem é a
+    /// instrução) devolve um resumo; o normal devolve texto. `cache_read` é
+    /// derivado do prefixo comum com o request anterior (como o provedor faria).
+    fn chat_cache_streamer(
+        captured: Arc<Mutex<Vec<(CompletionRequest, UsageInfo)>>>,
+        previous: Arc<Mutex<Option<PrefixDigest>>>,
+        fail_summary: bool,
+    ) -> ProviderStreamer {
+        Arc::new(move |request, sink| {
+            let digest = request_digest(&request);
+            let common_chars = previous
+                .lock()
+                .expect("previous digest")
+                .as_ref()
+                .map(|prev| digest.chars_up_to(digest.common_prefix_segments(prev)))
+                .unwrap_or(0);
+            let cached = (common_chars / 4).min(900);
+            let usage = usage_with_cache(1_000, cached);
+            previous
+                .lock()
+                .expect("previous digest")
+                .replace(digest.clone());
+            let summary_call = request
+                .history
+                .last()
+                .map(|message| {
+                    message
+                        .text
+                        .starts_with("Summarize the transcript of this same conversation")
+                })
+                .unwrap_or(false);
+            captured
+                .lock()
+                .expect("captured")
+                .push((request.clone(), usage.clone()));
+            Box::pin(async move {
+                if summary_call {
+                    if fail_summary {
+                        return Err(anyhow::anyhow!("falha simulada do resumo"));
+                    }
+                    emit(&sink, ProviderEvent::CacheDigest(digest));
+                    emit(&sink, ProviderEvent::Usage(usage));
+                    text_stream(&sink, "## Main request\nResumo cache-safe do Chat.");
+                } else {
+                    emit(&sink, ProviderEvent::CacheDigest(digest));
+                    emit(&sink, ProviderEvent::Usage(usage));
+                    text_stream(&sink, "Resposta final.");
+                }
+                Ok(())
+            })
+        })
+    }
+
+    /// F2c (a): histórico curto do Chat não compacta.
+    #[tokio::test]
+    async fn chat_short_history_does_not_compact() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let captured: Arc<Mutex<Vec<(CompletionRequest, UsageInfo)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let previous: Arc<Mutex<Option<PrefixDigest>>> = Arc::new(Mutex::new(None));
+        let (emitter, events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                chat_cache_streamer(captured.clone(), previous, false),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno curto");
+        assert_eq!(captured.lock().expect("captured").len(), 1);
+        assert!(
+            temp.db
+                .latest_session_summary(&conversation.id)
+                .expect("ler resumo")
+                .is_none(),
+            "histórico curto não pode compactar"
+        );
+        assert!(
+            !events
+                .lock()
+                .expect("events")
+                .iter()
+                .any(|event| event.contains("compacted")),
+            "sem evento de compactação"
+        );
+    }
+
+    /// F2c (b)+(d)+(e): histórico acima do threshold → resumo reusa o prefixo,
+    /// `session_summaries` é persistido (to_seq estável), o turno seguinte usa
+    /// `[resumo]+cauda` e estende o prefixo, restart reconstrói e o snapshot do
+    /// Chat não muda.
+    #[tokio::test]
+    async fn chat_compaction_reuses_the_prefix_and_reconstructs_on_restart() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        // Primeiro turno curto: aquece o prefixo/snapshot e simula o cache do
+        // provedor para o request de resumo do turno seguinte.
+        let captured: Arc<Mutex<Vec<(CompletionRequest, UsageInfo)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let previous: Arc<Mutex<Option<PrefixDigest>>> = Arc::new(Mutex::new(None));
+        let (emitter, _first_events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                chat_cache_streamer(captured.clone(), previous.clone(), false),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno inicial");
+        // 4 pares de 120k chars (~480k chars ≈ 120k tokens) > gatilho de 69k.
+        seed_chat_history(&temp, &conversation, 4, 120_000);
+
+        let (emitter, events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                chat_cache_streamer(captured.clone(), previous.clone(), false),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno com compactação");
+
+        let captured_now = captured.lock().expect("captured").clone();
+        assert_eq!(
+            captured_now.len(),
+            3,
+            "turno inicial + resumo + request normal"
+        );
+        let (summary_request, summary_usage) = &captured_now[1];
+        let (normal_request, _) = &captured_now[2];
+        let instruction = summary_request.history.last().expect("instrução no fim");
+        assert!(instruction
+            .text
+            .starts_with("Summarize the transcript of this same conversation"));
+        // O resumo reusa system/tools/histórico como prefixo (cache-safe).
+        let mut prefix_request = summary_request.clone();
+        prefix_request.history.pop();
+        let prefix_digest = request_digest(&prefix_request);
+        let summary_digest = request_digest(summary_request);
+        let estimate = cache::prefix::estimate(&summary_digest, Some(&prefix_digest));
+        assert_eq!(
+            estimate.common_segments as usize,
+            prefix_digest.segments.len(),
+            "histórico normal é prefixo do resumo do Chat"
+        );
+        assert!(
+            summary_usage.cache_read_tokens.unwrap_or(0) > 0,
+            "o resumo do Chat leu o prefixo cacheado: {summary_usage:?}"
+        );
+        assert_eq!(
+            summary_request.cache_plan, normal_request.cache_plan,
+            "resumo usa o mesmo cache_plan do request normal"
+        );
+
+        // `session_summaries` com fronteira em mensagens (ordinal estável).
+        let messages = temp.db.list_messages(&conversation.id).expect("mensagens");
+        let summary = temp
+            .db
+            .latest_session_summary(&conversation.id)
+            .expect("ler resumo")
+            .expect("resumo persistido");
+        let cut = usize::try_from(summary.to_seq).expect("to_seq");
+        assert!(cut > 0 && cut < messages.len());
+        assert_eq!(messages[cut].role, MessageRole::User);
+        // Watermark de emergência não é usado quando há resumo.
+        let state = temp
+            .db
+            .get_cache_state(&conversation.id)
+            .expect("estado")
+            .expect("cache_state");
+        assert_eq!(state.chat_cut_seq, None);
+
+        // Epoch Compaction no primeiro sample do turno.
+        let samples = cache_samples(&events);
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].break_reason, Some(CacheBreakReason::Compaction));
+
+        // Turno seguinte: [resumo]+cauda e extensão do request compactado.
+        let (emitter, events_after) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                chat_cache_streamer(captured.clone(), previous, false),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno seguinte");
+        let captured_now = captured.lock().expect("captured").clone();
+        let next_request = &captured_now[captured_now.len() - 1].0;
+        assert!(
+            next_request.history[0]
+                .text
+                .contains("[Summary of the previous conversation"),
+            "turno seguinte reconstrói [resumo]+cauda"
+        );
+        let next_digest = request_digest(next_request);
+        let normal_digest = request_digest(normal_request);
+        let estimate = cache::prefix::estimate(&next_digest, Some(&normal_digest));
+        assert_eq!(
+            estimate.common_segments as usize,
+            normal_digest.segments.len(),
+            "turno seguinte estende o prefixo (0 quebra)"
+        );
+        assert_eq!(cache_samples(&events_after)[0].break_reason, None);
+        // Snapshot do Chat intacto entre os turnos.
+        assert_eq!(next_request.system_prompt, normal_request.system_prompt);
+        assert_eq!(
+            cache::snapshot::tools_json(&next_request.tools),
+            cache::snapshot::tools_json(&normal_request.tools)
+        );
+
+        // Restart: mesma fronteira persistida reconstrói o mesmo prefixo.
+        let reopened = Arc::new(Db::open(&temp.path).expect("reabrir"));
+        let summary_after = reopened
+            .latest_session_summary(&conversation.id)
+            .expect("ler resumo")
+            .expect("resumo persistido após restart");
+        assert_eq!(summary_after.to_seq, summary.to_seq);
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                reopened.clone(),
+                chat_cache_streamer(captured.clone(), Arc::new(Mutex::new(None)), false),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno após restart");
+        let captured_now = captured.lock().expect("captured").clone();
+        let restart_request = &captured_now[captured_now.len() - 1].0;
+        assert!(restart_request.history[0]
+            .text
+            .contains("[Summary of the previous conversation"));
+        let restart_digest = request_digest(restart_request);
+        let estimate = cache::prefix::estimate(&restart_digest, Some(&next_digest));
+        assert_eq!(
+            estimate.common_segments as usize,
+            next_digest.segments.len(),
+            "restart reconstrói o mesmo prefixo"
+        );
+    }
+
+    /// F2c (c): falha do resumo não derruba o turno, não persiste resumo e não
+    /// entra em loop (1 tentativa por turno; o watermark continua de fallback).
+    #[tokio::test]
+    async fn chat_compaction_failure_does_not_drop_the_turn() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        seed_chat_history(&temp, &conversation, 4, 120_000);
+        let captured: Arc<Mutex<Vec<(CompletionRequest, UsageInfo)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let previous: Arc<Mutex<Option<PrefixDigest>>> = Arc::new(Mutex::new(None));
+        let (emitter, _events) = channel();
+        let result = run_turn(
+            deps(
+                temp.db.clone(),
+                chat_cache_streamer(captured.clone(), previous, true),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno não pode cair com falha de compactação");
+        assert_eq!(result.assistant_message.content, "Resposta final.");
+        assert!(
+            temp.db
+                .latest_session_summary(&conversation.id)
+                .expect("ler resumo")
+                .is_none(),
+            "resumo falho não pode ser persistido"
+        );
+        // Uma tentativa de resumo + um request normal; nada de retry infinito.
+        let captured_now = captured.lock().expect("captured").clone();
+        assert_eq!(captured_now.len(), 2, "1 resumo falho + 1 request normal");
+        assert!(
+            captured_now[1]
+                .0
+                .history
+                .last()
+                .map(|message| message
+                    .text
+                    .starts_with("Summarize the transcript of this same conversation"))
+                .unwrap_or(false)
+                == false,
+            "o request normal não carrega a instrução de resumo"
+        );
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* F6: poda de tool results no trecho mantido                       */
+    /* ---------------------------------------------------------------- */
+
+    fn completed_assistant(
+        conversation_id: &str,
+        text: &str,
+        calls: Vec<ToolCallRecord>,
+    ) -> ChatMessage {
+        let mut message = ChatMessage::assistant(conversation_id);
+        message.content = text.to_string();
+        message.status = MessageStatus::Complete;
+        message.tool_calls = calls;
+        message
+    }
+
+    fn done_call(id: &str, result: &str) -> ToolCallRecord {
+        let mut call = ToolCallRecord::running(id, "read_file");
+        call.result = Some(result.to_string());
+        call.status = ToolCallStatus::Done;
+        call
+    }
+
+    /// Conversa Chat com histórico longo e tool results grandes: um no trecho
+    /// que será **coberto** pelo resumo (`call-covered`) e um no trecho
+    /// **mantido** (`call-big`), além de um curto (`call-short`).
+    fn seed_chat_tool_history(
+        temp: &TempDb,
+        conversation: &Conversation,
+    ) -> (String, String, String) {
+        let mut seq = 1_700_000_000_000i64;
+        let mut insert = |mut message: ChatMessage| {
+            message.created_at = seq;
+            seq += 1;
+            let id = message.id.clone();
+            temp.db.insert_message(&message).expect("seed de mensagem");
+            id
+        };
+        insert(ChatMessage::user(&conversation.id, "u1 ".repeat(30_000)));
+        insert(completed_assistant(&conversation.id, "ok1", Vec::new()));
+        insert(ChatMessage::user(&conversation.id, "u2 ".repeat(30_000)));
+        let covered_big = "CONTEUDO-ORIGINAL-".repeat(1_500);
+        insert(completed_assistant(
+            &conversation.id,
+            "ok2",
+            vec![done_call("call-covered", &covered_big)],
+        ));
+        insert(ChatMessage::user(&conversation.id, "u3 ".repeat(30_000)));
+        let short_id = insert(completed_assistant(
+            &conversation.id,
+            "ok3",
+            vec![done_call("call-short", "curto")],
+        ));
+        insert(ChatMessage::user(&conversation.id, "u4 ".repeat(30_000)));
+        let kept_big = "SAIDA-GRANDE-".repeat(2_000);
+        let big_id = insert(completed_assistant(
+            &conversation.id,
+            "ok4",
+            vec![done_call("call-big", &kept_big)],
+        ));
+        (big_id, short_id, covered_big)
+    }
+
+    /// F6 (a): a compactação pode os tool results grandes do trecho mantido com
+    /// decisão congelada (`render_decisions`); replay de turnos seguintes e
+    /// restart reproduzem o mesmo texto, tool curto fica intacto e o transcript
+    /// do resumo usa o original do trecho coberto.
+    #[tokio::test]
+    async fn compaction_prunes_kept_tail_tool_results_deterministically() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let (big_id, short_id, covered_big) = seed_chat_tool_history(&temp, &conversation);
+        let captured: Arc<Mutex<Vec<(CompletionRequest, UsageInfo)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let previous: Arc<Mutex<Option<PrefixDigest>>> = Arc::new(Mutex::new(None));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                chat_cache_streamer(captured.clone(), previous.clone(), false),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno com compactação");
+
+        let captured_now = captured.lock().expect("captured").clone();
+        assert_eq!(captured_now.len(), 2, "resumo + request normal");
+        let summary_request = &captured_now[0].0;
+        let instruction = summary_request.history.last().expect("instrução");
+        // Transcript usa o **original** do trecho coberto (não o podado).
+        assert!(instruction.text.contains("CONTEUDO-ORIGINAL-"));
+        assert!(
+            !instruction.text.contains("SAIDA-GRANDE-"),
+            "transcript cobre só o trecho removido; a cauda mantida não entra"
+        );
+
+        let normal_request = &captured_now[1].0;
+        let pruned_text = normal_request
+            .history
+            .iter()
+            .find(|message| message.tool_call_id.as_deref() == Some("call-big"))
+            .map(|message| message.text.clone())
+            .expect("tool result mantido no replay");
+        assert!(
+            pruned_text.contains("saída podada na compactação"),
+            "tool result grande do trecho mantido deve ser podado: {pruned_text}"
+        );
+        assert!(pruned_text.starts_with("SAIDA-GRANDE-"));
+        let short_text = normal_request
+            .history
+            .iter()
+            .find(|message| message.tool_call_id.as_deref() == Some("call-short"))
+            .map(|message| message.text.clone())
+            .expect("tool result curto no replay");
+        assert_eq!(short_text, "curto", "tool result curto fica intacto");
+        assert_eq!(
+            normal_request
+                .history
+                .iter()
+                .filter(|message| message.role == HistoryRole::Tool)
+                .count(),
+            2,
+            "pareamento tool_use/tool_result preservado (nenhuma mensagem some)"
+        );
+
+        // Decisão congelada persistida (e só para o grande).
+        let decision = temp
+            .db
+            .get_render_decision(&big_id, compaction::RENDER_KIND_TOOL_RESULT)
+            .expect("ler decisão")
+            .expect("decisão do tool result podado");
+        let decision_payload: serde_json::Value =
+            serde_json::from_str(&decision.payload).expect("payload JSON");
+        assert!(decision_payload["call-big"]
+            .as_str()
+            .is_some_and(|value| value == pruned_text));
+        assert!(
+            temp.db
+                .get_render_decision(&short_id, compaction::RENDER_KIND_TOOL_RESULT)
+                .expect("ler decisão curta")
+                .is_none(),
+            "tool result curto não gera decisão"
+        );
+        let created_at = decision.created_at;
+
+        // Turno seguinte: replay aplica a decisão byte-a-byte (idempotente).
+        let second_captured: Arc<Mutex<Vec<(CompletionRequest, UsageInfo)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                chat_cache_streamer(second_captured.clone(), Arc::new(Mutex::new(None)), false),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno seguinte");
+        let second_requests = second_captured.lock().expect("captured").clone();
+        let second_normal = &second_requests.last().expect("request do turno 2").0;
+        let replayed = second_normal
+            .history
+            .iter()
+            .find(|message| message.tool_call_id.as_deref() == Some("call-big"))
+            .map(|message| message.text.clone())
+            .expect("tool result no replay do turno 2");
+        assert_eq!(replayed, pruned_text, "replay byte-a-byte entre turnos");
+        let decision_after = temp
+            .db
+            .get_render_decision(&big_id, compaction::RENDER_KIND_TOOL_RESULT)
+            .expect("ler decisão")
+            .expect("decisão persistida");
+        assert_eq!(
+            decision_after.created_at, created_at,
+            "poda é idempotente (decisão não é reescrita)"
+        );
+
+        // Restart: mesma decisão, mesmo texto.
+        let reopened = Arc::new(Db::open(&temp.path).expect("reabrir"));
+        let restart_captured: Arc<Mutex<Vec<(CompletionRequest, UsageInfo)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                reopened.clone(),
+                chat_cache_streamer(restart_captured.clone(), Arc::new(Mutex::new(None)), false),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno após restart");
+        let restart_requests = restart_captured.lock().expect("captured").clone();
+        let restart_normal = &restart_requests.last().expect("request após restart").0;
+        let restarted = restart_normal
+            .history
+            .iter()
+            .find(|message| message.tool_call_id.as_deref() == Some("call-big"))
+            .map(|message| message.text.clone())
+            .expect("tool result no restart");
+        assert_eq!(restarted, pruned_text, "restart reproduz o mesmo render");
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* F6: helper cache-safe do /compact manual                         */
+    /* ---------------------------------------------------------------- */
+
+    /// F6 (b): `summarize_manual` reusa system/tools/histórico como prefixo,
+    /// anexa a instrução no fim, mantém o `cache_plan` do request normal e
+    /// devolve `{summary, covered, tokens_freed}`.
+    #[tokio::test]
+    async fn summarize_manual_reuses_the_normal_prefix_and_plan() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let captured: Arc<Mutex<Vec<(CompletionRequest, UsageInfo)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let previous: Arc<Mutex<Option<PrefixDigest>>> = Arc::new(Mutex::new(None));
+
+        // Turno 1 com pedido longo (transcript > 500 chars para o resumo).
+        let mut first_payload = payload(&conversation, 2);
+        first_payload.content = "conteudo para resumir ".repeat(100);
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                chat_cache_streamer(captured.clone(), previous.clone(), false),
+            ),
+            first_payload,
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 1");
+
+        // Turno 2 normal (curto): o request capturado é o "normal" do /compact.
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                chat_cache_streamer(captured.clone(), previous.clone(), false),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno 2");
+        let normal_request = captured
+            .lock()
+            .expect("captured")
+            .get(1)
+            .expect("request normal")
+            .0
+            .clone();
+        let cut = normal_request.history.len() - 1;
+
+        let manual_captured: Arc<Mutex<Vec<(CompletionRequest, UsageInfo)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let manual_deps = deps(
+            temp.db.clone(),
+            chat_cache_streamer(manual_captured.clone(), previous.clone(), false),
+        );
+        let outcome = compaction::summarize_manual(
+            &manual_deps,
+            compaction::ManualSummaryRequest {
+                conversation: &conversation,
+                provider_id: "opencode-go",
+                model_id: "deepseek-v4.1-flash",
+                history: &normal_request.history,
+                system_prompt: &normal_request.system_prompt,
+                tools: &normal_request.tools,
+                cut,
+                cache_plan: normal_request.cache_plan.clone(),
+                max_output_tokens: 1_200,
+            },
+        )
+        .await
+        .expect("resumo manual");
+        assert_eq!(outcome.covered, cut as u32);
+        assert!(outcome.tokens_freed > 0, "resumo libera tokens");
+        assert!(outcome.summary.starts_with("## Main request"));
+
+        let manual_request = manual_captured
+            .lock()
+            .expect("captured")
+            .last()
+            .expect("request do resumo manual")
+            .0
+            .clone();
+        let instruction = manual_request.history.last().expect("instrução no fim");
+        assert!(instruction
+            .text
+            .starts_with("Summarize the transcript of this same conversation"));
+        // Prefixo normal reusado: digest do resumo = normal + instrução.
+        let mut prefix_request = manual_request.clone();
+        prefix_request.history.pop();
+        let prefix_digest = request_digest(&prefix_request);
+        let manual_digest = request_digest(&manual_request);
+        let estimate = cache::prefix::estimate(&manual_digest, Some(&prefix_digest));
+        assert_eq!(
+            estimate.common_segments as usize,
+            prefix_digest.segments.len(),
+            "histórico normal é prefixo do resumo manual"
+        );
+        assert_eq!(manual_request.system_prompt, normal_request.system_prompt);
+        assert_eq!(
+            cache::snapshot::tools_json(&manual_request.tools),
+            cache::snapshot::tools_json(&normal_request.tools)
+        );
+        assert_eq!(
+            manual_request.cache_plan, normal_request.cache_plan,
+            "plano de cache do request normal é reusado"
+        );
+    }
+
+    /// F6 (b, alto nível): `summarize_manual_for_conversation` monta o prefixo
+    /// normal do Code sozinho (snapshot persistido + surface + replay), corta em
+    /// fronteira de mensagem (`cut_covered` alinhado aos anchors) e devolve o
+    /// resumo sem persistir nada.
+    #[tokio::test]
+    async fn summarize_manual_for_conversation_rebuilds_the_code_prefix() {
+        let temp = TempDb::new();
+        let (_workspace_dir, conversation) = code_workspace(&temp);
+        seed_chat_history(&temp, &conversation, 3, 60_000);
+        let settings = Settings::default();
+
+        // Turno Code normal: persiste snapshot do Code, superfície e mensagens.
+        let turn_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (emitter, _events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(turn_requests.clone(), "Resposta."),
+            ),
+            code_payload(&conversation),
+            settings.clone(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno Code normal");
+        let normal_request = turn_requests
+            .lock()
+            .expect("requests")
+            .first()
+            .cloned()
+            .expect("request normal do Code");
+
+        // Helper de alto nível: monta o prefixo e resume.
+        let summary_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let helper_deps = deps(
+            temp.db.clone(),
+            capturing_streamer(summary_requests.clone(), "Resumo manual do Code."),
+        );
+        let outcome =
+            compaction::summarize_manual_for_conversation(&helper_deps, &conversation, &settings)
+                .await
+                .expect("helper do /compact manual")
+                .expect("histórico suficiente para resumir");
+        assert!(outcome.summary.starts_with("Resumo manual do Code."));
+        assert_eq!(
+            outcome.system_prompt_hash,
+            cache::snapshot::stable_hash(&normal_request.system_prompt),
+            "hash do snapshot congelado do Code"
+        );
+        // `covered` (to_seq) alinhado aos anchors: a primeira mensagem mantida é
+        // a `messages[covered]`, uma user.
+        let messages = temp.db.list_messages(&conversation.id).expect("mensagens");
+        assert!(outcome.covered > 0 && (outcome.covered as usize) < messages.len());
+        assert_eq!(
+            messages[outcome.covered as usize].role,
+            MessageRole::User,
+            "to_seq estável: messages[covered] é a primeira mensagem mantida"
+        );
+        // Nada é persistido pelo helper (o comando faz).
+        assert!(temp
+            .db
+            .latest_session_summary(&conversation.id)
+            .expect("ler resumo")
+            .is_none());
+
+        let summary_request = summary_requests
+            .lock()
+            .expect("requests")
+            .first()
+            .cloned()
+            .expect("request de resumo manual");
+        // Prefixo cache-safe: system/tools do snapshot + histórico normal
+        // (incluindo a superfície) e a instrução de resumo no fim.
+        assert_eq!(summary_request.system_prompt, normal_request.system_prompt);
+        assert_eq!(
+            cache::snapshot::tools_json(&summary_request.tools),
+            cache::snapshot::tools_json(&normal_request.tools)
+        );
+        let instruction = summary_request.history.last().expect("instrução");
+        assert!(instruction
+            .text
+            .starts_with("Summarize the transcript of this same conversation"));
+        let prefix_request = {
+            let mut prefix = summary_request.clone();
+            prefix.history.pop();
+            prefix
+        };
+        assert!(
+            prefix_request
+                .history
+                .iter()
+                .any(|message| message.text.starts_with("<contexto-da-sessao")),
+            "prefixo normal inclui a superfície do turno"
+        );
+        let summary_digest = request_digest(&summary_request);
+        let prefix_digest = request_digest(&prefix_request);
+        let estimate = cache::prefix::estimate(&summary_digest, Some(&prefix_digest));
+        assert_eq!(
+            estimate.common_segments as usize,
+            prefix_digest.segments.len(),
+            "resumo é extensão append-only do prefixo normal"
+        );
+        assert!(
+            summary_request.cache_plan.is_some(),
+            "plano de cache calculado para o prefixo Code"
+        );
+        assert_eq!(
+            summary_request
+                .cache_plan
+                .as_ref()
+                .and_then(|plan| plan.prompt_cache_key.as_deref())
+                .map(str::len),
+            Some(64),
+            "prompt_cache_key estável no plano"
+        );
+    }
+
+    /// F6/B2: o recorte seguro de usage (`ProviderEvent::UsageRaw`) chega na
+    /// amostra (`CacheSample.raw_usage`) e é persistido em `cache_samples`;
+    /// provedor que não emite raw deixa a amostra com `None`.
+    #[tokio::test]
+    async fn cache_sample_carries_the_provider_raw_usage() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let raw = serde_json::json!({
+            "input_tokens": 1_000,
+            "cache_read_input_tokens": 900,
+            "cache_creation_input_tokens": 100,
+        });
+        let streamer: ProviderStreamer = {
+            let raw = raw.clone();
+            Arc::new(move |request, sink| {
+                let digest = request_digest(&request);
+                let usage = usage_with_cache(1_000, 900);
+                let raw = raw.clone();
+                Box::pin(async move {
+                    emit(&sink, ProviderEvent::CacheDigest(digest));
+                    emit(&sink, ProviderEvent::Usage(usage));
+                    emit(&sink, ProviderEvent::UsageRaw(raw));
+                    text_stream(&sink, "Resposta final.");
+                    Ok(())
+                })
+            })
+        };
+        let (emitter, events) = channel();
+        run_turn(
+            deps(temp.db.clone(), streamer),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno completo");
+        let samples = cache_samples(&events);
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].raw_usage, Some(raw.clone()));
+        let rows = temp
+            .db
+            .list_cache_samples(&conversation.id, 10)
+            .expect("amostras");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].raw_usage, Some(raw));
+
+        // Sem UsageRaw: amostra honesta com `None`.
+        let (emitter, events) = channel();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                single_request_streamer(950, "Segunda resposta."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno sem raw");
+        let samples = cache_samples(&events);
+        assert_eq!(samples[0].raw_usage, None);
     }
 }

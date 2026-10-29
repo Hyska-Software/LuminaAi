@@ -34,7 +34,7 @@ import {
   type PageLink,
   type ToolGroup,
 } from '@/lib/agentTrace';
-import { useAppStore } from '@/lib/store';
+import { useAppStore, useUiStore } from '@/lib/store';
 import type { ChatMessage } from '@/lib/types';
 import { cn, formatDuration, formatThinkingDuration, truncate } from '@/lib/utils';
 import { openExternalUrl } from './external';
@@ -171,6 +171,10 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
   // ends. Keeping `setOpen` out of the effect in that mode avoids races with
   // the user's own expansion.
   const collapsedByDefault = useAppStore((state) => state.settings.thinkingCollapsedByDefault);
+  // Layout Code: o tempo do turno inclui ferramentas e comandos, então o
+  // título agregado fala em "Trabalhou por …". No Chat o bloco resume apenas o
+  // raciocínio do modelo → "Pensou por …" (DESIGN §6.3).
+  const layoutMode = useUiStore((state) => state.layoutMode);
   const [open, setOpen] = useState(() => (collapsedByDefault ? false : streaming));
   const wasStreaming = useRef(streaming);
   useEffect(() => {
@@ -194,7 +198,7 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
       : 'Pensando…'
     : hasReasoning
       ? duration
-        ? `Pensou por ${duration}`
+        ? `${layoutMode === 'code' ? 'Trabalhou' : 'Pensou'} por ${duration}`
         : 'Raciocínio'
       : toolCount > 0
         ? `${toolCount} ${toolCount === 1 ? 'passo' : 'passos'}`

@@ -238,3 +238,45 @@ configuração para MCP/servidores e "Verificações" no painel (backend exposto
 - O bug voltou em produção porque `withLazyChildren` retornava cedo no primeiro nível sem cache (`if (cached === undefined) return entry`) e **não descia** nos netos: no caso real (`apps > desktop > public`) o cache existe em `apps/desktop/public`, então o carregamento era guardado mas nunca mesclado/rendered — o clique aparentava não fazer nada.
 - Correção: a recursão agora desce **sempre** (`cache[path] ?? entry.children ?? []`) e o painel só dispara a busca quando o nó ainda não tem filhos (`findTreeEntry`), evitando refetch ao abrir/colapsar diretórios já carregados.
 - Teste de regressão realista (3 níveis, diretório `public` chegando sem children): carrega `apps/desktop/public`, mostra `logo.svg`, colapsa/expande novamente **sem** nova chamada de rede. Suíte de `components/code` 197/197, `pnpm typecheck`/`pnpm build` verdes.
+## 22. Fecho de turno — resumo de arquivos alterados (layout Code)
+
+- O transcript do layout Code passa a terminar cada turno com um card de resumo do que o agente
+  fez, no padrão "Edited N files" dos agentes de código: título **N arquivos alterados**
+  (singular "1 arquivo alterado"), totais `+N −M` (tokens `success`/`danger`, `tabular-nums`),
+  uma linha por arquivo (ícone colorido do tipo via `FileIcon`, path truncado com `title` e
+  `+N −M`) e, acima de 4 arquivos, botão full-width **Todos os N arquivos** / **Mostrar menos**
+  (`aria-expanded`/`aria-controls`, chevron 150ms, `motion-reduce`). Fecha um `section`
+  `role="group"` `aria-label="Resumo do turno"`, superfície `surface-raised` + borda de 1px,
+  sem hex solto (DESIGN §6.3, WORKBENCH §5.1).
+- **Só no Code e só no fim**: a montagem vive em `MessageItem` e checa
+  `layoutMode === "code" && !isStreaming`; no Chat o card não é montado, durante o streaming as
+  edições ainda estão chegando e o selo "Cancelado" vem antes do card. Turnos cancelados/erro
+  mantêm o resumo (edições parciais são reais).
+- **Sem backend novo**: o view model puro `src/lib/codeTurnSummary.ts` agrega
+  `ChatMessage.toolCalls[].presentation` com `kind: "file_change"` (write_file/edit_file, já
+  persistido no SQLite): uma linha por path, edições repetidas somam e o último `kind` vence,
+  chamadas com erro ficam de fora, ordenação determinística por path. Como o dado é persistido,
+  o card reaparece ao reabrir a sessão; arquivos alterados por `run_command` não entram (não
+  passam pelo journal) e continuam visíveis no painel Alterações com origem git.
+- **Abrir diff (revisão do turno)**: cada linha do card é um botão que abre o diff daquele
+  arquivo na **aba central**, como o painel Alterações já faz com o diff de git
+  (`uiStore.openCodeDiff` → `CodeDiffView`, fechável no tab strip). O alvo leva como
+  `knownDiff` o patch persistido da última edição do turno (sem IPC); sem patch conhecido a aba
+  busca `get_file_diff`. Sessão sem workspace mantém as linhas informativas (sem botão).
+- **Arquivos**: `src/lib/codeTurnSummary.ts`, `src/lib/__tests__/codeTurnSummary.test.ts`,
+  `src/components/code/CodeTurnSummary.tsx`, `src/components/code/CodeTurnSummary.test.tsx`,
+  `src/components/code/index.ts` (export), `src/components/chat/MessageItem.tsx` (montagem) e
+  `src/components/chat/MessageList.test.tsx` (integração). Docs: `DESIGN` §6.3/§14,
+  `WORKBENCH` §5.1/§13/§15, `ARCHITECTURE` §8.3.
+- **Testes**: `codeTurnSummary.test.ts` 8/8 (não-assistente, sem edições, agregação por path e
+  totais, edição repetida, erro ignorado, diff persistido da última edição, payload persistido
+  incompleto, deleção); `CodeTurnSummary.test.tsx` 8/8 (sem card, título/totais/linhas, singular
+  + pt-BR, expandir/recolher com ARIA, ≤4 sem botão, clique abre o diff com/sem `knownDiff`,
+  sem workspace não há ação); `MessageList.test.tsx` 8/8 (Code vs Chat, troca de layout ao vivo,
+  gate de streaming, cancelado com selo antes do card, erro, workspace da sessão abrindo o diff
+  na aba central e sessão sem workspace).
+- **Verificação**: `pnpm typecheck` limpo; `pnpm exec vitest run` dos três arquivos novos +
+  `ChatView` = 4/4 arquivos, 38/38 testes verdes; `pnpm test` 115 arquivos / 2.154 testes
+  (2.153 verdes; o único flaky é `ModelPill.test.tsx`, área de modelos e sem relação com esta
+  feature — passa isolado 33/33; as 114 demais suítes fecharam verdes); `pnpm build` verde.
+  Sem mudanças em Rust.

@@ -749,3 +749,107 @@ describe('AgentSteps — raciocínio em Markdown', () => {
     expect(container.textContent).not.toContain('<script>');
   });
 });
+
+describe('AgentSteps — título do Thinking por layout', () => {
+  const reasoning = 'Analisando a pergunta.';
+
+  function completedMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
+    return message({
+      reasoning,
+      toolCalls: [],
+      trace: [{ reasoning, toolCalls: 0 }],
+      usage: { durationMs: 10_000 },
+      ...overrides,
+    });
+  }
+
+  function liveMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
+    return message({
+      status: 'streaming',
+      reasoning,
+      toolCalls: [],
+      trace: [{ reasoning, toolCalls: 0 }],
+      ...overrides,
+    });
+  }
+
+  it('mostra "Pensou por 10s" no layout Chat', () => {
+    useUiStore.setState({ layoutMode: 'chat' });
+    render(<AgentSteps streaming={false} phase={null} message={completedMessage()} />);
+
+    expect(screen.getByRole('button', { name: /Pensou por 10s/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Trabalhou por/ })).toBeNull();
+  });
+
+  it('mostra "Trabalhou por 10s" no layout Code', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    render(<AgentSteps streaming={false} phase={null} message={completedMessage()} />);
+
+    expect(screen.getByRole('button', { name: /Trabalhou por 10s/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Pensou por/ })).toBeNull();
+  });
+
+  it('mantém "Pensando…" ao vivo nos dois layouts', () => {
+    for (const layoutMode of ['chat', 'code'] as const) {
+      useUiStore.setState({ layoutMode });
+      const { unmount } = render(
+        <AgentSteps
+          streaming
+          phase="reasoning"
+          startedAt={Date.now() - 1_000}
+          message={liveMessage()}
+        />,
+      );
+
+      expect(screen.getByRole('button', { name: /Pensando/ })).toBeTruthy();
+      unmount();
+    }
+  });
+
+  it('mantém "Executando ferramentas…" ao vivo no layout Code', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    render(
+      <AgentSteps
+        streaming
+        phase="tool"
+        startedAt={Date.now() - 1_000}
+        message={liveMessage({
+          reasoning: 'Vou ler o arquivo.',
+          toolCalls: [
+            tool({ name: 'read_file', status: 'running', arguments: '{"path":"src/app.ts"}' }),
+          ],
+          trace: [{ reasoning: 'Vou ler o arquivo.', toolCalls: 1 }],
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /Executando ferramentas/ })).toBeTruthy();
+  });
+
+  it('mantém "N passos" em turnos sem raciocínio nos dois layouts', async () => {
+    for (const layoutMode of ['chat', 'code'] as const) {
+      useUiStore.setState({ layoutMode });
+      const user = userEvent.setup();
+      const { unmount } = render(
+        <AgentSteps
+          streaming={false}
+          phase={null}
+          message={message({
+            reasoning: null,
+            toolCalls: [
+              tool({ name: 'read_file', arguments: '{"path":"src/app.ts"}' }),
+              tool({ name: 'run_command', arguments: '{"command":"pnpm test"}' }),
+            ],
+            trace: [{ reasoning: null, toolCalls: 2 }],
+          })}
+        />,
+      );
+
+      const header = screen.getByRole('button', { name: /2 passos/ });
+      await user.click(header);
+      expect(screen.getByRole('listitem', { name: 'Leu src/app.ts' })).toBeTruthy();
+      expect(screen.getByRole('listitem', { name: 'Executou pnpm test' })).toBeTruthy();
+      unmount();
+    }
+  });
+});

@@ -41,7 +41,6 @@ const IGNORED_DIRS: &[&str] = &[
 /// Diretório de trabalho efetivo do turno (workspace + projeto + instruções).
 #[derive(Debug, Clone, Default)]
 pub struct CodeTurnContext {
-    pub workspace_id: Option<String>,
     pub workspace: Option<Workspace>,
     pub root: Option<PathBuf>,
     pub trusted: bool,
@@ -59,8 +58,14 @@ impl CodeTurnContext {
     /// Contexto de prompt (tipos do módulo `prompt`).
     pub fn prompt_context(&self) -> prompt::CodeContext {
         prompt::CodeContext {
-            workspace_name: self.workspace.as_ref().map(|workspace| workspace.name.clone()),
-            workspace_path: self.root.as_ref().map(|root| root.to_string_lossy().to_string()),
+            workspace_name: self
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.name.clone()),
+            workspace_path: self
+                .root
+                .as_ref()
+                .map(|root| root.to_string_lossy().to_string()),
             git: self.git.clone(),
             project: self.project.as_ref().map(project_info),
             agents_md: self.agents_md.clone(),
@@ -102,7 +107,6 @@ fn project_info(profile: &crate::workspace::project::ProjectProfile) -> ProjectI
 /// Monta o contexto do turno a partir do banco e do disco.
 pub async fn build(db: &Db, conversation: &Conversation) -> CodeTurnContext {
     let mut context = CodeTurnContext {
-        workspace_id: conversation.workspace_id.clone(),
         permission_mode: conversation.permission_mode,
         todos: session::todos(db, &conversation.id).unwrap_or_default(),
         plan: session::plan_view(db, &conversation.id).ok().flatten(),
@@ -178,11 +182,7 @@ pub fn read_agents_md(root: &Path) -> Option<String> {
     let joined = parts.join("\n\n");
     if joined.chars().count() > MAX_AGENTS_CHARS {
         return Some(
-            joined
-                .chars()
-                .take(MAX_AGENTS_CHARS)
-                .collect::<String>()
-                + "\n…[instruções truncadas]",
+            joined.chars().take(MAX_AGENTS_CHARS).collect::<String>() + "\n…[instruções truncadas]",
         );
     }
     Some(joined)
@@ -304,7 +304,8 @@ mod tests {
         let workspace = db
             .create_workspace("demo", &dir.path().to_string_lossy())
             .expect("workspace");
-        db.set_workspace_trusted(&workspace.id, true).expect("trust");
+        db.set_workspace_trusted(&workspace.id, true)
+            .expect("trust");
         let mut conv = conversation(Some(workspace.id.clone()));
         conv.mode = CONVERSATION_MODE_CODE.to_string();
         let context = build(&db, &conv).await;

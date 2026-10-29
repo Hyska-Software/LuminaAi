@@ -15,7 +15,7 @@ use crate::domain::UsageInfo;
 
 use super::sse;
 use super::{
-    emit, image_data_url, make_usage, max_output_tokens, pointer_u32, reasoning, send_stream,
+    cache, emit, image_data_url, make_usage, max_output_tokens, pointer_u32, reasoning,
     system_text, to_provider_error, valid_json_arguments, CompletionRequest, EventSink,
     HistoryMessage, HistoryRole, ProviderError, ProviderEvent, ProviderResult, ReasoningRequest,
     WireProtocol,
@@ -27,11 +27,23 @@ pub(crate) async fn stream(
     sink: &EventSink,
 ) -> ProviderResult<()> {
     let url = request.config.endpoint_for(WireProtocol::OpenaiResponses)?;
-    let body = build_body(request);
-    let Some(response) = send_stream(http, request, &url, &body).await? else {
+    let mut body = build_body(request);
+    // F4b: the harness-owned plan lands on the final wire body before the
+    // digest; `digest(apply(body)) == digest(body)` is a contract (cache
+    // metadata is outside the hash), so the emitted digest stays valid.
+    cache::apply(
+        WireProtocol::OpenaiResponses,
+        request.cache_plan.as_ref(),
+        &mut body,
+    );
+    super::emit_cache_digest(request, WireProtocol::OpenaiResponses, &body, sink)?;
+    let Some(response) =
+        super::send_stream_with_cache_fallback(http, request, &url, &body, || build_body(request))
+            .await?
+    else {
         return Ok(());
     };
-    let mut handler = Handler::new(sink);
+    let mut handler = Handler::new(sink, request.config.provider_id.clone());
     let outcome = sse::stream_sse(response, &request.cancel, |event, data| {
         handler.on_event(event, data)
     })
@@ -247,19 +259,26 @@ struct ResponsesTool {
 
 struct Handler<'a> {
     sink: &'a EventSink,
+    /// Route that produced the request (used to gate the OpenCode gateway
+    /// `usage.opencode.tokens` fallback).
+    provider_id: String,
     text: String,
     usage: Option<UsageInfo>,
+    /// Verbatim `response.usage` block (safe excerpt is emitted as `UsageRaw`).
+    raw_usage: Option<Value>,
     output: Option<Value>,
     tools: Vec<ResponsesTool>,
     item_to_index: HashMap<String, usize>,
 }
 
 impl<'a> Handler<'a> {
-    fn new(sink: &'a EventSink) -> Self {
+    fn new(sink: &'a EventSink, provider_id: String) -> Self {
         Self {
             sink,
+            provider_id,
             text: String::new(),
             usage: None,
+            raw_usage: None,
             output: None,
             tools: Vec::new(),
             item_to_index: HashMap::new(),
@@ -475,7 +494,8 @@ impl<'a> Handler<'a> {
             }
         }
         if let Some(usage) = response.get("usage").filter(|usage| !usage.is_null()) {
-            self.usage = Some(parse_usage(usage));
+            self.raw_usage = Some(usage.clone());
+            self.usage = Some(parse_usage(usage, &self.provider_id));
         }
         if let Some(error) = response.get("error").filter(|error| !error.is_null()) {
             return Err(anyhow::Error::new(ProviderError::from_stream_error(error)));
@@ -535,6 +555,8 @@ impl<'a> Handler<'a> {
         if let Some(usage) = self.usage.take() {
             emit(self.sink, ProviderEvent::Usage(usage)).map_err(to_provider_error)?;
         }
+        // Safe raw usage excerpt for the diagnostics panel, before the state/Done.
+        super::emit_usage_raw(self.sink, self.raw_usage.as_ref())?;
         emit(self.sink, ProviderEvent::ProviderState(state)).map_err(to_provider_error)?;
         emit(self.sink, ProviderEvent::Done).map_err(to_provider_error)?;
         Ok(())
@@ -561,13 +583,19 @@ impl<'a> Handler<'a> {
     }
 }
 
-fn parse_usage(usage: &Value) -> UsageInfo {
+fn parse_usage(usage: &Value, provider_id: &str) -> UsageInfo {
     let input = pointer_u32(usage, "/input_tokens");
     let output = pointer_u32(usage, "/output_tokens");
     let reasoning = pointer_u32(usage, "/output_tokens_details/reasoning_tokens");
     let cached = pointer_u32(usage, "/input_tokens_details/cached_tokens");
     let total = pointer_u32(usage, "/total_tokens");
-    make_usage(input, output, reasoning, cached, total)
+    let mut info = make_usage(input, output, reasoning, cached, total);
+    // Normalized cache counters (read/write/uncached) for the responses route.
+    cache::apply_usage(
+        &mut info,
+        &cache::normalize_usage(WireProtocol::OpenaiResponses, provider_id, usage),
+    );
+    info
 }
 
 /* ------------------------------------------------------------------ */
@@ -625,6 +653,7 @@ mod tests {
             reasoning,
             max_output_tokens: Some(2_048),
             temperature: Some(0.3),
+            cache_plan: None,
             cancel: CancellationToken::new(),
         }
     }
@@ -771,7 +800,7 @@ mod tests {
     #[test]
     fn response_failed_with_quota_code_maps_to_plan_limit() {
         let (sink, _events) = tokio::sync::mpsc::unbounded_channel();
-        let mut handler = Handler::new(&sink);
+        let mut handler = Handler::new(&sink, "openai".to_string());
         let error = handler
             .on_event(
                 None,
@@ -786,5 +815,114 @@ mod tests {
             error.provider_code(),
             Some("subscription_sharing_usage_limit_exceeded")
         );
+    }
+
+    #[test]
+    fn parse_usage_fills_cached_and_write_tokens() {
+        let usage = parse_usage(
+            &json!({
+                "input_tokens": 20_000,
+                "output_tokens": 100,
+                "output_tokens_details": {"reasoning_tokens": 40},
+                "input_tokens_details": {
+                    "cached_tokens": 16_000,
+                    "cache_write_tokens": 2_000,
+                },
+            }),
+            "openai",
+        );
+        assert!(usage.cache_reported);
+        assert_eq!(usage.cached_tokens, Some(16_000), "alias legado");
+        assert_eq!(usage.cache_read_tokens, Some(16_000));
+        assert_eq!(usage.cache_write_tokens, Some(2_000));
+        assert_eq!(usage.uncached_input_tokens, Some(2_000));
+        assert_eq!(usage.input_tokens, Some(20_000));
+        assert_eq!(usage.reasoning_tokens, Some(40));
+    }
+
+    #[test]
+    fn parse_usage_without_cache_counters_is_not_reported() {
+        let usage = parse_usage(&json!({"input_tokens": 800, "output_tokens": 20}), "openai");
+        assert!(!usage.cache_reported);
+        assert_eq!(usage.cache_read_tokens, None);
+        assert_eq!(usage.uncached_input_tokens, Some(800));
+    }
+
+    /// F4b: the adapter lowers the plan onto the final body before the digest.
+    /// No plan → byte-for-byte identical body; with a plan, key/retention are
+    /// added and the prefix digest does not change.
+    #[test]
+    fn cache_plan_is_applied_before_the_digest() {
+        let mut request = test_request(RequestProfile::Standard, ReasoningRequest::Auto);
+        let plain = build_body(&request);
+        let mut without_plan = build_body(&request);
+        cache::apply(WireProtocol::OpenaiResponses, None, &mut without_plan);
+        assert_eq!(without_plan, plain, "sem plano o body não muda");
+
+        request.cache_plan = Some(cache::CachePlan {
+            mode: cache::CacheMode::Auto,
+            breakpoints: Vec::new(),
+            prompt_cache_key: Some("a".repeat(64)),
+            retention: Some("24h".to_string()),
+            ttl: None,
+        });
+        let mut planned = build_body(&request);
+        cache::apply(
+            WireProtocol::OpenaiResponses,
+            request.cache_plan.as_ref(),
+            &mut planned,
+        );
+        assert_eq!(planned["prompt_cache_key"], json!("a".repeat(64)));
+        assert_eq!(planned["prompt_cache_retention"], json!("24h"));
+
+        let digest_plain = cache::digest(WireProtocol::OpenaiResponses, "openai", &plain);
+        let digest_planned = cache::digest(WireProtocol::OpenaiResponses, "openai", &planned);
+        assert_eq!(digest_plain.segments, digest_planned.segments);
+        assert_eq!(digest_plain.total_chars, digest_planned.total_chars);
+    }
+
+    /// B2: `UsageRaw` carries the safe `response.usage` excerpt after `Usage`.
+    #[test]
+    fn usage_raw_is_emitted_after_usage_with_a_safe_excerpt() {
+        let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
+        {
+            let mut handler = Handler::new(&sink, "openai".to_string());
+            handler
+                .on_event(
+                    None,
+                    r#"{"type":"response.completed","response":{
+                        "output":[],
+                        "usage":{"input_tokens":20000,"output_tokens":100,
+                            "input_tokens_details":{"cached_tokens":16000,"cache_write_tokens":2000},
+                            "output_tokens_details":{"reasoning_tokens":40},
+                            "service_tier":"default",
+                            "prompt":"SEGREDO","authorization":"Bearer sk-secret"}}}"#,
+                )
+                .expect("response.completed");
+            handler.finish().expect("finish");
+        }
+
+        let mut order: Vec<&'static str> = Vec::new();
+        let mut raw = None;
+        while let Ok(event) = events.try_recv() {
+            match event {
+                ProviderEvent::Usage(_) => order.push("usage"),
+                ProviderEvent::UsageRaw(value) => {
+                    order.push("usage_raw");
+                    raw = Some(value);
+                }
+                ProviderEvent::Done => order.push("done"),
+                _ => {}
+            }
+        }
+        assert_eq!(order, vec!["usage", "usage_raw", "done"]);
+        let raw = raw.expect("UsageRaw emitido");
+        assert_eq!(raw["input_tokens_details"]["cached_tokens"], json!(16_000));
+        assert_eq!(raw["output_tokens_details"]["reasoning_tokens"], json!(40));
+        assert_eq!(raw["service_tier"], json!("default"));
+        let serialized = raw.to_string();
+        assert!(!serialized.contains("SEGREDO"), "{serialized}");
+        assert!(!serialized.contains("sk-secret"), "{serialized}");
+        assert!(!serialized.contains("authorization"), "{serialized}");
     }
 }

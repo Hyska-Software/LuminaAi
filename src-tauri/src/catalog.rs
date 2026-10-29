@@ -55,6 +55,28 @@ pub struct ProviderInfo {
     pub models: Vec<ModelInfo>,
     #[serde(default)]
     pub notes: Vec<String>,
+    /// Prompt-cache capabilities of the provider/route (docs/goals/prompt-cache).
+    #[serde(default)]
+    pub cache: Option<CacheInfo>,
+}
+
+/// Prompt-cache capabilities of a provider or a model override. `min_tokens:
+/// None` means unknown and excludes the request from the hit-rate target.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CacheInfo {
+    /// auto | explicit | none
+    pub mode: String,
+    pub min_tokens: Option<u32>,
+    pub block_tokens: Option<u32>,
+    pub ttl_options: Vec<String>,
+    pub supports_key: bool,
+    pub supports_retention: bool,
+    pub supports_explicit_breakpoints: bool,
+    pub reports_read: bool,
+    pub reports_write: bool,
+    /// family-default | probe | docs
+    pub source: Option<String>,
 }
 
 impl ProviderInfo {
@@ -172,6 +194,9 @@ pub struct ModelInfo {
     /// not present in the bundled catalog).
     #[serde(default)]
     pub estimated: bool,
+    /// Optional per-model cache override (overrides the provider defaults).
+    #[serde(default)]
+    pub cache: Option<CacheInfo>,
 }
 
 fn default_context() -> u32 {
@@ -284,6 +309,40 @@ mod tests {
         assert_eq!(oauth.callback_path, "/auth/callback");
         assert!(oauth.scopes.iter().any(|s| s == "chatgpt.tokens.use.direct"));
         assert!(oauth.scopes.iter().any(|s| s == "offline_access"));
+    }
+
+    #[test]
+    fn embedded_catalog_declares_prompt_cache_capabilities() {
+        let catalog = embedded();
+        let anthropic = catalog.provider("anthropic").expect("anthropic");
+        let cache = anthropic.cache.as_ref().expect("cache do anthropic");
+        assert_eq!(cache.mode, "explicit");
+        assert!(cache.supports_explicit_breakpoints);
+        assert!(cache.reports_read);
+        assert!(cache.reports_write);
+        assert_eq!(
+            cache.ttl_options,
+            vec!["5m".to_string(), "1h".to_string()]
+        );
+        // Anthropic's minimum is model-dependent; unknown must stay `None`.
+        assert_eq!(cache.min_tokens, None);
+
+        let openai = catalog.provider("openai").expect("openai");
+        let cache = openai.cache.as_ref().expect("cache do openai");
+        assert_eq!(cache.mode, "auto");
+        assert_eq!(cache.min_tokens, Some(1024));
+        assert!(cache.supports_key);
+        assert!(cache.supports_retention);
+
+        for id in ["opencode-go", "opencode-zen"] {
+            let provider = catalog.provider(id).expect(id);
+            let cache = provider.cache.as_ref().expect("cache do gateway");
+            // Probe F4.0 (29/10): o gateway repassa cache_control no protocolo
+            // anthropic e reporta usage.opencode.tokens.*.
+            assert_eq!(cache.mode, "explicit");
+            assert_eq!(cache.min_tokens, Some(2048), "gateway: mínimo do probe");
+            assert!(cache.reports_read && cache.reports_write);
+        }
     }
 
     #[test]
