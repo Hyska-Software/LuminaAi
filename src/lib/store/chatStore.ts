@@ -14,11 +14,13 @@ import type {
   TurnPayload,
   TurnProfile,
   TurnResult,
+  TurnKind,
 } from '../types';
 import { deriveTitle, newId } from '../utils';
 import { defaultSelection, getModel } from '../catalog';
 import { filterConversationsForLayout } from '../conversations';
 import { reasoningForModel } from '../modelMenu';
+import { shouldContinueGoal } from '../goalRunner';
 import { useAppStore } from './appStore';
 import { isCodeEvent, useCodeStore } from './codeStore';
 import { useCacheStore } from './cacheStore';
@@ -32,6 +34,8 @@ export interface StreamingState {
   phase: 'starting' | 'reasoning' | 'text' | 'tool';
   step: number;
   startedAt: number;
+  /** `user` (turno do usuário) ou `goal_round` (rodada automática do objetivo). */
+  turnKind: TurnKind;
 }
 
 interface ChatState {
@@ -90,6 +94,18 @@ interface ChatState {
   editAndResend: (messageId: string, content: string) => Promise<void>;
   stop: () => Promise<void>;
   /**
+   * Inicia uma rodada do objetivo na conversa informada (turno `goal_round`).
+   * Não roda se já houver streaming/rodada sendo montada; o backend revalida
+   * (preflight + harness) e pode recusar.
+   */
+  runGoalRound: (conversationId: string) => Promise<boolean>;
+  /**
+   * Chamado no `done` de um turno: decide (regra pura + preflight do backend)
+   * se a próxima rodada automática do objetivo deve começar. Só age quando a
+   * sessão do objetivo está ativa no layout Code.
+   */
+  maybeContinueGoal: (conversationId: string) => Promise<void>;
+  /**
    * Reconciles the artifact list shown in the UI with the backend snapshot of
    * a conversation. Used after a turn ends, when a conversation is reopened and
    * after edits/deletions, so missed `artifact_created` events can never leave
@@ -108,6 +124,11 @@ export interface SendOptions {
   reasoning?: ReasoningSelection | null;
   /** Extra turn options merged over the app settings defaults. */
   turnOptions?: Partial<TurnOptions>;
+  /**
+   * O usuário pediu um objetivo pelo `/goal` (chip do composer). O turno é
+   * humano normal; o backend injeta a instrução de criação no runtime context.
+   */
+  goalRequest?: boolean;
 }
 
 const EMPTY: ChatMessage[] = [];
@@ -366,12 +387,15 @@ export const useChatStore = create<ChatState>()((set, get) => {
       userMessageId: string | null;
       optimisticUserId: string | null;
       mode: 'new' | 'regenerate';
+      /** Rodada automática: remove os otimistas se o turno nem começou. */
+      removeOnFailure?: boolean;
     },
   ) => {
     let reasoningBuffer = '';
     let textBuffer = '';
     let flushHandle: ReturnType<typeof setTimeout> | null = null;
     let finished = false;
+    let started = false;
 
     const flush = () => {
       if (flushHandle) {
@@ -409,6 +433,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (isCodeEvent(event)) useCodeStore.getState().applyEvent(context.conversationId, event);
       switch (event.type) {
         case 'turn_started': {
+          started = true;
           if (context.optimisticUserId) {
             replaceMessageId(context.conversationId, context.optimisticUserId, event.userMessageId);
             context.userMessageId = event.userMessageId;
@@ -541,7 +566,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
           flush();
           finished = true;
           applyResult(event.result);
-          void useCodeStore.getState().refresh(context.conversationId);
+          // Sincroniza o snapshot da sessão e só então decide a próxima rodada
+          // do objetivo (o estado do goal_updated/finish_round precisa chegar).
+          void (async () => {
+            await useCodeStore.getState().refresh(context.conversationId);
+            await get().maybeContinueGoal(context.conversationId);
+          })();
           // The per-request event carries only cache counters; TTL/min/savings
           // come from the authoritative snapshot, so refresh it at turn end.
           void syncCacheStats(context.conversationId);
@@ -617,6 +647,19 @@ export const useChatStore = create<ChatState>()((set, get) => {
     } catch (error) {
       flush();
       const message = error instanceof Error ? error.message : String(error);
+      // Rodada de objetivo que nem começou (preflight/harness recusou): não
+      // deixa mensagens otimistas órfãs no transcript.
+      if (context.removeOnFailure && !started) {
+        removeMessage(
+          context.conversationId,
+          context.optimisticUserId ?? context.userMessageId ?? '',
+        );
+        removeMessage(context.conversationId, context.assistantId);
+        set({ streaming: null, error: message });
+        toast.error('Não foi possível iniciar a rodada do objetivo', { description: message });
+        void useCodeStore.getState().refresh(context.conversationId);
+        return;
+      }
       patchMessage(context.conversationId, context.assistantId, (m) =>
         m.content || m.reasoning
           ? { ...m, status: 'complete' }
@@ -991,6 +1034,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           phase: 'starting',
           step: 1,
           startedAt: now,
+          turnKind: 'user',
         },
       }));
 
@@ -1003,6 +1047,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
         reasoning: reasoning ?? null,
         options: turnOptionsFromSettings(options?.turnOptions),
         profile: turnProfileFor(get().conversations.find((c) => c.id === conversationId)),
+        turnKind: 'user',
+        goalRequest: options?.goalRequest ?? false,
         turnId,
       };
 
@@ -1023,6 +1069,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
       const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
       const lastUser = [...messages].reverse().find((m) => m.role === 'user');
       if (!lastAssistant || !lastUser) return;
+      if (lastUser.origin === 'goal_round') {
+        toast.info('Rodada do objetivo não pode ser regenerada', {
+          description: 'Use "Nova rodada" no objetivo para continuar o trabalho.',
+        });
+        return;
+      }
 
       const app = useAppStore.getState();
       // Regenerating keeps the model the conversation was started with.
@@ -1064,6 +1116,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           phase: 'starting',
           step: 1,
           startedAt: Date.now(),
+          turnKind: 'user',
         },
         error: null,
         errorCode: null,
@@ -1079,6 +1132,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         reasoning: selection.reasoning ?? null,
         options: turnOptionsFromSettings({ regenerate: true }),
         profile: turnProfileFor(get().conversations.find((c) => c.id === conversationId)),
+        turnKind: 'user',
         turnId,
       };
 
@@ -1124,11 +1178,176 @@ export const useChatStore = create<ChatState>()((set, get) => {
           ? { streaming: { ...state.streaming, phase: 'starting' } }
           : {},
       );
+      // Parar uma rodada do objetivo também pausa a continuidade automática:
+      // sem isso o próximo `done` retomaria sozinho o que o usuário parou.
+      if (streaming.turnKind === 'goal_round') {
+        void useCodeStore.getState().updateGoal(streaming.conversationId, 'pause');
+      }
       try {
         await api.cancelTurn(streaming.turnId);
       } catch (error) {
         console.error('cancel failed', error);
       }
+    },
+
+    runGoalRound: async (conversationId) => {
+      const state = get();
+      if (state.streaming) return false;
+      const conversation = state.conversations.find((entry) => entry.id === conversationId);
+      if (!conversation) return false;
+      const session = useCodeStore.getState().byConversation[conversationId];
+      if (!session?.goal || session.goalStarting) return false;
+
+      const app = useAppStore.getState();
+      const selection: ModelSelection = {
+        providerId: conversation.providerId,
+        modelId: conversation.modelId,
+        reasoning: null,
+      };
+      // Mesma checagem de credencial do `send`: um turno sem credencial não
+      // deve criar mensagens quebradas.
+      const activeProvider = app.providers?.find(
+        (provider) => provider.id === selection.providerId,
+      );
+      if (activeProvider) {
+        const key = app.keys?.find((entry) => entry.providerId === selection.providerId);
+        const auth = app.auth?.find((entry) => entry.providerId === selection.providerId);
+        const ready = Boolean(key?.hasKey) || auth?.state === 'signed-in';
+        if (!ready) {
+          toast.error('Conecte uma credencial para continuar o objetivo', {
+            description:
+              activeProvider.auth === 'oauth'
+                ? 'Entre com o ChatGPT (Configurações → Provedores) ou adicione uma API key.'
+                : 'Adicione a API key deste provedor em Configurações → Provedores.',
+          });
+          return false;
+        }
+      }
+      const model = getModel(conversation.providerId, conversation.modelId);
+      const current = app.selection;
+      const reasoning =
+        current.providerId === conversation.providerId &&
+        current.modelId === conversation.modelId
+          ? current.reasoning
+          : model
+            ? reasoningForModel(model, current.reasoning)
+            : current.reasoning;
+
+      const turnId = newId();
+      const now = Date.now();
+      const optimisticUserId = `optimistic-user-${turnId}`;
+      const optimisticAssistantId = `optimistic-assistant-${turnId}`;
+      const userMessage: ChatMessage = {
+        id: optimisticUserId,
+        conversationId,
+        role: 'user',
+        content: '',
+        status: 'complete',
+        toolCalls: [],
+        citations: [],
+        attachments: [],
+        modelId: selection.modelId,
+        providerId: selection.providerId,
+        createdAt: now,
+        origin: 'goal_round',
+      };
+      const assistantMessage: ChatMessage = {
+        id: optimisticAssistantId,
+        conversationId,
+        role: 'assistant',
+        content: '',
+        reasoning: '',
+        status: 'streaming',
+        toolCalls: [],
+        citations: [],
+        attachments: [],
+        trace: [],
+        modelId: selection.modelId,
+        providerId: selection.providerId,
+        createdAt: now + 1,
+      };
+
+      useCodeStore.getState().setGoalStarting(conversationId, true);
+      try {
+        const previous = get().messagesByConversation[conversationId] ?? [];
+        set((s) => ({
+          messagesByConversation: {
+            ...s.messagesByConversation,
+            [conversationId]: [...previous, userMessage, assistantMessage],
+          },
+          error: null,
+          errorCode: null,
+          errorHint: null,
+          streaming: {
+            turnId,
+            conversationId,
+            assistantId: optimisticAssistantId,
+            userMessageId: optimisticUserId,
+            phase: 'starting',
+            step: 1,
+            startedAt: now,
+            turnKind: 'goal_round',
+          },
+        }));
+
+        const payload: TurnPayload = {
+          conversationId,
+          content: '',
+          attachmentIds: [],
+          providerId: conversation.providerId,
+          modelId: conversation.modelId,
+          reasoning: reasoning ?? null,
+          options: turnOptionsFromSettings(),
+          profile: 'code',
+          turnKind: 'goal_round',
+          turnId,
+        };
+
+        void runTurn(payload, {
+          conversationId,
+          assistantId: optimisticAssistantId,
+          userMessageId: null,
+          optimisticUserId,
+          mode: 'new',
+          removeOnFailure: true,
+        });
+        return true;
+      } finally {
+        useCodeStore.getState().setGoalStarting(conversationId, false);
+      }
+    },
+
+    maybeContinueGoal: async (conversationId) => {
+      if (get().streaming) return;
+      const ui = useUiStore.getState();
+      if (ui.layoutMode !== 'code' || get().activeId !== conversationId) return;
+      const session = useCodeStore.getState().byConversation[conversationId];
+      if (!session) return;
+      if (
+        !shouldContinueGoal({
+          goal: session.goal,
+          planMode: session.planMode,
+          approvalCount: session.approvals.length,
+          questionCount: session.questions.length,
+          streaming: false,
+          activeId: get().activeId,
+          conversationId,
+          layoutMode: ui.layoutMode,
+        })
+      ) {
+        return;
+      }
+      let gate;
+      try {
+        gate = await api.goalCanContinue(conversationId, true);
+      } catch {
+        return;
+      }
+      if (!gate?.ok) return;
+      // Revalida depois do await (o usuário pode ter trocado de sessão/iniciado
+      // um turno enquanto o preflight respondia).
+      if (get().streaming || get().activeId !== conversationId) return;
+      await get().runGoalRound(conversationId);
     },
 
     syncArtifacts,

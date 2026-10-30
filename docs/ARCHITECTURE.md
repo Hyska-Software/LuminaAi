@@ -82,12 +82,20 @@ Eventos (`TurnEvent`): `turn_started`, `step_started`, `reasoning_delta`, `reaso
 `presentation`), `artifact_created`, `usage`, `message_updated`, `title_updated`, `done`,
 `cancelled`, `error` e os eventos do harness de código: `approval_requested/resolved`,
 `tool_progress`, `file_changed`, `workspace_changes`, `todos_updated`, `plan_updated`,
-`context_stats`, `cache_stats`, `compacted`, `job_updated`, `profile_changed`.
+`goal_updated` (estado do objetivo persistente), `context_stats`, `cache_stats`, `compacted`,
+`job_updated`, `profile_changed`.
 
 **Perfis de turno.** `TurnPayload.profile` (`chat` | `code`, default `chat`) seleciona o perfil do
 mesmo loop: prompt, catálogo de tools, política e orçamentos. O perfil `code` só é aceito em sessão
 do Code (nativa ou `code_linked`) e, a cada passo, passa por: compactação de contexto (se
 necessário), política/aprovação por tool, journal de arquivos e emissão de eventos de sessão.
+
+**Objetivo (Goal).** Além do perfil, o turno tem `TurnPayload.turnKind` (`user` default |
+`goal_round`) e `TurnPayload.goalRequest` (fluxo `/goal`: intenção de criação no turno humano,
+injetada no runtime context como `## Goal request`). Uma rodada de objetivo é um turno normal com
+prompt de continuação, `origin` próprio na mensagem do usuário e fecho em `goal/round` +
+`goal/state`; o contrato completo (estado, eventos, comandos, driver de rodadas e UI) está em
+`docs/goals/code-goals/PLAN.md`.
 
 ## 5. Modelo de dados
 
@@ -98,7 +106,9 @@ conversations(id PK, title, created_at, updated_at, pinned, provider_id, model_i
               mode, code_linked, workspace_id NULL, agent_kind, permission_mode)
 messages(id PK, conversation_id, role, content, reasoning, status, tool_calls JSON,
          citations JSON, attachments JSON, model_id, provider_id, usage JSON,
-         provider_state JSON, created_at, seq, trace JSON)
+         provider_state JSON, created_at, seq, trace JSON, origin)
+-- `origin` (`user` default | `goal_round`) é aditivo (v1.11, docs/goals/code-goals):
+-- rodadas automáticas do objetivo não se disfarçam de mensagem do usuário na UI.
 attachments(id PK, name, mime_type, size, kind, text, page_count, width, height, file_path, created_at)
 artifacts(id PK, conversation_id NULL, message_id, name, mime_type, kind, language, size,
          created_at, path, favorite)
@@ -121,6 +131,8 @@ cache_samples(id PK, conversation_id, turn_id, step, provider_id, model_id, prot
 -- harness de código (v1.9, docs/goals/code-harness/HARNESS.md §11)
 workspaces(id PK, name, path UNIQUE, created_at, updated_at, last_opened_at, pinned, trusted)
 code_events(id PK, conversation_id, turn_id NULL, seq, kind, payload JSON, created_at)
+-- kinds do objetivo (v1.11): goal/state, goal/deleted, goal/round-started, goal/round
+-- projeção única `harness::code::goal` (fold do último goal/state; tombstone em goal/deleted)
 file_journal(id PK, conversation_id, turn_id, path, change_kind, before_hash, after_hash,
              added, removed, created_at)
 session_summaries(id PK, conversation_id, from_seq, to_seq, content, tokens, created_at)
@@ -360,13 +372,15 @@ Mesmo loop do Chat, com `TurnPayload.profile = "code"` (só em sessão do Code).
 2. **Prompt próprio** (`harness/code/prompt.rs`): identidade de agente de código, ambiente,
    política de permissões, orientações das tools (geradas do registry — fonte única),
    regras de edição/verificação, projeto e formato de resposta.
-3. **Tools do perfil** (`tools/registry.rs` + `tools/code/*`): 23 tools (19 de código + web/skills —
+3. **Tools do perfil** (`tools/registry.rs` + `tools/code/*`): 24 tools (20 de código + web/skills —
    `read_file`, `list_dir`, `search_files`, `search_text`, `read_tool_output`,
    `write_file`, `edit_file`, `run_command`, `job_list`/`job_output`/`job_kill`,
    `git_status`/`git_diff`/`git_log`, `todo_write`, `submit_plan`, `ask_user` (perguntas
 estruturadas com opções e texto livre, respondidas pelo card da timeline via
-`respond_question`), `run_checks` (verificação detectada do projeto), `task` (subagente somente
-leitura, profundidade 1) e tools dinâmicas de servidores **MCP** (mcp__servidor__tool, stdio\nJSON-RPC, aprovação sempre explícita; config <app-data>/mcp.json).
+`respond_question`), `goal` (progresso/conclusão/bloqueio do objetivo da sessão —
+`docs/goals/code-goals/PLAN.md`), `run_checks` (verificação detectada do projeto), `task`
+(subagente somente leitura, profundidade 1) e tools dinâmicas de servidores **MCP**
+(mcp__servidor__tool, stdio\nJSON-RPC, aprovação sempre explícita; config <app-data>/mcp.json).
    O modelo **não** recebe commit/push.
 4. **Política e aprovação** (`policy/`): modos `read_only`/`edit`/`autonomous` + overlay Plano
    + regras persistidas. Toda mutação passa por `policy::decide` → `ApprovalRegistry`
@@ -392,6 +406,17 @@ leitura, profundidade 1) e tools dinâmicas de servidores **MCP** (mcp__servidor
    `code_events` e cancelamento das aprovações pendentes da sessão. O transcript do Code
    termina cada turno com o card de resumo de arquivos alterados (dados das presentations
    `file_change` persistidas; `docs/DESIGN.md` §6.3, `WORKBENCH.md` §5.1).
+11. **Objetivo (v1.11)**: `harness/code/goal.rs` projeta `goal/state` (último vence; `goal/deleted`
+    fecha) e o histórico de rodadas; `run_turn` aceita `turnKind=goal_round` só com objetivo
+    ativo/workspace/plano inativo/sem aprovação, abre a rodada (`goal/round-started`), injeta a
+    seção volátil `## Objective` no runtime context e fecha (`goal/round` + pausa em
+    erro/cancel/limite/estol). O driver de rodadas é do renderer (`chatStore.maybeContinueGoal`,
+    após `done`, uma rodada por vez, só com a sessão ativa no Code); a tool `goal` reporta
+    progresso/conclusão/bloqueio. **Ativação (v1.12)**: `/goal` ativa um chip no composer (a
+    mensagem do usuário não é alterada); o turno humano leva `goalRequest=true` e o runtime context
+    instrui o agente a criar o objetivo (`goal` action `create` com objetivo/título/limite/
+    `auto_continue=true`); o botão do objetivo no composer é somente ícone (controles no popover).
+    Plano completo: `docs/goals/code-goals/PLAN.md`.
 
 Contratos completos (tools/eventos/comandos/UI): `docs/goals/code-harness/TOOLS.md`,
 `HARNESS.md` e `WORKBENCH.md`.
@@ -688,6 +713,11 @@ search_workspace_files, read_workspace_file,
 get_code_session_state, set_permission_mode, set_plan_mode, respond_approval,
 list_approval_rules, save_approval_rule, delete_approval_rule,
 get_workspace_changes, get_file_diff, revert_file, revert_turn, compact_session,
+-- objetivo (v1.11, docs/goals/code-goals/PLAN.md §9)
+create_goal (input {objective,title?,maxRounds?,autoContinue?}),
+update_goal (action edit|arm|disarm|pause|resume|complete|reopen|block|delete,
+             input?, expectedRevision? — CAS),
+list_goal_rounds (limit? 1..=200), goal_can_continue (auto? — preflight),
 list_jobs, get_job_output, kill_job,
 -- git (painel)
 git_status, git_diff, git_stage, git_unstage, git_discard, git_commit,
@@ -754,7 +784,11 @@ A verificação é feita por testes automatizados — unitários e de integraç�
 `list_artifacts`/`read_artifact` (busca/leitura com fixtures reais, biblioteca
 global entre conversas — artefatos de outras conversas são listados/lidos com
 `conversationTitle`/`currentConversation` — e o teste de loop que prova que o
-texto de um artefato de outra conversa chega ao modelo).
+texto de um artefato de outra conversa chega ao modelo). Na v1.11 cobre também o **sistema de
+Goal**: fold/transições/rodadas/interrupção/estol/bloqueio de `harness/code/goal.rs`, validação e
+fecho de `goal_round` no harness (recusas antes do provider, origin, `goal_updated`, prompt
+estável), a tool `goal` (limites, presentation, ausência em subagente), os comandos IPC
+(CAS/idempotência/preflight/degradação de rodada órfã) e a migração de `messages.origin`.
 3. **Integração com o gateway real** (testes `#[ignore]`, executados sob demanda): streaming nos 4 protocolos, tool call + replay de `provider_state`, fallback de protocolo, mapeamento de 401, cancelamento e o caso canônico **DeepSeek V4.1 Flash com esforço máximo**.
 4. **Build**: `pnpm typecheck`, `pnpm build` e `pnpm tauri build --no-bundle` (artefato em `src-tauri/target/release/lumina.exe`).
 5. **Manual (release)**: abrir o app e validar visualmente os fluxos principais.
@@ -786,3 +820,4 @@ texto de um artefato de outra conversa chega ao modelo).
 | 21 | **Git via CLI do usuário** (porcelain v2) com trait futuro para backend nativo | libgit2/gix como backend principal | hooks, filtros, LFS, `core.autocrlf`, credential manager e worktrees se comportam como o usuário espera, sem dependência nativa; o painel usa o mesmo status/diff do terminal |
 | 22 | **Journal de arquivos por hash** (checkpoint por turno) + commit só pelo usuário | auto-commit a cada edição (Aider) / snapshot completo do workspace | reversibilidade sem poluir o histórico do git e com custo proporcional aos arquivos tocados; o commit continua sendo uma decisão humana no painel (HARNESS.md §7.4/§9) |
 | 23 | **Compromisso de docs/evidência**: toda fase do harness entra com testes e `EVIDENCE.md` atualizado | implementar sem registrar decisões | o repo usa TDD e evidência por objetivo; o harness mexe em dinheiro/arquivos do usuário, então cada incremento precisa de prova executável |
+| 24 | **Objetivo persiste em `code_events`** (`goal/state` + rodadas), rodada = turno normal com `turnKind=goal_round`, driver de rodadas no renderer e `messages.origin` aditivo | tabela `goals` própria, segundo loop de agente, round driver process-wide (DSH) | mantém a projeção única/append-only já usada por plano/tarefas, reaproveita streaming/aprovações/replay/journal (sem daemon nem transporte paralelo), preserva o prefix cache (estado só no runtime context) e torna a rodada automática honesta no transcript; retomada após reinício é sempre decisão do usuário (docs/goals/code-goals/PLAN.md §4) |

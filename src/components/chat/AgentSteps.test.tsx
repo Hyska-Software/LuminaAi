@@ -507,6 +507,46 @@ describe('AgentSteps — apresentações e tools do harness de código', () => {
     expect(screen.getByText('As verificações falharam')).toBeTruthy();
     expect(screen.getByText('Atualizou as tarefas')).toBeTruthy();
   });
+
+  it('mostra o Target e o rótulo do objetivo no grupo goal (docs/goals/code-goals)', async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentSteps
+        streaming={false}
+        phase={null}
+        message={message({
+          toolCalls: [
+            tool({
+              name: 'goal',
+              arguments: '{"action":"progress","note":"3 arquivos corrigidos"}',
+              presentation: {
+                kind: 'goal',
+                title: 'Deixar o build verde',
+                objective: 'Corrigir os erros de TypeScript.',
+                status: 'active',
+                autoContinue: true,
+                rounds: 3,
+                maxRounds: 25,
+                revision: 9,
+                origin: 'user',
+                createdAt: 1,
+                updatedAt: 2,
+                lastNote: '3 arquivos corrigidos',
+              },
+            }),
+          ],
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /1 passo/ }));
+
+    const label = screen.getByText('Progrediu no objetivo');
+    expect(label).toBeTruthy();
+    // O ícone do grupo `goal` é o `Target` (lucide), não o fallback `Wrench`.
+    expect(label.closest('li')?.querySelector('.lucide-target')).toBeTruthy();
+    expect(label.closest('li')?.querySelector('.lucide-wrench')).toBeNull();
+  });
 });
 
 describe('AgentSteps — raciocínio em Markdown', () => {

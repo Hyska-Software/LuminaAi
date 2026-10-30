@@ -656,3 +656,58 @@ describe('buildAgentTrace — Markdown do raciocínio', () => {
     expect(toolGroups(entries).map((group) => group.name)).toEqual(['web_search', 'fetch_url']);
   });
 });
+
+describe('buildAgentTrace — objetivo (Goal)', () => {
+  const goal = (overrides: Record<string, unknown> = {}) => ({
+    kind: 'goal' as const,
+    title: 'Objetivo',
+    objective: 'Concluir a refatoração.',
+    status: 'active' as const,
+    autoContinue: true,
+    rounds: 2,
+    maxRounds: 25,
+    revision: 3,
+    origin: 'user' as const,
+    createdAt: 1,
+    updatedAt: 2,
+    ...overrides,
+  });
+
+  it('agrupa chamadas da tool goal em uma linha com rótulo pt-BR', () => {
+    const entries = buildAgentTrace({
+      reasoning: null,
+      toolCalls: [
+        tool({ name: 'goal', presentation: goal({ status: 'completed' }) }),
+      ],
+    });
+    const groups = toolGroups(entries);
+    expect(groups.map((group) => group.name)).toEqual(['goal']);
+    expect(groups[0].label).toBe('Objetivo concluído');
+  });
+
+  it('descreve progresso, bloqueio e falha da tool goal', () => {
+    const progress = toolGroups(
+      buildAgentTrace({
+        reasoning: null,
+        toolCalls: [tool({ name: 'goal', presentation: goal() })],
+      }),
+    )[0];
+    expect(progress.label).toBe('Progrediu no objetivo');
+
+    const blocked = toolGroups(
+      buildAgentTrace({
+        reasoning: null,
+        toolCalls: [tool({ name: 'goal', presentation: goal({ status: 'blocked' }) })],
+      }),
+    )[0];
+    expect(blocked.label).toBe('Objetivo bloqueado');
+
+    const failed = toolGroups(
+      buildAgentTrace({
+        reasoning: null,
+        toolCalls: [tool({ name: 'goal', status: 'error', result: 'falhou' })],
+      }),
+    )[0];
+    expect(failed.label).toBe('Falha ao atualizar o objetivo');
+  });
+});

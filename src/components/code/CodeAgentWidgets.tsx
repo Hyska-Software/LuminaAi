@@ -13,11 +13,13 @@ import {
   AskUserCard,
   CacheHitChip,
   ContextMeter,
+  GoalAttentionCard,
   PlanCard,
   type ApprovalDecisionOptions,
   type PlanAction,
 } from '@/components/agent';
-import { useAppStore, useCodeStore } from '@/lib/store';
+import { goalNeedsAttention } from '@/lib/goalRunner';
+import { useAppStore, useCodeStore, useUiStore } from '@/lib/store';
 import { useCacheStore } from '@/lib/store/cacheStore';
 import type {
   ApprovalDecision,
@@ -38,15 +40,38 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
   const respondApproval = useCodeStore((state) => state.respondApproval);
   const respondQuestion = useCodeStore((state) => state.respondQuestion);
   const [responding, setResponding] = useState<string | null>(null);
+  /** Ação do objetivo aplicando (dispensa duplo clique nas ações do card). */
+  const [goalBusy, setGoalBusy] = useState(false);
   /** Guard síncrono contra duplo submit (o estado do React é assíncrono). */
   const submittingRef = useRef<string | null>(null);
 
   if (!session) return null;
   const planApprovals = session.approvals.filter((approval) => approval.tool === 'submit_plan');
   const otherApprovals = session.approvals.filter((approval) => approval.tool !== 'submit_plan');
-  if (planApprovals.length === 0 && otherApprovals.length === 0 && session.questions.length === 0) {
+  const goal = session.goal;
+  /* Card de atenção do objetivo (PLAN §10.5): só para estados que exigem decisão
+     humana e enquanto esta revisão não foi dispensada pelo usuário. */
+  const showGoalAttention = Boolean(
+    goal && goalNeedsAttention(goal) && goal.revision !== session.dismissedGoalRevision,
+  );
+  if (
+    planApprovals.length === 0 &&
+    otherApprovals.length === 0 &&
+    session.questions.length === 0 &&
+    !showGoalAttention
+  ) {
     return null;
   }
+
+  const applyGoalAction = async (run: () => Promise<unknown>) => {
+    if (goalBusy) return;
+    setGoalBusy(true);
+    try {
+      await run();
+    } finally {
+      setGoalBusy(false);
+    }
+  };
 
   const decide = async (
     approval: ApprovalRequest,
@@ -170,6 +195,34 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
           }}
         />
       ))}
+      {showGoalAttention && goal ? (
+        <GoalAttentionCard
+          goal={goal}
+          busy={goalBusy}
+          onResume={() =>
+            void applyGoalAction(() =>
+              useCodeStore.getState().updateGoal(conversationId, 'resume'),
+            )
+          }
+          onExtend={() =>
+            useUiStore.getState().openGoalDialog({ conversationId, mode: 'edit' })
+          }
+          onComplete={() =>
+            void applyGoalAction(() =>
+              useCodeStore.getState().updateGoal(conversationId, 'complete'),
+            )
+          }
+          onReopen={() =>
+            void applyGoalAction(() =>
+              useCodeStore.getState().updateGoal(conversationId, 'reopen'),
+            )
+          }
+          onOpen={() => useUiStore.getState().openCodeGoal()}
+          onDismiss={() =>
+            useCodeStore.getState().dismissGoalAttention(conversationId, goal.revision)
+          }
+        />
+      ) : null}
     </div>
   );
 }

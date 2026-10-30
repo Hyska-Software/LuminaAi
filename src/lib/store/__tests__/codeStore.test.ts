@@ -6,6 +6,7 @@ import type {
   CodeSessionState,
   ContextStats,
   FileChange,
+  GoalView,
   JobView,
   TurnEvent,
 } from '../../types';
@@ -34,6 +35,22 @@ function job(status: JobView['status'] = 'running'): JobView {
     status,
     startedAt: 1,
     durationMs: status === 'running' ? 100 : 900,
+  };
+}
+
+function goalView(overrides: Partial<GoalView> = {}): GoalView {
+  return {
+    title: 'Refatorar o parser',
+    objective: 'Refatore o parser mantendo os testes verdes.',
+    status: 'active',
+    autoContinue: true,
+    rounds: 2,
+    maxRounds: 25,
+    revision: 3,
+    origin: 'user',
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_100_000,
+    ...overrides,
   };
 }
 
@@ -177,5 +194,60 @@ describe('codeStore reducer', () => {
     expect(next.context?.used).toBe(1_000);
     // resoluções de UI sobrevivem ao snapshot
     expect(next.resolutions).toBe(previous.resolutions);
+  });
+});
+
+describe('codeStore — objetivo (Goal)', () => {
+  it('aplica goal_updated e considera o evento como de código', () => {
+    const goal = goalView();
+    const event: TurnEvent = { type: 'goal_updated', goal };
+    expect(isCodeEvent(event)).toBe(true);
+    const state = applyCodeEvent(emptyCodeSession('conv-1'), event);
+    expect(state.goal).toEqual(goal);
+  });
+
+  it('preserva as rodadas enquanto é o mesmo objetivo e limpa ao trocar', () => {
+    const goal = goalView();
+    let state = emptyCodeSession('conv-1');
+    state = applyCodeEvent(state, { type: 'goal_updated', goal });
+    state = { ...state, goalRounds: [{ index: 1, turnId: 't1', startedAt: 1, outcome: 'done' }] };
+    // Nova revisão do MESMO objetivo preserva o histórico e reabre o card.
+    state = { ...state, dismissedGoalRevision: 3 };
+    state = applyCodeEvent(state, { type: 'goal_updated', goal: { ...goal, revision: 4 } });
+    expect(state.goalRounds).toHaveLength(1);
+    expect(state.dismissedGoalRevision).toBeNull();
+    // Objetivo novo (createdAt diferente) começa com histórico vazio.
+    state = applyCodeEvent(state, {
+      type: 'goal_updated',
+      goal: { ...goal, createdAt: 2, revision: 1 },
+    });
+    expect(state.goalRounds).toEqual([]);
+  });
+
+  it('fromSnapshot mantém o objetivo e o histórico do mesmo objetivo', () => {
+    const goal = goalView();
+    const snapshot: CodeSessionState = {
+      conversationId: 'conv-1',
+      permissionMode: 'edit',
+      planMode: false,
+      goal,
+      todos: [],
+      jobs: [],
+      approvals: [],
+    };
+    const previous = {
+      ...emptyCodeSession('conv-1'),
+      goal,
+      goalRounds: [{ index: 1, turnId: 't1', startedAt: 1, outcome: 'done' as const }],
+      goalStarting: true,
+    };
+    const next = fromSnapshot(snapshot, previous);
+    expect(next.goal).toEqual(goal);
+    expect(next.goalRounds).toHaveLength(1);
+    expect(next.goalStarting).toBe(false);
+    // Snapshot antigo (sem goal) zera o objetivo.
+    const cleared = fromSnapshot({ ...snapshot, goal: null }, next);
+    expect(cleared.goal).toBeNull();
+    expect(cleared.goalRounds).toEqual([]);
   });
 });

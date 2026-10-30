@@ -129,6 +129,11 @@ pub fn run() {
             commands::code::revert_file,
             commands::code::revert_turn,
             commands::code::compact_session,
+            /* -------- harness de código: objetivo (Goal) -------- */
+            commands::code::create_goal,
+            commands::code::update_goal,
+            commands::code::list_goal_rounds,
+            commands::code::goal_can_continue,
             /* -------- harness de código: jobs em background -------- */
             commands::code::list_jobs,
             commands::code::get_job_output,

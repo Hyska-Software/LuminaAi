@@ -292,7 +292,7 @@ pub fn frozen_replay_mode(
 mod tests {
     use super::*;
     use crate::db::Db;
-    use crate::domain::{AttachmentInfo, ChatMessage, MessageRole, ToolCallRecord};
+    use crate::domain::{AttachmentInfo, ChatMessage, ToolCallRecord};
 
     fn image_message(id: &str, size_mb: i64) -> ChatMessage {
         let mut message = ChatMessage::user("conv", "veja");

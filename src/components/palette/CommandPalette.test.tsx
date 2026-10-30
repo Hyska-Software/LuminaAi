@@ -114,6 +114,7 @@ function streamingState() {
     phase: 'text' as const,
     step: 1,
     startedAt: Date.now(),
+    turnKind: 'user' as const,
   };
 }
 

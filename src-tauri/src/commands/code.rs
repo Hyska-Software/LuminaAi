@@ -12,9 +12,12 @@ use sha2::{Digest, Sha256};
 use tauri::State;
 
 use crate::domain::{
-    ApprovalDecision, ApprovalRequest, ApprovalRule, ApprovalScope, ChangesSummary,
-    CodeSessionState, FileChangeKind, FileChangeSummary, PlanState, PlanView, Workspace,
+    ApprovalDecision, ApprovalRequest, ApprovalRule, ApprovalScope, AskUserRequest, ChangesSummary,
+    CodeSessionState, Conversation, CreateGoalInput, FileChangeKind, FileChangeSummary, GoalAction,
+    GoalContinuation, GoalOrigin, GoalPauseReason, GoalRound, GoalStatus, GoalView, PlanState,
+    PlanView, UpdateGoalInput, Workspace,
 };
+use crate::harness::code::goal;
 use crate::state::AppState;
 
 use super::workspace::{enrich_workspace, project_info, workspace_path};
@@ -43,6 +46,28 @@ fn objects_dir(app_data: &Path) -> PathBuf {
     app_data.join("checkpoints").join("objects")
 }
 
+/// Aprovações pendentes visíveis nesta sessão (inclui pedidos sem conversa).
+fn pending_approvals_for(state: &AppState, conversation_id: &str) -> Vec<ApprovalRequest> {
+    state
+        .approvals
+        .pending_requests()
+        .into_iter()
+        .filter(|request| {
+            request.conversation_id.is_empty() || request.conversation_id == conversation_id
+        })
+        .collect()
+}
+
+/// Perguntas pendentes (`ask_user`) da sessão.
+fn pending_questions_for(state: &AppState, conversation_id: &str) -> Vec<AskUserRequest> {
+    state
+        .questions
+        .pending_requests()
+        .into_iter()
+        .filter(|request| request.conversation_id == conversation_id)
+        .collect()
+}
+
 /// Reconstrói o estado da sessão a partir do log de eventos + journal + git.
 async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSessionState, String> {
     let conversation = state
@@ -67,20 +92,16 @@ async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSe
 
     let changes = collect_changes(state, conversation_id, workspace.as_ref()).await;
 
-    let approvals: Vec<ApprovalRequest> = state
-        .approvals
-        .pending_requests()
-        .into_iter()
-        .filter(|request| {
-            request.conversation_id.is_empty() || request.conversation_id == conversation_id
-        })
-        .collect();
-    let questions: Vec<crate::domain::AskUserRequest> = state
-        .questions
-        .pending_requests()
-        .into_iter()
-        .filter(|request| request.conversation_id == conversation_id)
-        .collect();
+    let approvals = pending_approvals_for(state, conversation_id);
+    let questions = pending_questions_for(state, conversation_id);
+
+    // Objetivo da sessão: fold de `goal/state` **já degradado** quando a última
+    // rodada morreu sem `goal/round` (leitura, nunca grava — PLAN §6.3).
+    let goal = project_goal(
+        &state.db,
+        conversation_id,
+        state.has_active_turn_for(conversation_id),
+    )?;
 
     // Projeção **única** (`PLAN.md` D9/B-09): plano, modo e tarefas vêm de
     // `harness::code::session` — este módulo não recalcula nada.
@@ -108,6 +129,7 @@ async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSe
         permission_mode: conversation.permission_mode,
         plan_mode,
         plan,
+        goal,
         todos,
         workspace,
         project,
@@ -967,6 +989,362 @@ pub async fn compact_session(
 }
 
 /* ------------------------------------------------------------------ */
+/* Objetivo persistente da sessão (Goal) — PLAN.md §6.3/§7.4/§9.1      */
+/* ------------------------------------------------------------------ */
+
+/// `outcome` de uma rodada fechada como interrompida (crash/reload no meio).
+const ROUND_OUTCOME_INTERRUPTED: &str = "interrupted";
+
+/// Texto do snapshot/card quando a última rodada não fechou (`PLAN.md` §10.9).
+pub(crate) const ORPHAN_ROUND_DETAIL: &str =
+    "A última rodada foi interrompida. Retome para continuar.";
+
+/// Sessão do layout Code? Nativo (`mode == "code"`) ou sessão do Chat
+/// explicitamente adicionada ao Code (`codeLinked`) — PLAN D18.
+pub(crate) fn is_code_session(conversation: &Conversation) -> bool {
+    conversation.mode == crate::domain::CONVERSATION_MODE_CODE || conversation.code_linked
+}
+
+/// O objetivo só existe no layout Code (PLAN D18); o código estável no prefixo
+/// permite a UI/pill traduzir a recusa.
+fn validate_goal_session(conversation: &Conversation) -> Result<(), String> {
+    if !is_code_session(conversation) {
+        return Err("GOAL_NOT_CODE: o objetivo só existe em sessões do layout Code".to_string());
+    }
+    Ok(())
+}
+
+/// Pasta do workspace do objetivo, validada **no disco** (PLAN D15/§7.2): uma
+/// rodada de código sem arquivos estola. Usar o caminho para checar a existência
+/// (o workspace pode ter sido movido/apagado fora do app).
+fn goal_workspace_root(
+    db: &crate::db::Db,
+    conversation: &Conversation,
+) -> Result<PathBuf, String> {
+    let workspace_id = conversation.workspace_id.as_deref().ok_or_else(|| {
+        "GOAL_NO_WORKSPACE: abra uma pasta para definir o objetivo da sessão".to_string()
+    })?;
+    let workspace = db
+        .get_workspace(workspace_id)
+        .map_err(map_err)?
+        .ok_or_else(|| format!("GOAL_NO_WORKSPACE: workspace não encontrado: {workspace_id}"))?;
+    let root = PathBuf::from(&workspace.path);
+    if !root.is_dir() {
+        return Err(format!(
+            "GOAL_NO_WORKSPACE: a pasta do workspace não existe mais: {}",
+            workspace.path
+        ));
+    }
+    Ok(root)
+}
+
+/// `true` quando o workspace do objetivo existe no disco. Ausência de
+/// workspace/pasta é um **fato do preflight** (`false`); erro de banco é erro.
+fn goal_has_workspace(
+    db: &crate::db::Db,
+    conversation: &Conversation,
+) -> Result<bool, String> {
+    match goal_workspace_root(db, conversation) {
+        Ok(_) => Ok(true),
+        Err(error) if error.starts_with("GOAL_NO_WORKSPACE") => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// Degradação **de leitura** de uma rodada órfã (`PLAN.md` §6.3): um objetivo
+/// `active` cuja última rodada não tem `goal/round` e não tem turno ativo vira
+/// `paused/interrupted` no snapshot — **sem gravar** nada. O próximo
+/// `begin_round` reconcilia o log (fecha a órfã) e um `resume` rearma.
+pub(crate) fn degrade_orphan_goal(
+    goal: Option<GoalView>,
+    last_round_interrupted: bool,
+    has_active_turn: bool,
+) -> Option<GoalView> {
+    let mut goal = goal?;
+    if goal.status == GoalStatus::Active && last_round_interrupted && !has_active_turn {
+        goal.status = GoalStatus::Paused;
+        goal.pause_reason = Some(GoalPauseReason::Interrupted);
+        goal.pause_detail = Some(ORPHAN_ROUND_DETAIL.to_string());
+        goal.auto_continue = false;
+    }
+    Some(goal)
+}
+
+/// Objetivo projetado para a UI: fold de `goal/state` + degradação de rodada
+/// órfã. Nunca grava — o log continua `active` até a próxima reconciliação.
+pub(crate) fn project_goal(
+    db: &crate::db::Db,
+    conversation_id: &str,
+    has_active_turn: bool,
+) -> Result<Option<GoalView>, String> {
+    let Some(goal) = goal::current(db, conversation_id).map_err(map_err)? else {
+        return Ok(None);
+    };
+    // Só pode haver órfã quando o objetivo segue `active` e nenhum turno o
+    // ocupa; nesse caso o fold de rodadas (uma, a mais recente) diz se a última
+    // abertura ficou **sem `goal/round`** (a rodada sintetizada como
+    // `interrupted` não tem `endedAt`; uma rodada reconciliada tem). Fora daí
+    // não há o que degradar.
+    let interrupted = goal.status == GoalStatus::Active
+        && !has_active_turn
+        && goal::rounds(db, conversation_id, 1, has_active_turn)
+            .map_err(map_err)?
+            .first()
+            .is_some_and(|round| {
+                let unclosed = round.ended_at.is_none();
+                unclosed && round.outcome.as_deref() == Some(ROUND_OUTCOME_INTERRUPTED)
+            });
+    Ok(degrade_orphan_goal(Some(goal), interrupted, has_active_turn))
+}
+
+/// Renomeia o título da conversa para o título do objetivo **apenas** quando
+/// ela ainda está com o placeholder (`PLAN` D17/§8.4). Falha é logada e não
+/// derruba a criação: o título é cosmético.
+fn rename_placeholder_title(db: &crate::db::Db, conversation: &Conversation, goal: &GoalView) {
+    if !crate::harness::should_auto_title(&conversation.title) {
+        return;
+    }
+    if let Err(error) = db.rename_conversation(&conversation.id, &goal.title) {
+        eprintln!("lumina: falha ao renomear conversa: {error:#}");
+    }
+}
+
+/// Lógica testável de `create_goal`: valida layout Code + workspace real,
+/// cria o objetivo com `origin = user` (default `autoContinue = true`) e renomeia
+/// o título placeholder da conversa.
+pub(crate) fn create_goal_for_conversation(
+    db: &crate::db::Db,
+    conversation_id: &str,
+    input: &CreateGoalInput,
+) -> Result<GoalView, String> {
+    let conversation = ensure_conversation(db, conversation_id)?;
+    validate_goal_session(&conversation)?;
+    goal_workspace_root(db, &conversation)?;
+    let goal = goal::create(db, conversation_id, input, GoalOrigin::User)
+        .map_err(|error| error.to_string())?;
+    rename_placeholder_title(db, &conversation, &goal);
+    Ok(goal)
+}
+
+/// Lógica testável de `update_goal`: CAS por `expectedRevision`
+/// (`GOAL_STALE_REVISION`) + mapeamento [`GoalAction`] → mutação do `goal.rs`
+/// (idempotente no estado alvo). `None` = objetivo encerrado (`delete`).
+pub(crate) fn apply_goal_action(
+    db: &crate::db::Db,
+    conversation_id: &str,
+    action: GoalAction,
+    input: &UpdateGoalInput,
+    expected_revision: Option<u64>,
+) -> Result<Option<GoalView>, String> {
+    goal::update(db, conversation_id, action, input, expected_revision)
+        .map_err(|error| error.to_string())
+}
+
+/// Limite do histórico de rodadas: default e teto de
+/// `GOAL_ROUNDS_LIST_LIMIT` (200), piso 1 (`PLAN.md` §5.3/§9.1).
+pub(crate) fn clamp_rounds_limit(limit: Option<u32>) -> u32 {
+    limit
+        .unwrap_or(goal::GOAL_ROUNDS_LIST_LIMIT)
+        .clamp(1, goal::GOAL_ROUNDS_LIST_LIMIT)
+}
+
+/// Motivos do preflight `goal_can_continue`, na ordem oficial do `PLAN.md`
+/// §7.4 (o primeiro que casar vence).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GoalContinuationReason {
+    NoGoal,
+    NotCode,
+    Completed,
+    Blocked,
+    Paused,
+    NotArmed,
+    MaxRounds,
+    PlanMode,
+    PendingApproval,
+    Busy,
+    NoWorkspace,
+    Interrupted,
+}
+
+impl GoalContinuationReason {
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::NoGoal => "no_goal",
+            Self::NotCode => "not_code",
+            Self::Completed => "completed",
+            Self::Blocked => "blocked",
+            Self::Paused => "paused",
+            Self::NotArmed => "not_armed",
+            Self::MaxRounds => "max_rounds",
+            Self::PlanMode => "plan_mode",
+            Self::PendingApproval => "pending_approval",
+            Self::Busy => "busy",
+            Self::NoWorkspace => "no_workspace",
+            Self::Interrupted => "interrupted",
+        }
+    }
+}
+
+/// Fatos do preflight já resolvidos pelo comando (a decisão em si é pura e
+/// testável). `goal` é o snapshot **já degradado** por [`project_goal`].
+pub(crate) struct ContinuationFacts<'a> {
+    pub is_code: bool,
+    pub goal: Option<&'a GoalView>,
+    pub plan_mode: bool,
+    pub pending_approval: bool,
+    pub has_active_turn: bool,
+    pub has_workspace: bool,
+}
+
+/// Decisão pura do preflight (§7.4). `auto = true` é a continuação automática
+/// (exige `autoContinue`); `auto = false` é "Nova rodada" (basta `active` +
+/// orçamento + sem plano/aprovação/busy).
+pub(crate) fn continuation_reason(
+    facts: &ContinuationFacts<'_>,
+    auto: bool,
+) -> Option<GoalContinuationReason> {
+    let Some(goal) = facts.goal else {
+        return Some(GoalContinuationReason::NoGoal);
+    };
+    if !facts.is_code {
+        return Some(GoalContinuationReason::NotCode);
+    }
+    match goal.status {
+        GoalStatus::Completed => return Some(GoalContinuationReason::Completed),
+        GoalStatus::Blocked => return Some(GoalContinuationReason::Blocked),
+        GoalStatus::Paused => {
+            // `paused(interrupted)` é reportado como o código específico
+            // `interrupted` (o último da lista oficial), não como `paused`.
+            if goal.pause_reason != Some(GoalPauseReason::Interrupted) {
+                return Some(GoalContinuationReason::Paused);
+            }
+        }
+        GoalStatus::Active => {}
+    }
+    if auto && !goal.auto_continue {
+        return Some(GoalContinuationReason::NotArmed);
+    }
+    if goal.rounds >= goal.max_rounds {
+        return Some(GoalContinuationReason::MaxRounds);
+    }
+    if facts.plan_mode {
+        return Some(GoalContinuationReason::PlanMode);
+    }
+    if facts.pending_approval {
+        return Some(GoalContinuationReason::PendingApproval);
+    }
+    if facts.has_active_turn {
+        return Some(GoalContinuationReason::Busy);
+    }
+    if !facts.has_workspace {
+        return Some(GoalContinuationReason::NoWorkspace);
+    }
+    if goal.status == GoalStatus::Paused {
+        return Some(GoalContinuationReason::Interrupted);
+    }
+    None
+}
+
+/// Cria o objetivo da sessão de código (`PLAN.md` §9.1).
+///
+/// Valida layout Code + workspace real + limites, persiste `goal/state` com
+/// `origin = user` e renomeia um título placeholder para o título do objetivo.
+/// Devolve o snapshot completo (a UI aplica sem depender de evento).
+#[tauri::command]
+pub async fn create_goal(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    input: CreateGoalInput,
+) -> Result<CodeSessionState, String> {
+    create_goal_for_conversation(&state.db, &conversation_id, &input)?;
+    session_state(&state, &conversation_id).await
+}
+
+/// Aplica uma ação da UI sobre o objetivo com CAS por `expectedRevision`
+/// (`GOAL_STALE_REVISION: ...`), idempotente no estado alvo (`PLAN.md` §9.1).
+#[tauri::command]
+pub async fn update_goal(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    action: GoalAction,
+    input: Option<UpdateGoalInput>,
+    expected_revision: Option<u64>,
+) -> Result<CodeSessionState, String> {
+    ensure_conversation(&state.db, &conversation_id)?;
+    // Crash/reinício pode ter deixado uma rodada aberta: fecha como `interrupted`
+    // antes da ação (sem isso o snapshot degradado em `paused/interrupted` não
+    // destrava, porque o estado persistido continua `active` e `resume` é no-op
+    // — QA F4, achado ALTO). Nunca reconcilia com turno vivo nesta conversa.
+    if !state.has_active_turn_for(&conversation_id) {
+        crate::harness::code::goal::reconcile_interrupted_rounds(
+            &state.db,
+            &conversation_id,
+        )
+        .map_err(map_err)?;
+    }
+    let input = input.unwrap_or_default();
+    apply_goal_action(
+        &state.db,
+        &conversation_id,
+        action,
+        &input,
+        expected_revision,
+    )?;
+    session_state(&state, &conversation_id).await
+}
+
+/// Histórico de rodadas do objetivo, **mais recentes primeiro**; limite 1..=200
+/// (o turno ativo distingue "em andamento" de "interrompida").
+#[tauri::command]
+pub async fn list_goal_rounds(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    limit: Option<u32>,
+) -> Result<Vec<GoalRound>, String> {
+    ensure_conversation(&state.db, &conversation_id)?;
+    let has_active_turn = state.has_active_turn_for(&conversation_id);
+    goal::rounds(
+        &state.db,
+        &conversation_id,
+        clamp_rounds_limit(limit),
+        has_active_turn,
+    )
+    .map_err(map_err)
+}
+
+/// Preflight oficial de continuidade (`PLAN.md` §7.4): devolve
+/// `{ ok, reason, goal }` com os códigos estáveis na ordem documentada.
+/// `auto = false` ("Nova rodada agora") não exige `autoContinue`.
+#[tauri::command]
+pub async fn goal_can_continue(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    auto: Option<bool>,
+) -> Result<GoalContinuation, String> {
+    let conversation = ensure_conversation(&state.db, &conversation_id)?;
+    let has_active_turn = state.has_active_turn_for(&conversation_id);
+    let goal = project_goal(&state.db, &conversation_id, has_active_turn)?;
+    let plan_mode = crate::harness::code::session::plan_mode_active(&state.db, &conversation_id)
+        .map_err(map_err)?;
+    let pending_approval = !pending_approvals_for(&state, &conversation_id).is_empty()
+        || !pending_questions_for(&state, &conversation_id).is_empty();
+    let facts = ContinuationFacts {
+        is_code: is_code_session(&conversation),
+        goal: goal.as_ref(),
+        plan_mode,
+        pending_approval,
+        has_active_turn,
+        has_workspace: goal_has_workspace(&state.db, &conversation)?,
+    };
+    let reason = continuation_reason(&facts, auto.unwrap_or(true));
+    Ok(GoalContinuation {
+        ok: reason.is_none(),
+        reason: reason.map(|reason| reason.code().to_string()),
+        goal,
+    })
+}
+
+/* ------------------------------------------------------------------ */
 /* Jobs em background (F4)                                             */
 /* ------------------------------------------------------------------ */
 
@@ -1023,7 +1401,7 @@ pub async fn kill_job(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ApprovalDetail, RiskClass};
+    use crate::domain::{ApprovalDetail, GoalOrigin, RiskClass, UsageInfo};
     use crate::harness::code::session;
     use crate::policy::approval::{ApprovalOutcome, ApprovalRegistry};
 
@@ -1358,5 +1736,641 @@ mod tests {
             .expect("ler resumo")
             .expect("resumo persistido");
         assert_eq!(latest.to_seq, 9);
+    }
+
+    /* -------------------------------------------------------------- */
+    /* Objetivo (Goal) — F1c: comandos IPC/preflight/degradação        */
+    /* -------------------------------------------------------------- */
+
+    fn goal_input(objective: &str) -> CreateGoalInput {
+        CreateGoalInput {
+            objective: objective.to_string(),
+            title: None,
+            max_rounds: Some(5),
+            auto_continue: Some(true),
+        }
+    }
+
+    /// Banco em memória + conversa do Code com um workspace real em disco
+    /// (o `TempDir` precisa viver enquanto o teste usa o workspace).
+    fn code_workspace() -> (crate::db::Db, String, tempfile::TempDir) {
+        let db = crate::db::Db::open_in_memory().expect("banco em memória");
+        let conversation = db
+            .create_conversation_with_mode(
+                "Nova conversa",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa");
+        let dir = tempfile::tempdir().expect("diretório temporário");
+        let workspace = db
+            .create_workspace("demo", dir.path().to_str().expect("caminho utf-8"))
+            .expect("workspace");
+        db.set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("vincular workspace");
+        (db, conversation.id, dir)
+    }
+
+    fn goal_view(
+        status: GoalStatus,
+        auto_continue: bool,
+        rounds: u32,
+        max_rounds: u32,
+        pause_reason: Option<GoalPauseReason>,
+    ) -> GoalView {
+        GoalView {
+            title: "Objetivo".to_string(),
+            objective: "Concluir a migração".to_string(),
+            status,
+            auto_continue,
+            rounds,
+            max_rounds,
+            revision: 1,
+            origin: GoalOrigin::User,
+            created_at: 1,
+            updated_at: 1,
+            completed_at: None,
+            last_round_at: None,
+            last_note: None,
+            pause_reason,
+            pause_detail: None,
+            blocker_reason: None,
+            blocker_streak: 0,
+            stalled_rounds: 0,
+            tokens: 0,
+            cost: 0.0,
+        }
+    }
+
+    fn continuation_facts(goal: Option<&GoalView>) -> ContinuationFacts<'_> {
+        ContinuationFacts {
+            is_code: true,
+            goal,
+            plan_mode: false,
+            pending_approval: false,
+            has_active_turn: false,
+            has_workspace: true,
+        }
+    }
+
+    fn reason_code(
+        facts: &ContinuationFacts<'_>,
+        auto: bool,
+    ) -> Option<&'static str> {
+        continuation_reason(facts, auto).map(|reason| reason.code())
+    }
+
+    #[test]
+    fn only_code_sessions_can_own_a_goal() {
+        let (db, conversation_id) = db_with_conversation();
+        let code = db
+            .get_conversation(&conversation_id)
+            .expect("ler")
+            .expect("conversa do Code");
+        assert!(is_code_session(&code));
+        assert!(validate_goal_session(&code).is_ok());
+
+        // Chat não tem objetivo (PLAN D18).
+        let chat = db
+            .create_conversation("Chat", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversa do Chat");
+        assert!(!is_code_session(&chat));
+        let error = validate_goal_session(&chat).expect_err("Chat não tem objetivo");
+        assert!(error.starts_with("GOAL_NOT_CODE"), "{error}");
+
+        // Sessão do Chat adicionada ao Code (`codeLinked`) pode ter objetivo.
+        let linked = db
+            .set_conversation_code_linked(&chat.id, true)
+            .expect("vincular ao Code");
+        assert!(is_code_session(&linked));
+        assert!(validate_goal_session(&linked).is_ok());
+    }
+
+    #[test]
+    fn create_goal_requires_a_workspace_that_exists_on_disk() {
+        let db = crate::db::Db::open_in_memory().expect("banco em memória");
+        let conversation = db
+            .create_conversation_with_mode(
+                "Nova conversa",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa");
+
+        // Sem workspace: recusa e não grava nada (PLAN D15).
+        let error = create_goal_for_conversation(&db, &conversation.id, &goal_input("Migrar"))
+            .expect_err("sem workspace não cria");
+        assert!(error.starts_with("GOAL_NO_WORKSPACE"), "{error}");
+        assert!(goal::current(&db, &conversation.id).expect("fold").is_none());
+        let stored = db
+            .get_conversation(&conversation.id)
+            .expect("ler")
+            .expect("conversa");
+        assert!(!goal_has_workspace(&db, &stored).expect("checar workspace"));
+
+        // Workspace cadastrado, pasta removida do disco: recusa honesta.
+        let parent = tempfile::tempdir().expect("diretório temporário");
+        let gone = parent.path().join("nao-existe");
+        let workspace = db
+            .create_workspace("removido", gone.to_str().expect("caminho utf-8"))
+            .expect("workspace");
+        db.set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("vincular");
+        let error = create_goal_for_conversation(&db, &conversation.id, &goal_input("Migrar"))
+            .expect_err("pasta ausente");
+        assert!(error.starts_with("GOAL_NO_WORKSPACE"), "{error}");
+        let stored = db
+            .get_conversation(&conversation.id)
+            .expect("ler")
+            .expect("conversa");
+        assert!(
+            !goal_has_workspace(&db, &stored).expect("checar workspace"),
+            "pasta ausente no disco"
+        );
+
+        // Workspace real: cria com os defaults da UI (origin user, armado).
+        let dir = tempfile::tempdir().expect("diretório temporário");
+        let workspace = db
+            .create_workspace("demo", dir.path().to_str().expect("caminho utf-8"))
+            .expect("workspace");
+        db.set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("vincular");
+        let stored = db
+            .get_conversation(&conversation.id)
+            .expect("ler")
+            .expect("conversa");
+        assert!(goal_has_workspace(&db, &stored).expect("checar workspace"));
+        let goal = create_goal_for_conversation(&db, &conversation.id, &goal_input("Migrar"))
+            .expect("criar objetivo");
+        assert_eq!(goal.status, GoalStatus::Active);
+        assert_eq!(goal.origin, GoalOrigin::User);
+        assert!(goal.auto_continue);
+        assert_eq!(goal.max_rounds, 5);
+    }
+
+    #[test]
+    fn create_goal_renames_only_a_placeholder_conversation_title() {
+        let (db, conversation_id, _dir) = code_workspace();
+        let goal = create_goal_for_conversation(
+            &db,
+            &conversation_id,
+            &CreateGoalInput {
+                objective: "Migrar o módulo de pagamentos".to_string(),
+                title: Some("Migração de pagamentos".to_string()),
+                max_rounds: Some(10),
+                auto_continue: Some(false),
+            },
+        )
+        .expect("criar objetivo");
+        assert!(!goal.auto_continue);
+        let renamed = db
+            .get_conversation(&conversation_id)
+            .expect("ler")
+            .expect("conversa");
+        assert_eq!(
+            renamed.title, "Migração de pagamentos",
+            "título placeholder vira o título do objetivo"
+        );
+
+        // Título real nunca é sobrescrito (PLAN D17).
+        let (db2, conversation2, _dir2) = code_workspace();
+        db2.rename_conversation(&conversation2, "Planejamento financeiro")
+            .expect("renomear");
+        create_goal_for_conversation(&db2, &conversation2, &goal_input("Outro objetivo"))
+            .expect("criar objetivo");
+        let kept = db2
+            .get_conversation(&conversation2)
+            .expect("ler")
+            .expect("conversa");
+        assert_eq!(kept.title, "Planejamento financeiro");
+    }
+
+    #[test]
+    fn create_goal_rejects_invalid_input_before_touching_the_title() {
+        let (db, conversation_id, _dir) = code_workspace();
+        let error = create_goal_for_conversation(&db, &conversation_id, &goal_input("   "))
+            .expect_err("objetivo vazio");
+        assert!(error.starts_with("GOAL_INVALID_ARGS"), "{error}");
+        assert!(goal::current(&db, &conversation_id).expect("fold").is_none());
+        let conversation = db
+            .get_conversation(&conversation_id)
+            .expect("ler")
+            .expect("conversa");
+        assert_eq!(conversation.title, "Nova conversa", "falha não renomeia");
+    }
+
+    #[test]
+    fn update_goal_applies_cas_and_is_idempotent_on_the_target_state() {
+        let (db, conversation_id, _dir) = code_workspace();
+        let created = create_goal_for_conversation(&db, &conversation_id, &goal_input("Migrar"))
+            .expect("criar objetivo");
+        assert_eq!(created.revision, 1);
+        assert!(created.auto_continue);
+        let edit = UpdateGoalInput {
+            title: Some("Migração".to_string()),
+            ..Default::default()
+        };
+
+        // CAS: revisão esperada correta edita e incrementa uma vez.
+        let edited = apply_goal_action(&db, &conversation_id, GoalAction::Edit, &edit, Some(1))
+            .expect("editar")
+            .expect("ativo");
+        assert_eq!(edited.title, "Migração");
+        assert_eq!(edited.revision, 2);
+
+        // CAS: revisão velha ⇒ GOAL_STALE_REVISION (nada muda).
+        let stale = apply_goal_action(&db, &conversation_id, GoalAction::Edit, &edit, Some(1))
+            .expect_err("revisão desatualizada");
+        assert!(stale.starts_with("GOAL_STALE_REVISION"), "{stale}");
+
+        // Idempotência: armar um objetivo já armado não incrementa a revisão.
+        let armed = apply_goal_action(
+            &db,
+            &conversation_id,
+            GoalAction::Arm,
+            &UpdateGoalInput::default(),
+            Some(2),
+        )
+        .expect("armar")
+        .expect("ativo");
+        assert_eq!(armed.revision, 2);
+        assert!(armed.auto_continue);
+
+        let disarmed = apply_goal_action(
+            &db,
+            &conversation_id,
+            GoalAction::Disarm,
+            &UpdateGoalInput::default(),
+            Some(2),
+        )
+        .expect("desarmar")
+        .expect("ativo");
+        assert!(!disarmed.auto_continue);
+        assert_eq!(disarmed.revision, 3);
+        let rearmed = apply_goal_action(
+            &db,
+            &conversation_id,
+            GoalAction::Arm,
+            &UpdateGoalInput::default(),
+            Some(3),
+        )
+        .expect("armar")
+        .expect("ativo");
+        assert!(rearmed.auto_continue);
+        assert_eq!(rearmed.revision, 4);
+
+        // Pausar/retomar (pausar um pausado é no-op).
+        let pause = UpdateGoalInput {
+            reason: Some("Revisando o escopo".to_string()),
+            ..Default::default()
+        };
+        let paused = apply_goal_action(&db, &conversation_id, GoalAction::Pause, &pause, Some(4))
+            .expect("pausar")
+            .expect("ativo");
+        assert_eq!(paused.status, GoalStatus::Paused);
+        assert_eq!(paused.pause_reason, Some(GoalPauseReason::User));
+        assert_eq!(paused.pause_detail.as_deref(), Some("Revisando o escopo"));
+        let paused_again = apply_goal_action(
+            &db,
+            &conversation_id,
+            GoalAction::Pause,
+            &UpdateGoalInput::default(),
+            Some(5),
+        )
+        .expect("pausar de novo")
+        .expect("pausado");
+        assert_eq!(paused_again.revision, 5, "pausar um pausado é no-op");
+        let resumed = apply_goal_action(
+            &db,
+            &conversation_id,
+            GoalAction::Resume,
+            &UpdateGoalInput::default(),
+            Some(5),
+        )
+        .expect("retomar")
+        .expect("ativo");
+        assert_eq!(resumed.status, GoalStatus::Active);
+        assert!(resumed.auto_continue);
+        assert_eq!(resumed.revision, 6);
+
+        // Concluir + idempotência; reabrir volta manual.
+        let complete = UpdateGoalInput {
+            summary: Some("Feito com testes".to_string()),
+            ..Default::default()
+        };
+        let completed = apply_goal_action(
+            &db,
+            &conversation_id,
+            GoalAction::Complete,
+            &complete,
+            Some(6),
+        )
+        .expect("concluir")
+        .expect("ativo");
+        assert_eq!(completed.status, GoalStatus::Completed);
+        assert!(!completed.auto_continue);
+        assert_eq!(completed.last_note.as_deref(), Some("Feito com testes"));
+        let completed_again = apply_goal_action(
+            &db,
+            &conversation_id,
+            GoalAction::Complete,
+            &UpdateGoalInput::default(),
+            Some(7),
+        )
+        .expect("concluir de novo")
+        .expect("ativo");
+        assert_eq!(completed_again.revision, 7, "concluir um concluído é no-op");
+        let reopened = apply_goal_action(
+            &db,
+            &conversation_id,
+            GoalAction::Reopen,
+            &UpdateGoalInput::default(),
+            Some(7),
+        )
+        .expect("reabrir")
+        .expect("ativo");
+        assert_eq!(reopened.status, GoalStatus::Active);
+        assert!(!reopened.auto_continue, "reabrir volta manual");
+
+        // Bloquear exige motivo; sem motivo não muda o estado.
+        let invalid_block = apply_goal_action(
+            &db,
+            &conversation_id,
+            GoalAction::Block,
+            &UpdateGoalInput::default(),
+            Some(8),
+        )
+        .expect_err("motivo obrigatório");
+        assert!(invalid_block.starts_with("GOAL_INVALID_ARGS"), "{invalid_block}");
+        let block = UpdateGoalInput {
+            reason: Some("Falta acesso ao gateway".to_string()),
+            ..Default::default()
+        };
+        let blocked = apply_goal_action(&db, &conversation_id, GoalAction::Block, &block, Some(8))
+            .expect("bloquear")
+            .expect("ativo");
+        assert_eq!(blocked.status, GoalStatus::Blocked);
+        assert_eq!(
+            blocked.blocker_reason.as_deref(),
+            Some("Falta acesso ao gateway")
+        );
+        let resumed = apply_goal_action(
+            &db,
+            &conversation_id,
+            GoalAction::Resume,
+            &UpdateGoalInput::default(),
+            Some(9),
+        )
+        .expect("retomar")
+        .expect("ativo");
+        assert_eq!(resumed.status, GoalStatus::Active);
+        assert_eq!(resumed.revision, 10);
+
+        // Encerrar: tombstone; ações posteriores recusam.
+        assert!(apply_goal_action(
+            &db,
+            &conversation_id,
+            GoalAction::Delete,
+            &UpdateGoalInput::default(),
+            Some(10),
+        )
+        .expect("encerrar")
+        .is_none());
+        assert!(goal::current(&db, &conversation_id).expect("fold").is_none());
+        let missing =
+            apply_goal_action(&db, &conversation_id, GoalAction::Edit, &edit, None)
+                .expect_err("sem objetivo");
+        assert!(missing.starts_with("GOAL_NOT_FOUND"), "{missing}");
+    }
+
+    #[test]
+    fn project_goal_degrades_an_orphan_round_without_writing() {
+        let (db, conversation_id, _dir) = code_workspace();
+        let created = create_goal_for_conversation(&db, &conversation_id, &goal_input("Migrar"))
+            .expect("criar objetivo");
+        let begun = goal::begin_round(&db, &conversation_id, "turn-1").expect("abrir rodada");
+        assert_eq!(begun.rounds, 1);
+        assert_eq!(begun.revision, created.revision + 1);
+
+        // Turno morto (crash/reload): o snapshot degrada, o log não muda.
+        let projected = project_goal(&db, &conversation_id, false)
+            .expect("projetar")
+            .expect("objetivo");
+        assert_eq!(projected.status, GoalStatus::Paused);
+        assert_eq!(
+            projected.pause_reason,
+            Some(GoalPauseReason::Interrupted)
+        );
+        assert_eq!(
+            projected.pause_detail.as_deref(),
+            Some(ORPHAN_ROUND_DETAIL)
+        );
+        assert!(!projected.auto_continue);
+        let persisted = goal::current(&db, &conversation_id)
+            .expect("fold")
+            .expect("objetivo");
+        assert_eq!(
+            persisted.status,
+            GoalStatus::Active,
+            "degradação de leitura não grava"
+        );
+        assert_eq!(persisted.revision, begun.revision);
+
+        // Turno vivo: rodada em andamento, nada degradado.
+        let running = project_goal(&db, &conversation_id, true)
+            .expect("projetar")
+            .expect("objetivo");
+        assert_eq!(running.status, GoalStatus::Active);
+        assert!(running.auto_continue);
+
+        // Fecho normal da rodada também não deixa o snapshot degradado.
+        goal::finish_round(
+            &db,
+            &conversation_id,
+            "turn-1",
+            "done",
+            &UsageInfo::default(),
+            1,
+        )
+        .expect("fechar rodada");
+        let closed = project_goal(&db, &conversation_id, false)
+            .expect("projetar")
+            .expect("objetivo");
+        assert_eq!(closed.status, GoalStatus::Active);
+
+        // Rodada já fechada como `interrupted` (existe `goal/round`): não é
+        // órfã, então o snapshot não degrada de novo — um `resume` do usuário
+        // continua de pé até a próxima rodada.
+        goal::begin_round(&db, &conversation_id, "turn-2").expect("abrir rodada 2");
+        goal::finish_round(
+            &db,
+            &conversation_id,
+            "turn-2",
+            "interrupted",
+            &UsageInfo::default(),
+            0,
+        )
+        .expect("fechar rodada interrompida");
+        let reconciled = project_goal(&db, &conversation_id, false)
+            .expect("projetar")
+            .expect("objetivo");
+        assert_eq!(
+            reconciled.status,
+            GoalStatus::Active,
+            "rodada com `goal/round` fechado não é órfã"
+        );
+
+        // Objetivo inexistente continua `None`.
+        let (other_db, other_id) = db_with_conversation();
+        assert!(project_goal(&other_db, &other_id, false).expect("projetar").is_none());
+    }
+
+    #[test]
+    fn orphan_degradation_only_touches_an_active_goal_without_a_live_turn() {
+        let active = goal_view(GoalStatus::Active, true, 0, 5, None);
+        let degraded = degrade_orphan_goal(Some(active.clone()), true, false).expect("objetivo");
+        assert_eq!(degraded.status, GoalStatus::Paused);
+        assert_eq!(degraded.pause_reason, Some(GoalPauseReason::Interrupted));
+        assert_eq!(degraded.pause_detail.as_deref(), Some(ORPHAN_ROUND_DETAIL));
+        assert!(!degraded.auto_continue);
+
+        // Rodada em andamento (turno ativo): nada a degradar.
+        let live = degrade_orphan_goal(Some(active.clone()), true, true).expect("objetivo");
+        assert_eq!(live.status, GoalStatus::Active);
+        assert!(live.auto_continue);
+
+        // Rodada fechada: nada a degradar.
+        let closed = degrade_orphan_goal(Some(active), false, false).expect("objetivo");
+        assert_eq!(closed.status, GoalStatus::Active);
+
+        // Concluído pelo usuário vence a leitura (não "ressuscita" pausa).
+        let completed = goal_view(GoalStatus::Completed, false, 2, 5, None);
+        let kept = degrade_orphan_goal(Some(completed), true, false).expect("objetivo");
+        assert_eq!(kept.status, GoalStatus::Completed);
+
+        assert!(degrade_orphan_goal(None, true, false).is_none());
+    }
+
+    #[test]
+    fn goal_can_continue_reasons_follow_the_documented_order() {
+        let active = goal_view(GoalStatus::Active, true, 0, 5, None);
+
+        assert_eq!(
+            reason_code(&continuation_facts(None), true),
+            Some("no_goal")
+        );
+
+        let mut facts = continuation_facts(Some(&active));
+        facts.is_code = false;
+        assert_eq!(reason_code(&facts, true), Some("not_code"));
+
+        // `completed`/`blocked` vencem os demais gates.
+        let completed = goal_view(GoalStatus::Completed, false, 5, 5, None);
+        let mut facts = continuation_facts(Some(&completed));
+        facts.plan_mode = true;
+        assert_eq!(reason_code(&facts, true), Some("completed"));
+        let blocked = goal_view(GoalStatus::Blocked, false, 2, 5, None);
+        let mut facts = continuation_facts(Some(&blocked));
+        facts.has_active_turn = true;
+        assert_eq!(reason_code(&facts, true), Some("blocked"));
+
+        let paused = goal_view(GoalStatus::Paused, true, 2, 5, Some(GoalPauseReason::User));
+        assert_eq!(
+            reason_code(&continuation_facts(Some(&paused)), true),
+            Some("paused")
+        );
+
+        // `autoContinue=false` só bloqueia a continuação automática (`auto=true`).
+        let manual = goal_view(GoalStatus::Active, false, 0, 5, None);
+        assert_eq!(
+            reason_code(&continuation_facts(Some(&manual)), true),
+            Some("not_armed")
+        );
+        assert_eq!(
+            reason_code(&continuation_facts(Some(&manual)), false),
+            None,
+            "nova rodada manual não exige continuidade armada"
+        );
+
+        let exhausted = goal_view(GoalStatus::Active, true, 5, 5, None);
+        assert_eq!(
+            reason_code(&continuation_facts(Some(&exhausted)), true),
+            Some("max_rounds")
+        );
+
+        let mut facts = continuation_facts(Some(&active));
+        facts.plan_mode = true;
+        assert_eq!(reason_code(&facts, true), Some("plan_mode"));
+
+        let mut facts = continuation_facts(Some(&active));
+        facts.pending_approval = true;
+        assert_eq!(reason_code(&facts, true), Some("pending_approval"));
+
+        let mut facts = continuation_facts(Some(&active));
+        facts.has_active_turn = true;
+        assert_eq!(reason_code(&facts, true), Some("busy"));
+
+        let mut facts = continuation_facts(Some(&active));
+        facts.has_workspace = false;
+        assert_eq!(reason_code(&facts, true), Some("no_workspace"));
+
+        // `paused(interrupted)` é reportado como `interrupted` (último código).
+        // A degradação de rodada órfã desarma o objetivo (`autoContinue=false`,
+        // PLAN §6.3), então na ordem oficial `not_armed` vence na continuação
+        // automática; "Nova rodada" (`auto=false`) chega ao código específico.
+        let interrupted = goal_view(
+            GoalStatus::Paused,
+            false,
+            3,
+            5,
+            Some(GoalPauseReason::Interrupted),
+        );
+        assert_eq!(
+            reason_code(&continuation_facts(Some(&interrupted)), true),
+            Some("not_armed")
+        );
+        assert_eq!(
+            reason_code(&continuation_facts(Some(&interrupted)), false),
+            Some("interrupted")
+        );
+        // Objetivo ainda armado com pausa `interrupted` (snapshot antigo/pausa
+        // manual do motivo): o código específico é alcançado no fim da ordem.
+        let armed_interrupted = goal_view(
+            GoalStatus::Paused,
+            true,
+            3,
+            5,
+            Some(GoalPauseReason::Interrupted),
+        );
+        assert_eq!(
+            reason_code(&continuation_facts(Some(&armed_interrupted)), true),
+            Some("interrupted")
+        );
+        // ...mas os gates anteriores continuam na frente na ordem oficial.
+        let mut facts = continuation_facts(Some(&armed_interrupted));
+        facts.has_workspace = false;
+        assert_eq!(
+            reason_code(&facts, true),
+            Some("no_workspace"),
+            "no_workspace vem antes de interrupted"
+        );
+
+        assert_eq!(reason_code(&continuation_facts(Some(&active)), true), None);
+        assert_eq!(reason_code(&continuation_facts(Some(&active)), false), None);
+    }
+
+    #[test]
+    fn goal_rounds_limit_is_clamped_to_one_through_two_hundred() {
+        assert_eq!(clamp_rounds_limit(None), goal::GOAL_ROUNDS_LIST_LIMIT);
+        assert_eq!(clamp_rounds_limit(Some(0)), 1);
+        assert_eq!(clamp_rounds_limit(Some(1)), 1);
+        assert_eq!(clamp_rounds_limit(Some(100)), 100);
+        assert_eq!(clamp_rounds_limit(Some(200)), 200);
+        assert_eq!(
+            clamp_rounds_limit(Some(10_000)),
+            goal::GOAL_ROUNDS_LIST_LIMIT
+        );
     }
 }

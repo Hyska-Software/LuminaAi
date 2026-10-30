@@ -21,6 +21,81 @@ pub struct DynamicModels {
     pub models: Vec<ModelInfo>,
 }
 
+/// Um turno em andamento: token de cancelamento + conversa dona.
+///
+/// Guardar a conversa permite que o preflight do objetivo
+/// (`goal_can_continue`) recuse uma segunda rodada na mesma sessão sem
+/// depender do renderer.
+struct TurnEntry {
+    cancel: CancellationToken,
+    conversation_id: String,
+}
+
+/// Registro de turnos ativos (testável sem Tauri). `AppState` delega para ele.
+#[derive(Default)]
+pub struct TurnRegistry {
+    turns: Mutex<HashMap<String, TurnEntry>>,
+}
+
+impl TurnRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register(&self, turn_id: &str, conversation_id: &str) -> CancellationToken {
+        let token = CancellationToken::new();
+        self.turns.lock().insert(
+            turn_id.to_string(),
+            TurnEntry {
+                cancel: token.clone(),
+                conversation_id: conversation_id.to_string(),
+            },
+        );
+        token
+    }
+
+    pub fn finish(&self, turn_id: &str) {
+        self.turns.lock().remove(turn_id);
+    }
+
+    pub fn cancel(&self, turn_id: &str) -> bool {
+        match self.turns.lock().get(turn_id) {
+            Some(entry) => {
+                entry.cancel.cancel();
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn cancel_all(&self) {
+        for entry in self.turns.lock().values() {
+            entry.cancel.cancel();
+        }
+    }
+
+    /// Há algum turno ativo para esta conversa?
+    pub fn has_active_for(&self, conversation_id: &str) -> bool {
+        self.turns
+            .lock()
+            .values()
+            .any(|entry| entry.conversation_id == conversation_id)
+    }
+
+    /// Ids de conversas com turno ativo (para reconciliação/diagnóstico).
+    pub fn active_conversations(&self) -> Vec<String> {
+        let mut conversations: Vec<String> = self
+            .turns
+            .lock()
+            .values()
+            .map(|entry| entry.conversation_id.clone())
+            .collect();
+        conversations.sort();
+        conversations.dedup();
+        conversations
+    }
+}
+
 pub struct AppState {
     pub started_at: i64,
     pub db: Arc<Db>,
@@ -42,7 +117,7 @@ pub struct AppState {
     /// Perguntas estruturadas pendentes (sk_user).
     pub questions: Arc<crate::harness::code::questions::QuestionRegistry>,
     dynamic_models: RwLock<HashMap<String, DynamicModels>>,
-    turns: Mutex<HashMap<String, CancellationToken>>,
+    turns: TurnRegistry,
 }
 
 impl AppState {
@@ -66,7 +141,7 @@ impl AppState {
             questions: Arc::new(crate::harness::code::questions::QuestionRegistry::new()),
             jobs: Arc::new(crate::jobs::JobRegistry::new()),
             dynamic_models: RwLock::new(HashMap::new()),
-            turns: Mutex::new(HashMap::new()),
+            turns: TurnRegistry::new(),
         };
         state.restore_models_cache();
         Ok(state)
@@ -212,31 +287,27 @@ impl AppState {
     /* Turns                                                           */
     /* -------------------------------------------------------------- */
 
-    pub fn register_turn(&self, turn_id: &str) -> CancellationToken {
-        let token = CancellationToken::new();
-        self.turns.lock().insert(turn_id.to_string(), token.clone());
-        token
+    pub fn register_turn(&self, turn_id: &str, conversation_id: &str) -> CancellationToken {
+        self.turns.register(turn_id, conversation_id)
     }
 
     pub fn finish_turn(&self, turn_id: &str) {
-        self.turns.lock().remove(turn_id);
+        self.turns.finish(turn_id);
     }
 
     /// Cancel a running turn; returns true when a turn was found.
     pub fn cancel_turn(&self, turn_id: &str) -> bool {
-        match self.turns.lock().get(turn_id) {
-            Some(token) => {
-                token.cancel();
-                true
-            }
-            None => false,
-        }
+        self.turns.cancel(turn_id)
     }
 
     pub fn cancel_all(&self) {
-        for token in self.turns.lock().values() {
-            token.cancel();
-        }
+        self.turns.cancel_all();
+    }
+
+    /// Há um turno ativo nesta conversa? Usado pelo preflight de objetivos
+    /// (`goal_can_continue`) e pela degradação de rodada interrompida.
+    pub fn has_active_turn_for(&self, conversation_id: &str) -> bool {
+        self.turns.has_active_for(conversation_id)
     }
 }
 
@@ -259,4 +330,40 @@ pub fn ensure_dirs(app: &AppHandle) -> anyhow::Result<()> {
     }
     let _ = app.package_info();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TurnRegistry;
+
+    #[test]
+    fn turn_registry_tracks_active_turns_per_conversation() {
+        let registry = TurnRegistry::new();
+        assert!(!registry.has_active_for("conv-1"));
+
+        let token = registry.register("turn-1", "conv-1");
+        assert!(registry.has_active_for("conv-1"));
+        assert!(!registry.has_active_for("conv-2"));
+        assert_eq!(registry.active_conversations(), vec!["conv-1".to_string()]);
+        assert!(!token.is_cancelled());
+
+        registry.finish("turn-1");
+        assert!(!registry.has_active_for("conv-1"));
+        assert!(registry.active_conversations().is_empty());
+    }
+
+    #[test]
+    fn turn_registry_cancels_only_the_requested_turn() {
+        let registry = TurnRegistry::new();
+        let first = registry.register("turn-1", "conv-1");
+        let second = registry.register("turn-2", "conv-1");
+
+        assert!(registry.cancel("turn-1"));
+        assert!(first.is_cancelled());
+        assert!(!second.is_cancelled());
+        assert!(!registry.cancel("turn-unknown"));
+
+        registry.cancel_all();
+        assert!(second.is_cancelled());
+    }
 }

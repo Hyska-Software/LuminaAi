@@ -8,7 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { ArrowUp, FilePlus, Globe, Plus, Square, TriangleAlert } from 'lucide-react';
+import { ArrowUp, FilePlus, Globe, Plus, Square, Target, TriangleAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { credentialGateMessage } from '@/components/chat/turnError';
 import { useReduceMotion } from '@/components/layout/hooks';
@@ -66,6 +66,8 @@ export function Composer() {
   const [attaching, setAttaching] = useState(false);
   const [mentioned, setMentioned] = useState<MentionedFile[]>([]);
   const [menu, setMenu] = useState<ComposerMenu | null>(null);
+  /** `/goal` como chip de intenção: a mensagem é enviada sem prompt automático. */
+  const [goalIntent, setGoalIntent] = useState(false);
   const [mentionResults, setMentionResults] = useState<string[]>([]);
   const [mentionLoading, setMentionLoading] = useState(false);
   const [mentionError, setMentionError] = useState<string | null>(null);
@@ -153,16 +155,29 @@ export function Composer() {
         resizeTextarea();
       });
     };
+    const onGoalIntent = () => {
+      // Chip do `/goal`: não mexe no texto digitado; só ativa a intenção e foca.
+      setGoalIntent(true);
+      setMenu(null);
+      textareaRef.current?.focus();
+    };
     const onFocusComposer = () => {
       textareaRef.current?.focus();
     };
     window.addEventListener('lumina:suggest', onSuggest);
+    window.addEventListener('lumina:goal-intent', onGoalIntent);
     window.addEventListener('lumina:focus-composer', onFocusComposer);
     return () => {
       window.removeEventListener('lumina:suggest', onSuggest);
+      window.removeEventListener('lumina:goal-intent', onGoalIntent);
       window.removeEventListener('lumina:focus-composer', onFocusComposer);
     };
   }, [resizeTextarea]);
+
+  /* A intenção de objetivo não vaza entre sessões. */
+  useEffect(() => {
+    setGoalIntent(false);
+  }, [activeConversationId]);
 
   /* Ctrl/Cmd+L foca o composer (padrão Paseo) — só no modo Code. Local ao
      componente: nenhum atalho global novo, o Chat mantém o comportamento. */
@@ -383,6 +398,13 @@ export function Composer() {
       const end = menu.end;
       setMenu(null);
       const rest = value.slice(end);
+      if (command.action === 'intent') {
+        // `/goal` vira chip; o texto do usuário fica intocado.
+        setGoalIntent(true);
+        setValue(value.slice(0, start) + rest);
+        focusTextareaAt(start);
+        return;
+      }
       if (command.action === 'fill' && command.fill) {
         setValue(value.slice(0, start) + command.fill + rest);
         focusTextareaAt(start + command.fill.length);
@@ -422,13 +444,15 @@ export function Composer() {
     if (!canSend) return;
     const text = composeMessage(value, mentioned);
     if (!text && pendingAttachments.length === 0) return;
+    const goalRequest = goalIntent;
     setValue('');
     setMentioned([]);
     setMenu(null);
+    setGoalIntent(false);
     requestAnimationFrame(resizeTextarea);
     window.dispatchEvent(new CustomEvent('lumina:scroll-bottom'));
-    void useChatStore.getState().send(text);
-  }, [canSend, mentioned, pendingAttachments.length, resizeTextarea, value]);
+    void useChatStore.getState().send(text, goalRequest ? { goalRequest: true } : undefined);
+  }, [canSend, goalIntent, mentioned, pendingAttachments.length, resizeTextarea, value]);
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;
@@ -504,11 +528,13 @@ export function Composer() {
     void useAppStore.getState().saveSettings({ fileCreationEnabled: !fileCreationEnabled });
   };
 
-  const placeholder = !isCodeLayout
-    ? 'Pergunte alguma coisa…'
-    : codeMenusEnabled
-      ? 'Descreva a tarefa… @ para arquivos, / para comandos'
-      : 'Descreva a tarefa para o agente…';
+  const placeholder = goalIntent
+    ? 'Descreva o objetivo e o trabalho a fazer…'
+    : !isCodeLayout
+      ? 'Pergunte alguma coisa…'
+      : codeMenusEnabled
+        ? 'Descreva a tarefa… @ para arquivos, / para comandos'
+        : 'Descreva a tarefa para o agente…';
 
   const menuControls = menu
     ? menu.kind === 'mention'
@@ -566,6 +592,26 @@ export function Composer() {
         >
           <PopoverAnchor asChild>
             <div className="px-3 pb-1 pt-3">
+              {goalIntent ? (
+                <div className="mb-2 flex items-center gap-1.5">
+                  <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft pl-2.5 pr-1 text-[12px] font-medium text-foreground">
+                    <Target aria-hidden className="size-3.5 text-accent" strokeWidth={1.75} />
+                    /goal
+                    <button
+                      type="button"
+                      aria-label="Remover objetivo"
+                      onClick={() => {
+                        setGoalIntent(false);
+                        textareaRef.current?.focus();
+                      }}
+                      className="flex size-5 items-center justify-center rounded-full text-foreground-muted transition-colors hover:bg-surface-active hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    >
+                      <X aria-hidden className="size-3" />
+                    </button>
+                  </span>
+                </div>
+              ) : null}
+
               {mentioned.length > 0 ? (
                 <MentionChips
                   mentions={mentioned}

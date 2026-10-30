@@ -32,7 +32,7 @@
     "steadyRequestsFrom": 3,
     "steadyCeilingMinPercent": 98,
     "steadyHitMinPercent": 98,
-    "steadyHitHardFailBelowPercent": 90,
+    "steadyHitHardFailBelowPercent": 95,
     "lifecycleMinPercent": 98,
     "lifecycleMinOnlyWhenColdWriteDeltaRatioLeqPercent": 2,
     "repetitions": 5,

@@ -338,3 +338,150 @@ Não aceito como exceção: p50/p10 declarado no sintético sem implementação;
 
 - **GO** para a implementação: B1/B2/B3 tiveram seus pontos centrais corrigidos, os gates compilam/passam e o E2E live `run_turn` prova 99,7/100% contra baseline 0,0.
 - **Antes de publicar o EVIDENCE final**, fechar as 7 correções acima (principalmente p50/p10/mean, floor 98, baseline/matriz/contagens e a divergência do artefato). Não é necessário outro PLAN-FIX arquitetural; a rodada resta `complete with documented exceptions` se o usuário aceitar o escopo N=5/p50/p10 reduzido e a verificação visual manual pendente.
+
+---
+
+## Rodada 3 — check direcionado
+
+**Base:** `PLAN.md` (1292 linhas, SHA-256 `9BA2708E…E943A7`), `EVIDENCE.md` (265
+linhas), `harness/cache/bench.rs` (30 KB), artifacts
+`bench-e2e-live-2026-10-29T200230.json` e `…T200427.json` (e o novo `…T201139.json`
+gerado na minha reexecução). Read-only fora deste arquivo.
+
+**Gates reexecutados:** `cargo test --lib` **937 passed / 0 failed / 13 ignored**;
+`cargo test --lib cache_bench -- --ignored --nocapture` **1 passed** (live
+`cache_bench_e2e_live`: 12 requests, steady **100,0%**, p50 **99,97%**, p10
+**99,97%**, min 99,97%, baseline **0,0%**, artifact único `…T201139.json`; stdout
+`GATE live steady hit 100.0% (target 98%, hard floor 95%); baseline 0.0%`);
+`pnpm typecheck` exit 0. O `pnpm test` 2216/2216 isolado da rodada anterior
+permanece registrado; não reexecutei a suíte completa nesta rodada.
+
+### Status dos 7 itens
+
+| # | Item | Status | Verificação |
+| --- | --- | --- | --- |
+| 1 | p50/p10 no bench | **resolvido** | `BenchMetrics` tem `steady_p50_hit`/`steady_p10_hit` e `Percentile` nearest-rank (`bench.rs:78-145`); artifact T200230 traz live 99,97%, p50/p10 99,97%, baseline 0,0%; `LUMINA_BENCH_REPETITIONS` N run-level (`:39-42,400-460`) com default 1 explicado. |
+| 2 | floor do gate | **resolvido** | `TARGET_STEADY_HIT=98.0`, `HARD_FLOOR_STEADY_HIT=95.0` (`bench.rs:36-37`), assert e linha GATE (`:562-580`); o E2E passou com 100%. Fixture ainda declara `steadyHitHardFailBelowPercent: 90` (abaixo do código 95), mas é campo não lido — ajustar por coerência. |
+| 3 | artifact único + skip auditável | **resolvido** | Nome `bench-e2e-live-<data>T<HHMMSS>.json` com colisão `-N` (`bench.rs:278-315`); `skip_artifact` grava `{skipped:true,reason,at}` e retorna sem falhar (`:304-320,368-394`); minha execução criou `T201139` e preservou os anteriores. |
+| 4 | fixture | **resolvido** | `e2e.turns=12`, `turnsMin=10`, `statistics` inclui `p50/p10/mean/min`; array tem 12 turnos. `acceptance.repetitions:5` é o protocolo run-level; default 1 é exceção declarada. |
+| 5 | EVIDENCE atualizado | **parcial** | Melhorou muito: baseline F0a agora tem a ablação plan None→0,0% (`EVIDENCE.md:53-55`), matriz separa E2E (`:170`) e provider-level (`:171`), contagens **937/13** (`:220`), gate `cache_bench` 1 teste (`:150`), artefatos citados e N=5/p50/p10 explicado (`:153-154,240`), warnings com nota das outras áreas (`:264`). Restam contradições: a matriz ainda diz ciclo E2E **91,4%** (`:170`) enquanto §1.4/artifact dizem **99,97%** (`:142-148`); o stdout antigo 99,7/91,4 em `:134-136` não é o do artifact novo; “warnings do harness 10→0” (`:46,260`) não se sustenta — `cargo test` emite warning em `render.rs:295` (unused import `MessageRole`) além dos 52 warnings externos. A linha da tabela de baseline tem 8 células para 7 colunas (source/status em colunas trocadas). |
+| 6 | `chatStore` em done/cancelled/error | **resolvido** | `syncCacheStats` é chamado em `case 'done'` (`chatStore.ts:540-547`), `'cancelled'` (`:549-552`) e `'error'` (`:561-564`), então TTL/min/savings do `get_cache_stats` chegam no 1º turno, não só ao reabrir. |
+| 7 | `/compact`, poda, probes | **resolvido** | Reconfirmado na rodada 2: helper cache-safe, `render_decisions` tool result, probes OpenCode/OpenAI-responses/google citados. |
+
+### Achado novo relevante — E2E live está “quente” entre runs
+
+O artifact novo (`T200230`/`T200427`/`T201139`) tem a **primeira** amostra com
+`state:"cold"` mas `hitPercent` 99,97 e `cache_read_input_tokens` 14.230 (write 0):
+o prefixo do fixture é idêntico entre execuções (Chat não inclui id de conversa no
+prompt), então o provedor reutiliza o cache da run anterior. Consequências:
+- o E2E prova o steady e a atribuição ao plano (baseline 0,0), mas **não prova
+  cold-start/write nem ciclo de vida live**; a matriz `EVIDENCE.md:170` ainda mostra
+  o 91,4% antigo (que vinha do run frio) e é a única linha com lifecycle E2E.
+- **Correção mínima:** injetar um nonce único por run no system/user do fixture
+  (ou usar `Session date`/filler com nonce) para forçar o primeiro request frio,
+  gravar `cold`/write separadamente e então publicar lifecycle live real; o
+  synthetic 120 continua cobrindo o ciclo da fixture longa.
+
+### Novas contradições documentais (não bloqueiam código)
+
+- `EVIDENCE.md:170` (lifecycle 91,4%) × `:142-148`/artifact (99,97%) — citar o
+  artifact T200230/T201139 e o campo correto; o stdout `:134` é de run antiga.
+- `EVIDENCE.md:46,260` “warnings do harness 10→0” — há warnings de harness
+  (`render.rs:295 unused import`) e 52 warnings de teste; `:264` já ressalva
+  “demais áreas”, mas `:46` afirma zero no harness; corrigir a frase.
+- `EVIDENCE.md:55` row de baseline com células a mais; `EVIDENCE.md:134-136`
+  mostra 99,7/91,4 de execução antiga, enquanto artifact novo tem 99,97/99,97.
+- `bench-fixture.json` `acceptance.steadyHitHardFailBelowPercent: 90` versus código
+  95; campo não lido, mas incoerente com o gate atual.
+- Artifact `T201139` gerado por mim não está citado no EVIDENCE; os citados
+  T200230/T200427 são válidos; citar “última run” ou não gravar artifacts de
+  revisão no diretório de evidência.
+
+### Verdict final
+
+**`complete with documented exceptions`.**
+
+Os 7 itens estão resolvidos no código/artefatos, exceto o item 5 (EVIDENCE ainda com
+duas contradições numéricas e claims de warnings/contagens) e o achado novo de
+cache “quente” entre runs do E2E. Não há blocker arquitetural; os gates passam
+(cargo test 937/13, cache_bench 1 teste live com target 98/hard 95 e baseline 0,0,
+typecheck OK; pnpm test 2216/2216 isolado já registrado). Exceções documentadas
+mantidas: N=5/p50/p10 run-level reduzido a uma run (default 1), providers sem
+credencial (OpenAI/Anthropic diretos), gateway `openai-chat` não reportado, gateway
+`google` indisponível e verificação visual manual no app empacotado não executada.
+Para fechar o EVIDENCE final: corrigir a linha de lifecycle/matriz (91,4→99,97),
+o claim de warnings do harness, a tabela de baseline e adicionar nonce por run ao
+E2E se quiser provar cold-start/lifecycle live — nenhum desses exige outro
+PLAN-FIX.
+
+---
+
+## Rodada 4 — confirmação final
+
+**Base:** artifact final `evidence/bench-e2e-live-2026-10-29T202639.json` (verificado
+por parse), `EVIDENCE.md` atualizado (270 linhas), `harness/cache/bench.rs` com
+nonce/cold metrics, `render.rs` sem o import antigo, e os números de gate
+registrados. Não reexecutei a suíte completa (conforme pedido); rodei apenas
+`cargo check --lib --tests` para conferir warnings de harness.
+
+### Item 5 (EVIDENCE) — **resolvido com nota menor**
+
+O EVIDENCE foi efetivamente corrigido:
+- §1.4 agora cita o artifact T202639 e traz `hit_steady=99.699%`, `min=99.695%`,
+  `p50=99.699%`, `p10=99.696%`, `hit_all=92.76%`, `coldWriteTokens=11994`,
+  `firstRequestHit=16.46%`, `lifecycleHit=92.87%` e baseline
+  (`coldWrite=0/firstHit=0/lifecycle=0`), com a decomposição honesta do 1º request
+  (2364 tokens lidos = bloco imutável de tool definitions; system/histórico frios)
+  — `EVIDENCE.md:127-159`.
+- A matriz saiu do 91,4% antigo para o T202639: E2E **99,70% steady / 92,87%
+  lifecycle**, e a linha provider-level 98,48% segue separada
+  (`EVIDENCE.md:173-176`).
+- Baseline F0a agora tem 7 colunas e a ablação plan None→0,0%, com a ressalva
+  correta de que o baseline histórico pré-F0a não foi capturado
+  (`EVIDENCE.md:53-55`).
+- Contagens **937/13**, gate `cache_bench` 1 teste live e N=5/p50/p10 explicado
+  (`EVIDENCE.md:150-159,225,245,268`).
+- Cold-start no código é real: nonce único por run no display name/settings/1º
+  turno (`bench.rs:228-273`), métricas `coldWriteTokens`/`firstRequestHit`/
+  `lifecycleHit` (`:78-180,417-452`), assert de `coldWriteTokens>0` e
+  `firstRequestHit<30%` (`:716-726`); artifact T202639 tem `cache_creation=11994`,
+  `read=2364`, `firstHit=16,46%`, o que casa com a explicação de tools.
+
+**Nota menor que impede “resolvido sem ressalvas”:** o claim “harness 0 warnings
+inclusive teste” ainda não é literal — `cargo check --lib --tests` mostra
+`warning: unused variable: covered_big` em `harness/mod.rs:9971` (test-only), além
+dos 51 warnings do crate. O import de `render.rs` foi removido (bom). O EVIDENCE já
+ressalva “test-only pré-existentes” em `:46`, mas `:269` afirma “módulo harness
+10→0”; ajustar a frase ou usar `_covered_big`. Também resta
+`bench-fixture.json` com `acceptance.steadyHitHardFailBelowPercent: 90` (campo não
+lido) contra o código 95; ajustar por coerência. Nada disso é blocker.
+
+### Contradições remanescentes
+
+- **Nenhuma contradição numérica principal**: lifecycle 91,4→92,87 e steady
+  99,7 resolvidos no EVIDENCE; baseline 0,0; contagens 937/13; T202639 é o artifact
+  citado; cold-start documentado.
+- **Menor:** claim de “harness 0 warnings inclusive teste” ainda falso pelo
+  `covered_big` em teste (`harness/mod.rs:9971`); `bench-fixture`
+  `steadyHitHardFailBelowPercent:90` vs código 95; §5 do EVIDENCE ainda lista
+  `live_cache_gateway` e não o comando `cache_bench` (o §1.4 lista o teste).
+- Artifacts antigos (T200230/T200427/T201139/T201916/T202121/T202349) estão
+  preservados; o final válido é T202639. O artifact `T201139` gerado por mim na
+  revisão anterior não está citado, o que é aceitável como histórico, mas não deve
+  ser confundido com o aceite.
+
+### Verdict final
+
+**`complete with documented exceptions`.**
+
+Os 7 itens da rodada 3 estão resolvidos no código/artefatos e o item 5 agora está
+substancialmente resolvido; restam apenas duas imprecisões menores de documentação
+(warning test-only `covered_big` e campo `steadyHitHardFailBelowPercent` do fixture)
+e as exceções já declaradas: N=5/p50/p10 run-level reduzido a uma run (default 1;
+`LUMINA_BENCH_REPETITIONS=5` disponível), OpenAI/Anthropic diretos sem credencial,
+gateway `openai-chat` não reportado, gateway `google` indisponível e verificação
+visual manual no app empacotado não executada. Gates registrados/confirmados:
+`cargo test --lib` 937/13, `cache_bench --ignored` 1 teste live com target 98/hard
+95 e baseline 0,0%, `pnpm test` 2216/2216 isolado, typecheck/build OK. O goal pode
+ser marcado como completo com essas exceções; para o EVIDENCE final basta o ajuste
+de uma linha em `covered_big` e do campo do fixture.

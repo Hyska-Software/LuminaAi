@@ -505,6 +505,10 @@ pub struct ChatMessage {
     /// Agent loop trace for the thinking timeline (reasoning + tool counts per step).
     #[serde(default)]
     pub trace: Vec<TraceStep>,
+    /// Origem da mensagem: `user` (default) ou `goal_round` (rodada automática
+    /// do objetivo). Só tem significado em mensagens de usuário.
+    #[serde(default)]
+    pub origin: TurnKind,
 }
 
 impl ChatMessage {
@@ -525,6 +529,7 @@ impl ChatMessage {
             created_at: now_ms(),
             provider_state: None,
             trace: Vec::new(),
+            origin: TurnKind::User,
         }
     }
 
@@ -545,6 +550,7 @@ impl ChatMessage {
             created_at: now_ms(),
             provider_state: None,
             trace: Vec::new(),
+            origin: TurnKind::User,
         }
     }
 }
@@ -628,6 +634,16 @@ pub struct TurnPayload {
     /// Perfil do turno: `chat` (default, retrocompatível) ou `code`.
     #[serde(default)]
     pub profile: TurnProfile,
+    /// Tipo do turno: `user` (default) ou `goal_round` (rodada automática de um
+    /// objetivo; exige perfil `code` e sessão do layout Code).
+    #[serde(default)]
+    pub turn_kind: TurnKind,
+    /// O usuário pediu um objetivo pelo fluxo `/goal` (chip no composer). O
+    /// turno continua humano; o runtime context instrui o agente a chamar a
+    /// tool `goal` (action `create`) com os parâmetros do pedido. Não persiste
+    /// em `messages` — é intenção do turno, não conteúdo da mensagem.
+    #[serde(default)]
+    pub goal_request: bool,
     /// Client generated id used to cancel the stream.
     #[serde(default)]
     pub turn_id: Option<String>,
@@ -1565,6 +1581,158 @@ pub struct PlanView {
     pub updated_at: i64,
 }
 
+/* ------------------------------------------------------------------ */
+/* Objetivos (Goal) do layout Code (docs/goals/code-goals/PLAN.md)     */
+/* ------------------------------------------------------------------ */
+
+/// Origem de um turno e de uma mensagem de usuário. O default `user` mantém
+/// payloads antigos e testes existentes retrocompatíveis.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnKind {
+    #[default]
+    User,
+    /// Rodada automática/manual de um objetivo, gerada pelo driver do renderer.
+    GoalRound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalStatus {
+    Active,
+    Paused,
+    Completed,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalPauseReason {
+    User,
+    Error,
+    MaxRounds,
+    Stalled,
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalOrigin {
+    User,
+    Agent,
+}
+
+/// Estado completo de um objetivo (projeção de `code_events`; o último
+/// `goal/state` vence e a `revision` é o CAS das ações da UI).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalView {
+    pub title: String,
+    pub objective: String,
+    pub status: GoalStatus,
+    /// Continuar sozinho após cada turno bem-sucedido.
+    pub auto_continue: bool,
+    pub rounds: u32,
+    pub max_rounds: u32,
+    pub revision: u64,
+    pub origin: GoalOrigin,
+    pub created_at: i64,
+    pub updated_at: i64,
+    #[serde(default)]
+    pub completed_at: Option<i64>,
+    #[serde(default)]
+    pub last_round_at: Option<i64>,
+    #[serde(default)]
+    pub last_note: Option<String>,
+    #[serde(default)]
+    pub pause_reason: Option<GoalPauseReason>,
+    #[serde(default)]
+    pub pause_detail: Option<String>,
+    #[serde(default)]
+    pub blocker_reason: Option<String>,
+    #[serde(default)]
+    pub blocker_streak: u32,
+    #[serde(default)]
+    pub stalled_rounds: u32,
+    #[serde(default)]
+    pub tokens: u64,
+    #[serde(default)]
+    pub cost: f64,
+}
+
+/// Uma rodada do objetivo (registro do histórico/painel).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalRound {
+    pub index: u32,
+    pub turn_id: String,
+    pub started_at: i64,
+    #[serde(default)]
+    pub ended_at: Option<i64>,
+    /// `done` | `cancelled` | `error` | `interrupted` (None = em andamento).
+    #[serde(default)]
+    pub outcome: Option<String>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub tokens: Option<u32>,
+    #[serde(default)]
+    pub cost: Option<f64>,
+    #[serde(default)]
+    pub files_changed: u32,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// Resposta do preflight `goal_can_continue` (códigos estáveis em `reason`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalContinuation {
+    pub ok: bool,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub goal: Option<GoalView>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateGoalInput {
+    pub objective: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub max_rounds: Option<u32>,
+    #[serde(default)]
+    pub auto_continue: Option<bool>,
+}
+
+/// Ações da UI sobre o objetivo (`update_goal`). A tool do modelo tem um
+/// contrato próprio (`create|edit|progress|complete|blocked`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalAction {
+    Edit,
+    Arm,
+    Disarm,
+    Pause,
+    Resume,
+    Complete,
+    Reopen,
+    Block,
+    Delete,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct UpdateGoalInput {
+    pub title: Option<String>,
+    pub objective: Option<String>,
+    pub max_rounds: Option<u32>,
+    pub summary: Option<String>,
+    pub reason: Option<String>,
+}
+
 /// Tipo de alteração de um arquivo (journal/presentation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -1686,6 +1854,9 @@ pub struct CodeSessionState {
     pub plan_mode: bool,
     #[serde(default)]
     pub plan: Option<PlanView>,
+    /// Objetivo persistente da sessão (`docs/goals/code-goals/PLAN.md`).
+    #[serde(default)]
+    pub goal: Option<GoalView>,
     #[serde(default)]
     pub todos: Vec<TodoItem>,
     #[serde(default)]

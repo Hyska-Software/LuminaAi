@@ -16,7 +16,12 @@
 //! cache de prefixo: `docs/goals/prompt-cache/PLAN.md` §4.2/§4.3/§4.4.
 
 use crate::catalog::ModelInfo;
-use crate::domain::{PermissionMode, PlanState, PlanView, ProjectInfo, TodoItem, TodoStatus};
+use crate::domain::{
+    GoalStatus, GoalView, PermissionMode, PlanState, PlanView, ProjectInfo, TodoItem, TodoStatus,
+    TurnKind,
+};
+
+use super::goal::{GOAL_BLOCKED_STREAK, GOAL_MAX_OBJECTIVE_CHARS};
 
 /// Version of the Code prompt layout (part of the `prompt_snapshots` identity).
 /// Bump whenever the stable prompt text changes.
@@ -49,6 +54,13 @@ pub struct CodeContext {
     pub plan: Option<PlanView>,
     pub plan_mode: bool,
     pub permission_mode: PermissionMode,
+    /// Objetivo persistente da sessão (volátil: só no runtime context).
+    pub goal: Option<GoalView>,
+    /// `goal_round` usa o texto de continuação; turno humano usa o texto de
+    /// contexto ("follow the user's message").
+    pub turn_kind: TurnKind,
+    /// O usuário pediu um objetivo pelo `/goal` (chip do composer) neste turno.
+    pub goal_request: bool,
 }
 
 /// Limite do bloco de instruções do projeto (mesmo racional do Codex: 32 KiB).
@@ -240,6 +252,119 @@ fn planning_section(ctx: &CodeContext, has_todo_write: bool) -> String {
     out
 }
 
+fn goal_status_name(status: GoalStatus) -> &'static str {
+    match status {
+        GoalStatus::Active => "active",
+        GoalStatus::Paused => "paused",
+        GoalStatus::Completed => "completed",
+        GoalStatus::Blocked => "blocked",
+    }
+}
+
+/// Seção `## Objective` do contexto **volátil** (PLAN §8.1): estado do objetivo
+/// + regras de autonomia da rodada. O system prompt estável nunca a recebe (o
+/// prefixo cacheável não pode mudar a cada rodada).
+fn objective_section(ctx: &CodeContext, has_todo_write: bool) -> String {
+    let Some(goal) = &ctx.goal else {
+        return String::new();
+    };
+    let mut out = String::from("## Objective\n\n");
+    let goal_round = ctx.turn_kind == TurnKind::GoalRound;
+    if goal_round {
+        out.push_str(
+            "Continuing the session objective autonomously (this is a goal round, not a new user \
+             request).\n",
+        );
+    } else {
+        out.push_str("Session objective (context; follow the user's message).\n");
+    }
+    let armed = if goal.auto_continue {
+        "automatic rounds armed"
+    } else {
+        "manual rounds only"
+    };
+    out.push_str(&format!(
+        "Status: {} — {armed} · round {} of {} · revision {}\n",
+        goal_status_name(goal.status),
+        goal.rounds,
+        goal.max_rounds,
+        goal.revision
+    ));
+    out.push_str(&format!(
+        "Objective: {}\n",
+        truncate(&goal.objective, GOAL_MAX_OBJECTIVE_CHARS)
+    ));
+    let completed = ctx
+        .todos
+        .iter()
+        .filter(|todo| todo.status == TodoStatus::Completed)
+        .count();
+    if ctx.todos.is_empty() {
+        out.push_str("Tasks: none tracked");
+    } else {
+        out.push_str(&format!("Tasks: {completed}/{} completed", ctx.todos.len()));
+    }
+    match goal
+        .last_note
+        .as_deref()
+        .map(str::trim)
+        .filter(|note| !note.is_empty())
+    {
+        Some(note) => out.push_str(&format!(" · Last round: {}\n", truncate(note, 300))),
+        None => out.push_str(" · Last round: no summary yet\n"),
+    }
+    if let (Some(reason), true) = (goal.blocker_reason.as_deref(), goal.blocker_streak > 0) {
+        out.push_str(&format!(
+            "Blocker: {} ({}/{})\n",
+            truncate(reason, 300),
+            goal.blocker_streak.min(GOAL_BLOCKED_STREAK),
+            GOAL_BLOCKED_STREAK
+        ));
+    }
+    if goal.status == GoalStatus::Paused {
+        if let Some(detail) = goal
+            .pause_detail
+            .as_deref()
+            .map(str::trim)
+            .filter(|detail| !detail.is_empty())
+        {
+            out.push_str(&format!("Pause: {}\n", truncate(detail, 300)));
+        }
+    }
+    if goal.status != GoalStatus::Active {
+        out.push_str(
+            "\nThe objective is not active: do not start or continue rounds on your own; the user \
+             decides when to resume.\n",
+        );
+        return out;
+    }
+    out.push('\n');
+    out.push_str(
+        "- Work autonomously through the objective; do not wait for confirmation for steps the \
+         permission policy allows.\n",
+    );
+    if has_todo_write {
+        out.push_str(
+            "- Keep `todo_write` updated; at the end of the round call `goal` with action \
+             \"progress\" and a one-line note.\n",
+        );
+    } else {
+        out.push_str(
+            "- At the end of the round call `goal` with action \"progress\" and a one-line \
+             note.\n",
+        );
+    }
+    out.push_str(
+        "- Call \"complete\" only when the objective is fully met, listing the evidence; call \
+         \"blocked\" only if the same real impediment persists for 3 rounds.\n",
+    );
+    out.push_str(
+        "- If a user decision is genuinely required, explain it and stop. Do not fabricate \
+         progress.\n",
+    );
+    out
+}
+
 fn git_runtime_section(ctx: &CodeContext) -> String {
     match &ctx.git {
         Some(git) => format!(
@@ -287,6 +412,26 @@ pub fn build_runtime_context(ctx: &CodeContext, has_todo_write: bool) -> String 
     }
     out.push('\n');
     out.push_str(&planning_section(ctx, has_todo_write));
+    let objective = objective_section(ctx, has_todo_write);
+    if !objective.is_empty() {
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(&objective);
+    }
+    if ctx.goal_request {
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str("## Goal request\n\n");
+        out.push_str(
+            "The user selected `/goal` and asked for a new session objective. Before continuing, \
+             call `goal` with action \"create\": write `objective` from their message, a short \
+             `title`, an appropriate `max_rounds` (default 25) and `auto_continue: true`. Then \
+             start the work. Treat the message as the objective description; do not ask for \
+             confirmation.\n\n",
+        );
+    }
     out
 }
 
@@ -424,6 +569,34 @@ mod tests {
             plan: None,
             plan_mode: false,
             permission_mode: PermissionMode::Edit,
+            goal: None,
+            turn_kind: TurnKind::User,
+            goal_request: false,
+        }
+    }
+
+    fn goal_fixture() -> GoalView {
+        GoalView {
+            title: "Migrar pagamentos".into(),
+            objective: "Migrar o módulo de pagamentos para o novo SDK".into(),
+            status: GoalStatus::Active,
+            auto_continue: true,
+            rounds: 3,
+            max_rounds: 25,
+            revision: 9,
+            origin: crate::domain::GoalOrigin::User,
+            created_at: 1,
+            updated_at: 2,
+            completed_at: None,
+            last_round_at: Some(2),
+            last_note: Some("extraí o SDK".into()),
+            pause_reason: None,
+            pause_detail: None,
+            blocker_reason: None,
+            blocker_streak: 0,
+            stalled_rounds: 0,
+            tokens: 0,
+            cost: 0.0,
         }
     }
 
@@ -557,5 +730,122 @@ mod tests {
     fn todos_are_rendered_in_the_runtime_context() {
         let runtime = build_runtime_context(&ctx(), true);
         assert!(runtime.contains("[~] Corrigir cálculo"));
+    }
+
+    #[test]
+    fn runtime_context_renders_the_objective_for_a_goal_round() {
+        let mut context = ctx();
+        context.goal = Some(goal_fixture());
+        context.turn_kind = TurnKind::GoalRound;
+        let runtime = build_runtime_context(&context, true);
+        for needle in [
+            "## Objective",
+            "goal round",
+            "Status: active — automatic rounds armed · round 3 of 25 · revision 9",
+            "Objective: Migrar o módulo de pagamentos para o novo SDK",
+            "Tasks: 0/1 completed",
+            "Last round: extraí o SDK",
+            "Work autonomously through the objective",
+            "call `goal` with action \"progress\"",
+            "Do not fabricate progress",
+        ] {
+            assert!(runtime.contains(needle), "trecho ausente: {needle}\n{runtime}");
+        }
+        // A seção vem **depois** de plano/tarefas (PLAN §8.1).
+        let objective = runtime.find("## Objective").expect("seção");
+        let planning = runtime.find("## Plan and tasks").expect("planejamento");
+        assert!(objective > planning);
+        // O system prompt estável não carrega estado do objetivo.
+        let stable = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        for volatile in [
+            "## Objective",
+            "Migrar o módulo de pagamentos",
+            "round 3 of 25",
+            "extraí o SDK",
+        ] {
+            assert!(
+                !stable.contains(volatile),
+                "estado do objetivo vazou para o system prompt: {volatile}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_context_renders_the_goal_request_hint() {
+        let mut context = ctx();
+        context.goal_request = true;
+        let runtime = build_runtime_context(&context, true);
+        assert!(runtime.contains("## Goal request"), "{runtime}");
+        assert!(runtime.contains("action \"create\""), "{runtime}");
+        assert!(runtime.contains("auto_continue: true"), "{runtime}");
+        assert!(runtime.contains("do not ask for confirmation"), "{runtime}");
+
+        // Sem a intenção (turno humano comum) a seção não aparece.
+        assert!(!build_runtime_context(&ctx(), true).contains("## Goal request"));
+
+        // A intenção é volátil: nunca no system prompt estável.
+        let stable = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        assert!(!stable.contains("## Goal request"), "{stable}");
+        assert!(!stable.contains("selected `/goal`"), "{stable}");
+    }
+
+    #[test]
+    fn human_turn_objective_uses_the_context_wording() {
+        let mut context = ctx();
+        context.goal = Some(goal_fixture());
+        context.turn_kind = TurnKind::User;
+        let runtime = build_runtime_context(&context, true);
+        assert!(runtime.contains("## Objective"), "{runtime}");
+        assert!(
+            runtime.contains("Session objective (context; follow the user's message)"),
+            "{runtime}"
+        );
+        assert!(!runtime.contains("goal round"), "{runtime}");
+        // Regras de autonomia continuam presentes (o objetivo está ativo).
+        assert!(
+            runtime.contains("Work autonomously through the objective"),
+            "{runtime}"
+        );
+        let stable = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        assert!(!stable.contains("## Objective"));
+    }
+
+    #[test]
+    fn paused_and_blocked_objectives_are_context_only() {
+        let mut goal = goal_fixture();
+        goal.status = GoalStatus::Paused;
+        goal.pause_reason = Some(crate::domain::GoalPauseReason::Stalled);
+        goal.pause_detail = Some("Sem progresso em 3 rodadas.".into());
+        goal.auto_continue = false;
+        let mut context = ctx();
+        context.goal = Some(goal);
+        let runtime = build_runtime_context(&context, true);
+        assert!(runtime.contains("Status: paused — manual rounds only"), "{runtime}");
+        assert!(runtime.contains("Pause: Sem progresso em 3 rodadas."), "{runtime}");
+        assert!(
+            runtime.contains("The objective is not active"),
+            "{runtime}"
+        );
+        assert!(
+            !runtime.contains("Work autonomously through the objective"),
+            "objetivo inativo não instrui autonomia: {runtime}"
+        );
+
+        let mut blocked = goal_fixture();
+        blocked.status = GoalStatus::Blocked;
+        blocked.blocker_reason = Some("Dependência fora do ar".into());
+        blocked.blocker_streak = 2;
+        context.goal = Some(blocked);
+        let runtime = build_runtime_context(&context, true);
+        assert!(
+            runtime.contains("Blocker: Dependência fora do ar (2/3)"),
+            "{runtime}"
+        );
+    }
+
+    #[test]
+    fn session_without_goal_has_no_objective_section() {
+        let runtime = build_runtime_context(&ctx(), true);
+        assert!(!runtime.contains("## Objective"));
     }
 }

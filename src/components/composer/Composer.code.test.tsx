@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Conversation, ProviderInfo } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
@@ -134,6 +134,9 @@ beforeEach(() => {
     codePanelTab: 'files',
     codePanelOpen: false,
     settingsOpen: false,
+    codeView: 'session',
+    codeGoalOpen: false,
+    goalDialog: null,
   });
 });
 
@@ -169,11 +172,12 @@ describe('Composer — placeholder e atalho no modo Code', () => {
 });
 
 describe('Composer — controles de sessão no layout Code', () => {
-  it('troca os pills de ferramentas pelos controles de permissão, Plano e Plano/tarefas', () => {
+  it('troca os pills de ferramentas pelos controles de permissão, Plano, Objetivo e Plano/tarefas', () => {
     render(<Composer />);
 
     expect(screen.getByRole('button', { name: 'Modo de permissão: Editar' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^Modo Plano/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Criar objetivo com /goal' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Plano, tarefas e trabalhos em segundo plano' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Busca web' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Criar arquivos' })).toBeNull();
@@ -442,5 +446,73 @@ describe('Composer — comandos /', () => {
     });
 
     expect(screen.queryByRole('listbox')).toBeNull();
+  });
+});
+
+describe('Composer — comando /goal', () => {
+  it('aparece no catálogo com o grupo Objetivo', async () => {
+    render(<Composer />);
+
+    typeInComposer('/goal');
+
+    expect(await screen.findByRole('option', { name: /\/goal/ })).toBeTruthy();
+    const listbox = screen.getByRole('listbox', { name: 'Comandos do modo Code' });
+    expect(within(listbox).getByText('Objetivo')).toBeTruthy();
+  });
+
+  it('ativa o chip /goal sem alterar nem preencher a mensagem do usuário', async () => {
+    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(undefined);
+    render(<Composer />);
+
+    typeInComposer('/goal');
+    await screen.findByRole('option', { name: /\/goal/ });
+    fireEvent.keyDown(textarea(), { key: 'Enter' });
+
+    // O comando vira chip; não injeta prompt automático no texto.
+    expect(screen.getByRole('button', { name: 'Remover objetivo' })).toBeTruthy();
+    expect(screen.getByText('/goal')).toBeTruthy();
+    expect(textarea().value).toBe('');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+    expect(useUiStore.getState().goalDialog).toBeNull();
+    expect(useUiStore.getState().codeGoalOpen).toBe(false);
+    expect(useUiStore.getState().codeView).toBe('session');
+  });
+
+  it('envia a mensagem intacta com goalRequest=true e limpa o chip', async () => {
+    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(undefined);
+    render(<Composer />);
+
+    typeInComposer('/goal');
+    await screen.findByRole('option', { name: /\/goal/ });
+    fireEvent.keyDown(textarea(), { key: 'Enter' });
+
+    fireEvent.change(textarea(), {
+      target: { value: 'Refatore o parser e deixe o build verde.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar mensagem' }));
+
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith('Refatore o parser e deixe o build verde.', {
+        goalRequest: true,
+      }),
+    );
+    expect(screen.queryByRole('button', { name: 'Remover objetivo' })).toBeNull();
+    expect(textarea().value).toBe('');
+  });
+
+  it('remover o chip volta ao turno normal', async () => {
+    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(undefined);
+    render(<Composer />);
+
+    typeInComposer('/goal');
+    await screen.findByRole('option', { name: /\/goal/ });
+    fireEvent.keyDown(textarea(), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Remover objetivo' }));
+
+    fireEvent.change(textarea(), { target: { value: 'Oi' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar mensagem' }));
+
+    await waitFor(() => expect(send).toHaveBeenCalledWith('Oi', undefined));
   });
 });

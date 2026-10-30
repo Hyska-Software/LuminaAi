@@ -21,6 +21,7 @@ import {
   Search,
   ShieldCheck,
   SquareTerminal,
+  Target,
   TriangleAlert,
   Wrench,
   type LucideIcon,
@@ -84,6 +85,8 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   git_status: GitBranch,
   git_diff: GitBranch,
   git_log: GitBranch,
+  /* objetivo persistente (docs/goals/code-goals/PLAN.md §10.5) */
+  goal: Target,
 };
 
 const MAX_DOMAINS = 5;

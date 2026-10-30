@@ -25,6 +25,12 @@ export type { CodeFileViewProps } from './CodeFileView';
 export { CodePlanView } from './CodePlanView';
 export type { CodePlanViewProps } from './CodePlanView';
 
+export { GoalPanel } from './GoalPanel';
+export type { GoalPanelProps } from './GoalPanel';
+
+export { GoalDialog } from './GoalDialog';
+export type { GoalDialogProps } from './GoalDialog';
+
 export { CodeTurnSummary } from './CodeTurnSummary';
 export type { CodeTurnSummaryProps } from './CodeTurnSummary';
 

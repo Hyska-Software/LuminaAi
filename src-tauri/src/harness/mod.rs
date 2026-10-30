@@ -16,9 +16,9 @@ use crate::catalog::{CatalogFile, ModelInfo, ProviderAuth, ProviderInfo};
 use crate::db::{CacheStateRecord, Db, StoredAttachment, UsageLogCache};
 use crate::domain::{
     now_ms, AttachmentInfo, CacheBreakReason, CacheSample, CacheSettings, ChatMessage, Citation,
-    MessageRole, MessageStatus, PrefixDigest, ReasoningMode, ReasoningSelection, Settings,
-    ToolCallRecord, ToolCallStatus, TraceStep, TurnOptions, TurnPayload, TurnProfile, TurnResult,
-    UsageInfo, MAX_STEPS_LIMIT,
+    Conversation, MessageRole, MessageStatus, PrefixDigest, ReasoningMode, ReasoningSelection,
+    Settings, ToolCallRecord, ToolCallStatus, TraceStep, TurnKind, TurnOptions, TurnPayload,
+    TurnProfile, TurnResult, UsageInfo, MAX_STEPS_LIMIT,
 };
 use crate::events::TurnEvent;
 use crate::providers::{
@@ -1413,7 +1413,7 @@ fn emit_context_stats(
 /// 4. streams every phase through `on_event` and persists the assistant message.
 pub async fn run_turn(
     deps: HarnessDeps,
-    payload: TurnPayload,
+    mut payload: TurnPayload,
     settings: Settings,
     on_event: Arc<dyn EventEmitter>,
     cancel: CancellationToken,
@@ -1470,6 +1470,100 @@ pub async fn run_turn(
     let mut credential = resolve_credential(&deps, &provider).await?;
     let protocols = resolve_protocols(&provider, &model)?;
 
+    /* ---------------------------------------------------------------- */
+    /* 1b. Goal round: validate and open **before** persisting anything   */
+    /* ---------------------------------------------------------------- */
+
+    // Rodada de objetivo (PLAN §7.2): recusar antes de persistir mensagens e
+    // antes de qualquer request ao provider. O harness valida o que conhece;
+    // "turno ativo" é garantido pelo `TurnRegistry`/preflight na camada de
+    // comandos — aqui ele entra como `false` (defesa em profundidade fica no
+    // `validate_round_start`, que também recheca).
+    let mut goal_round_view: Option<crate::domain::GoalView> = None;
+    // `/goal` no composer: intenção de criação no turno humano, sem mensagem
+    // automática. O runtime context instrui o agente a chamar a tool `goal`.
+    if payload.goal_request {
+        if profile != TurnProfile::Code {
+            return Err(anyhow!(
+                "{}: criar objetivo exige o perfil Code",
+                code::goal::GOAL_TURN_REQUIRES_CODE
+            ));
+        }
+        if payload.turn_kind != TurnKind::User {
+            return Err(anyhow!(
+                "GOAL_INVALID_ARGS: `goalRequest` só vale em turno humano (não em rodada)"
+            ));
+        }
+        if payload.options.delegation_depth > 0 {
+            return Err(anyhow!(
+                "{}: subagentes não criam objetivos",
+                code::goal::GOAL_REQUIRES_TOP_LEVEL
+            ));
+        }
+        if payload.options.regenerate {
+            return Err(anyhow!(
+                "GOAL_INVALID_ARGS: não é possível regenerar um turno de criação de objetivo"
+            ));
+        }
+    }
+    if payload.turn_kind == TurnKind::GoalRound {
+        if profile != TurnProfile::Code {
+            return Err(anyhow!(
+                "{}: uma rodada de objetivo exige o perfil Code",
+                code::goal::GOAL_TURN_REQUIRES_CODE
+            ));
+        }
+        if payload.options.delegation_depth > 0 {
+            return Err(anyhow!(
+                "{}: subagentes não executam rodadas de objetivo",
+                code::goal::GOAL_REQUIRES_TOP_LEVEL
+            ));
+        }
+        if payload.options.regenerate {
+            return Err(anyhow!(
+                "GOAL_INVALID_ARGS: não é possível regenerar uma rodada de objetivo"
+            ));
+        }
+        let plan_mode = code::session::plan_mode_active(&deps.db, &conversation.id)
+            .unwrap_or(false);
+        let pending_approvals = deps
+            .approvals
+            .as_ref()
+            .is_some_and(|approvals| {
+                approvals
+                    .pending_requests()
+                    .iter()
+                    .any(|request| request.conversation_id == conversation.id)
+            })
+            || deps.questions.as_ref().is_some_and(|questions| {
+                questions
+                    .pending_requests()
+                    .iter()
+                    .any(|request| request.conversation_id == conversation.id)
+            });
+        let has_workspace = conversation
+            .workspace_id
+            .as_deref()
+            .and_then(|workspace_id| deps.db.get_workspace(workspace_id).ok().flatten())
+            .is_some_and(|workspace| PathBuf::from(&workspace.path).is_dir());
+        // Valida contra o estado persistido (sem lock de escrita: o `begin_round`
+        // logo abaixo revalida e incrementa sob o lock).
+        code::goal::validate_round_start(
+            &deps.db,
+            &conversation.id,
+            plan_mode,
+            pending_approvals,
+            has_workspace,
+            false,
+        )?;
+        let opened = code::goal::begin_round(&deps.db, &conversation.id, &turn_id)?;
+        // A mensagem de usuário da rodada é o prompt de continuação (PLAN §8.2),
+        // nunca o conteúdo vazio enviado pelo renderer.
+        payload.content = code::goal::round_prompt(&opened, opened.rounds);
+        goal_round_view = Some(opened);
+    }
+
+    // Só depois de a rodada validar (uma recusa não altera a conversa).
     if conversation.provider_id != provider.id || conversation.model_id != model.id {
         deps.db
             .update_conversation_model(&conversation.id, &provider.id, &model.id)?;
@@ -1519,6 +1613,14 @@ pub async fn run_turn(
             assistant_message_id: assistant_message.id.clone(),
         },
     );
+    // Rodada aberta: a UI recebe o snapshot autoritativo (`rounds` já contado)
+    // logo depois do `turn_started` (PLAN §7.2 passo 6).
+    if let Some(goal) = goal_round_view.as_ref() {
+        emit(
+            &on_event,
+            TurnEvent::GoalUpdated { goal: goal.clone() },
+        );
+    }
 
     /* ---------------------------------------------------------------- */
     /* 4. Build the neutral history + system prompt                      */
@@ -1655,10 +1757,17 @@ pub async fn run_turn(
     .unwrap_or_default();
     // Perfil Code: contexto do workspace (git/projeto/AGENTS.md/árvore) e as
     // regras de aprovação aplicáveis à sessão. O Chat não paga esse custo.
-    let code_context = match profile {
-        TurnProfile::Code => Some(code::context::build(&deps.db, &conversation).await),
+    let mut code_context = match profile {
+        // O tipo do turno vem do payload (não é persistido na conversa); o
+        // objetivo já foi aberto (`begin_round`) para a rodada contar aqui.
+        TurnProfile::Code => Some(
+            code::context::build_for_turn(&deps.db, &conversation, payload.turn_kind).await,
+        ),
         TurnProfile::Chat => None,
     };
+    if let Some(context) = code_context.as_mut() {
+        context.goal_request = payload.goal_request;
+    }
     // O evento inicial do perfil Code carrega o estado **real** da sessão
     // (B-05: o modo Plano era enviado como `false` fixo e o chip dessincronizava
     // durante todo o turno).
@@ -1838,6 +1947,7 @@ pub async fn run_turn(
             rules: code_rules.clone(),
             jobs: deps.jobs.clone(),
             questions: deps.questions.clone(),
+            turn_kind: payload.turn_kind,
             mcp: deps.mcp.clone(),
             skills_roots: skills_roots.clone(),
             subagent: Some(code::subagent::runner(
@@ -2680,7 +2790,13 @@ pub async fn run_turn(
     );
 
     // Auto title: only when the conversation still has a placeholder title.
-    if settings.auto_title && should_auto_title(&conversation.title) {
+    // Rodada de objetivo nunca gera título (PLAN §8.4). A checagem relê o DB
+    // porque a tool `goal` (fluxo `/goal`) pode ter renomeado o placeholder
+    // durante o turno — o `conversation` em memória tem o título do início.
+    if settings.auto_title
+        && payload.turn_kind == TurnKind::User
+        && conversation_needs_auto_title(&deps.db, &conversation)
+    {
         let source = if user_message.content.trim().is_empty() {
             user_message
                 .attachments
@@ -2723,9 +2839,13 @@ pub async fn run_turn(
 
     // Fecho do turno Code: alterações do turno, medidor de contexto e auditoria.
     if profile == TurnProfile::Code {
-        if let Some(summary) =
-            code::session::turn_changes(&deps.db, &conversation.id, &tool_turn_id)
-        {
+        let turn_changes =
+            code::session::turn_changes(&deps.db, &conversation.id, &tool_turn_id);
+        let files_changed = turn_changes
+            .as_ref()
+            .map(|summary| u32::try_from(summary.files.len()).unwrap_or(u32::MAX))
+            .unwrap_or(0);
+        if let Some(summary) = turn_changes {
             emit(&on_event, TurnEvent::WorkspaceChanges { summary });
         }
         // Fecho: estimativa final do histórico efetivamente enviado ao modelo
@@ -2755,6 +2875,26 @@ pub async fn run_turn(
             &serde_json::json!({ "status": turn_status, "usage": usage }),
         ) {
             eprintln!("lumina: falha ao registrar fim do turno Code: {error:#}");
+        }
+        // Fecho da rodada do objetivo (PLAN §7.3): fecha `goal/round` com as
+        // métricas do turno, agrega tokens/custo, detecta progresso/estol e
+        // pausa quando necessário — **depois** do `turn/ended` e antes de
+        // Done/Error/Cancelled. Falha aqui não derruba o turno (best-effort).
+        if goal_round_view.is_some() {
+            match code::goal::finish_round(
+                &deps.db,
+                &conversation.id,
+                &tool_turn_id,
+                turn_status,
+                &usage,
+                files_changed,
+            ) {
+                Ok(Some(goal)) => emit(&on_event, TurnEvent::GoalUpdated { goal }),
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("lumina: falha ao fechar a rodada do objetivo: {error:#}");
+                }
+            }
         }
         // Nenhuma aprovação pode sobreviver ao fim do turno.
         if let Some(approvals) = &deps.approvals {
@@ -2796,6 +2936,9 @@ fn prepare_new_turn(
     model: &ModelInfo,
 ) -> anyhow::Result<(ChatMessage, ChatMessage)> {
     let mut user_message = ChatMessage::user(&payload.conversation_id, payload.content.clone());
+    // Origem honesta: rodada de objetivo não se disfarça de mensagem do usuário
+    // (persistido em `messages.origin`; a UI renderiza um divisor próprio).
+    user_message.origin = payload.turn_kind;
     user_message.model_id = Some(model.id.clone());
     user_message.provider_id = Some(provider.id.clone());
     user_message.attachments = resolve_attachment_infos(&deps.db, &payload.attachment_ids);
@@ -3596,7 +3739,8 @@ fn add_tokens(left: Option<u32>, right: Option<u32>) -> Option<u32> {
     }
 }
 
-fn should_auto_title(title: &str) -> bool {
+/// Título ainda é placeholder e pode ser substituído (auto title / `create_goal`).
+pub(crate) fn should_auto_title(title: &str) -> bool {
     let title = title.trim();
     if title.is_empty() {
         return true;
@@ -3605,6 +3749,20 @@ fn should_auto_title(title: &str) -> bool {
         title.to_lowercase().as_str(),
         "nova conversa" | "novo chat" | "new chat" | "untitled" | "sem título" | "sem titulo"
     )
+}
+
+/// Decide o auto-title relendo o título **vivo** da conversa: a tool `goal`
+/// (fluxo `/goal`) pode renomear o placeholder durante o turno, e o snapshot em
+/// memória do `run_turn` ficaria desatualizado (sobrescreveria o título do
+/// objetivo).
+fn conversation_needs_auto_title(db: &Db, conversation: &Conversation) -> bool {
+    let live_title = db
+        .get_conversation(&conversation.id)
+        .ok()
+        .flatten()
+        .map(|current| current.title)
+        .unwrap_or_else(|| conversation.title.clone());
+    should_auto_title(&live_title)
 }
 
 fn derive_title(text: &str) -> Option<String> {
@@ -3863,6 +4021,26 @@ mod tests {
         let title = derive_title(&long).expect("title");
         assert!(title.chars().count() <= TITLE_MAX_CHARS + 1);
         assert!(title.ends_with('…'));
+    }
+
+    #[test]
+    fn auto_title_reads_the_live_title_after_a_goal_renames_the_placeholder() {
+        let db = crate::db::Db::open_in_memory().expect("db");
+        let conversation = db
+            .create_conversation_with_mode(
+                "Nova conversa",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa");
+        // Snapshot em memória com o placeholder (como no início do turno).
+        assert!(conversation_needs_auto_title(&db, &conversation));
+        // A tool `goal` renomeia durante o turno: o auto-title não pode
+        // sobrescrever o título do objetivo usando o snapshot antigo.
+        db.rename_conversation(&conversation.id, "Refatorar o parser")
+            .expect("renomear");
+        assert!(!conversation_needs_auto_title(&db, &conversation));
     }
 
     #[test]
@@ -4165,6 +4343,8 @@ mod agent_loop_tests {
                 ..Default::default()
             },
             profile: TurnProfile::Chat,
+            turn_kind: crate::domain::TurnKind::User,
+            goal_request: false,
             turn_id: Some(uuid::Uuid::new_v4().to_string()),
         }
     }
@@ -4192,6 +4372,8 @@ mod agent_loop_tests {
                 ..Default::default()
             },
             profile: TurnProfile::Chat,
+            turn_kind: crate::domain::TurnKind::User,
+            goal_request: false,
             turn_id: Some(uuid::Uuid::new_v4().to_string()),
         }
     }
@@ -4306,6 +4488,8 @@ mod agent_loop_tests {
                 ..Default::default()
             },
             profile: TurnProfile::Chat,
+            turn_kind: crate::domain::TurnKind::User,
+            goal_request: false,
             turn_id: Some(uuid::Uuid::new_v4().to_string()),
         }
     }
@@ -10410,5 +10594,560 @@ mod agent_loop_tests {
         .expect("turno sem raw");
         let samples = cache_samples(&events);
         assert_eq!(samples[0].raw_usage, None);
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Objetivo (§8) — integração do run_turn                            */
+    /* ---------------------------------------------------------------- */
+
+    fn goal_input(objective: &str, max_rounds: u32) -> crate::domain::CreateGoalInput {
+        crate::domain::CreateGoalInput {
+            objective: objective.to_string(),
+            title: None,
+            max_rounds: Some(max_rounds),
+            auto_continue: Some(true),
+        }
+    }
+
+    /// `goal_round`: valida/abre a rodada antes de persistir, injeta o prompt de
+    /// continuação, persiste a origem, emite `goal_updated` no início e no
+    /// fecho, monta a seção `## Objective` no runtime e mantém o system prompt
+    /// estável (sem estado do objetivo).
+    #[tokio::test]
+    async fn goal_round_opens_persists_and_closes_the_round() {
+        let temp = TempDb::new();
+        let (_workspace_dir, conversation) = code_workspace(&temp);
+        let goal = code::goal::create(
+            &temp.db,
+            &conversation.id,
+            &goal_input("Migrar o módulo de pagamentos para o novo SDK", 5),
+            crate::domain::GoalOrigin::User,
+        )
+        .expect("criar objetivo");
+        assert_eq!(goal.rounds, 0);
+
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                requests.lock().expect("requests lock").push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    emit(&sink, ProviderEvent::Usage(usage_with_cache(1_200, 900)));
+                    if current == 0 {
+                        let arguments =
+                            serde_json::json!({ "action": "progress", "note": "extraí o SDK" })
+                                .to_string();
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallStart {
+                                index: 0,
+                                id: "call-goal".to_string(),
+                                name: "goal".to_string(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallArgsDelta {
+                                index: 0,
+                                delta: arguments.clone(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallDone {
+                                index: 0,
+                                arguments,
+                            },
+                        );
+                        emit(&sink, ProviderEvent::Done);
+                    } else {
+                        text_stream(&sink, "Rodada concluída: SDK extraído.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let mut payload = code_payload(&conversation);
+        payload.turn_kind = TurnKind::GoalRound;
+        payload.content = String::new();
+        let (emitter, events) = channel();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            payload,
+            Settings::default(),
+            emitter,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("rodada do objetivo");
+
+        // Rodada contada, nota registrada e token/custo agregados (PLAN §7.2/§7.3).
+        let current = code::goal::current(&temp.db, &conversation.id)
+            .expect("fold")
+            .expect("objetivo");
+        assert_eq!(current.rounds, 1, "begin_round incrementou a rodada");
+        assert_eq!(current.last_note.as_deref(), Some("extraí o SDK"));
+        assert!(current.tokens > 0, "tokens da rodada agregados: {current:?}");
+        assert_eq!(current.status, crate::domain::GoalStatus::Active);
+        assert_eq!(
+            result.assistant_message.content.trim(),
+            "Rodada concluída: SDK extraído."
+        );
+
+        // Origem honesta + prompt de continuação na mensagem de usuário.
+        let messages = temp.db.list_messages(&conversation.id).expect("mensagens");
+        let user = messages
+            .iter()
+            .rev()
+            .find(|message| message.role == MessageRole::User)
+            .expect("mensagem da rodada");
+        assert_eq!(user.origin, TurnKind::GoalRound);
+        assert!(
+            user.content.contains("Continue the session objective — round 1 of 5"),
+            "{}",
+            user.content
+        );
+        assert!(user.content.contains("Migrar o módulo de pagamentos"));
+
+        // Fecho: a rodada foi registrada com outcome done.
+        let rounds = code::goal::rounds(&temp.db, &conversation.id, 10, false).expect("rodadas");
+        assert_eq!(rounds.len(), 1);
+        assert_eq!(rounds[0].index, 1);
+        assert_eq!(rounds[0].outcome.as_deref(), Some("done"));
+
+        // Eventos: início (turn_started → goal_updated) e fecho (turn/ended →
+        // goal_updated) — pelo menos dois snapshots emitidos.
+        assert!(has_event(&events, "turn_started"));
+        assert!(has_event(&events, "goal_updated"));
+        let updates = events
+            .lock()
+            .expect("events lock")
+            .iter()
+            .filter(|json| json.contains("\"type\":\"goal_updated\""))
+            .count();
+        assert!(updates >= 2, "goal_updated no início e no fecho: {updates}");
+        assert!(
+            temp.db
+                .latest_code_event(&conversation.id, code::session::KIND_TURN_ENDED)
+                .expect("evento")
+                .is_some(),
+            "turn/ended gravado antes do fecho da rodada"
+        );
+
+        // Contexto volátil: seção `## Objective` com a rodada no request, e o
+        // system prompt estável idêntico entre os passos, sem estado do objetivo.
+        let requests = requests.lock().expect("requests lock").clone();
+        assert_eq!(requests.len(), 2, "um request por passo");
+        assert_eq!(
+            requests[0].system_prompt, requests[1].system_prompt,
+            "system prompt estável durante a rodada"
+        );
+        for volatile in [
+            "## Objective",
+            "Migrar o módulo de pagamentos",
+            "round 1 of 5",
+            "extraí o SDK",
+        ] {
+            assert!(
+                !requests[0].system_prompt.contains(volatile),
+                "estado do objetivo vazou para o system prompt: {volatile}"
+            );
+        }
+        assert!(
+            requests[0]
+                .tools
+                .iter()
+                .any(|tool| tool.name == "goal"),
+            "a tool `goal` está no wire da rodada"
+        );
+        let runtime = requests[0]
+            .history
+            .iter()
+            .find(|message| message.text.starts_with("<contexto-da-sessao"))
+            .expect("surface item de runtime");
+        for needle in [
+            "## Objective",
+            "round 1 of 5",
+            "Migrar o módulo de pagamentos",
+            "Work autonomously through the objective",
+        ] {
+            assert!(runtime.text.contains(needle), "trecho ausente: {needle}");
+        }
+        // O item de superfície é **user** marcado, nunca system (cache).
+        assert_eq!(runtime.role, HistoryRole::User);
+
+        // Segunda rodada: system prompt e tools byte-idênticos (prefixo cacheável
+        // preservado), só o runtime context muda (rodada 2).
+        let second_requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let mut second_payload = code_payload(&conversation);
+        second_payload.turn_kind = TurnKind::GoalRound;
+        second_payload.content = String::new();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(second_requests.clone(), "Segunda rodada concluída."),
+            ),
+            second_payload,
+            Settings::default(),
+            channel().0,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("segunda rodada");
+        let second_requests = second_requests.lock().expect("requests lock").clone();
+        assert_eq!(
+            requests[0].system_prompt, second_requests[0].system_prompt,
+            "system prompt idêntico entre rodadas"
+        );
+        assert_eq!(
+            cache::snapshot::tools_json(&requests[0].tools),
+            cache::snapshot::tools_json(&second_requests[0].tools),
+            "tools idênticas entre rodadas"
+        );
+        let second_runtime = second_requests[0]
+            .history
+            .iter()
+            .rev()
+            .find(|message| message.text.starts_with("<contexto-da-sessao"))
+            .expect("surface da segunda rodada");
+        assert!(
+            second_runtime.text.contains("round 2 of 5"),
+            "{:?}",
+            second_runtime.text
+        );
+        assert!(!second_requests[0].system_prompt.contains("## Objective"));
+    }
+
+    /// Rodada inválida é recusada **antes** do provider e **antes** de
+    /// persistir mensagens (PLAN §7.2): nada de mensagem quebrada no transcript.
+    #[tokio::test]
+    async fn goal_round_refuses_invalid_starts_before_persisting() {
+        let temp = TempDb::new();
+        let (workspace_dir, conversation) = code_workspace(&temp);
+        code::goal::create(
+            &temp.db,
+            &conversation.id,
+            &goal_input("Objetivo validado", 5),
+            crate::domain::GoalOrigin::User,
+        )
+        .expect("objetivo");
+
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            Arc::new(move |request, _sink| {
+                requests.lock().expect("requests lock").push(request.clone());
+                Box::pin(async { Ok(()) })
+            })
+        };
+
+        let run = |payload: TurnPayload| {
+            let deps = deps(temp.db.clone(), streamer.clone());
+            async move {
+                run_turn(
+                    deps,
+                    payload,
+                    Settings::default(),
+                    channel().0,
+                    CancellationToken::new(),
+                )
+                .await
+            }
+        };
+
+        // (a) Chat + goal_round ⇒ GOAL_TURN_REQUIRES_CODE.
+        let chat = temp
+            .db
+            .create_conversation("Chat", "opencode-go", "deepseek-v4.1-flash")
+            .expect("chat");
+        let mut chat_payload = payload(&chat, 1);
+        chat_payload.turn_kind = TurnKind::GoalRound;
+        let error = format!("{:#}", run(chat_payload).await.expect_err("chat recusa"));
+        assert!(error.contains(code::goal::GOAL_TURN_REQUIRES_CODE), "{error}");
+
+        // (b) subagente (delegation_depth > 0) ⇒ GOAL_REQUIRES_TOP_LEVEL.
+        let mut sub_payload = code_payload(&conversation);
+        sub_payload.turn_kind = TurnKind::GoalRound;
+        sub_payload.options.delegation_depth = 1;
+        let error = format!("{:#}", run(sub_payload).await.expect_err("subagente recusa"));
+        assert!(error.contains(code::goal::GOAL_REQUIRES_TOP_LEVEL), "{error}");
+
+        // (c) sem objetivo ⇒ GOAL_NOT_FOUND.
+        let empty = temp
+            .db
+            .create_conversation_with_mode(
+                "Sem objetivo",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa code");
+        temp.db
+            .set_conversation_workspace(&empty.id, Some("ws-nope"))
+            .ok();
+        let mut empty_payload = code_payload(&empty);
+        empty_payload.turn_kind = TurnKind::GoalRound;
+        let error = format!("{:#}", run(empty_payload).await.expect_err("sem objetivo"));
+        assert!(error.contains("GOAL_NOT_FOUND"), "{error}");
+
+        // (d) objetivo pausado ⇒ GOAL_NOT_ACTIVE.
+        code::goal::pause(
+            &temp.db,
+            &conversation.id,
+            crate::domain::GoalPauseReason::User,
+            None,
+        )
+        .expect("pausar");
+        let mut paused_payload = code_payload(&conversation);
+        paused_payload.turn_kind = TurnKind::GoalRound;
+        let error = format!("{:#}", run(paused_payload).await.expect_err("pausado"));
+        assert!(error.contains("GOAL_NOT_ACTIVE"), "{error}");
+        code::goal::resume(&temp.db, &conversation.id).expect("retomar");
+
+        // (e) modo Plano ativo ⇒ GOAL_PLAN_MODE.
+        code::session::set_plan_mode(&temp.db, &conversation.id, true).expect("plano");
+        let mut plan_payload = code_payload(&conversation);
+        plan_payload.turn_kind = TurnKind::GoalRound;
+        let error = format!("{:#}", run(plan_payload).await.expect_err("plano"));
+        assert!(error.contains("GOAL_PLAN_MODE"), "{error}");
+        code::session::set_plan_mode(&temp.db, &conversation.id, false).expect("plano off");
+
+        // (f) sem workspace no disco ⇒ GOAL_NO_WORKSPACE.
+        let no_ws = temp
+            .db
+            .create_conversation_with_mode(
+                "Sem workspace",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa code");
+        code::goal::create(
+            &temp.db,
+            &no_ws.id,
+            &goal_input("Objetivo sem workspace", 5),
+            crate::domain::GoalOrigin::User,
+        )
+        .expect("objetivo sem workspace");
+        let mut no_ws_payload = code_payload(&no_ws);
+        no_ws_payload.turn_kind = TurnKind::GoalRound;
+        let error = format!("{:#}", run(no_ws_payload).await.expect_err("sem workspace"));
+        assert!(error.contains("GOAL_NO_WORKSPACE"), "{error}");
+
+        // Nenhuma recusa chegou ao provider nem persistiu mensagens.
+        assert!(
+            requests.lock().expect("requests").is_empty(),
+            "a validação roda antes do provider"
+        );
+        for conversation_id in [&chat.id, &conversation.id, &empty.id, &no_ws.id] {
+            assert!(
+                temp.db
+                    .list_messages(conversation_id)
+                    .expect("mensagens")
+                    .is_empty(),
+                "nada persistido para {conversation_id}"
+            );
+        }
+        let _ = workspace_dir;
+    }
+
+    /// `error`/`cancelled` no fecho pausam a rodada (PLAN §7.3): `paused(error)`
+    /// e `paused(user)`, com `goal/round` gravado.
+    #[tokio::test]
+    async fn goal_round_pauses_on_error_and_cancel() {
+        // Error do provider.
+        let temp = TempDb::new();
+        let (_workspace_dir, conversation) = code_workspace(&temp);
+        code::goal::create(
+            &temp.db,
+            &conversation.id,
+            &goal_input("Objetivo que falha", 5),
+            crate::domain::GoalOrigin::User,
+        )
+        .expect("objetivo");
+        let failing: ProviderStreamer = Arc::new(|_request, _sink| {
+            Box::pin(async move { Err(anyhow::anyhow!("gateway indisponível")) })
+        });
+        let mut payload = code_payload(&conversation);
+        payload.turn_kind = TurnKind::GoalRound;
+        let result = run_turn(
+            deps(temp.db.clone(), failing),
+            payload,
+            Settings::default(),
+            channel().0,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno resolve com erro");
+        assert!(result.error.is_some());
+        let paused = code::goal::current(&temp.db, &conversation.id)
+            .expect("fold")
+            .expect("objetivo");
+        assert_eq!(paused.status, crate::domain::GoalStatus::Paused);
+        assert_eq!(
+            paused.pause_reason,
+            Some(crate::domain::GoalPauseReason::Error)
+        );
+        let rounds = code::goal::rounds(&temp.db, &conversation.id, 10, false).expect("rodadas");
+        assert_eq!(rounds[0].outcome.as_deref(), Some("error"));
+
+        // Cancelamento antes do loop.
+        let temp = TempDb::new();
+        let (_workspace_dir, conversation) = code_workspace(&temp);
+        code::goal::create(
+            &temp.db,
+            &conversation.id,
+            &goal_input("Objetivo cancelado", 5),
+            crate::domain::GoalOrigin::User,
+        )
+        .expect("objetivo");
+        let unreachable: ProviderStreamer = Arc::new(|_request, _sink| {
+            Box::pin(async { panic!("o provider não pode ser chamado com cancelamento") })
+        });
+        let mut payload = code_payload(&conversation);
+        payload.turn_kind = TurnKind::GoalRound;
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let result = run_turn(
+            deps(temp.db.clone(), unreachable),
+            payload,
+            Settings::default(),
+            channel().0,
+            cancel,
+        )
+        .await
+        .expect("turno cancelado resolve");
+        assert_eq!(result.assistant_message.status, MessageStatus::Cancelled);
+        let paused = code::goal::current(&temp.db, &conversation.id)
+            .expect("fold")
+            .expect("objetivo");
+        assert_eq!(paused.status, crate::domain::GoalStatus::Paused);
+        assert_eq!(
+            paused.pause_reason,
+            Some(crate::domain::GoalPauseReason::User)
+        );
+        let rounds = code::goal::rounds(&temp.db, &conversation.id, 10, false).expect("rodadas");
+        assert_eq!(rounds[0].outcome.as_deref(), Some("cancelled"));
+    }
+
+    /// Rodada de objetivo **não** dispara auto title (PLAN §8.4); turno humano
+    /// normal continua renomeando o placeholder.
+    #[tokio::test]
+    async fn goal_round_skips_auto_title_but_human_turns_still_title() {
+        let temp = TempDb::new();
+        let workspace_dir = std::env::temp_dir()
+            .join(format!("lumina-goal-title-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace_dir).expect("workspace");
+        let workspace = temp
+            .db
+            .create_workspace("demo", &workspace_dir.to_string_lossy())
+            .expect("workspace");
+        temp.db
+            .set_workspace_trusted(&workspace.id, true)
+            .expect("confiar");
+        let conversation = temp
+            .db
+            .create_conversation_with_mode(
+                "Nova conversa",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa");
+        temp.db
+            .set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("vincular");
+        code::goal::create(
+            &temp.db,
+            &conversation.id,
+            &goal_input("Objetivo sem auto título", 5),
+            crate::domain::GoalOrigin::User,
+        )
+        .expect("objetivo");
+
+        // A criação do objetivo já renomeia o título placeholder (fluxo
+        // `/goal`/v1.12); o que este teste prova é que a RODADA não gera
+        // auto-title — resetamos para o placeholder antes do turno.
+        temp.db
+            .rename_conversation(&conversation.id, "Nova conversa")
+            .expect("resetar título");
+        let mut payload = code_payload(&conversation);
+        payload.turn_kind = TurnKind::GoalRound;
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(Arc::new(Mutex::new(Vec::new())), "Rodada."),
+            ),
+            payload,
+            Settings::default(),
+            channel().0,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("rodada");
+        let after_round = temp
+            .db
+            .get_conversation(&conversation.id)
+            .expect("conversa")
+            .expect("presente");
+        assert_eq!(
+            after_round.title, "Nova conversa",
+            "rodada não pode gerar título automático"
+        );
+
+        // Turno humano normal (sem objetivo pendente na rodada) volta a titular.
+        temp.db
+            .rename_conversation(&conversation.id, "Nova conversa")
+            .expect("resetar título");
+        let mut human = code_payload(&conversation);
+        human.content = "Explique a estrutura do projeto em uma frase.".to_string();
+        run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(Arc::new(Mutex::new(Vec::new())), "Resposta."),
+            ),
+            human,
+            Settings::default(),
+            channel().0,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno humano");
+        let after_human = temp
+            .db
+            .get_conversation(&conversation.id)
+            .expect("conversa")
+            .expect("presente");
+        assert_ne!(
+            after_human.title, "Nova conversa",
+            "turno humano do Code continua gerando título"
+        );
+        let _ = workspace_dir;
+    }
+
+    /// Subagente (somente leitura) não recebe a tool `goal`; o turno de topo
+    /// recebe (24 tools no catálogo Code).
+    #[test]
+    fn subagent_catalog_excludes_the_goal_tool() {
+        let mut context = code::context::CodeTurnContext::default();
+        context.root = Some(PathBuf::from("C:/workspace"));
+        let settings = Settings::default();
+        let top_level: Vec<&str> = code_enabled_specs(&context, &settings, 0)
+            .iter()
+            .map(|spec| spec.name)
+            .collect();
+        assert!(top_level.contains(&"goal"));
+        assert_eq!(top_level.len(), 24, "catálogo Code: 24 tools");
+        let subagent: Vec<&str> = code_enabled_specs(&context, &settings, 1)
+            .iter()
+            .map(|spec| spec.name)
+            .collect();
+        assert!(!subagent.contains(&"goal"), "subagente não recebe `goal`");
+        assert!(!subagent.contains(&"todo_write"));
+        assert!(subagent.contains(&"read_file"));
     }
 }

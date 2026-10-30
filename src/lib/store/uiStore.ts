@@ -24,10 +24,11 @@ export type LayoutMode = 'chat' | 'code';
  * (Biblioteca/Skills) and vice versa. `diff` mostra o diff de um arquivo em uma
  * aba central (WORKBENCH §7.2); `file` mostra a prévia de um arquivo do
  * workspace na mesma faixa de abas (código, imagem ou PDF); `plan` mostra o
- * plano aprovado da sessão em Markdown na mesma faixa (ver `codePlanTab`).
+ * plano aprovado da sessão em Markdown na mesma faixa (ver `codePlanTab`);
+ * `goal` mostra o painel do objetivo persistente (docs/goals/code-goals).
  * Os alvos vivem em `codeDiffTab`/`codeFileTab`/`codePlanTab`.
  */
-export type CodeView = 'session' | 'skills' | 'diff' | 'commits' | 'file' | 'plan';
+export type CodeView = 'session' | 'skills' | 'diff' | 'commits' | 'file' | 'plan' | 'goal';
 
 /** Diff aberto como aba central (alvo é volátil; não persiste entre sessões). */
 export interface CodeDiffTab {
@@ -72,6 +73,15 @@ export interface CodePlanTab {
 
 /** Tabs of the Code right panel (Arquivos | Alterações). */
 export type CodePanelTab = 'files' | 'changes' | 'terminal';
+
+/**
+ * Diálogo de criação/edição do objetivo (docs/goals/code-goals/PLAN.md §10.4).
+ * Volátil: abre pelo pill do composer, pelo card de atenção ou por `/goal`.
+ */
+export interface GoalDialogState {
+  conversationId: string;
+  mode: 'create' | 'edit';
+}
 
 /**
  * Surface shown by the artifact side panel: the generated-artifact list (the
@@ -136,6 +146,10 @@ interface UiState {
   codeFileTab: CodeFileTab | null;
   /** Plano aprovado exibido como aba central (`null` = nenhum/aba fechada). */
   codePlanTab: CodePlanTab | null;
+  /** Aba "Objetivo" aberta no centro (volátil, como a do plano). */
+  codeGoalOpen: boolean;
+  /** Diálogo de criação/edição do objetivo (`null` = fechado). */
+  goalDialog: GoalDialogState | null;
   /** Quebra de linha dos arquivos — global, persistida e aplicada a todas as abas. */
   codeFileWrap: boolean;
   /** Aba central de histórico de commits (`null` = fechada). */
@@ -192,6 +206,14 @@ interface UiState {
   openCodePlan: (target: CodePlanTab) => void;
   /** Fecha a aba do plano; se ela era a ativa, volta para a sessão. */
   closeCodePlan: () => void;
+  /** Abre a aba central "Objetivo" (`codeView` vira goal). */
+  openCodeGoal: () => void;
+  /** Fecha a aba do objetivo; se ela era a ativa, volta para a sessão. */
+  closeCodeGoal: () => void;
+  /** Abre o diálogo de criação/edição do objetivo. */
+  openGoalDialog: (target: GoalDialogState) => void;
+  /** Fecha o diálogo do objetivo. */
+  closeGoalDialog: () => void;
   /** Liga/desliga a quebra de linha de todas as abas de arquivo (persistida). */
   setCodeFileWrap: (enabled: boolean) => void;
   /** Abre a aba de histórico de commits (lista do workspace). */
@@ -244,7 +266,7 @@ interface UiState {
 }
 
 /** Aba central aberta no centro (as três abas convivem na faixa de abas). */
-type CentralCodeView = Extract<CodeView, 'diff' | 'file' | 'commits' | 'plan'>;
+type CentralCodeView = Extract<CodeView, 'diff' | 'file' | 'commits' | 'plan' | 'goal'>;
 
 /**
  * Fechar uma aba central em **segundo plano** (o usuário está lendo outra aba)
@@ -289,6 +311,8 @@ export const useUiStore = create<UiState>()(
       codeFileTabs: [],
       codeFileTab: null,
       codePlanTab: null,
+      codeGoalOpen: false,
+      goalDialog: null,
       codeFileWrap: false,
       codeCommitsTab: null,
       codePanelOpen: true,
@@ -329,7 +353,9 @@ export const useUiStore = create<UiState>()(
                     ? 'file'
                     : codeView === 'plan'
                       ? 'plan'
-                      : 'session',
+                      : codeView === 'goal'
+                        ? 'goal'
+                        : 'session',
         }),
       openCodeDiff: (codeDiffTab) => set({ codeDiffTab, codeView: 'diff' }),
       closeCodeDiff: () =>
@@ -377,6 +403,11 @@ export const useUiStore = create<UiState>()(
         }),
       closeCodePlan: () =>
         set((state) => ({ codePlanTab: null, ...keepCenterViewUnlessActive(state, 'plan') })),
+      openCodeGoal: () => set({ codeGoalOpen: true, codeView: 'goal' }),
+      closeCodeGoal: () =>
+        set((state) => ({ codeGoalOpen: false, ...keepCenterViewUnlessActive(state, 'goal') })),
+      openGoalDialog: (goalDialog) => set({ goalDialog }),
+      closeGoalDialog: () => set({ goalDialog: null }),
       setCodeFileWrap: (codeFileWrap) => set({ codeFileWrap }),
       openCodeCommits: (workspaceId) =>
         set({ codeCommitsTab: { workspaceId, revision: null }, codeView: 'commits' }),
@@ -498,6 +529,7 @@ export const useUiStore = create<UiState>()(
           modelPickerOpen: false,
           commandPaletteOpen: false,
           sourcesPanelOpen: false,
+          goalDialog: null,
         }),
       applyTheme: () => {
         const dark = resolveDark(get().theme);

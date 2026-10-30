@@ -112,6 +112,11 @@ pub enum TurnEvent {
     PlanUpdated {
         plan: crate::domain::PlanView,
     },
+    /// Estado do objetivo persistente da sessão mudou (criação, rodada,
+    /// progresso, pausa, conclusão, bloqueio ou encerramento).
+    GoalUpdated {
+        goal: crate::domain::GoalView,
+    },
     /// Medidor de contexto do turno (tokens estimados/janela).
     ContextStats {
         stats: crate::domain::ContextStats,

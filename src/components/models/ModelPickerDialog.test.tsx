@@ -444,6 +444,7 @@ describe('ModelPickerDialog (modelo bloqueado após iniciar a conversa)', () => 
         phase: 'starting',
         step: 1,
         startedAt: Date.now(),
+        turnKind: 'user',
       },
     });
     await renderDialog();

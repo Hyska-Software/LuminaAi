@@ -4,14 +4,15 @@
  * `presentation` em cada `ToolCallRecord` (diff, tarefas, plano, job, respostas);
  * este componente transforma o JSON opaco em UI tipada.
  *
- * Contrato (`TOOLS.md` §1.1, decisão D1): a apresentação de plano é **flat** —
- * `{kind:"plan", state, markdown?, feedback?, updatedAt}`. Payloads antigos
- * (sem `markdown`) continuam renderizando; payloads inválidos degradam para uma
- * linha curta em vez de derrubar a App (`PresentationBoundary`).
+ * Contrato (`TOOLS.md` §1.1, decisão D1): as apresentações de plano e objetivo
+ * são **flat** — `{kind:"plan", ...}` / `{kind:"goal", ...GoalView}`. Payloads
+ * antigos/aninhados continuam renderizando; payloads inválidos degradam para
+ * uma linha curta em vez de derrubar a App (`PresentationBoundary`).
  */
 import { Component, useState, type ErrorInfo, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 
+import { GoalCard } from './GoalCard';
 import { JobsBar } from './JobsBar';
 import { PlanCard } from './PlanCard';
 import { TodoCard } from './TodoCard';
@@ -19,6 +20,10 @@ import { DiffView } from '@/components/code/DiffView';
 import type {
   AskUserAnswer,
   FileChangeKind,
+  GoalOrigin,
+  GoalPauseReason,
+  GoalStatus,
+  GoalView,
   JobView,
   PlanState,
   PlanView,
@@ -68,6 +73,77 @@ export function normalizePlanPresentation(raw: unknown): PlanView | null {
     markdown: typeof source.markdown === 'string' ? source.markdown : null,
     feedback: nonEmptyString(source.feedback),
     updatedAt: finiteNumber(source.updatedAt, Date.now()),
+  };
+}
+
+const GOAL_STATUSES: readonly GoalStatus[] = ['active', 'paused', 'completed', 'blocked'];
+const GOAL_PAUSE_REASONS: readonly GoalPauseReason[] = [
+  'user',
+  'error',
+  'max_rounds',
+  'stalled',
+  'interrupted',
+];
+
+function optionalFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function finiteInteger(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : fallback;
+}
+
+/**
+ * Normaliza a apresentação de objetivo para `GoalView`.
+ *
+ * Aceita o formato canônico flat (`{kind:"goal", ...GoalView}`), o formato
+ * legado aninhado (`{goal: {...}}`) e payloads incompletos. Campos numéricos
+ * inválidos caem em defaults seguros e o limite de rodadas respeita o backend
+ * (1..100). Retorna `null` quando o status é inválido — o card precisa degradar,
+ * nunca receber um `GoalView` pela metade.
+ */
+export function normalizeGoalPresentation(raw: unknown): GoalView | null {
+  const value = asRecord(raw);
+  if (!value) return null;
+  const nested = asRecord(value.goal);
+  const source = nested ?? value;
+  const status = source.status;
+  if (typeof status !== 'string' || !GOAL_STATUSES.includes(status as GoalStatus)) return null;
+
+  const pauseReasonRaw = source.pauseReason;
+  const pauseReason =
+    typeof pauseReasonRaw === 'string' &&
+    GOAL_PAUSE_REASONS.includes(pauseReasonRaw as GoalPauseReason)
+      ? (pauseReasonRaw as GoalPauseReason)
+      : null;
+  const origin: GoalOrigin = source.origin === 'agent' ? 'agent' : 'user';
+  const maxRounds = Math.min(Math.max(finiteInteger(source.maxRounds, 25), 1), 100);
+
+  return {
+    title: nonEmptyString(source.title) ?? 'Objetivo',
+    objective: typeof source.objective === 'string' ? source.objective : '',
+    status: status as GoalStatus,
+    autoContinue: source.autoContinue === true,
+    rounds: Math.max(0, finiteInteger(source.rounds, 0)),
+    maxRounds,
+    revision: Math.max(0, finiteInteger(source.revision, 0)),
+    origin,
+    createdAt: finiteNumber(source.createdAt, Date.now()),
+    updatedAt: finiteNumber(source.updatedAt, Date.now()),
+    completedAt: optionalFiniteNumber(source.completedAt) ?? null,
+    lastRoundAt: optionalFiniteNumber(source.lastRoundAt) ?? null,
+    lastNote: optionalString(source.lastNote),
+    pauseReason,
+    pauseDetail: optionalString(source.pauseDetail),
+    blockerReason: optionalString(source.blockerReason),
+    blockerStreak: optionalFiniteNumber(source.blockerStreak),
+    stalledRounds: optionalFiniteNumber(source.stalledRounds),
+    tokens: optionalFiniteNumber(source.tokens),
+    cost: optionalFiniteNumber(source.cost),
   };
 }
 
@@ -153,7 +229,9 @@ function DegradedPresentation({ kind }: { kind?: string }) {
     >
       {kind === 'plan'
         ? 'Plano indisponível nesta versão.'
-        : 'Não foi possível mostrar esta apresentação.'}
+        : kind === 'goal'
+          ? 'Objetivo indisponível nesta versão.'
+          : 'Não foi possível mostrar esta apresentação.'}
     </p>
   );
 }
@@ -216,6 +294,12 @@ function PresentationContent({ presentation, className }: ToolPresentationCardPr
       // Timeline/histórico e popover são somente leitura: nunca renderizar
       // botões de aprovação que não têm efeito (F-22).
       return <PlanCard plan={plan} readOnly className={className} />;
+    }
+    case 'goal': {
+      const goal = normalizeGoalPresentation(presentation);
+      if (!goal) return <DegradedPresentation kind={kind} />;
+      // Card compacto na timeline: resumo do estado, sem ações mortas.
+      return <GoalCard goal={goal} compact readOnly className={className} />;
     }
     case 'job': {
       const job = normalizeJob(asRecord(presentation)?.job);

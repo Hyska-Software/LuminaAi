@@ -188,6 +188,8 @@ async fn run_child(
             ..Default::default()
         },
         profile: TurnProfile::Code,
+        turn_kind: crate::domain::TurnKind::User,
+        goal_request: false,
         turn_id: None,
     };
     let emitter: Arc<dyn EventEmitter> = Arc::new(DiscardEmitter);
@@ -312,6 +314,10 @@ mod tests {
         assert!(!tools.contains(&"write_file"));
         assert!(!tools.contains(&"run_command"));
         assert!(!tools.contains(&"task"));
+        // Objetivo é estado da sessão de topo: subagente nem vê a tool `goal`.
+        assert!(!tools.contains(&"goal"));
+        assert!(!tools.contains(&"todo_write"));
+        assert!(!tools.contains(&"submit_plan"));
     }
 
     #[test]

@@ -714,3 +714,57 @@ com golden JSON quando o DTO é novo).
    automação de UI (regra do repo).
 5. Cenários de caos: crash no meio do turno, cancelar durante aprovação, matar processo, repo com
    lock de arquivo (antivírus), workspace em drive de rede, arquivo com CRLF/BOM, path > 260.
+
+## 15. Objetivo (Goal) — v1.11
+
+Contrato completo: `docs/goals/code-goals/PLAN.md` (esse documento é a fonte de produto; esta seção
+resume o acoplamento com o harness).
+
+### 15.1 Persistência e projeção
+
+- Um objetivo por sessão, projetado de `code_events` (append-only, sem tabela nova):
+  `goal/state` (snapshot completo do `GoalView`, o último vence; revisão monotônica),
+  `goal/deleted` (tombstone), `goal/round-started` e `goal/round` (histórico de rodadas).
+- Projeção única: `harness/code/goal.rs::current/rounds`. `rounds()` recebe `active_turn` para
+  distinguir rodada "em andamento" de "interrompida"; o `commands::code` degrada em **leitura**
+  (`paused/interrupted`) quando a última rodada ficou órfã e não há turno ativo — sem gravar.
+- Mutações com `GOAL_WRITE_LOCK` + CAS por `expectedRevision`; `begin_round` reconcilia órfã
+  (`interrupted`) e é idempotente por `turnId`; `finish_round` também é idempotente.
+- Limites: objetivo 4 000 chars, título 120, nota 2 000, motivo 500, rodadas 25 default / 100 cap,
+  estol 3, bloqueio 3, lista de rodadas 200.
+
+### 15.2 Rodada no loop
+
+- `TurnPayload.turnKind = goal_round` (só perfil `code`, sessão do Code, top-level). Antes de
+  persistir mensagens: recusas estáveis (`GOAL_TURN_REQUIRES_CODE`, `GOAL_REQUIRES_TOP_LEVEL`,
+  `GOAL_INVALID_ARGS`) e `validate_round_start` (ativo, `rounds<max`, Plano inativo, sem
+  aprovação/pergunta pendente, workspace no disco).
+- `begin_round` antes de `prepare_new_turn`; a mensagem do usuário grava `origin = goal_round` e
+  `payload.content = goal::round_prompt` (inglês, com o objetivo embutido).
+- `GoalUpdated` é emitido após `turn_started` e no fecho (após `turn/ended`); `finish_round` recebe
+  outcome (`done|cancelled|error`), usage do turno e `files_changed` do journal; pausa em
+  erro/cancel/limite/estol e **nunca** sobrescreve conclusão/bloqueio/pausa do usuário.
+- Auto-title não roda em `goal_round`; `create_goal` renomeia título placeholder para o do objetivo.
+- **Ativação v1.12**: `/goal` ativa um chip no composer (a mensagem do usuário não é alterada) e
+  o turno humano leva `goalRequest=true`; o harness injeta `## Goal request` no runtime context
+  (volátil) instruindo a tool `goal` action `create` com os parâmetros do pedido. `create` honra
+  `auto_continue` explícito (default do fluxo: true) e grava `origin=agent`. Com continuidade
+  armada, o driver inicia a rodada ao fim do turno.
+
+### 15.3 Prompt e cache
+
+- `## Objective` é **volátil** (runtime context/surface item): status, armed, rodada, revisão,
+  objetivo, tarefas, última nota, bloqueio e as 4 regras de autonomia. Turno humano usa o texto
+  "Session objective (context; follow the user's message)"; rodada usa o texto de continuação.
+- O system prompt/tools **não** carregam estado do objetivo (teste byte-a-byte entre passos e entre
+  rodadas); a tool `goal` entra no catálogo Code (24 tools) e o subagente não a recebe.
+
+### 15.4 Driver e eventos
+
+- O driver é do renderer (`chatStore.maybeContinueGoal`), chamado no `done`: no máximo uma rodada,
+  só com objetivo ativo + `autoContinue`, `rounds<max`, sem plano/aprovação/pergunta, sem streaming,
+  sessão ativa no layout Code; `goal_can_continue` é o preflight final e o harness revalida.
+- `stop()` em rodada pausa o objetivo; erro/cancel pausam no backend; reinício do app não retoma
+  sozinho (`interrupted` até o usuário retomar).
+- Comandos IPC: `create_goal`, `update_goal` (CAS/idempotente), `list_goal_rounds`,
+  `goal_can_continue`; evento `goal_updated`; projeção em `CodeSessionState.goal`.

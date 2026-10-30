@@ -513,3 +513,23 @@ Microcopy-chave:
 - Tabs heterogêneas (terminal/browser/arquivo como abas de sessão) — o painel fixo cobre; reavaliar
   depois do terminal.
 - i18n: pt-BR fixo (decisão do app).
+
+## 17. Objetivo (Goal) — v1.11
+
+Produto/contrato completo: `docs/goals/code-goals/PLAN.md` §10. Superfícies e regras de UI:
+
+| Superfície | Componente | Comportamento |
+| --- | --- | --- |
+| Pill + popover no composer | `GoalControls` (entre **Plano** e **Plano e tarefas**) | botão **somente ícone** (sem texto/rounds): sem objetivo ativa o chip `/goal`; com objetivo abre popover com `GoalCard` completo (Pausar/Retomar/Armar/Nova rodada/Concluir com confirmação/Editar/Estender/Abrir). Durante streaming só "Pausar após esta rodada" + Abrir |
+| Badge + aba no header | `CodeSessionHeader` | badge clicável → `openCodeGoal()` (accent+spinner na rodada, warning pausado, danger bloqueado, `N/M` ativo, oculto concluído); aba central "Objetivo" com teclado setas/Home/End/Delete e X |
+| Painel central | `GoalPanel` (`codeView='goal'`, `id="code-goal-panel"`) | resumo (rodadas/tempo/tokens/custo/última atividade), objetivo em Markdown com scroll/copiar, timeline de rodadas (200 máx; Em andamento/Concluída/Cancelada/Erro/Interrompida), estados vazio/loading/erro+retry |
+| Diálogo | `GoalDialog` (`uiStore.goalDialog`) | caminho de **edição** (título/objetivo/limite; Switch de continuidade só com objetivo ativo) + zona de perigo "Encerrar objetivo"; criação não é mais aberta pela UI (fluxo `/goal`); `Esc` fecha; `aria-invalid`/`aria-describedby`/`aria-busy` |
+| Transcript | `GoalRoundDivider` + `ToolPresentationCard` | `origin='goal_round'` vira divisor (`role="separator"`, Target, relativeTime, spinner), sem bolha/editar/regenerar; card da tool `goal` compacto/readOnly; `AgentSteps` com ícone `Target` e labels pt-BR |
+| Card de atenção | `GoalAttentionCard` em `CodeSessionCards` | pausado(error/stalled/max/interrupted)/bloqueado/concluído; motivo+detalhe, resumo, Retomar/Estender/Concluir/Abrir/Dispensar (X); dispensável por revisão (`dismissedGoalRevision`) |
+| Comando `/goal` | `commands.ts` (grupo **Objetivo**) | comando de **intenção** (`action: 'intent'`): vira um chip `/goal` removível no composer **sem alterar a mensagem**; ao enviar, a mensagem segue intacta com `goalRequest=true` e o harness injeta a instrução de criação no runtime context — o agente cria o objetivo pela tool `goal` (action `create`) |
+| Estado global | `codeStore` (`goal`, `goalRounds`, `goalStarting`, `dismissedGoalRevision`) + `uiStore` (`codeView='goal'`, `codeGoalOpen`, `goalDialog`) | snapshot autoritativo + reducer `goal_updated`; ações com otimista/rollback/CAS |
+
+Regras: a interface **nunca** inicia rodada sozinha a partir de uma ação declarativa; a
+autocontinuação é do driver após `done` (uma rodada por vez, sessão ativa no Code, objetivo armado,
+sem plano/aprovação/pergunta). Parar uma rodada pausa a continuidade. Nenhuma ação de objetivo
+substitui aprovação/permissão do harness.

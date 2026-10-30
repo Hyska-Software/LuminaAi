@@ -3,7 +3,7 @@
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 
-use crate::domain::{TurnPayload, TurnResult};
+use crate::domain::{TurnKind, TurnPayload, TurnResult};
 use crate::events::TurnEvent;
 use crate::harness::{self, HarnessDeps};
 use crate::state::AppState;
@@ -15,11 +15,21 @@ pub async fn run_turn(
     payload: TurnPayload,
     on_event: Channel<TurnEvent>,
 ) -> Result<TurnResult, String> {
+    // Rodada de objetivo: uma por conversa. O preflight (`goal_can_continue`)
+    // também checa isso; aqui é a barreira final contra dois clientes/duplo
+    // invoke. Turnos normais mantêm o comportamento anterior.
+    if payload.turn_kind == TurnKind::GoalRound
+        && state.has_active_turn_for(&payload.conversation_id)
+    {
+        return Err(
+            "GOAL_BUSY: já existe um turno em andamento nesta sessão; aguarde terminar".to_string(),
+        );
+    }
     let turn_id = payload
         .turn_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let cancel = state.register_turn(&turn_id);
+    let cancel = state.register_turn(&turn_id, &payload.conversation_id);
     let settings = crate::config::load_settings(&app);
     let deps = HarnessDeps {
         app: Some(app.clone()),

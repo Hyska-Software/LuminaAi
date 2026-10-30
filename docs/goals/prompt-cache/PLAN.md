@@ -173,12 +173,15 @@ resultado por perfil × provedor × protocolo/modelo, artefatos JSON brutos em
 - Integration points: `providers/mod.rs::stream_one`, loop do `harness/mod.rs`,
   `commands/cache.rs`, `ContextMeter`/Chat, Settings.
 
-**Plan Review Gate:** PRE concluído — rodada 3 com verdict **`aligned`/GO**
-(`REVIEW-PRE.md`), após correção dos 6 blockers + 8 majors da rodada 1 e dos 3
-blockers da rodada 2. Correções editoriais apontadas na rodada 3 (schema `seq`,
-F0b.6 nas dependências/DAG, frase “sem DB”, split de F6.2) já aplicadas neste
-documento. **GO autorizado para F0a**; F0b.3 só depois de revisar o schema final e
-F1.2b/c depois de F0b.6.
+**Plan Review Gate:** PRE concluído (rodadas 1–3, verdict `aligned`/GO em
+`REVIEW-PRE.md`). **Execução concluída** — revisão final em `REVIEW-FINAL.md`
+rodada 4: **`complete with documented exceptions`**. Evidência em `EVIDENCE.md`:
+baseline por ablação (plan None → 0,0%), probes por rota, bench E2E `run_turn` com
+cold-start real (steady 99,70%, ciclo 92,87%, baseline 0,0%) e gates Rust
+937/13 + renderer 2216/2216. Exceções documentadas: OpenAI/Anthropic diretos sem
+credencial válida, gateway `openai-chat` sem reporte, gateway `google`
+indisponível, N=5/p50/p10 run-level reduzido a uma run e verificação visual manual
+no app empacotado não executada.
 
 ### 0.1 Como ler este pacote
 

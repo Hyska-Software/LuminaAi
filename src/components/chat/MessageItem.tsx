@@ -12,6 +12,7 @@ import type { ChatMessage } from '@/lib/types';
 import { cn, copyText, formatDuration, formatTokens } from '@/lib/utils';
 import { CitationChips } from './CitationChips';
 import { BrandMark } from './BrandMark';
+import { GoalRoundDivider } from './GoalRoundDivider';
 import { Markdown } from './Markdown';
 import { AgentSteps } from './AgentSteps';
 import { MessageArtifacts } from './MessageArtifacts';
@@ -344,8 +345,37 @@ const AssistantMessageItem = memo(function AssistantMessageItem({ message, isStr
   );
 });
 
+/**
+ * Abertura de rodada automática do objetivo (`message.origin === 'goal_round'`):
+ * divisor em vez de bolha do usuário (PLAN §10.5). O spinner acompanha o turno
+ * `goal_round` desta conversa no `chatStore` — a mensagem do usuário não recebe
+ * `isStreaming` do `MessageList` (ele é acoplado ao id do assistant).
+ */
+const GoalRoundMessageItem = memo(function GoalRoundMessageItem({
+  message,
+  isGroupStart,
+}: MessageItemProps) {
+  const running = useChatStore((state) =>
+    Boolean(
+      state.streaming &&
+        state.streaming.turnKind === 'goal_round' &&
+        state.streaming.conversationId === message.conversationId,
+    ),
+  );
+  return (
+    <GoalRoundDivider
+      createdAt={message.createdAt}
+      streaming={running}
+      className={isGroupStart ? 'mt-7' : 'mt-3'}
+    />
+  );
+});
+
 /** Renders a single chat message: user bubble or assistant markdown turn. */
 export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
+  if (props.message.role === 'user' && props.message.origin === 'goal_round') {
+    return <GoalRoundMessageItem {...props} />;
+  }
   if (props.message.role === 'user') return <UserMessageItem {...props} />;
   if (props.message.role === 'system') {
     return (

@@ -325,6 +325,93 @@ export interface PlanView {
   updatedAt: number;
 }
 
+/* ------------------------------------------------------------------ */
+/* Objetivos (Goal) do layout Code (docs/goals/code-goals/PLAN.md)      */
+/* ------------------------------------------------------------------ */
+
+/** Origem de um turno/mensagem de usuário (`user` = default retrocompatível). */
+export type TurnKind = 'user' | 'goal_round';
+
+export type GoalStatus = 'active' | 'paused' | 'completed' | 'blocked';
+
+export type GoalPauseReason = 'user' | 'error' | 'max_rounds' | 'stalled' | 'interrupted';
+
+export type GoalOrigin = 'user' | 'agent';
+
+/** Estado completo do objetivo (espelho camelCase de `GoalView` no Rust). */
+export interface GoalView {
+  title: string;
+  objective: string;
+  status: GoalStatus;
+  /** Continuar sozinho após cada turno bem-sucedido. */
+  autoContinue: boolean;
+  rounds: number;
+  maxRounds: number;
+  revision: number;
+  origin: GoalOrigin;
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number | null;
+  lastRoundAt?: number | null;
+  lastNote?: string | null;
+  pauseReason?: GoalPauseReason | null;
+  pauseDetail?: string | null;
+  blockerReason?: string | null;
+  blockerStreak?: number;
+  stalledRounds?: number;
+  tokens?: number;
+  cost?: number;
+}
+
+/** Registro de uma rodada do objetivo. */
+export interface GoalRound {
+  index: number;
+  turnId: string;
+  startedAt: number;
+  endedAt?: number | null;
+  /** `done` | `cancelled` | `error` | `interrupted` (ausente = em andamento). */
+  outcome?: string | null;
+  durationMs?: number | null;
+  tokens?: number | null;
+  cost?: number | null;
+  filesChanged?: number;
+  note?: string | null;
+}
+
+/** Resposta do preflight `goal_can_continue`. */
+export interface GoalContinuation {
+  ok: boolean;
+  reason?: string | null;
+  goal?: GoalView | null;
+}
+
+export interface CreateGoalInput {
+  objective: string;
+  title?: string | null;
+  maxRounds?: number | null;
+  autoContinue?: boolean | null;
+}
+
+export interface UpdateGoalInput {
+  title?: string | null;
+  objective?: string | null;
+  maxRounds?: number | null;
+  summary?: string | null;
+  reason?: string | null;
+}
+
+/** Ações da UI sobre o objetivo (`update_goal`). */
+export type GoalAction =
+  | 'edit'
+  | 'arm'
+  | 'disarm'
+  | 'pause'
+  | 'resume'
+  | 'complete'
+  | 'reopen'
+  | 'block'
+  | 'delete';
+
 export type FileChangeKind = 'created' | 'modified' | 'deleted' | 'renamed';
 
 /** Alteração de um arquivo (card de tool / evento `file_changed`). */
@@ -409,6 +496,11 @@ export type ToolPresentation =
    * `kind`. O renderer normaliza payloads antigos (sem `markdown`) sem quebrar.
    */
   | { kind: 'plan'; state: PlanState; markdown?: string | null; feedback?: string | null; updatedAt?: number }
+  /**
+   * Objetivo flat (mesmo padrão do plano): o backend achata o `GoalView` com
+   * `kind`. Payloads antigos/malformados degradam sem derrubar o card.
+   */
+  | ({ kind: 'goal' } & GoalView)
   | { kind: 'job'; job: JobView }
   | { kind: 'answers'; answers: AskUserAnswer[]; skipped: boolean }
   | { kind: 'subagent'; description: string; subagentType: string }
@@ -421,6 +513,8 @@ export interface CodeSessionState {
   permissionMode: PermissionMode;
   planMode: boolean;
   plan?: PlanView | null;
+  /** Objetivo persistente da sessão (ausente em snapshots antigos). */
+  goal?: GoalView | null;
   todos: TodoItem[];
   workspace?: Workspace | null;
   project?: ProjectInfo | null;
@@ -691,6 +785,11 @@ export interface ChatMessage {
   createdAt: number;
   /** Opaque replay payload captured from the provider (never rendered). */
   providerState?: unknown;
+  /**
+   * Origem da mensagem: `user` (default) ou `goal_round` (rodada automática do
+   * objetivo). Só tem significado em mensagens de usuário.
+   */
+  origin?: TurnKind;
 }
 
 /** Origem de uma sessão: o layout onde ela foi criada. */
@@ -762,6 +861,14 @@ export interface TurnPayload {
   options: TurnOptions;
   /** Perfil do turno; ausente = `chat` (retrocompatível). */
   profile?: TurnProfile;
+  /** `user` (default) ou `goal_round` (rodada automática de um objetivo). */
+  turnKind?: TurnKind;
+  /**
+   * O usuário pediu um objetivo pelo fluxo `/goal` (chip no composer). O turno
+   * continua humano; o runtime context instrui o agente a chamar a tool `goal`.
+   * Ausente/false = turno normal.
+   */
+  goalRequest?: boolean;
   turnId?: string | null;
 }
 
@@ -806,6 +913,7 @@ export type TurnEvent =
   | { type: 'workspace_changes'; summary: ChangesSummary }
   | { type: 'todos_updated'; todos: TodoItem[] }
   | { type: 'plan_updated'; plan: PlanView }
+  | { type: 'goal_updated'; goal: GoalView }
   | { type: 'context_stats'; stats: ContextStats }
   | { type: 'compacted'; messages: number; tokensFreed: number }
   | { type: 'job_updated'; job: JobView }

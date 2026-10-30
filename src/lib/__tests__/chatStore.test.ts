@@ -26,6 +26,9 @@ const mocks = vi.hoisted(() => {
     listArtifacts: vi.fn(),
     runTurn: vi.fn(),
     cancelTurn: vi.fn(),
+    getCodeSessionState: vi.fn(),
+    goalCanContinue: vi.fn(),
+    updateGoal: vi.fn(),
     getSettings: vi.fn(),
     saveSettings: vi.fn(),
     setProviderKey: vi.fn(),
@@ -45,8 +48,10 @@ vi.mock('sonner', () => ({
 // Imported after the mocks above.
 import { useAppStore } from '@/lib/store/appStore';
 import { useChatStore, selectModelLocked } from '@/lib/store/chatStore';
+import { emptyCodeSession, useCodeStore } from '@/lib/store/codeStore';
 import { useUiStore } from '@/lib/store/uiStore';
 import { catalog } from '@/lib/catalog';
+import type { GoalView } from '@/lib/types';
 
 const conversation = (overrides: Partial<Conversation> = {}): Conversation => ({
   id: 'conv-1',
@@ -117,6 +122,7 @@ function resetStores(): void {
     error: null,
   });
   useUiStore.setState({ artifacts: [], layoutMode: 'chat' });
+  useCodeStore.setState({ byConversation: {} });
   useAppStore.setState({
     selection: {
       providerId: 'opencode-go',
@@ -139,6 +145,24 @@ beforeEach(() => {
   mocks.api.truncateConversation.mockResolvedValue(undefined);
   mocks.api.cancelTurn.mockResolvedValue(true);
   mocks.api.createConversation.mockResolvedValue(conversation());
+  mocks.api.getCodeSessionState.mockResolvedValue({
+    conversationId: 'conv-1',
+    permissionMode: 'edit',
+    planMode: false,
+    todos: [],
+    jobs: [],
+    approvals: [],
+  });
+  mocks.api.goalCanContinue.mockResolvedValue({ ok: false, reason: 'no_goal' });
+  mocks.api.updateGoal.mockResolvedValue({
+    conversationId: 'conv-1',
+    permissionMode: 'edit',
+    planMode: false,
+    todos: [],
+    jobs: [],
+    approvals: [],
+    goal: null,
+  });
 });
 
 describe('chatStore.send', () => {
@@ -393,6 +417,7 @@ describe('chatStore other actions', () => {
         phase: 'text',
         step: 1,
         startedAt: Date.now(),
+        turnKind: 'user',
       },
     });
     await useChatStore.getState().stop();
@@ -634,6 +659,7 @@ describe('model lock', () => {
         phase: 'text',
         step: 1,
         startedAt: Date.now(),
+        turnKind: 'user',
       },
     });
     expect(selectModelLocked(useChatStore.getState())).toBe(true);
@@ -1008,5 +1034,185 @@ describe('chatStore — sessões separadas Chat/Code', () => {
     // instead of opening the Chat session.
     expect(useChatStore.getState().activeId).toBeNull();
     expect(useChatStore.getState().conversations.map((entry) => entry.id)).toEqual(['chat-1']);
+  });
+});
+
+describe('chatStore — rodadas do objetivo (Goal)', () => {
+  const goal = (overrides: Partial<GoalView> = {}): GoalView => ({
+    title: 'Objetivo',
+    objective: 'Concluir a refatoração.',
+    status: 'active',
+    autoContinue: true,
+    rounds: 1,
+    maxRounds: 25,
+    revision: 2,
+    origin: 'user',
+    createdAt: 1,
+    updatedAt: 2,
+    ...overrides,
+  });
+
+  function seedGoalSession(goalValue: GoalView = goal()): void {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-1', mode: 'code' })],
+      activeId: 'conv-1',
+      messagesByConversation: { 'conv-1': [] },
+    });
+    useCodeStore.setState({
+      byConversation: {
+        'conv-1': { ...emptyCodeSession('conv-1'), goal: goalValue },
+      },
+    });
+  }
+
+  function doneEvent(): TurnEvent {
+    const result = {
+      userMessage: userMessage(),
+      assistantMessage: assistantMessage({ content: 'ok' }),
+      usage: null,
+      error: null,
+      conversation: conversation({ id: 'conv-1', mode: 'code' }),
+    };
+    return { type: 'done', result };
+  }
+
+  it('runGoalRound inicia um turno goal_round com conteúdo vazio e origem', async () => {
+    seedGoalSession();
+    const payloads: TurnPayload[] = [];
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        payloads.push(payload);
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent(doneEvent());
+        return { userMessage: userMessage(), assistantMessage: assistantMessage() };
+      },
+    );
+    mocks.api.getCodeSessionState.mockResolvedValue({
+      conversationId: 'conv-1',
+      permissionMode: 'edit',
+      planMode: false,
+      goal: goal(),
+      todos: [],
+      jobs: [],
+      approvals: [],
+    });
+
+    const ok = await useChatStore.getState().runGoalRound('conv-1');
+
+    expect(ok).toBe(true);
+    expect(payloads[0]).toMatchObject({
+      conversationId: 'conv-1',
+      content: '',
+      profile: 'code',
+      turnKind: 'goal_round',
+      providerId: 'opencode-go',
+      modelId: 'deepseek-v4.1-flash',
+    });
+  });
+
+  it('done continua o objetivo uma vez quando ativo e armado', async () => {
+    seedGoalSession();
+    mocks.api.listConversations.mockResolvedValue([
+      conversation({ id: 'conv-1', mode: 'code', messageCount: 2 }),
+    ]);
+    const payloads: TurnPayload[] = [];
+    mocks.api.getCodeSessionState.mockResolvedValue({
+      conversationId: 'conv-1',
+      permissionMode: 'edit',
+      planMode: false,
+      goal: goal(),
+      todos: [],
+      jobs: [],
+      approvals: [],
+    });
+    // O primeiro preflight autoriza; o segundo (após a rodada) encerra o teste.
+    mocks.api.goalCanContinue
+      .mockResolvedValueOnce({ ok: true, goal: goal() })
+      .mockResolvedValue({ ok: false, reason: 'completed' });
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        payloads.push(payload);
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent(doneEvent());
+        return { userMessage: userMessage(), assistantMessage: assistantMessage() };
+      },
+    );
+
+    await useChatStore.getState().send('Vamos começar');
+    await vi.waitFor(() => expect(payloads).toHaveLength(2), { timeout: 2000 });
+
+    expect(payloads[0].turnKind).toBe('user');
+    expect(payloads[1]).toMatchObject({ turnKind: 'goal_round', content: '' });
+  });
+
+  it('não continua com continuidade manual ou orçamento esgotado', async () => {
+    for (const pausedGoal of [
+      goal({ autoContinue: false }),
+      goal({ rounds: 25 }),
+    ]) {
+      vi.clearAllMocks();
+      seedGoalSession(pausedGoal);
+      mocks.api.getCodeSessionState.mockResolvedValue({
+        conversationId: 'conv-1',
+        permissionMode: 'edit',
+        planMode: false,
+        goal: pausedGoal,
+        todos: [],
+        jobs: [],
+        approvals: [],
+      });
+      mocks.api.goalCanContinue.mockResolvedValue({ ok: false, reason: 'not_armed' });
+      const payloads: TurnPayload[] = [];
+      mocks.api.runTurn.mockImplementation(
+        async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+          payloads.push(payload);
+          onEvent({
+            type: 'turn_started',
+            turnId: payload.turnId!,
+            userMessageId: 'user-1',
+            assistantMessageId: 'assistant-1',
+          });
+          onEvent(doneEvent());
+          return { userMessage: userMessage(), assistantMessage: assistantMessage() };
+        },
+      );
+
+      await useChatStore.getState().send('Oi');
+      await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+      expect(payloads).toHaveLength(1);
+      expect(mocks.api.goalCanContinue).not.toHaveBeenCalled();
+    }
+  });
+
+  it('stop() de uma rodada do objetivo pausa a continuidade automática', async () => {
+    seedGoalSession();
+    useChatStore.setState({
+      streaming: {
+        turnId: 'turn-goal',
+        conversationId: 'conv-1',
+        assistantId: 'assistant-1',
+        userMessageId: 'user-1',
+        phase: 'text',
+        step: 1,
+        startedAt: Date.now(),
+        turnKind: 'goal_round',
+      },
+    });
+
+    await useChatStore.getState().stop();
+
+    expect(mocks.api.cancelTurn).toHaveBeenCalledWith('turn-goal');
+    expect(mocks.api.updateGoal).toHaveBeenCalledWith('conv-1', 'pause', null, 2);
   });
 });

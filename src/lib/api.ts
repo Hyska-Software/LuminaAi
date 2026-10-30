@@ -21,7 +21,11 @@ import type {
   Conversation,
   ConversationDetail,
   ConversationMode,
+  CreateGoalInput,
   FileChange,
+  GoalAction,
+  GoalContinuation,
+  GoalRound,
   JobView,
   LibraryArtifact,
   LoginChallenge,
@@ -38,6 +42,7 @@ import type {
   TurnEvent,
   TurnPayload,
   TurnResult,
+  UpdateGoalInput,
   Workspace,
   WorkspaceCommitDetail,
   WorkspaceContext,
@@ -218,6 +223,26 @@ export const api = {
   revertTurn: (conversationId: string, turnId: string) =>
     invoke<boolean>('revert_turn', { conversationId, turnId }),
   compactSession: (conversationId: string) => invoke<boolean>('compact_session', { conversationId }),
+
+  /* -------- objetivo (Goal) da sessão de código -------- */
+  createGoal: (conversationId: string, input: CreateGoalInput) =>
+    invoke<CodeSessionState>('create_goal', { conversationId, input }),
+  updateGoal: (
+    conversationId: string,
+    action: GoalAction,
+    input?: UpdateGoalInput | null,
+    expectedRevision?: number | null,
+  ) =>
+    invoke<CodeSessionState>('update_goal', {
+      conversationId,
+      action,
+      input: input ?? null,
+      expectedRevision: expectedRevision ?? null,
+    }),
+  listGoalRounds: (conversationId: string, limit = 100) =>
+    invoke<GoalRound[]>('list_goal_rounds', { conversationId, limit }),
+  goalCanContinue: (conversationId: string, auto = true) =>
+    invoke<GoalContinuation>('goal_can_continue', { conversationId, auto }),
 
   respondQuestion: (requestId: string, answers: AskUserAnswer[], skipped = false) =>
     invoke<boolean>('respond_question', { requestId, answers, skipped }),

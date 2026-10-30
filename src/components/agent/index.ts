@@ -15,7 +15,17 @@ export type {
 
 export { PlanCard, MAX_PLAN_CHARS } from './PlanCard';
 export type { PlanAction, PlanCardProps } from './PlanCard';
-export { PresentationBoundary, normalizePlanPresentation } from './ToolPresentationCard';
+export {
+  PresentationBoundary,
+  normalizeGoalPresentation,
+  normalizePlanPresentation,
+} from './ToolPresentationCard';
+
+export { GoalCard } from './GoalCard';
+export type { GoalCardAction, GoalCardProps } from './GoalCard';
+
+export { GoalAttentionCard } from './GoalAttentionCard';
+export type { GoalAttentionCardProps } from './GoalAttentionCard';
 
 export { TodoCard } from './TodoCard';
 export type { TodoCardProps } from './TodoCard';

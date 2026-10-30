@@ -110,6 +110,9 @@ pub struct ToolCtx {
     pub jobs: Option<Arc<crate::jobs::JobRegistry>>,
     /// Perguntas estruturadas ao usuário (`ask_user`).
     pub questions: Option<Arc<crate::harness::code::questions::QuestionRegistry>>,
+    /// Tipo do turno que executa a tool (`goal` distingue criação/edição em
+    /// turno humano de progresso/conclusão/bloqueio em rodada).
+    pub turn_kind: crate::domain::TurnKind,
     /// Runner de subagentes (	ask; None em testes).
     /// Servidores MCP (tools dinâmicas `mcp__servidor__tool`).
     pub mcp: Option<Arc<crate::mcp::McpManager>>,
@@ -304,7 +307,7 @@ pub static CHAT_SPECS: [ToolSpec; 9] = [
 /* ------------------------------------------------------------------ */
 
 /// Ordem estável do catálogo Code (a ordem entra no prompt: não reordene).
-static CODE_SPECS: [&ToolSpec; 23] = [
+static CODE_SPECS: [&ToolSpec; 24] = [
     &code::fs_read::READ_FILE_SPEC,
     &code::fs_read::LIST_DIR_SPEC,
     &code::fs_read::SEARCH_FILES_SPEC,
@@ -323,6 +326,7 @@ static CODE_SPECS: [&ToolSpec; 23] = [
     &code::plan::TODO_WRITE_SPEC,
     &code::plan::SUBMIT_PLAN_SPEC,
     &code::plan::ASK_USER_SPEC,
+    &code::goal::GOAL_SPEC,
     &code::task::TASK_SPEC,
     &CODE_WEB_SEARCH_SPEC,
     &CODE_FETCH_URL_SPEC,
@@ -484,6 +488,7 @@ pub enum ToolExec {
     TodoWrite,
     SubmitPlan,
     AskUser,
+    Goal,
     Task,
     WebSearch,
     FetchUrl,
@@ -513,6 +518,7 @@ impl ToolExec {
             "todo_write" => Self::TodoWrite,
             "submit_plan" => Self::SubmitPlan,
             "ask_user" => Self::AskUser,
+            "goal" => Self::Goal,
             "task" => Self::Task,
             "web_search" => Self::WebSearch,
             "fetch_url" => Self::FetchUrl,
@@ -542,6 +548,7 @@ impl ToolExec {
             Self::TodoWrite => "todo_write",
             Self::SubmitPlan => "submit_plan",
             Self::AskUser => "ask_user",
+            Self::Goal => "goal",
             Self::Task => "task",
             Self::WebSearch => "web_search",
             Self::FetchUrl => "fetch_url",
@@ -584,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn code_catalog_lists_the_twenty_three_tools_in_order() {
+    fn code_catalog_lists_the_twenty_four_tools_in_order() {
         assert_eq!(
             names(&code_spec_refs()),
             vec![
@@ -606,6 +613,7 @@ mod tests {
                 "todo_write",
                 "submit_plan",
                 "ask_user",
+                "goal",
                 "task",
                 "web_search",
                 "fetch_url",
@@ -613,7 +621,7 @@ mod tests {
                 "read_skill",
             ]
         );
-        assert_eq!(code_specs().len(), 23);
+        assert_eq!(code_specs().len(), 24);
     }
 
     #[test]
@@ -711,7 +719,7 @@ mod tests {
     #[test]
     fn code_definitions_expose_wire_fields_only() {
         let definitions = definitions_for(TurnProfile::Code);
-        assert_eq!(definitions.len(), 23);
+        assert_eq!(definitions.len(), 24);
         for definition in &definitions {
             assert!(!definition.description.is_empty(), "{}", definition.name);
             assert_eq!(definition.parameters["type"], "object", "{}", definition.name);
@@ -728,10 +736,14 @@ mod tests {
         assert_eq!(spec("edit_file").parallel, ParallelClass::PathLocked);
         assert_eq!(spec("run_command").parallel, ParallelClass::Exclusive);
         assert_eq!(spec("todo_write").parallel, ParallelClass::Exclusive);
+        assert_eq!(spec("goal").parallel, ParallelClass::Exclusive);
 
         assert!(spec("write_file").mutating);
         assert!(!spec("read_file").mutating);
         assert!(!spec("ask_user").mutating);
+        assert!(!spec("goal").mutating);
+        assert!(spec("goal").requires_workspace);
+        assert_eq!(spec("goal").risk, RiskClass::Read);
         assert!(spec("run_command").requires_workspace);
         assert!(!spec("ask_user").requires_workspace);
     }
@@ -771,7 +783,8 @@ mod tests {
             rules: Vec::new(),
             jobs: None,
             questions: None,
-        mcp: None,
+            turn_kind: crate::domain::TurnKind::User,
+            mcp: None,
             subagent: None,
             skills_roots: Vec::new(),
         }

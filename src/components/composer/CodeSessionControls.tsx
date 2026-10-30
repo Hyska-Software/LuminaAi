@@ -25,6 +25,7 @@ import { JobsBar, PlanCard, TodoCard } from '@/components/agent';
 import { useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import type { PermissionMode } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { GoalControls } from './GoalControls';
 
 /** Rótulos pt-BR do modo de permissão da sessão (WORKBENCH §4/§6). */
 const PERMISSION_LABELS: Record<PermissionMode, string> = {
@@ -184,6 +185,10 @@ export function CodeSessionControls({ conversationId, className }: CodeSessionCo
           <span className="truncate">Plano</span>
         </button>
       </Tooltip>
+
+      {/* Objetivo da sessão entre o modo Plano e o popover "Plano e tarefas"
+          (docs/goals/code-goals/PLAN.md §10.7). */}
+      <GoalControls conversationId={conversationId} />
 
       <Popover open={planOpen} onOpenChange={setPlanOpen}>
         <PopoverTrigger asChild>

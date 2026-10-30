@@ -6,6 +6,7 @@
 //! - `compaction` (re-export de `harness::compaction`): resumo cache-safe compartilhado com o Chat;
 //! - `context`: contexto do turno (workspace, git, projeto, AGENTS.md, árvore);
 //! - `session`: projeções sobre `code_events` (plano, tarefas, contexto);
+//! - `goal`: objetivo persistente da sessão (fold, mutações, rodada e preflight);
 //! - `observed`: política de leitura antes da escrita (CAS por hash);
 //! - `tools`: execução das tools de código (aprovação, journal, spill, shell).
 //!
@@ -13,6 +14,7 @@
 
 pub use crate::harness::compaction;
 pub mod context;
+pub mod goal;
 pub mod observed;
 pub mod prompt;
 pub mod questions;

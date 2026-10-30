@@ -20,7 +20,7 @@ use crate::domain::{
     conversation_mode_or_default, now_ms, ApprovalDecision, ApprovalRule, ApprovalScope, Artifact,
     ArtifactKind, AttachmentInfo, CacheBreakReason, CacheSample, CacheState, ChatMessage,
     Conversation, ConversationDetail, FileChangeKind, LibraryArtifact, MessageRole, MessageStatus,
-    PermissionMode, SegmentDigest, UsageInfo, Workspace, CONVERSATION_MODE_CHAT,
+    PermissionMode, SegmentDigest, TurnKind, UsageInfo, Workspace, CONVERSATION_MODE_CHAT,
 };
 
 /* ------------------------------------------------------------------ */
@@ -35,7 +35,8 @@ const WORKSPACE_COLUMNS: &str = "id, name, path, created_at, updated_at, last_op
      pinned, trusted";
 
 const MESSAGE_COLUMNS: &str = "id, conversation_id, role, content, reasoning, status, \
-     tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, created_at, trace";
+     tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, created_at, \
+     trace, origin";
 
 const ATTACHMENT_COLUMNS: &str = "id, name, mime_type, size, kind, text, page_count, \
      width, height, file_path, created_at";
@@ -97,7 +98,11 @@ CREATE TABLE IF NOT EXISTS messages (
   usage           TEXT,
   provider_state  TEXT,
   created_at      INTEGER NOT NULL,
-  trace           TEXT NOT NULL DEFAULT '[]'
+  trace           TEXT NOT NULL DEFAULT '[]',
+  -- Origem do turno que gerou a mensagem: 'user' (default) ou 'goal_round'
+  -- (rodada automática do objetivo no layout Code). Bancos legados viram
+  -- 'user' — é o que o app mostrava até o sistema de objetivos.
+  origin          TEXT NOT NULL DEFAULT 'user'
 );
 
 CREATE TABLE IF NOT EXISTS attachments (
@@ -781,6 +786,30 @@ fn migrate_artifacts_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Migração aditiva e idempotente da tabela `messages`:
+///
+/// 1. bancos anteriores à trilha do agente ganham `trace` (`'[]'` = sem
+///    timeline);
+/// 2. bancos anteriores ao sistema de objetivos ganham `origin` (`'user'` em
+///    todas as linhas existentes — o app não gravava a origem do turno, então
+///    tudo é mensagem humana; é exatamente o que era exibido).
+///
+/// Nenhuma linha é perdida e a migração pode rodar quantas vezes for preciso.
+fn migrate_messages_schema(conn: &Connection) -> Result<()> {
+    ensure_column(
+        conn,
+        "messages",
+        "trace",
+        "ALTER TABLE messages ADD COLUMN trace TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    ensure_column(
+        conn,
+        "messages",
+        "origin",
+        "ALTER TABLE messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'user'",
+    )
+}
+
 /// Migração aditiva e idempotente da tabela `conversations`:
 ///
 /// 1. separação Chat/Code: bancos criados antes dos dois layouts ganham `mode`
@@ -916,6 +945,23 @@ fn status_from_str(raw: &str) -> MessageStatus {
         "error" => MessageStatus::Error,
         "cancelled" => MessageStatus::Cancelled,
         _ => MessageStatus::Complete,
+    }
+}
+
+/// `TurnKind` <-> TEXT de `messages.origin`. Os slugs espelham o
+/// `#[serde(rename_all = "snake_case")]` do contrato de IPC; valor desconhecido
+/// (banco legado/corrompido) cai em `User`, a origem visualizada até hoje.
+fn turn_kind_to_str(kind: TurnKind) -> &'static str {
+    match kind {
+        TurnKind::User => "user",
+        TurnKind::GoalRound => "goal_round",
+    }
+}
+
+fn turn_kind_from_str(raw: &str) -> TurnKind {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "goal_round" => TurnKind::GoalRound,
+        _ => TurnKind::User,
     }
 }
 
@@ -1342,6 +1388,9 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<ChatMessage> {
     let tool_calls: String = row.get(6)?;
     let citations: String = row.get(7)?;
     let attachments: String = row.get(8)?;
+    // `origin` é a última coluna de `MESSAGE_COLUMNS` (posição 15). Lida por
+    // posição como o resto do mapper; o default do contrato cobre banco legado.
+    let origin: String = row.get(15)?;
     Ok(ChatMessage {
         id: row.get(0)?,
         conversation_id: row.get(1)?,
@@ -1358,6 +1407,7 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<ChatMessage> {
         created_at: row.get(13)?,
         provider_state: decode_opt_value(row.get(12)?),
         trace: decode_json(&row.get::<_, String>(14)?),
+        origin: turn_kind_from_str(&origin),
     })
 }
 
@@ -1438,7 +1488,8 @@ fn insert_message_row(
     conn.execute(
         "INSERT INTO messages (id, conversation_id, role, content, reasoning, status, \
          tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, \
-         created_at, trace) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+         created_at, trace, origin) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             &message.id,
             &message.conversation_id,
@@ -1455,6 +1506,7 @@ fn insert_message_row(
             &cols.provider_state,
             message.created_at,
             &cols.trace,
+            turn_kind_to_str(message.origin),
         ],
     )
     .with_context(|| format!("falha ao inserir mensagem {}", message.id))?;
@@ -1471,7 +1523,7 @@ fn update_message_row(
             "UPDATE messages SET role = ?2, content = ?3, reasoning = ?4, status = ?5, \
              tool_calls = ?6, citations = ?7, attachments = ?8, model_id = ?9, \
              provider_id = ?10, usage = ?11, provider_state = ?12, created_at = ?13, \
-             trace = ?14 \
+             trace = ?14, origin = ?15 \
              WHERE id = ?1",
             params![
                 &message.id,
@@ -1488,6 +1540,7 @@ fn update_message_row(
                 &cols.provider_state,
                 message.created_at,
                 &cols.trace,
+                turn_kind_to_str(message.origin),
             ],
         )
         .with_context(|| format!("falha ao atualizar mensagem {}", message.id))?;
@@ -1626,14 +1679,9 @@ impl Db {
             .context("falha ao configurar o SQLite (WAL/foreign keys)")?;
         conn.execute_batch(SCHEMA)
             .context("falha ao aplicar o schema do banco")?;
-        // Databases created before the agent trace existed get the column on
-        // open; new databases already have it from `SCHEMA`.
-        ensure_column(
-            conn,
-            "messages",
-            "trace",
-            "ALTER TABLE messages ADD COLUMN trace TEXT NOT NULL DEFAULT '[]'",
-        )?;
+        // Databases created before the agent trace (and the goal origin) get
+        // the columns on open; new databases already have them from `SCHEMA`.
+        migrate_messages_schema(conn)?;
         // Separação Chat/Code: conversas antigas viram mode='chat', sem vínculo.
         migrate_conversations_schema(conn)?;
         // Biblioteca: `favorite` + `conversation_id` nullable (uploads do usuário).
@@ -2147,6 +2195,63 @@ impl Db {
         )
         .optional()
         .context("falha ao ler o último evento do agente")
+    }
+
+    /// Eventos de um conjunto de `kind`s, do mais recente (`seq` maior) para o
+    /// mais antigo. `limit` corta depois do filtro; `None` devolve tudo.
+    ///
+    /// É a query do fold do sistema de objetivos (`harness/code/goal.rs`), que
+    /// só precisa de `goal/state`, `goal/deleted`, `goal/round-started` e
+    /// `goal/round` — o replay completo continua em [`Db::list_code_events`].
+    /// Lista de `kinds` vazia (ou só com espaços) devolve vazio: não há o que
+    /// filtrar, e um `IN ()` seria inválido no SQLite.
+    pub fn list_code_events_by_kinds(
+        &self,
+        conversation_id: &str,
+        kinds: &[&str],
+        limit: Option<usize>,
+    ) -> anyhow::Result<Vec<StoredCodeEvent>> {
+        let kinds: Vec<&str> = kinds
+            .iter()
+            .map(|kind| kind.trim())
+            .filter(|kind| !kind.is_empty())
+            .collect();
+        if kinds.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Placeholders dinâmicos: `?1` é a conversa, `?2..=?n+1` são os kinds e
+        // o `LIMIT` (quando pedido) ocupa a posição seguinte.
+        let placeholders = (2..=kinds.len() + 1)
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut sql = format!(
+            "SELECT id, conversation_id, turn_id, seq, kind, payload, created_at \
+             FROM code_events WHERE conversation_id = ?1 AND kind IN ({placeholders}) \
+             ORDER BY seq DESC"
+        );
+        if limit.is_some() {
+            sql.push_str(&format!(" LIMIT ?{}", kinds.len() + 2));
+        }
+        let mut values: Vec<rusqlite::types::Value> =
+            vec![rusqlite::types::Value::Text(conversation_id.to_string())];
+        values.extend(
+            kinds
+                .iter()
+                .map(|kind| rusqlite::types::Value::Text((*kind).to_string())),
+        );
+        if let Some(limit) = limit {
+            values.push(rusqlite::types::Value::Integer(
+                i64::try_from(limit).unwrap_or(i64::MAX),
+            ));
+        }
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            code_event_from_row(row)
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar os eventos do agente por tipo")
     }
 
     /* ---------------- harness de código: journal ---------------- */
@@ -3468,7 +3573,7 @@ mod tests {
     use super::*;
     use crate::domain::{
         CacheBreakReason, CacheState, Citation, MessageStatus, SegmentKind, ToolCallRecord,
-        ToolCallStatus, TraceStep,
+        ToolCallStatus, TraceStep, TurnKind,
     };
 
     fn test_db() -> Db {
@@ -6456,5 +6561,228 @@ mod tests {
             .list_render_decisions(&third.id)
             .expect("removida")
             .is_empty());
+    }
+
+    #[test]
+    fn migrates_legacy_messages_with_origin_defaulting_to_user() {
+        // Banco anterior ao sistema de objetivos: a tabela `messages` não tem
+        // `origin` (nem o `trace` da trilha do agente, migrado no mesmo passo).
+        let conn = Connection::open_in_memory().expect("in-memory connection");
+        conn.execute_batch(
+            "CREATE TABLE messages (
+               id              TEXT PRIMARY KEY,
+               conversation_id TEXT NOT NULL,
+               role            TEXT NOT NULL,
+               content         TEXT NOT NULL DEFAULT '',
+               reasoning       TEXT,
+               status          TEXT NOT NULL,
+               tool_calls      TEXT NOT NULL DEFAULT '[]',
+               citations       TEXT NOT NULL DEFAULT '[]',
+               attachments     TEXT NOT NULL DEFAULT '[]',
+               model_id        TEXT,
+               provider_id     TEXT,
+               usage           TEXT,
+               provider_state  TEXT,
+               created_at      INTEGER NOT NULL
+             );
+             INSERT INTO messages (id, conversation_id, role, status, content, created_at)
+               VALUES ('m1', 'c1', 'user', 'complete', 'pergunta antiga', 1),
+                      ('m2', 'c1', 'assistant', 'complete', 'resposta antiga', 2);",
+        )
+        .expect("legacy schema");
+
+        Db::init_connection(&conn).expect("migration");
+
+        // Todas as linhas continuam lá e viram `origin = 'user'` — a origem que
+        // o app exibia antes do sistema de objetivos.
+        let origins: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT origin FROM messages ORDER BY created_at")
+                .expect("prepare origins");
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(0))
+                .expect("query origins");
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .expect("collect origins")
+        };
+        assert_eq!(origins, vec!["user", "user"]);
+
+        // O mapper também cai no default `TurnKind::User` e preserva o conteúdo.
+        let db = Db {
+            conn: parking_lot::Mutex::new(conn),
+        };
+        let stored = db.list_messages("c1").expect("listar mensagens");
+        assert_eq!(stored.len(), 2);
+        assert_eq!(stored[0].content, "pergunta antiga");
+        assert_eq!(stored[1].content, "resposta antiga");
+        assert!(
+            stored
+                .iter()
+                .all(|message| message.origin == TurnKind::User),
+            "bancos legados não têm rodada de objetivo"
+        );
+
+        // Reabrir o banco roda a migração de novo sem alterar nada.
+        {
+            let conn = db.conn.lock();
+            Db::init_connection(&conn).expect("idempotent migration");
+        }
+        assert_eq!(db.list_messages("c1").expect("listar de novo").len(), 2);
+    }
+
+    #[test]
+    fn messages_roundtrip_the_origin_turn_kind() {
+        let db = test_db();
+        let conversation = db
+            .create_conversation("Objetivo", "anthropic", "claude-sonnet-5")
+            .expect("conversa");
+
+        let mut round = user_message(&conversation.id, "primeira rodada", 1_000);
+        round.origin = TurnKind::GoalRound;
+        db.insert_message(&round).expect("inserir rodada");
+        let stored = db.get_message(&round.id).expect("ler").expect("presente");
+        assert_eq!(stored.origin, TurnKind::GoalRound);
+        assert_eq!(stored.role, MessageRole::User);
+
+        // O default do contrato continua `user`.
+        let human = user_message(&conversation.id, "mensagem humana", 2_000);
+        db.insert_message(&human).expect("inserir humana");
+        assert_eq!(
+            db.get_message(&human.id)
+                .expect("ler humana")
+                .expect("presente")
+                .origin,
+            TurnKind::User
+        );
+
+        let listed = db.list_messages(&conversation.id).expect("listar");
+        assert_eq!(
+            listed
+                .iter()
+                .map(|message| message.origin)
+                .collect::<Vec<_>>(),
+            vec![TurnKind::GoalRound, TurnKind::User],
+            "a origem sobrevive à leitura em lista, não só por id"
+        );
+
+        // `update_message` também persiste a troca de origem.
+        let mut human = human;
+        human.origin = TurnKind::GoalRound;
+        db.update_message(&human).expect("update origem");
+        assert_eq!(
+            db.get_message(&human.id)
+                .expect("ler")
+                .expect("presente")
+                .origin,
+            TurnKind::GoalRound
+        );
+        let mut round = round;
+        round.origin = TurnKind::User;
+        db.update_message(&round).expect("update origem de volta");
+        assert_eq!(
+            db.get_message(&round.id)
+                .expect("ler")
+                .expect("presente")
+                .origin,
+            TurnKind::User
+        );
+
+        // Valor desconhecido (banco legado/corrompido) cai em `user`.
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "UPDATE messages SET origin = 'legado' WHERE id = ?1",
+                [&human.id],
+            )
+            .expect("valor desconhecido");
+        }
+        assert_eq!(
+            db.get_message(&human.id)
+                .expect("ler")
+                .expect("presente")
+                .origin,
+            TurnKind::User
+        );
+    }
+
+    #[test]
+    fn lists_code_events_by_kind_ordered_and_limited() {
+        let db = test_db();
+        // seq: 1 goal/state, 2 step, 3 goal/round, 4 goal/state, 5 tool,
+        // 6 goal/round-started.
+        for (kind, payload) in [
+            ("goal/state", r#"{"status":"active","revision":1}"#),
+            ("step", r#"{"step":1}"#),
+            ("goal/round", r#"{"index":1,"outcome":"done"}"#),
+            ("goal/state", r#"{"status":"active","revision":2}"#),
+            ("tool", r#"{"tool":"read"}"#),
+            ("goal/round-started", r#"{"index":2,"turnId":"turn-2"}"#),
+        ] {
+            db.append_code_event("conv-1", None, kind, payload)
+                .expect("evento");
+        }
+        db.append_code_event("conv-2", None, "goal/state", "{}")
+            .expect("outra conversa");
+
+        let selected = db
+            .list_code_events_by_kinds("conv-1", &["goal/state", "goal/round"], None)
+            .expect("filtrar");
+        assert_eq!(
+            selected.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            vec![4, 3, 1],
+            "mais recentes primeiro"
+        );
+        assert_eq!(
+            selected
+                .iter()
+                .map(|event| event.kind.as_str())
+                .collect::<Vec<_>>(),
+            vec!["goal/state", "goal/round", "goal/state"]
+        );
+        assert_eq!(
+            selected[0].payload, r#"{"status":"active","revision":2}"#,
+            "o payload inteiro é preservado"
+        );
+
+        let limited = db
+            .list_code_events_by_kinds("conv-1", &["goal/state", "goal/round"], Some(2))
+            .expect("limite");
+        assert_eq!(
+            limited.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            vec![4, 3],
+            "o limite corta depois do filtro e da ordenação"
+        );
+
+        // Espaços em volta dos kinds são ignorados (como em append_code_event).
+        let trimmed = db
+            .list_code_events_by_kinds("conv-1", &["  goal/round-started  "], None)
+            .expect("trim");
+        assert_eq!(trimmed.len(), 1);
+        assert_eq!(trimmed[0].seq, 6);
+
+        // Lista vazia/só espaços, limite 0 e conversa vazia devolvem vazio.
+        assert!(db
+            .list_code_events_by_kinds("conv-1", &[], None)
+            .expect("vazio")
+            .is_empty());
+        assert!(db
+            .list_code_events_by_kinds("conv-1", &["   "], None)
+            .expect("só espaços")
+            .is_empty());
+        assert!(db
+            .list_code_events_by_kinds("conv-1", &["goal/state"], Some(0))
+            .expect("limite 0")
+            .is_empty());
+        assert!(db
+            .list_code_events_by_kinds("conv-inexistente", &["goal/state"], None)
+            .expect("conversa vazia")
+            .is_empty());
+        // Eventos de outra conversa não vazam para o filtro.
+        assert_eq!(
+            db.list_code_events_by_kinds("conv-2", &["goal/state"], None)
+                .expect("conversa 2")
+                .len(),
+            1
+        );
     }
 }

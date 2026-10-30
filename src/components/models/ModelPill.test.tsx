@@ -711,6 +711,7 @@ describe('ModelPill (model locked)', () => {
           phase: 'starting',
           step: 0,
           startedAt: 1,
+          turnKind: 'user',
         },
       });
     });

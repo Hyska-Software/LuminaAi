@@ -163,6 +163,8 @@ function buildToolGroup(tools: ToolCallRecord[]): ToolGroup {
       return todoCodeGroup(tools, status, errors);
     case 'submit_plan':
       return planCodeGroup(tools, status, errors);
+    case 'goal':
+      return goalCodeGroup(tools, status, errors);
     case 'ask_user':
       return askCodeGroup(tools, status, errors);
     case 'task':
@@ -649,6 +651,27 @@ function planCodeGroup(
   return harnessGroup('submit_plan', tools, status, errors, label);
 }
 
+/** Rótulo do grupo `goal` a partir da apresentação flat persistida. */
+function goalCodeGroup(
+  tools: ToolCallRecord[],
+  status: ToolGroupStatus,
+  errors: string[],
+): ToolGroup {
+  const goal = [...tools]
+    .reverse()
+    .map((tool) => (tool.presentation?.kind === 'goal' ? tool.presentation : null))
+    .find(Boolean);
+  let label: string;
+  if (status === 'running') label = 'Atualizando o objetivo…';
+  else if (status === 'error') label = 'Falha ao atualizar o objetivo';
+  else if (goal?.status === 'completed') label = 'Objetivo concluído';
+  else if (goal?.status === 'blocked') label = 'Objetivo bloqueado';
+  else if (goal?.status === 'paused') label = 'Objetivo pausado';
+  else label = 'Progrediu no objetivo';
+  return harnessGroup('goal', tools, status, errors, label);
+}
+
+
 function askCodeGroup(
   tools: ToolCallRecord[],
   status: ToolGroupStatus,
@@ -789,6 +812,14 @@ export function describeCodeTool(tool: ToolCallRecord): CodeToolLabel {
       return make(failed ? 'As verificações falharam' : 'Rodou as verificações');
     case 'todo_write':
       return make(failed ? 'Falha ao atualizar as tarefas' : 'Atualizou as tarefas');
+    case 'goal': {
+      const goal = presentation?.kind === 'goal' ? presentation : null;
+      if (failed) return make('Falha ao atualizar o objetivo');
+      if (goal?.status === 'completed') return make('Objetivo concluído');
+      if (goal?.status === 'blocked') return make('Objetivo bloqueado');
+      if (goal?.status === 'paused') return make('Objetivo pausado');
+      return make('Progrediu no objetivo');
+    }
     case 'submit_plan': {
       const plan = presentation?.kind === 'plan' ? presentation : null;
       if (failed) return make(plan?.feedback ? 'Plano não aprovado' : 'Falha ao enviar o plano');

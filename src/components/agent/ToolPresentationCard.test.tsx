@@ -5,6 +5,7 @@ import type { ToolPresentation } from '@/lib/types';
 import {
   PresentationBoundary,
   ToolPresentationCard,
+  normalizeGoalPresentation,
   normalizePlanPresentation,
 } from './ToolPresentationCard';
 
@@ -102,6 +103,96 @@ describe('ToolPresentationCard — plano (contrato flat + legado)', () => {
         plan: { state: 'reviewing', markdown: '# P', updatedAt: 42 },
       }),
     ).toEqual({ state: 'reviewing', markdown: '# P', feedback: null, updatedAt: 42 });
+  });
+});
+
+describe('ToolPresentationCard — objetivo (contrato flat + legado)', () => {
+  it('renderiza o payload real da tool goal como card compacto somente leitura', () => {
+    // Payload flat emitido pelo backend (`{kind:"goal", ...GoalView}`).
+    const presentation = {
+      kind: 'goal',
+      title: 'Reduzir o tempo de build',
+      objective: 'Build abaixo de 2 min com testes verdes.',
+      status: 'active',
+      autoContinue: true,
+      rounds: 3,
+      maxRounds: 25,
+      revision: 2,
+      origin: 'user',
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_060_000,
+      lastNote: 'Rodada 3: build em 95s.',
+    } as ToolPresentation;
+
+    render(<ToolPresentationCard presentation={presentation} />);
+
+    expect(screen.getByText('Reduzir o tempo de build')).toBeTruthy();
+    expect(screen.getByText('Automático')).toBeTruthy();
+    expect(screen.getByText('Rodada 3 de 25')).toBeTruthy();
+    expect(screen.getByText(/build em 95s/)).toBeTruthy();
+    // Compacto + somente leitura: nenhum botão morto na timeline.
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('renderiza o formato legado aninhado ({goal}) sem crash', () => {
+    const legacy = {
+      kind: 'goal',
+      goal: {
+        title: 'Legado',
+        objective: 'Objetivo antigo',
+        status: 'paused',
+        autoContinue: false,
+        rounds: 1,
+        maxRounds: 10,
+        revision: 1,
+        origin: 'agent',
+        createdAt: 1,
+        updatedAt: 2,
+        pauseReason: 'user',
+      },
+    } as unknown as ToolPresentation;
+
+    render(<ToolPresentationCard presentation={legacy} />);
+
+    expect(screen.getByText('Legado')).toBeTruthy();
+    expect(screen.getByText('Pausado')).toBeTruthy();
+    expect(screen.getByText('Rodada 1 de 10')).toBeTruthy();
+  });
+
+  it('degrada payload de objetivo inválido (status desconhecido) sem derrubar', () => {
+    const malformed = {
+      kind: 'goal',
+      title: 'Quebrado',
+      status: 'rodando',
+    } as unknown as ToolPresentation;
+
+    render(<ToolPresentationCard presentation={malformed} />);
+    expect(screen.getByText('Objetivo indisponível nesta versão.')).toBeTruthy();
+    expect(screen.queryByText('Quebrado')).toBeNull();
+  });
+
+  it('normaliza campos ausentes/financeiros inválidos com defaults seguros', () => {
+    const normalized = normalizeGoalPresentation({
+      kind: 'goal',
+      goal: { title: 'Sem números', status: 'completed' },
+      rounds: 'muitas',
+      maxRounds: -3,
+    });
+
+    expect(normalized).not.toBeNull();
+    expect(normalized?.title).toBe('Sem números');
+    expect(normalized?.status).toBe('completed');
+    expect(normalized?.rounds).toBe(0);
+    expect(normalized?.maxRounds).toBe(25);
+    expect(normalized?.autoContinue).toBe(false);
+    expect(normalized?.origin).toBe('user');
+    expect(normalized?.objective).toBe('');
+  });
+
+  it('normalizeGoalPresentation devolve null para payload que não é objeto', () => {
+    expect(normalizeGoalPresentation(null)).toBeNull();
+    expect(normalizeGoalPresentation('goal')).toBeNull();
+    expect(normalizeGoalPresentation({ kind: 'goal' })).toBeNull();
   });
 });
 

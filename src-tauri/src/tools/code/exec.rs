@@ -21,10 +21,11 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::domain::{
-    now_ms, ApprovalDetail, ApprovalOption, ApprovalRequest, ApprovalScope, FileChange,
-    FileChangeKind, RiskClass, TodoItem,
+    now_ms, ApprovalDetail, ApprovalOption, ApprovalRequest, ApprovalScope, CreateGoalInput,
+    FileChange, FileChangeKind, GoalOrigin, GoalView, RiskClass, TodoItem, TurnKind,
+    UpdateGoalInput,
 };
-use crate::harness::code::{observed::ObservationState, session};
+use crate::harness::code::{goal, observed::ObservationState, session};
 use crate::policy::{decide, CallFacts, PolicyContext, PolicyDecision};
 use crate::tools::registry::{ToolCtx, ToolExec};
 use crate::tools::ToolOutcome;
@@ -63,6 +64,7 @@ pub async fn run(ctx: &ToolCtx, exec: ToolExec, args: Value) -> ToolOutcome {
         ToolExec::TodoWrite => todo_write(ctx, &args).await,
         ToolExec::SubmitPlan => submit_plan(ctx, &args).await,
         ToolExec::AskUser => ask_user(ctx, &args).await,
+        ToolExec::Goal => goal_tool(ctx, &args),
         ToolExec::Task => run_task(ctx, &args).await,
         ToolExec::WebSearch | ToolExec::FetchUrl | ToolExec::ListSkills | ToolExec::ReadSkill => {
             bridge_chat_tool(ctx, exec.name(), &args).await
@@ -2302,6 +2304,215 @@ fn plan_error(code: &str, message: impl Into<String>, plan: Option<&crate::domai
     outcome
 }
 
+/* ------------------------------------------------------------------ */
+/* Objetivo persistente (`goal`, docs/goals/code-goals/PLAN.md §8.3)   */
+/* ------------------------------------------------------------------ */
+
+/// `presentation` canônica **flat** do card do objetivo (`{kind:"goal", ...}`).
+fn goal_presentation(view: &GoalView) -> Value {
+    match serde_json::to_value(view) {
+        Ok(Value::Object(mut map)) => {
+            map.insert("kind".to_string(), Value::String("goal".to_string()));
+            Value::Object(map)
+        }
+        // Defensivo: nunca aninha o card (payload malformado cai no card mínimo).
+        _ => json!({ "kind": "goal" }),
+    }
+}
+
+/// Emite o snapshot autoritativo (`GoalUpdated`) e devolve a saída curta da
+/// tool com o card da timeline.
+fn finish_goal(ctx: &ToolCtx, view: GoalView, content: String, summary: String) -> ToolOutcome {
+    ctx.emit_event(crate::events::TurnEvent::GoalUpdated {
+        goal: view.clone(),
+    });
+    finish(
+        ctx,
+        content,
+        Some(summary),
+        Some(goal_presentation(&view)),
+    )
+}
+
+fn goal_error(error: goal::GoalError) -> ToolOutcome {
+    err(error.code, error.message)
+}
+
+/// Tool `goal`: `create|edit` só em turno humano; `progress|complete|blocked`
+/// em qualquer turno. O objetivo é da sessão; o modelo nunca arma/pausa.
+fn goal_tool(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let action = match arg_str(args, "action") {
+        Ok(action) => action,
+        Err(outcome) => return outcome,
+    };
+    match action.as_str() {
+        "create" => goal_create(ctx, args),
+        "edit" => goal_edit(ctx, args),
+        "progress" => goal_progress(ctx, args),
+        "complete" => goal_complete(ctx, args),
+        "blocked" => goal_blocked(ctx, args),
+        other => err(
+            "TOOL_INVALID_ARGS",
+            format!(
+                "ação desconhecida `{other}`; use create, edit, progress, complete ou blocked"
+            ),
+        ),
+    }
+}
+
+fn goal_create(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    if ctx.turn_kind != TurnKind::User {
+        return goal_error(goal::GoalError::requires_user_turn());
+    }
+    let objective = match arg_str(args, "objective") {
+        Ok(objective) => objective,
+        Err(outcome) => return outcome,
+    };
+    // Fluxo `/goal` + mensagem: o humano pediu o objetivo, então a continuidade
+    // automática nasce ligada (o modelo pode desligar explicitamente). A UI tem
+    // "Pausar"/"Desarmar" para reverter depois.
+    let auto_continue = opt_bool(args, "auto_continue").unwrap_or(true);
+    let input = CreateGoalInput {
+        objective,
+        title: opt_str(args, "title"),
+        max_rounds: opt_u32(args, "max_rounds"),
+        auto_continue: Some(auto_continue),
+    };
+    match goal::create(&ctx.db, &ctx.conversation_id, &input, GoalOrigin::Agent) {
+        Ok(view) => {
+            let continuity = if view.auto_continue {
+                "continuidade automática ligada — a próxima rodada inicia ao fim deste turno"
+            } else {
+                "continuidade automática desligada — o usuário pode armá-la no objetivo"
+            };
+            let content = format!(
+                "Objetivo criado: {} (limite de {} rodadas; {}).\n",
+                view.title, view.max_rounds, continuity
+            );
+            finish_goal(ctx, view.clone(), content, format!("Objetivo · {}", view.title))
+        }
+        Err(error) => goal_error(error),
+    }
+}
+
+fn goal_edit(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    if ctx.turn_kind != TurnKind::User {
+        return goal_error(goal::GoalError::requires_user_turn());
+    }
+    let title = opt_str(args, "title");
+    let objective = opt_str(args, "objective");
+    let max_rounds = opt_u32(args, "max_rounds");
+    if title.is_none() && objective.is_none() && max_rounds.is_none() {
+        return err(
+            "TOOL_INVALID_ARGS",
+            "`edit` exige `title`, `objective` ou `max_rounds`",
+        );
+    }
+    let input = UpdateGoalInput {
+        title,
+        objective,
+        max_rounds,
+        summary: None,
+        reason: None,
+    };
+    match goal::edit(&ctx.db, &ctx.conversation_id, &input) {
+        Ok(view) => {
+            let content = format!(
+                "Objetivo atualizado: {} (limite de {} rodadas).\n",
+                view.title, view.max_rounds
+            );
+            finish_goal(ctx, view.clone(), content, format!("Objetivo · {}", view.title))
+        }
+        Err(error) => goal_error(error),
+    }
+}
+
+fn goal_progress(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let note = match arg_str(args, "note") {
+        Ok(note) => note,
+        Err(outcome) => return outcome,
+    };
+    match goal::note_progress(&ctx.db, &ctx.conversation_id, &note) {
+        Ok(view) => {
+            let content = format!(
+                "Progresso registrado (rodada {}/{}). Nota: {}\n",
+                view.rounds,
+                view.max_rounds,
+                truncate_for_tool_output(&note, 300)
+            );
+            finish_goal(
+                ctx,
+                view.clone(),
+                content,
+                format!(
+                    "Objetivo · progresso na rodada {}/{}",
+                    view.rounds, view.max_rounds
+                ),
+            )
+        }
+        Err(error) => goal_error(error),
+    }
+}
+
+fn goal_complete(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let summary = opt_str(args, "note");
+    match goal::complete(&ctx.db, &ctx.conversation_id, summary.as_deref()) {
+        Ok(view) => {
+            let content = format!(
+                "Objetivo concluído: {} ({} rodada(s)).\n",
+                view.title, view.rounds
+            );
+            finish_goal(
+                ctx,
+                view.clone(),
+                content,
+                format!("Objetivo concluído · {}", view.title),
+            )
+        }
+        Err(error) => goal_error(error),
+    }
+}
+
+fn goal_blocked(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let note = match arg_str(args, "note") {
+        Ok(note) => note,
+        Err(outcome) => return outcome,
+    };
+    match goal::report_blocker(&ctx.db, &ctx.conversation_id, &note) {
+        Ok(report) => {
+            let content = if report.blocked {
+                format!(
+                    "Objetivo bloqueado após {} registros do mesmo impedimento. O usuário decide como retomar.\n",
+                    goal::GOAL_BLOCKED_STREAK
+                )
+            } else {
+                format!(
+                    "Bloqueio registrado ({}/{}); a rodada segue até o fim. Motivo: {}\n",
+                    report.goal.blocker_streak,
+                    goal::GOAL_BLOCKED_STREAK,
+                    truncate_for_tool_output(&note, 300)
+                )
+            };
+            let summary = if report.blocked {
+                "Objetivo bloqueado".to_string()
+            } else {
+                format!("Bloqueio {}/{} registrado", report.goal.blocker_streak, goal::GOAL_BLOCKED_STREAK)
+            };
+            finish_goal(ctx, report.goal, content, summary)
+        }
+        Err(error) => goal_error(error),
+    }
+}
+
+/// Limita um texto narrativo devolvido ao modelo (mensagem curta, sem spill).
+fn truncate_for_tool_output(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(max.saturating_sub(1)).collect();
+    format!("{truncated}…")
+}
+
 async fn todo_write(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let Some(raw) = args.get("todos") else {
         return err("TOOL_INVALID_ARGS", "`todos` é obrigatório");
@@ -2675,8 +2886,15 @@ mod tests {
         }
 
         fn ctx(&self) -> ToolCtx {
+            self.ctx_for_turn(crate::domain::TurnKind::User)
+        }
+
+        /// Contexto com o tipo de turno (a tool `goal` distingue turno humano de
+        /// rodada automática).
+        fn ctx_for_turn(&self, turn_kind: crate::domain::TurnKind) -> ToolCtx {
             let emit: Arc<dyn crate::harness::EventEmitter> = self.recorder.clone();
             ToolCtx {
+                turn_kind,
                 db: self.db.clone(),
                 http: reqwest::Client::new(),
                 conversation_id: self.conversation_id.clone(),
@@ -3733,6 +3951,230 @@ mod tests {
         no_approval.approval = None;
         let ask = call(&no_approval, "job_kill", json!({ "job_id": "job-nope" })).await;
         assert_eq!(error_code(&ask), "APPROVAL_UNAVAILABLE");
+    }
+
+    /* ---------------- tool `goal` ---------------- */
+
+    #[tokio::test]
+    async fn goal_create_only_in_human_turn_and_com_apresentacao_flat() {
+        let fixture = Fixture::new();
+        let human = fixture.ctx_for_turn(crate::domain::TurnKind::User);
+        let created = call(
+            &human,
+            "goal",
+            json!({
+                "action": "create",
+                "objective": "Migrar o módulo de pagamentos para o novo SDK",
+                "title": "Migrar pagamentos",
+                "max_rounds": 10
+            }),
+        )
+        .await;
+        assert!(!created.is_error, "{}", created.content);
+        assert!(created.content.contains("Objetivo criado"), "{}", created.content);
+        let presentation = created.presentation.as_ref().expect("presentation");
+        assert_eq!(presentation["kind"], "goal", "card flat: {presentation}");
+        assert!(presentation.get("goal").is_none(), "não aninha: {presentation}");
+        assert_eq!(presentation["status"], "active");
+        assert_eq!(presentation["origin"], "agent");
+        assert_eq!(
+            presentation["autoContinue"], true,
+            "fluxo /goal arma a continuidade por default"
+        );
+        assert_eq!(presentation["maxRounds"], 10);
+        assert!(event_types(&fixture.recorder).contains(&"goal_updated".to_string()));
+
+        // Segundo create recusa: já existe objetivo ativo.
+        let again = call(
+            &human,
+            "goal",
+            json!({ "action": "create", "objective": "Outro" }),
+        )
+        .await;
+        assert_eq!(error_code(&again), "GOAL_ALREADY_EXISTS");
+
+        // Em rodada de objetivo, create/edit exigem turno humano.
+        let round = fixture.ctx_for_turn(crate::domain::TurnKind::GoalRound);
+        let refused = call(
+            &round,
+            "goal",
+            json!({ "action": "create", "objective": "Outro" }),
+        )
+        .await;
+        assert_eq!(error_code(&refused), "GOAL_REQUIRES_USER_TURN");
+        let edit_refused = call(
+            &round,
+            "goal",
+            json!({ "action": "edit", "objective": "Outro" }),
+        )
+        .await;
+        assert_eq!(error_code(&edit_refused), "GOAL_REQUIRES_USER_TURN");
+    }
+
+    #[tokio::test]
+    async fn goal_create_can_explicitly_disable_auto_continue() {
+        let fixture = Fixture::new();
+        let human = fixture.ctx_for_turn(crate::domain::TurnKind::User);
+        let created = call(
+            &human,
+            "goal",
+            json!({
+                "action": "create",
+                "objective": "Objetivo manual",
+                "auto_continue": false
+            }),
+        )
+        .await;
+        assert!(!created.is_error, "{}", created.content);
+        let presentation = created.presentation.as_ref().expect("presentation");
+        assert_eq!(presentation["autoContinue"], false);
+        assert!(created
+            .content
+            .contains("continuidade automática desligada"), "{}", created.content);
+    }
+
+    #[tokio::test]
+    async fn goal_edit_progress_complete_and_blocked_flow() {
+        let fixture = Fixture::new();
+        let human = fixture.ctx_for_turn(crate::domain::TurnKind::User);
+        let created = call(
+            &human,
+            "goal",
+            json!({ "action": "create", "objective": "Objetivo do fluxo" }),
+        )
+        .await;
+        assert!(!created.is_error, "{}", created.content);
+
+        // `edit` só em turno humano e exige ao menos um campo.
+        let empty_edit = call(&human, "goal", json!({ "action": "edit" })).await;
+        assert_eq!(error_code(&empty_edit), "TOOL_INVALID_ARGS");
+        let edited = call(
+            &human,
+            "goal",
+            json!({ "action": "edit", "max_rounds": 7, "title": "Título novo" }),
+        )
+        .await;
+        assert!(!edited.is_error, "{}", edited.content);
+        assert_eq!(edited.presentation.as_ref().expect("presentation")["maxRounds"], 7);
+
+        // Progress/completar/bloquear valem em rodada.
+        let round = fixture.ctx_for_turn(crate::domain::TurnKind::GoalRound);
+        let progress = call(
+            &round,
+            "goal",
+            json!({ "action": "progress", "note": "implementei a migração" }),
+        )
+        .await;
+        assert!(!progress.is_error, "{}", progress.content);
+        assert!(progress.content.contains("Progresso registrado"), "{}", progress.content);
+        assert!(event_types(&fixture.recorder).contains(&"goal_updated".to_string()));
+
+        let missing_note = call(&round, "goal", json!({ "action": "progress" })).await;
+        assert_eq!(error_code(&missing_note), "TOOL_INVALID_ARGS");
+
+        let completed = call(
+            &round,
+            "goal",
+            json!({ "action": "complete", "note": "42 testes verdes" }),
+        )
+        .await;
+        assert!(!completed.is_error, "{}", completed.content);
+        assert_eq!(completed.presentation.as_ref().expect("presentation")["status"], "completed");
+
+        // Progresso depois de concluído é recusado (sem ressuscitar o objetivo).
+        let after = call(
+            &round,
+            "goal",
+            json!({ "action": "progress", "note": "mais um" }),
+        )
+        .await;
+        assert_eq!(error_code(&after), "GOAL_NOT_ACTIVE");
+    }
+
+    #[tokio::test]
+    async fn goal_blocked_requires_note_and_blocks_on_the_third_same_reason() {
+        let fixture = Fixture::new();
+        let human = fixture.ctx_for_turn(crate::domain::TurnKind::User);
+        call(&human, "goal", json!({ "action": "create", "objective": "Objetivo bloqueável" }))
+            .await;
+        let round = fixture.ctx_for_turn(crate::domain::TurnKind::GoalRound);
+
+        let no_note = call(&round, "goal", json!({ "action": "blocked" })).await;
+        assert_eq!(error_code(&no_note), "TOOL_INVALID_ARGS");
+
+        let first = call(
+            &round,
+            "goal",
+            json!({ "action": "blocked", "note": "dependência externa fora do ar" }),
+        )
+        .await;
+        assert!(!first.is_error, "{}", first.content);
+        assert!(first.content.contains("(1/3)"), "{}", first.content);
+        let second = call(
+            &round,
+            "goal",
+            json!({ "action": "blocked", "note": "Dependência externa fora do ar" }),
+        )
+        .await;
+        assert!(second.content.contains("(2/3)"), "{}", second.content);
+
+        let third = call(
+            &round,
+            "goal",
+            json!({ "action": "blocked", "note": "dependência externa fora do ar" }),
+        )
+        .await;
+        assert!(!third.is_error, "{}", third.content);
+        assert!(third.content.contains("Objetivo bloqueado"), "{}", third.content);
+        assert_eq!(third.presentation.as_ref().expect("presentation")["status"], "blocked");
+
+        // Novo progresso em objetivo bloqueado: recusado.
+        let progress = call(&round, "goal", json!({ "action": "progress", "note": "x" })).await;
+        assert_eq!(error_code(&progress), "GOAL_NOT_ACTIVE");
+    }
+
+    #[tokio::test]
+    async fn goal_validates_limits_and_requires_an_existing_goal() {
+        let fixture = Fixture::new();
+        let human = fixture.ctx_for_turn(crate::domain::TurnKind::User);
+        let without_goal = call(&human, "goal", json!({ "action": "complete" })).await;
+        assert_eq!(error_code(&without_goal), "GOAL_NOT_FOUND");
+
+        let long_objective = "x".repeat(goal::GOAL_MAX_OBJECTIVE_CHARS + 1);
+        let oversized = call(
+            &human,
+            "goal",
+            json!({ "action": "create", "objective": long_objective }),
+        )
+        .await;
+        assert_eq!(error_code(&oversized), "GOAL_INVALID_ARGS");
+
+        let invalid_action = call(&human, "goal", json!({ "action": "delete" })).await;
+        assert_eq!(error_code(&invalid_action), "TOOL_INVALID_ARGS");
+
+        // Limites da nota também são validados pela tool.
+        call(&human, "goal", json!({ "action": "create", "objective": "Objetivo" })).await;
+        let long_note = "n".repeat(goal::GOAL_MAX_NOTE_CHARS + 1);
+        let note = call(
+            &human,
+            "goal",
+            json!({ "action": "progress", "note": long_note }),
+        )
+        .await;
+        assert_eq!(error_code(&note), "GOAL_INVALID_ARGS");
+
+        // `max_rounds` é clampado pelo núcleo (1..=100).
+        let edited = call(
+            &human,
+            "goal",
+            json!({ "action": "edit", "max_rounds": 500 }),
+        )
+        .await;
+        assert!(!edited.is_error, "{}", edited.content);
+        assert_eq!(
+            edited.presentation.as_ref().expect("presentation")["maxRounds"],
+            goal::GOAL_MAX_ROUNDS_HARD_CAP
+        );
     }
 
 }

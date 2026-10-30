@@ -111,6 +111,7 @@ function streamingState(assistantId: string): StreamingState {
     phase: 'tool',
     step: 1,
     startedAt: Date.now(),
+    turnKind: 'user',
   };
 }
 

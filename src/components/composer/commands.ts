@@ -7,7 +7,7 @@
  * com um toast honesto em vez de fingir que executou.
  */
 
-export type SlashCommandGroup = 'Sessão' | 'Plano' | 'Git' | 'Contexto' | 'Projeto';
+export type SlashCommandGroup = 'Sessão' | 'Plano' | 'Objetivo' | 'Git' | 'Contexto' | 'Projeto';
 
 /** Ações diretas suportadas nesta fase (sem backend novo). */
 export type SlashInvoke =
@@ -19,6 +19,17 @@ export type SlashInvoke =
   | 'plan-on'
   | 'plan-off';
 
+/**
+ * Chip de intenção do `/goal`: o usuário escolhe o comando, o composer mostra
+ * um chip removível e a mensagem digitada é enviada **como está** (sem prompt
+ * automático). O `TurnPayload.goalRequest` diz ao harness para injetar a
+ * instrução de criação no runtime context; o agente já conhece a tool `goal`.
+ */
+export function requestGoalCreation(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('lumina:goal-intent'));
+}
+
 export interface SlashCommand {
   id: string;
   /** Texto exibido no menu, incluindo a barra (ex.: `/compact`). */
@@ -26,7 +37,11 @@ export interface SlashCommand {
   title: string;
   description: string;
   group: SlashCommandGroup;
-  action: 'fill' | 'invoke';
+  /**
+   * `fill` insere texto; `invoke` executa uma ação; `intent` ativa um chip de
+   * intenção no composer (ex.: `/goal`) sem alterar a mensagem do usuário.
+   */
+  action: 'fill' | 'invoke' | 'intent';
   /** Texto inserido no composer quando `action === 'fill'`. */
   fill?: string;
   /** Ação executada quando `action === 'invoke'`. */
@@ -53,6 +68,15 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     group: 'Plano',
     action: 'invoke',
     invoke: 'plan-off',
+  },
+  {
+    id: 'goal',
+    command: '/goal',
+    title: 'Criar objetivo da sessão',
+    description:
+      'Ativa o chip de objetivo; a mensagem seguinte descreve a tarefa e o agente cria o objetivo.',
+    group: 'Objetivo',
+    action: 'intent',
   },
   {
     id: 'permissoes',

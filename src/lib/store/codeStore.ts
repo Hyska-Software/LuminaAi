@@ -10,13 +10,18 @@ import type {
   ChangesSummary,
   CodeSessionState,
   ContextStats,
+  CreateGoalInput,
   FileChange,
+  GoalAction,
+  GoalRound,
+  GoalView,
   JobView,
   PermissionMode,
   PlanApprovalChoice,
   PlanView,
   TodoItem,
   TurnEvent,
+  UpdateGoalInput,
 } from '../types';
 
 /**
@@ -34,6 +39,16 @@ export interface CodeSessionUi {
   permissionMode: PermissionMode;
   planMode: boolean;
   plan: PlanView | null;
+  /** Objetivo persistente da sessão (docs/goals/code-goals/PLAN.md). */
+  goal: GoalView | null;
+  /** Histórico de rodadas (carregado sob demanda pelo painel). */
+  goalRounds: GoalRound[];
+  goalRoundsLoading: boolean;
+  goalRoundsError: string | null;
+  /** Guarda síncrona contra duas rodadas iniciadas no mesmo clique/ciclo. */
+  goalStarting: boolean;
+  /** Revisão do objetivo cujo card de atenção foi dispensado (UI-only). */
+  dismissedGoalRevision: number | null;
   todos: TodoItem[];
   context: ContextStats | null;
   changes: ChangesSummary | null;
@@ -55,6 +70,12 @@ export function emptyCodeSession(conversationId: string): CodeSessionUi {
     permissionMode: 'edit',
     planMode: false,
     plan: null,
+    goal: null,
+    goalRounds: [],
+    goalRoundsLoading: false,
+    goalRoundsError: null,
+    goalStarting: false,
+    dismissedGoalRevision: null,
     todos: [],
     context: null,
     changes: null,
@@ -139,6 +160,20 @@ export function applyCodeEvent(state: CodeSessionUi, event: TurnEvent): CodeSess
         plan: event.plan,
         planMode: event.plan.state === 'planning' || event.plan.state === 'reviewing',
       };
+    case 'goal_updated': {
+      const previousGoal = state.goal;
+      const goal = event.goal;
+      // Rodada nova/estado novo invalida o "dispensado" do card de atenção.
+      const dismissedGoalRevision =
+        previousGoal && previousGoal.revision === goal.revision
+          ? state.dismissedGoalRevision
+          : null;
+      const goalRounds =
+        previousGoal && previousGoal.createdAt === goal.createdAt
+          ? state.goalRounds
+          : [];
+      return { ...state, goal, goalRounds, dismissedGoalRevision };
+    }
     case 'todos_updated':
       return { ...state, todos: event.todos };
     case 'context_stats':
@@ -183,6 +218,7 @@ export function isCodeEvent(event: TurnEvent): boolean {
     case 'question_requested':
     case 'question_resolved':
     case 'plan_updated':
+    case 'goal_updated':
     case 'todos_updated':
     case 'context_stats':
     case 'compacted':
@@ -201,11 +237,20 @@ export function fromSnapshot(
   snapshot: CodeSessionState,
   previous: CodeSessionUi | undefined,
 ): CodeSessionUi {
+  const goal = snapshot.goal ?? null;
+  const sameGoal =
+    Boolean(goal && previous?.goal) && goal!.createdAt === previous!.goal!.createdAt;
   return {
     conversationId: snapshot.conversationId,
     permissionMode: snapshot.permissionMode,
     planMode: snapshot.planMode,
     plan: snapshot.plan ?? null,
+    goal,
+    goalRounds: sameGoal ? (previous?.goalRounds ?? []) : [],
+    goalRoundsLoading: sameGoal ? (previous?.goalRoundsLoading ?? false) : false,
+    goalRoundsError: sameGoal ? (previous?.goalRoundsError ?? null) : null,
+    goalStarting: false,
+    dismissedGoalRevision: sameGoal ? (previous?.dismissedGoalRevision ?? null) : null,
     todos: snapshot.todos ?? [],
     context: snapshot.context ?? null,
     changes: snapshot.changes ?? null,
@@ -245,6 +290,25 @@ interface CodeStoreState {
   ) => Promise<boolean>;
   setPermissionMode: (conversationId: string, mode: PermissionMode) => Promise<boolean>;
   setPlanMode: (conversationId: string, enabled: boolean) => Promise<boolean>;
+  /** Cria o objetivo da sessão (UI: diálogo "Criar e começar"). */
+  createGoal: (conversationId: string, input: CreateGoalInput) => Promise<boolean>;
+  /**
+   * Aplica uma ação do usuário sobre o objetivo, com CAS (`expectedRevision`)
+   * e atualização otimista nos toggles de pausa/continuidade. Sempre substitui
+   * o estado pelo snapshot autoritativo do backend.
+   */
+  updateGoal: (
+    conversationId: string,
+    action: GoalAction,
+    input?: UpdateGoalInput | null,
+    expectedRevision?: number | null,
+  ) => Promise<boolean>;
+  /** Carrega o histórico de rodadas para o painel central. */
+  loadGoalRounds: (conversationId: string, limit?: number) => Promise<void>;
+  /** Dispensa o card de atenção desta revisão (UI-only). */
+  dismissGoalAttention: (conversationId: string, revision: number) => void;
+  /** Guarda síncrona do driver de rodadas (não confundir com `busy` de IPC). */
+  setGoalStarting: (conversationId: string, starting: boolean) => void;
   refreshJobs: (conversationId: string) => Promise<void>;
   killJob: (conversationId: string, jobId: string) => Promise<void>;
   revertTurn: (conversationId: string, turnId: string) => Promise<boolean>;
@@ -259,6 +323,41 @@ function patch(
 ): Record<string, CodeSessionUi> {
   const current = state[conversationId] ?? emptyCodeSession(conversationId);
   return { ...state, [conversationId]: update(current) };
+}
+
+/**
+ * Atualização otimista dos toggles do objetivo (pausa/retomada/armar/desarmar).
+ * `null` = ação sem otimista (o snapshot do backend é a resposta).
+ */
+function optimisticGoal(goal: GoalView | null, action: GoalAction): GoalView | null {
+  if (!goal) return null;
+  switch (action) {
+    case 'pause':
+      return {
+        ...goal,
+        status: 'paused',
+        autoContinue: false,
+        pauseReason: 'user',
+        pauseDetail: null,
+      };
+    case 'resume':
+      return {
+        ...goal,
+        status: 'active',
+        autoContinue: true,
+        pauseReason: null,
+        pauseDetail: null,
+        blockerReason: null,
+        blockerStreak: 0,
+        stalledRounds: 0,
+      };
+    case 'arm':
+      return { ...goal, autoContinue: true };
+    case 'disarm':
+      return { ...goal, autoContinue: false };
+    default:
+      return null;
+  }
 }
 
 export const useCodeStore = create<CodeStoreState>()((set, get) => ({
@@ -415,6 +514,112 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
       toast.error('Não foi possível alterar o modo Plano', { description: String(error) });
       return false;
     }
+  },
+
+  createGoal: async (conversationId, input) => {
+    try {
+      const snapshot = await api.createGoal(conversationId, input);
+      set((state) => ({
+        byConversation: {
+          ...state.byConversation,
+          [conversationId]: fromSnapshot(snapshot, state.byConversation[conversationId]),
+        },
+      }));
+      return true;
+    } catch (error) {
+      toast.error('Não foi possível criar o objetivo', { description: String(error) });
+      return false;
+    }
+  },
+
+  updateGoal: async (conversationId, action, input, expectedRevision) => {
+    const previous = get().byConversation[conversationId];
+    const optimistic = optimisticGoal(previous?.goal ?? null, action);
+    if (optimistic) {
+      set((state) => ({
+        byConversation: patch(state.byConversation, conversationId, (current) => ({
+          ...current,
+          goal: optimistic,
+        })),
+      }));
+    }
+    try {
+      const snapshot = await api.updateGoal(
+        conversationId,
+        action,
+        input ?? null,
+        expectedRevision ?? previous?.goal?.revision ?? null,
+      );
+      set((state) => ({
+        byConversation: {
+          ...state.byConversation,
+          [conversationId]: fromSnapshot(snapshot, state.byConversation[conversationId]),
+        },
+      }));
+      return true;
+    } catch (error) {
+      if (previous) {
+        set((state) => ({
+          byConversation: { ...state.byConversation, [conversationId]: previous },
+        }));
+      }
+      const message = String(error);
+      if (message.includes('GOAL_STALE_REVISION')) {
+        toast.error('O objetivo mudou em outra ação', {
+          description: 'Atualizando o estado da sessão…',
+        });
+        await get().refresh(conversationId);
+      } else {
+        toast.error('Não foi possível atualizar o objetivo', { description: message });
+      }
+      return false;
+    }
+  },
+
+  loadGoalRounds: async (conversationId, limit = 100) => {
+    set((state) => ({
+      byConversation: patch(state.byConversation, conversationId, (current) => ({
+        ...current,
+        goalRoundsLoading: true,
+        goalRoundsError: null,
+      })),
+    }));
+    try {
+      const goalRounds = await api.listGoalRounds(conversationId, limit);
+      set((state) => ({
+        byConversation: patch(state.byConversation, conversationId, (current) => ({
+          ...current,
+          goalRounds,
+          goalRoundsLoading: false,
+        })),
+      }));
+    } catch (error) {
+      set((state) => ({
+        byConversation: patch(state.byConversation, conversationId, (current) => ({
+          ...current,
+          goalRoundsLoading: false,
+          goalRoundsError: String(error),
+        })),
+      }));
+    }
+  },
+
+  dismissGoalAttention: (conversationId, revision) => {
+    set((state) => ({
+      byConversation: patch(state.byConversation, conversationId, (current) => ({
+        ...current,
+        dismissedGoalRevision: revision,
+      })),
+    }));
+  },
+
+  setGoalStarting: (conversationId, goalStarting) => {
+    set((state) => ({
+      byConversation: patch(state.byConversation, conversationId, (current) => ({
+        ...current,
+        goalStarting,
+      })),
+    }));
   },
 
   refreshJobs: async (conversationId) => {

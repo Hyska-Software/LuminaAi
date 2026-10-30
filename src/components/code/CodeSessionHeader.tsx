@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  Target,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -24,10 +25,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   IconButton,
+  Spinner,
   Tooltip,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { filterConversationsForLayout } from '@/lib/conversations';
+import { goalIsRunning, goalPauseReasonLabel } from '@/lib/goalRunner';
 import {
   codeFileTabKey,
   useChatStore,
@@ -35,7 +38,7 @@ import {
   useUiStore,
   type CodeFileTab,
 } from '@/lib/store';
-import type { Conversation, Workspace } from '@/lib/types';
+import type { Conversation, GoalView, Workspace } from '@/lib/types';
 import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel';
 import { cn, copyText } from '@/lib/utils';
 import { WorkspaceTrustDialog } from './WorkspaceTrustDialog';
@@ -52,6 +55,8 @@ const CODE_DIFF_TAB_ID = '__code_diff__';
 const CODE_COMMITS_TAB_ID = '__code_commits__';
 /** Synthetic center tab for the approved plan opened from "Ver plano". */
 const CODE_PLAN_TAB_ID = '__code_plan__';
+/** Synthetic center tab for the session goal (GoalPanel). */
+const CODE_GOAL_TAB_ID = '__code_goal__';
 /**
  * Prefixo dos ids das abas centrais de arquivo (§7.1) — cada arquivo aberto tem
  * a própria aba. O sufixo é a chave estável `codeFileTabKey` codificada para o
@@ -96,6 +101,67 @@ interface SessionTab {
 
 function sessionTitle(conversations: Conversation[], id: string): string {
   return conversations.find((conversation) => conversation.id === id)?.title ?? NEW_SESSION_TITLE;
+}
+
+const GOAL_BADGE_TONE = {
+  accent: 'bg-accent-soft text-accent',
+  warning: 'bg-warning-soft text-warning',
+  danger: 'bg-danger-soft text-danger',
+} as const;
+
+interface GoalBadgeProps {
+  goal: GoalView;
+  running: boolean;
+  onOpen: () => void;
+}
+
+/**
+ * Badge do objetivo no cabeçalho (PLAN §10.6): rodada em andamento
+ * (`accent` + spinner), pausado (`warning`), bloqueado (`danger`) e ativo
+ * (`N/M`). Concluído não aparece — o card de atenção/painel cuidam desse caso.
+ * Clicar abre a aba central "Objetivo" (`openCodeGoal`).
+ */
+function GoalBadge({ goal, running, onOpen }: GoalBadgeProps) {
+  const tone =
+    goal.status === 'paused' ? 'warning' : goal.status === 'blocked' ? 'danger' : 'accent';
+  const pauseLabel = goalPauseReasonLabel(goal.pauseReason);
+  const ariaLabel = running
+    ? `Abrir objetivo: rodada ${goal.rounds} de ${goal.maxRounds} em andamento`
+    : goal.status === 'paused'
+      ? `Abrir objetivo: pausado${pauseLabel ? ` (${pauseLabel})` : ''}`
+      : goal.status === 'blocked'
+        ? 'Abrir objetivo: bloqueado'
+        : `Abrir objetivo: ativo, rodada ${goal.rounds} de ${goal.maxRounds}${
+            goal.autoContinue ? ', continuidade automática' : ', continuidade manual'
+          }`;
+  const visible =
+    goal.status === 'paused'
+      ? 'Pausado'
+      : goal.status === 'blocked'
+        ? 'Bloqueado'
+        : `${goal.rounds}/${goal.maxRounds}`;
+
+  return (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      onClick={onOpen}
+      className={cn(
+        'inline-flex h-7 max-w-36 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] font-medium',
+        'transition-opacity duration-150 hover:opacity-90 motion-reduce:transition-none',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+        GOAL_BADGE_TONE[tone],
+      )}
+    >
+      {running ? (
+        <Spinner size="xs" />
+      ) : (
+        <Target aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+      )}
+      <span className="truncate tabular-nums">{visible}</span>
+    </button>
+  );
 }
 
 interface WorkspaceChipProps {
@@ -240,6 +306,7 @@ export function CodeSessionHeader() {
   const closeCodeCommits = useUiStore((state) => state.closeCodeCommits);
   const codeFileTabs = useUiStore((state) => state.codeFileTabs);
   const codePlanTab = useUiStore((state) => state.codePlanTab);
+  const codeGoalOpen = useUiStore((state) => state.codeGoalOpen);
   const codeFileTab = useUiStore((state) => state.codeFileTab);
   const closeCodeFile = useUiStore((state) => state.closeCodeFile);
   const viewportWidth = useViewportWidth();
@@ -300,6 +367,21 @@ export function CodeSessionHeader() {
     if (!session) return 0;
     return session.approvals.length + session.questions.length;
   });
+  // Objetivo persistento da sessão ativa (docs/goals/code-goals): o badge só
+  // aparece quando há objetivo e ele não está concluído (PLAN §10.6).
+  const activeGoal = useCodeStore((state) =>
+    activeId ? (state.byConversation[activeId]?.goal ?? null) : null,
+  );
+  const streaming = useChatStore((state) => state.streaming);
+  const goalRunning = activeGoal
+    ? goalIsRunning(
+        activeGoal,
+        streaming != null,
+        streaming?.turnKind,
+        streaming?.conversationId,
+        activeId,
+      )
+    : false;
   const tabs: SessionTab[] =
     openIds.length === 0
       ? []
@@ -331,6 +413,10 @@ export function CodeSessionHeader() {
     }
     if (id === CODE_PLAN_TAB_ID) {
       useUiStore.getState().setCodeView('plan');
+      return;
+    }
+    if (id === CODE_GOAL_TAB_ID) {
+      useUiStore.getState().openCodeGoal();
       return;
     }
     if (id === NEW_SESSION_ID) return;
@@ -367,6 +453,11 @@ export function CodeSessionHeader() {
     }
     if (id === CODE_PLAN_TAB_ID) {
       useUiStore.getState().closeCodePlan();
+      focusTab(activeId ?? undefined);
+      return;
+    }
+    if (id === CODE_GOAL_TAB_ID) {
+      useUiStore.getState().closeCodeGoal();
       focusTab(activeId ?? undefined);
       return;
     }
@@ -531,6 +622,14 @@ export function CodeSessionHeader() {
           >
             Aguardando aprovação
           </Badge>
+        ) : null}
+
+        {activeGoal && activeGoal.status !== 'completed' ? (
+          <GoalBadge
+            goal={activeGoal}
+            running={goalRunning}
+            onOpen={() => useUiStore.getState().openCodeGoal()}
+          />
         ) : null}
 
         <WorkspaceChip
@@ -721,6 +820,50 @@ export function CodeSessionHeader() {
                 aria-label="Fechar plano"
                 tabIndex={-1}
                 onClick={() => closeTab(CODE_PLAN_TAB_ID)}
+                className={cn(
+                  'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                  'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                )}
+              >
+                <X aria-hidden className="size-3.5" />
+              </button>
+            </div>
+          ) : null}
+          {codeGoalOpen ? (
+            <div
+              role="presentation"
+              className={cn(
+                'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
+                codeView === 'goal'
+                  ? 'bg-surface-raised text-foreground shadow-sm'
+                  : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+              )}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-label="Objetivo da sessão"
+                aria-selected={codeView === 'goal'}
+                aria-controls="code-goal-panel"
+                title="Objetivo da sessão"
+                tabIndex={codeView === 'goal' ? 0 : -1}
+                ref={addTabRef(CODE_GOAL_TAB_ID)}
+                onClick={() => selectTab(CODE_GOAL_TAB_ID)}
+                onKeyDown={(event) => handleTabKeyDown(event, CODE_GOAL_TAB_ID)}
+                className={cn(
+                  'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                  'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                )}
+              >
+                <Target aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+                <span className="truncate">Objetivo</span>
+              </button>
+              <button
+                type="button"
+                aria-label="Fechar objetivo"
+                tabIndex={-1}
+                onClick={() => closeTab(CODE_GOAL_TAB_ID)}
                 className={cn(
                   'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
                   'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',

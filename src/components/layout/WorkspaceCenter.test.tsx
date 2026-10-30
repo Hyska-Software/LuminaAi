@@ -25,6 +25,33 @@ vi.mock('@/components/code', () => ({
   CodePlanView: ({ tab }: { tab: { markdown: string } }) => (
     <div data-testid="code-plan-view">{tab.markdown}</div>
   ),
+  GoalPanel: ({ conversationId, className }: { conversationId: string; className?: string }) => (
+    <section
+      id="code-goal-panel"
+      role="region"
+      aria-label="Objetivo da sessão"
+      className={className}
+      data-testid="goal-panel"
+    >
+      {conversationId}
+    </section>
+  ),
+  GoalDialog: ({
+    conversationId,
+    mode,
+    onClose,
+  }: {
+    conversationId: string;
+    mode: 'create' | 'edit';
+    onClose: () => void;
+  }) => (
+    <div data-testid="goal-dialog">
+      <span>{`${mode}:${conversationId}`}</span>
+      <button type="button" onClick={onClose}>
+        Fechar diálogo do objetivo
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('@/components/skills', () => ({
@@ -41,7 +68,7 @@ vi.mock('@/components/library', () => ({
   LibraryView: () => <div data-testid="library-view" />,
 }));
 
-import { useUiStore } from '@/lib/store';
+import { useChatStore, useUiStore } from '@/lib/store';
 import { WorkspaceCenter } from './WorkspaceCenter';
 
 beforeEach(() => {
@@ -53,7 +80,10 @@ beforeEach(() => {
     codeCommitsTab: null,
     codeFileTab: null,
     codePlanTab: null,
+    codeGoalOpen: false,
+    goalDialog: null,
   });
+  useChatStore.setState({ activeId: null });
 });
 
 afterEach(() => {
@@ -240,5 +270,62 @@ describe('WorkspaceCenter — aba central de arquivo', () => {
 
     expect(screen.queryByTestId('code-file-view')).toBeNull();
     expect(screen.getByTestId('chat-view').parentElement?.className).not.toContain('hidden');
+  });
+});
+
+describe('WorkspaceCenter — aba central de objetivo', () => {
+  it('mostra o GoalPanel no centro com header e chat montados/ocultos', () => {
+    useUiStore.setState({ layoutMode: 'code', codeView: 'goal', codeGoalOpen: true });
+    useChatStore.setState({ activeId: 'c-1' });
+
+    render(<WorkspaceCenter />);
+
+    // O GoalPanel é dono da region/id (sem wrapper duplicado no WorkspaceCenter).
+    const panel = screen.getByRole('region', { name: 'Objetivo da sessão' });
+    expect(panel.id).toBe('code-goal-panel');
+    expect(panel.textContent).toContain('c-1');
+    expect(screen.getByTestId('code-session-header')).toBeTruthy();
+    expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
+  });
+
+  it('sem sessão ativa volta para o chat em vez de um painel fantasma', () => {
+    useUiStore.setState({ layoutMode: 'code', codeView: 'goal', codeGoalOpen: true });
+    useChatStore.setState({ activeId: null });
+
+    render(<WorkspaceCenter />);
+
+    expect(screen.queryByTestId('goal-panel')).toBeNull();
+    expect(screen.getByTestId('chat-view').parentElement?.className).not.toContain('hidden');
+  });
+
+  it('não renderiza o painel do objetivo fora da view goal', () => {
+    useUiStore.setState({ layoutMode: 'code', codeView: 'session' });
+    useChatStore.setState({ activeId: 'c-1' });
+
+    render(<WorkspaceCenter />);
+
+    expect(screen.queryByTestId('goal-panel')).toBeNull();
+    expect(screen.getByTestId('chat-view').parentElement?.className).not.toContain('hidden');
+  });
+
+  it('monta o GoalDialog quando o uiStore pede e fecha pelo onClose', () => {
+    useUiStore.setState({
+      layoutMode: 'code',
+      goalDialog: { conversationId: 'c-1', mode: 'edit' },
+    });
+
+    render(<WorkspaceCenter />);
+
+    expect(screen.getByTestId('goal-dialog').textContent).toContain('edit:c-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar diálogo do objetivo' }));
+    expect(useUiStore.getState().goalDialog).toBeNull();
+  });
+
+  it('não monta o diálogo quando goalDialog é null', () => {
+    useUiStore.setState({ layoutMode: 'code', goalDialog: null });
+
+    render(<WorkspaceCenter />);
+
+    expect(screen.queryByTestId('goal-dialog')).toBeNull();
   });
 });

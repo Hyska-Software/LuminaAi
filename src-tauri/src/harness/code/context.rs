@@ -8,11 +8,11 @@ use std::path::{Path, PathBuf};
 
 use crate::db::Db;
 use crate::domain::{
-    Conversation, GitInfo, PermissionMode, PlanView, ProjectCheckInfo, ProjectInfo, TodoItem,
-    Workspace,
+    Conversation, GitInfo, GoalView, PermissionMode, PlanView, ProjectCheckInfo, ProjectInfo,
+    TodoItem, TurnKind, Workspace,
 };
 
-use super::{prompt, session};
+use super::{goal, prompt, session};
 
 /// Limite do `AGENTS.md` injetado no prompt (mesmo racional do Codex).
 const MAX_AGENTS_CHARS: usize = 32_768;
@@ -52,6 +52,13 @@ pub struct CodeTurnContext {
     pub todos: Vec<TodoItem>,
     pub plan: Option<PlanView>,
     pub plan_mode: bool,
+    /// Objetivo persistente da sessão (`docs/goals/code-goals/PLAN.md`).
+    pub goal: Option<GoalView>,
+    /// Tipo do turno: `goal_round` (rodada automática) muda o texto da seção
+    /// `## Objective` do contexto volátil.
+    pub turn_kind: TurnKind,
+    /// O usuário pediu um objetivo pelo `/goal` neste turno (ver `TurnPayload`).
+    pub goal_request: bool,
 }
 
 impl CodeTurnContext {
@@ -74,6 +81,9 @@ impl CodeTurnContext {
             plan: self.plan.clone(),
             plan_mode: self.plan_mode,
             permission_mode: self.permission_mode,
+            goal: self.goal.clone(),
+            turn_kind: self.turn_kind,
+            goal_request: self.goal_request,
         }
     }
 
@@ -104,13 +114,26 @@ fn project_info(profile: &crate::workspace::project::ProjectProfile) -> ProjectI
     }
 }
 
-/// Monta o contexto do turno a partir do banco e do disco.
+/// Monta o contexto do turno a partir do banco e do disco (turno humano).
 pub async fn build(db: &Db, conversation: &Conversation) -> CodeTurnContext {
+    build_for_turn(db, conversation, TurnKind::User).await
+}
+
+/// Idem, informando o tipo do turno: o `run_turn` passa o `turnKind` do payload
+/// (o tipo não é persistido na conversa). A rodada lê o objetivo **já aberto**
+/// (`begin_round` roda antes da montagem do contexto).
+pub async fn build_for_turn(
+    db: &Db,
+    conversation: &Conversation,
+    turn_kind: TurnKind,
+) -> CodeTurnContext {
     let mut context = CodeTurnContext {
         permission_mode: conversation.permission_mode,
         todos: session::todos(db, &conversation.id).unwrap_or_default(),
         plan: session::plan_view(db, &conversation.id).ok().flatten(),
         plan_mode: session::plan_mode_active(db, &conversation.id).unwrap_or(false),
+        goal: goal::current(db, &conversation.id).ok().flatten(),
+        turn_kind,
         ..Default::default()
     };
 
@@ -291,6 +314,43 @@ mod tests {
         assert!(context.workspace.is_none());
         assert!(context.prompt_context().workspace_path.is_none());
         assert!(!context.plan_mode);
+        assert!(context.goal.is_none());
+        assert_eq!(context.turn_kind, crate::domain::TurnKind::User);
+    }
+
+    #[tokio::test]
+    async fn context_carries_the_goal_and_the_turn_kind() {
+        let db = Db::open_in_memory().expect("db");
+        let conv = conversation(None);
+        let goal = goal::create(
+            &db,
+            &conv.id,
+            &crate::domain::CreateGoalInput {
+                objective: "Migrar pagamentos".into(),
+                title: None,
+                max_rounds: Some(10),
+                auto_continue: Some(true),
+            },
+            crate::domain::GoalOrigin::User,
+        )
+        .expect("objetivo");
+        let context = build_for_turn(&db, &conv, crate::domain::TurnKind::GoalRound).await;
+        assert_eq!(context.turn_kind, crate::domain::TurnKind::GoalRound);
+        assert_eq!(
+            context.goal.as_ref().map(|goal| goal.revision),
+            Some(goal.revision)
+        );
+        let prompt_context = context.prompt_context();
+        assert_eq!(
+            prompt_context.turn_kind,
+            crate::domain::TurnKind::GoalRound
+        );
+        assert!(prompt_context.goal.is_some());
+        // O turno humano não recebe o texto de continuação, mas o objetivo
+        // continua visível como contexto.
+        let human = build(&db, &conv).await;
+        assert_eq!(human.turn_kind, crate::domain::TurnKind::User);
+        assert!(human.goal.is_some());
     }
 
     #[tokio::test]

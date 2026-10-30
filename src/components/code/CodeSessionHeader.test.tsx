@@ -6,6 +6,7 @@ import type {
   ApprovalRequest,
   CodeSessionState,
   Conversation,
+  GoalView,
   Settings,
   Workspace,
 } from '@/lib/types';
@@ -177,6 +178,8 @@ beforeEach(() => {
     codeFileTab: null,
     codeFileTabs: [],
     codePlanTab: null,
+    codeGoalOpen: false,
+    goalDialog: null,
     codePanelOpen: true,
     codePanelTab: 'changes',
     activeWorkspaceId: null,
@@ -185,6 +188,7 @@ beforeEach(() => {
     artifacts: [],
   });
   useCodeStore.setState({ byConversation: {} });
+  useChatStore.setState({ streaming: null });
 });
 
 afterEach(() => {
@@ -990,5 +994,172 @@ describe('CodeSessionHeader — aba central de arquivo', () => {
     expect(document.activeElement).toBe(second);
     fireEvent.keyDown(second, { key: 'ArrowRight' });
     expect(document.activeElement).toBe(diff);
+  });
+});
+function goal(overrides: Partial<GoalView> = {}): GoalView {
+  return {
+    title: 'Fechar o bug',
+    objective: 'Corrigir o cálculo de juros.',
+    status: 'active',
+    autoContinue: true,
+    rounds: 3,
+    maxRounds: 25,
+    revision: 7,
+    origin: 'user',
+    createdAt: 1_000,
+    updatedAt: 2_000,
+    completedAt: null,
+    lastRoundAt: null,
+    lastNote: null,
+    pauseReason: null,
+    pauseDetail: null,
+    blockerReason: null,
+    blockerStreak: 0,
+    stalledRounds: 0,
+    tokens: 0,
+    cost: 0,
+    ...overrides,
+  };
+}
+
+function seedGoalSession(goalValue: GoalView, title = 'Sessão com objetivo'): void {
+  useChatStore.setState({
+    conversations: [conversation({ id: 'c-1', title })],
+    activeId: 'c-1',
+  });
+  useCodeStore.setState({
+    byConversation: {
+      'c-1': { ...emptyCodeSession('c-1'), goal: goalValue },
+    },
+  });
+}
+
+describe('CodeSessionHeader — objetivo (badge)', () => {
+  it('mostra o badge de rodada do objetivo ativo e abre o painel ao clicar', async () => {
+    seedGoalSession(goal());
+
+    render(<CodeSessionHeader />);
+
+    const badge = await screen.findByRole('button', {
+      name: 'Abrir objetivo: ativo, rodada 3 de 25, continuidade automática',
+    });
+    expect(badge.textContent).toContain('3/25');
+
+    fireEvent.click(badge);
+
+    expect(useUiStore.getState().codeGoalOpen).toBe(true);
+    expect(useUiStore.getState().codeView).toBe('goal');
+  });
+
+  it('badge pausado expõe o motivo no nome acessível', async () => {
+    seedGoalSession(goal({ status: 'paused', pauseReason: 'error', autoContinue: false }));
+
+    render(<CodeSessionHeader />);
+
+    const badge = await screen.findByRole('button', {
+      name: /Abrir objetivo: pausado \(Pausado após um erro\)/,
+    });
+    expect(badge.textContent).toBe('Pausado');
+  });
+
+  it('badge bloqueado usa o tom de perigo', async () => {
+    seedGoalSession(goal({ status: 'blocked', autoContinue: false }));
+
+    render(<CodeSessionHeader />);
+
+    const badge = await screen.findByRole('button', { name: 'Abrir objetivo: bloqueado' });
+    expect(badge.className).toContain('bg-danger-soft');
+    expect(badge.textContent).toBe('Bloqueado');
+  });
+
+  it('rodada em andamento mostra spinner e N/M', async () => {
+    seedGoalSession(goal());
+    useChatStore.setState({
+      streaming: {
+        turnId: 'turn-1',
+        conversationId: 'c-1',
+        assistantId: 'assistant-1',
+        userMessageId: 'user-1',
+        phase: 'text',
+        step: 1,
+        startedAt: 1,
+        turnKind: 'goal_round',
+      },
+    });
+
+    render(<CodeSessionHeader />);
+
+    const badge = await screen.findByRole('button', {
+      name: 'Abrir objetivo: rodada 3 de 25 em andamento',
+    });
+    expect(badge.textContent).toContain('3/25');
+    expect(badge.querySelector('svg')).toBeTruthy();
+  });
+
+  it('objetivo concluído não mostra badge', async () => {
+    seedGoalSession(goal({ status: 'completed', autoContinue: false }));
+
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Sessão com objetivo' })).toBeTruthy());
+
+    expect(screen.queryByRole('button', { name: /Abrir objetivo/ })).toBeNull();
+  });
+
+  it('sem objetivo não mostra badge', () => {
+    render(<CodeSessionHeader />);
+    expect(screen.queryByRole('button', { name: /Abrir objetivo/ })).toBeNull();
+  });
+});
+
+describe('CodeSessionHeader — aba central do objetivo', () => {
+  beforeEach(() => {
+    seedGoalSession(goal());
+  });
+
+  it('mostra a aba Objetivo, ativa no centro e fecha pelo X', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão com objetivo')).toBeTruthy());
+
+    act(() => {
+      useUiStore.getState().openCodeGoal();
+    });
+
+    const goalTab = await screen.findByRole('tab', { name: 'Objetivo da sessão' });
+    expect(goalTab.getAttribute('aria-selected')).toBe('true');
+    expect(goalTab.getAttribute('aria-controls')).toBe('code-goal-panel');
+    expect(goalTab.textContent).toBe('Objetivo');
+    // A aba da sessão deixa de parecer ativa enquanto o painel está no centro.
+    expect(tab('Sessão com objetivo').getAttribute('aria-selected')).toBe('false');
+
+    // Voltar para a sessão mantém a aba do objetivo disponível.
+    fireEvent.click(tab('Sessão com objetivo'));
+    expect(useUiStore.getState().codeView).toBe('session');
+    expect(goalTab.getAttribute('aria-selected')).toBe('false');
+
+    fireEvent.click(goalTab);
+    expect(useUiStore.getState().codeView).toBe('goal');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar objetivo' }));
+    expect(useUiStore.getState().codeGoalOpen).toBe(false);
+    expect(useUiStore.getState().codeView).toBe('session');
+    expect(screen.queryByRole('tab', { name: 'Objetivo da sessão' })).toBeNull();
+  });
+
+  it('navegação por teclado alcança a aba e Delete a fecha', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão com objetivo')).toBeTruthy());
+    act(() => {
+      useUiStore.getState().openCodeGoal();
+    });
+    const goalTab = await screen.findByRole('tab', { name: 'Objetivo da sessão' });
+
+    tab('Sessão com objetivo').focus();
+    fireEvent.keyDown(tab('Sessão com objetivo'), { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(goalTab);
+
+    fireEvent.keyDown(goalTab, { key: 'Delete' });
+    expect(useUiStore.getState().codeGoalOpen).toBe(false);
+    expect(useUiStore.getState().codeView).toBe('session');
+    expect(screen.queryByRole('tab', { name: 'Objetivo da sessão' })).toBeNull();
   });
 });

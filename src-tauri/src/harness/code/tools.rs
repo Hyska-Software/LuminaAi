@@ -185,6 +185,7 @@ mod tests {
             observed: None,
             jobs: None,
             questions: None,
+            turn_kind: crate::domain::TurnKind::User,
             mcp: None,
             subagent: None,
             skills_roots: Vec::new(),

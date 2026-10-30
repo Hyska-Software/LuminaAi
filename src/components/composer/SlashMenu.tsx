@@ -16,7 +16,14 @@ export interface SlashMenuProps {
   onHoverIndex: (index: number) => void;
 }
 
-const GROUP_ORDER: SlashCommandGroup[] = ['Sessão', 'Plano', 'Git', 'Contexto', 'Projeto'];
+const GROUP_ORDER: SlashCommandGroup[] = [
+  'Sessão',
+  'Plano',
+  'Objetivo',
+  'Git',
+  'Contexto',
+  'Projeto',
+];
 
 /**
  * Listbox de comandos `/` do modo Code (WORKBENCH §12). Os grupos preservam a

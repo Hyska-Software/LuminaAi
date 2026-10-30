@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { CodeSessionState, Conversation, JobView, PermissionMode } from '@/lib/types';
+import type { CodeSessionState, Conversation, GoalView, JobView, PermissionMode } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
   setPermissionMode: vi.fn(),
@@ -60,6 +60,22 @@ function job(overrides: Partial<JobView> = {}): JobView {
     status: 'running',
     startedAt: 1,
     durationMs: 1_200,
+    ...overrides,
+  };
+}
+
+function goalFixture(overrides: Partial<GoalView> = {}): GoalView {
+  return {
+    title: 'Deixar o build verde',
+    objective: 'Corrigir os erros de TypeScript.',
+    status: 'active',
+    autoContinue: true,
+    rounds: 1,
+    maxRounds: 25,
+    revision: 2,
+    origin: 'user',
+    createdAt: 1,
+    updatedAt: 2,
     ...overrides,
   };
 }
@@ -306,5 +322,33 @@ describe('CodeSessionControls — popover de plano e tarefas', () => {
       title: 'Plano',
       updatedAt: 7,
     });
+  });
+});
+
+describe('CodeSessionControls — objetivo da sessão', () => {
+  it('mostra o botão só com ícone para criar objetivo com /goal', () => {
+    seedSession();
+    render(<CodeSessionControls conversationId="c-1" />);
+
+    expect(screen.getByRole('button', { name: 'Criar objetivo com /goal' })).toBeTruthy();
+  });
+
+  it('posiciona o controle do objetivo entre o Plano e o popover "Plano e tarefas"', () => {
+    seedSession({ goal: goalFixture({ rounds: 3 }) });
+    render(<CodeSessionControls conversationId="c-1" />);
+
+    expect(
+      screen.getByRole('button', { name: /^Objetivo: Automático — Rodada 3 de 25$/ }),
+    ).toBeTruthy();
+
+    const labels = screen
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('aria-label') ?? '');
+    const planIndex = labels.findIndex((label) => label.startsWith('Modo Plano:'));
+    const goalIndex = labels.findIndex((label) => label.startsWith('Objetivo:'));
+    const planTasksIndex = labels.indexOf('Plano, tarefas e trabalhos em segundo plano');
+    expect(planIndex).toBeGreaterThanOrEqual(0);
+    expect(goalIndex).toBeGreaterThan(planIndex);
+    expect(planTasksIndex).toBeGreaterThan(goalIndex);
   });
 });

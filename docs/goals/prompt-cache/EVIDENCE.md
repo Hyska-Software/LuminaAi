@@ -4,13 +4,13 @@
 > comando, JSON do benchmark, `usage` reportado pelo provedor, teste que passa) e não
 > para uma descrição do que deveria acontecer.
 >
-> Estado: **implementado e verificado automaticamente + prova live no gateway
-> OpenCode (anthropic)**. F0–F6 implementados e cobertos por teste; aceite do
-> PLAN §2.4 atendido no caminho do produto (E2E `run_turn`: steady 99,7%) e no
-> provider-level (99,92%/98,48%), com o escopo de evidência reduzido documentado
-> na §6 (OpenAI/Anthropic diretos sem credencial; N=5/p50/p10 live não executados;
-> Google indisponível no gateway).
-
+> Estado: **concluído — `complete with documented exceptions`** (REVIEW-FINAL
+> rodada 4). F0–F6 implementados e cobertos por teste; prova live no gateway
+> OpenCode/anthropic e E2E `run_turn` com cold-start real (steady 99,70%, ciclo
+> 92,87%, baseline 0,0%). Exceções documentadas na §6: OpenAI/Anthropic diretos sem
+> credencial válida, gateway `openai-chat` sem reporte, gateway `google`
+> indisponível, N=5/p50/p10 run-level reduzido a uma run e verificação visual
+> manual no app empacotado não executada.
 ## 0. Progresso de execução
 
 ### Rodada 1 (29/10/2026)
@@ -43,7 +43,7 @@ pnpm test                                  # 2194/2194 em 1 rodada; flakes de ti
 | F4a: `plan`/`apply` reais (Anthropic 3 breakpoints/TTL 1h/máx. 4/idempotente/sem alterar texto; OpenAI `prompt_cache_key` sha256 64 + retention gated; Google no-op) | `cargo test --lib providers` (98 testes) |
 | F4b: `CompletionRequest.cache_plan`, ordem `build_body → apply → digest` nos 4 adaptadores, digest estável pré/pós-apply, fallback 400 único sem plano | testes por adaptador + cross-protocol |
 | Probe (F4.0): `scripts/probe-cache.mjs` (2 requests/rota, usage reportado) — smoke sem credenciais registrou `sem credencial`; probes reais pendentes | `docs/goals/prompt-cache/evidence/probe-smoke.json` |
-Fases F0–F6 concluídas (ver §1.1–§1.4 e §6). Limpeza F6.2: módulo de compactação compartilhado, dead code removido, warnings do **harness** 10→0 (demais áreas têm warnings pré-existentes), `render_decisions` para tool result/imagem/anexo/replay, `/compact` manual cache-safe. Gate final em §5. O que não foi provado ao vivo está listado como exceção documentada na §6.
+Fases F0–F6 concluídas (ver §1.1–§1.4 e §6). Limpeza F6.2: módulo de compactação compartilhado, dead code removido, **warnings do módulo harness 10→0** (o `cargo test --lib` ainda emite warnings de outras áreas + warnings test-only pré-existentes; não se afirma “zero warnings no crate”), `render_decisions` para tool result/imagem/anexo/replay, `/compact` manual cache-safe. Gate final em §5. O que não foi provado ao vivo está listado como exceção documentada na §6.
 
 ## 1. Baseline (antes — F0a)
 
@@ -52,7 +52,7 @@ Artefatos brutos: `docs/goals/prompt-cache/evidence/`.
 
 | Provedor | Protocolo | Modelo/perfil | Hit% p50 (requests com ceiling ≥98%) | Hit% ciclo de vida | N requests | Fonte |
 | --- | --- | --- | --- | --- | --- | --- |
-| opencode-go (E2E `run_turn`, fixture 12 turnos; **ablação baseline**: catálogo sem `provider.cache` ⇒ plan None) | `anthropic` | `claude-haiku-5-5` | **0,0%** (steady) | 0,0% | — | auth.json | **medido** (`bench-e2e-live-*.json`; baseline histórico pré-implementação não foi capturado antes do F0a — a ablação sem plano é a referência reproduzível) |
+| opencode-go (E2E `run_turn`, 12 turnos; **ablação baseline**: catálogo sem `provider.cache` ⇒ plan None) | `anthropic` | `claude-haiku-5-5` | **0,0%** (steady) | 0,0% | 12 | `bench-e2e-live-*.json` — baseline histórico pré-implementação não capturado antes do F0a; a ablação sem plano é a referência reproduzível |
 
 Campos obrigatórios por linha: `P`/`Δ`/`ceiling` por request, `usage` bruto
 (Anthropic read+creation; OpenAI cached/write; Google cachedContent; OpenCode
@@ -85,7 +85,8 @@ Teste `#[ignore]` `providers::cache::tests::live_cache_gateway_anthropic_roundtr
 [live_cache_gateway] 2ª hit = 99.92% (5211/5215)
 ```
 
-Comando: `cd src-tauri && cargo test --lib live_cache_gateway -- --ignored --nocapture`.
+Comando: `cd src-tauri && cargo test --lib live_cache_gateway -- --ignored --nocapture
+cd src-tauri && cargo test --lib cache_bench -- --ignored --nocapture`.
 Leitura: write 5.211 tokens (TTL 1h) na 1ª e read exato na 2ª; `input=4` é só a
 cauda após o último breakpoint (prova do posicionamento system+tail). **Primeira
 prova live 99,92% do caminho completo do Lumina.**
@@ -131,21 +132,32 @@ Teste `#[ignore]` `harness::cache::bench::cache_bench_e2e_live` (DB/data_dir tem
 opencode-go/`claude-haiku-5-5`, TTL 1h):
 
 ```
-lumina bench live: requests=12 steady=10 hit_steady=99.7% hit_all=91.4% min_steady=99.69%
+lumina bench live: requests=12 steady=10 hit_steady=99.699% min=99.695% p50=99.699% p10=99.696%
+                   hit_all=92.76% coldWriteTokens=11994 firstRequestHit=16.46% lifecycleHit=92.87%
 lumina bench baseline (catálogo sem provider.cache ⇒ plan=None):
-  requests=12 steady=10 hit_steady=0.0% hit_all=0.0%
+  requests=12 steady=10 hit_steady=0.0% hit_all=0.0% coldWrite=0 firstHit=0 lifecycle=0
+GATE live steady hit 99.699% (target 98%, hard floor 95%); baseline 0.0%
 ```
 
-- Artefato bruto: `docs/goals/prompt-cache/evidence/bench-e2e-live-2026-10-29.json`.
-- **Steady 99,7%** no caminho completo do produto (snapshot/surface/tracker/evento),
-  contra **0,0%** de baseline sem cache — atribuição do ganho ao plano é direta.
-- Ciclo de vida da execução: 91,4% (12 requests; cold write de 12–13k tokens), dentro
-  da regra do PLAN (98% de ciclo só em fixture longa).
-- `cargo test --lib cache_bench -- --ignored` agora encontra/roda o teste live (não é
-  mais gate vazio: 1 teste executado); o teste sintético `cache_bench_synthetic_120_requests_steady_state`
-  cobre 120 requests (steady=118, hit 100%) no gate normal.
-- Limitação declarada: uma execução live (custo/latência); N=5/p50/p10 não foram
-  rodados em live — o p50/p10 fica no teste sintético e na matriz provider-level.
+- Artefato válido (único por run, nunca sobrescrito):
+  `docs/goals/prompt-cache/evidence/bench-e2e-live-2026-10-29T202639.json`
+  (execuções anteriores preservadas como histórico: T200230/T200427/T202349).
+- **Live: steady 99,70%, min 99,70%, p50 99,70%, p10 99,70%** (12 turnos,
+  `run_turn` real) contra **baseline 0,0%** — atribuição do ganho ao plano é
+  direta; gate `cache_bench_e2e_live` com target 98%/hard floor 95%.
+- **Cold-start real medido** (nonce único por run no system prompt/identity/turno):
+  `coldWriteTokens=11994`, `firstRequestHit=16,46%`, `lifecycleHit=92,87%`.
+  Decomposição honesta do 1º request: `cache_creation=11994`, `cache_read=2364`,
+  `input=4` — os 2364 tokens lidos são o bloco imutável de tool definitions (com
+  breakpoint no plano anthropic); system/histórico estão frios (write real). O
+  artifact registra `coldStartMethod`. Ciclo de vida de fixture longa continua
+  coberto pelo sintético de 120 requests (steady=118, hit 100%, p50/p10/min 100%,
+  epoch 1 sem quebras), conforme PLAN §2.3.
+- `cargo test --lib cache_bench -- --ignored` roda **1 teste** (`cache_bench_e2e_live`);
+  sem credencial/fixture ele grava artifact `{skipped:true,...}` e imprime `SKIP`,
+  sem falhar o CI (skip não conta como prova).
+- N=5 run-level: suportado por `LUMINA_BENCH_REPETITIONS=5` (default 1 por custo);
+  a execução publicada é uma run + percentis por request — exceção declarada na §6.
 
 #### Outras entregas verificadas na mesma rodada
 
@@ -161,7 +173,7 @@ Ver `PLAN.md` §2.4. Para cada `perfil × provedor × protocolo × modelo`:
 
 | Perfil | Provedor | Protocolo | Modelo | Hit% p50 (ceiling ≥98%) | Hit% ciclo de vida | Custo vs. baseline | Credencial | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Chat/Code (E2E `run_turn`, harness completo) | opencode-go | `anthropic` | `claude-haiku-5-5` | **99,7–100%** (steady 3–12; runs de 29/10) | 91,4% (12 requests; cold write) | — | auth.json | **provado** (artefato `bench-e2e-live-*.json`) |
+| Chat/Code (E2E `run_turn`, harness completo) | opencode-go | `anthropic` | `claude-haiku-5-5` | **99,70%** (steady 3–12; run T202639) | 92,87% (12 requests; coldWrite 11994, firstHit 16,46%) | — | auth.json | **provado** (`bench-e2e-live-2026-10-29T202639.json`) |
 | Provider-level (`stream_completion`, bench 10 requests) | opencode-go | `anthropic` | `claude-haiku-5-5` | **98,48%** (steady 3–10) | 89,30% | — | auth.json | **provado** (`live_cache_gateway_anthropic_bench`) |
 | Chat/Code | opencode-go | `openai-chat` | `deepseek-v4-pro` | — | — | — | auth.json | **não reportado** (probe: read/write=0 em 2 requests) |
 | Chat/Code | openai | `openai-responses` | seed | — | — | — | OAuth expirado | **implementado, não provado** |
@@ -214,6 +226,7 @@ cd src-tauri && cargo check                                  # OK
 cd src-tauri && cargo test --lib                             # 937 passed, 0 failed, 13 ignored
 cd src-tauri && cargo build                                  # OK (binário debug)
 cd src-tauri && cargo test --lib live_cache_gateway -- --ignored --nocapture
+cd src-tauri && cargo test --lib cache_bench -- --ignored --nocapture
                                                              # 99,92% (2 requests) e 98,48% steady (bench de 10)
 pnpm typecheck                                               # OK
 pnpm test                                                    # 2216/2216 verdes
@@ -231,7 +244,7 @@ pnpm build                                                   # OK
 | `/compact` manual | **resolvido** | comando usa `summarize_manual_for_conversation` (prefixo normal + `summary_instruction` + `cache_plan`); projeção `context/compacted`/`to_seq` mantidas |
 | `usage_summary` | `#[cfg(test)]` | usado pelos testes de agregação; produção usa `cache_session_aggregate`/`get_cache_stats` |
 | Matriz completa OpenAI/Anthropic/gateway chat | cobertura parcial | gateway anthropic provado no harness E2E (99,7%) e provider-level (98,48%); gateway `openai-responses` provado no probe (write/read 1113); gateway `google` 400 “Model is unavailable”; OpenAI/Anthropic diretos exigem credencial |
-| N=5/p50/p10 em live | reduzido | uma execução E2E live (custo/latência) + bench sintético de 120 requests (steady 118, 100%); p50/p10 ficam no sintético; exceção declarada |
+| N=5/p50/p10 em live | **resolvido no código, execução reduzida** | p50/p10 implementados (nearest-rank por request) e publicados no artifact; N run-level via `LUMINA_BENCH_REPETITIONS=5` (default 1 por custo/latência); a execução publicada é uma run com p50/p10 por request |
 | TTL/mínimo/economia/usage bruto na UI | **resolvido** | `get_cache_stats` enriquece `ttl_seconds`/`min_cacheable_tokens`/`savings_usd` do catálogo; `CacheSample.raw_usage` recebe `ProviderEvent::UsageRaw` sanitizado (≤4 KB) e é persistido; UI mostra/copia |
 | D7 imagem/anexo/replay | **resolvido** | `render_decisions` kind image/attachment/replay congeladas na primeira inclusão; budget de imagem entre turnos/restart testado (0 quebras) |
 | Verificação manual no app empacotado | não executada (sem automação de UI) | `pnpm build` + `cargo build` OK; validação visual manual não foi registrada — exceção declarada |
@@ -254,5 +267,6 @@ pnpm build                                                   # OK
 - Limpeza final (F6.2): módulo de compactação compartilhado (`harness/compaction.rs`), dead code removido, warnings do harness 10 → 0.
 - Poda de tool results no trecho mantido: `render_decisions` kind `tool_result`, replay/restart determinístico, transcript do resumo usa o original (documentado).
 - `/compact` manual migrado para o helper cache-safe do harness (`summarize_manual_for_conversation`); task-26 resolvida.
-- Gate final: `cargo test --lib` **937 passed, 0 failed, 13 ignored**; `pnpm test` **2216/2216**; `pnpm typecheck`/`pnpm build`/`cargo build` OK.
-- Desvios registrados durante a execução: fixture live do bench usando 36k chars (não 6k) para satisfazer `minTokens`/ceiling; gateway `openai-chat` sem reporte de cache; OpenAI/Anthropic diretos sem credencial válida.
+- Gate final: `cargo test --lib` **937 passed, 0 failed, 13 ignored**; `cargo test --lib cache_bench -- --ignored` **1 teste** (live, artefato único); `pnpm test` **2216/2216** (isolado, com `testTimeout` 15 s); `pnpm typecheck`/`pnpm build`/`cargo build` OK.
+- Claims de warnings: o import de `render.rs` foi removido; resta **1 warning test-only** em `harness/mod.rs` (unused variable `covered_big`, não produção). O EVIDENCE não afirma “zero warnings no crate”; demais áreas mantêm warnings pré-existentes.
+- Revisão final (REVIEW-FINAL.md): rodada 1 `incomplete` (3 blockers), rodada 2 `complete with documented exceptions` após B1/B2/B3, rodada 3 parcial em EVIDENCE/cold-start, rodada 4 **`complete with documented exceptions`** (artifact T202639 com cold-start real 11994 write, steady 99,70%, lifecycle 92,87%, baseline 0%).\n- Desvios registrados durante a execução: fixture live do bench usando 36k chars (não 6k) para satisfazer `minTokens`/ceiling; gateway `openai-chat` sem reporte de cache; OpenAI/Anthropic diretos sem credencial válida.

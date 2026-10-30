@@ -6,10 +6,12 @@ import {
   CodePlanView,
   CodeSessionHeader,
   CodeWelcomeScreen,
+  GoalDialog,
+  GoalPanel,
 } from '@/components/code';
 import { LibraryView } from '@/components/library';
 import { SkillsView } from '@/components/skills';
-import { useUiStore } from '@/lib/store';
+import { useChatStore, useUiStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 
 /**
@@ -35,6 +37,10 @@ export function WorkspaceCenter() {
   const activeView = useUiStore((state) => state.activeView);
   const setActiveView = useUiStore((state) => state.setActiveView);
   const setCodeView = useUiStore((state) => state.setCodeView);
+  const goalDialog = useUiStore((state) => state.goalDialog);
+  const closeGoalDialog = useUiStore((state) => state.closeGoalDialog);
+  /** Sessão ativa no Code (dona do objetivo exibido no painel central). */
+  const activeId = useChatStore((state) => state.activeId);
 
   const isCode = layoutMode === 'code';
   const showSkills = isCode ? codeView === 'skills' : activeView === 'skills';
@@ -42,9 +48,11 @@ export function WorkspaceCenter() {
   const showDiff = isCode && codeView === 'diff' && codeDiffTab !== null;
   const showFile = isCode && codeView === 'file' && codeFileTab !== null;
   const showPlan = isCode && codeView === 'plan' && codePlanTab !== null;
+  const showGoal = isCode && codeView === 'goal' && activeId !== null;
   const showCommits = isCode && codeView === 'commits' && codeCommitsTab !== null;
-  const showChat = !showSkills && !showLibrary && !showDiff && !showCommits && !showFile && !showPlan;
-  const showHeader = isCode && (showChat || showDiff || showCommits || showFile || showPlan);
+  const showChat =
+    !showSkills && !showLibrary && !showDiff && !showCommits && !showFile && !showPlan && !showGoal;
+  const showHeader = isCode && (showChat || showDiff || showCommits || showFile || showPlan || showGoal);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -114,6 +122,11 @@ export function WorkspaceCenter() {
         </div>
       ) : null}
 
+      {/* Objetivo persistente da sessão (docs/goals/code-goals/PLAN.md §10.3):
+          o `GoalPanel` é dono da region/id (`code-goal-panel`) e do scroll; aqui
+          ele só ocupa o centro no lugar da conversa. */}
+      {showGoal && activeId ? <GoalPanel conversationId={activeId} /> : null}
+
       {showSkills ? (
         <SkillsView
           onBack={() => (isCode ? setCodeView('session') : setActiveView('chat'))}
@@ -122,6 +135,16 @@ export function WorkspaceCenter() {
       ) : null}
 
       {showLibrary ? <LibraryView /> : null}
+
+      {/* Diálogo de criação/edição do objetivo, aberto pelo pill do composer,
+          pelo card de atenção, pelo `/goal` ou pelo painel central. */}
+      {goalDialog ? (
+        <GoalDialog
+          conversationId={goalDialog.conversationId}
+          mode={goalDialog.mode}
+          onClose={closeGoalDialog}
+        />
+      ) : null}
     </div>
   );
 }

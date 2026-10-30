@@ -477,3 +477,30 @@ pub struct ToolSpec {
 
 Cada código tem mensagem acionável e um teste — o modelo recebe o código em `code` (envelope) e a
 mensagem em `content`; a UI mostra o código no card de erro (para diagnóstico).
+
+## 7. Tool `goal` — objetivo da sessão (v1.11)
+
+Fonte de produto/UI: `docs/goals/code-goals/PLAN.md`. Resumo do contrato:
+
+- `name:"goal"`, `parallel: Exclusive`, `risk: Read`, `mutating: false`,
+  `requires_workspace: true`, profiles `[Code]` (24ª tool do catálogo, entre `ask_user` e `task`);
+  ausente em subagentes (não está em `readonly_tools()`).
+- Schema estrito: `{ action: "create"|"edit"|"progress"|"complete"|"blocked", objective?, title?,
+  max_rounds? (1..=100), auto_continue?, note? }`, `required:["action"]`,
+  `additionalProperties:false`.
+- **Ativação (v1.12)**: o usuário usa `/goal` + mensagem; o comando apenas ativa um chip no
+  composer (sem texto automático) e o turno humano leva `goalRequest=true`. O harness injeta uma
+  seção volátil `## Goal request` no runtime context instruindo o agente a chamar `create` com
+  `objective`, `title`, `max_rounds` e `auto_continue` (default do fluxo: **true**). O driver
+  inicia a rodada ao fim do turno.
+- Regras: `create`/`edit` só em turno humano (`GOAL_REQUIRES_USER_TURN`); `create` exige objetivo,
+  não aceita objetivo ativo/pausado/bloqueado, usa `origin=agent` e honra `auto_continue` explícito
+  (sem o parâmetro, proposta nasce desarmada); `progress` exige objetivo ativo/pausado, nota ≤2 000 e
+  zera estol; `complete` grava resumo/evidência; `blocked` exige motivo e aplica a regra de 3 motivos
+  normalizados iguais (antes disso responde "registrado N/3").
+- Saída model-facing curta (1–3 linhas); `presentation` flat `{kind:"goal", ...GoalView camelCase}`
+  para o card da timeline; emite `GoalUpdated`.
+- Códigos adicionais: `GOAL_NOT_FOUND`, `GOAL_NOT_ACTIVE`, `GOAL_ALREADY_EXISTS`,
+  `GOAL_STALE_REVISION`, `GOAL_MAX_ROUNDS`, `GOAL_PLAN_MODE`, `GOAL_INVALID_ARGS`,
+  `GOAL_REQUIRES_USER_TURN`, `GOAL_NOT_ARMED`, `GOAL_BUSY`, `GOAL_NO_WORKSPACE`,
+  `GOAL_PERSIST_FAILED`, `GOAL_TURN_REQUIRES_CODE`, `GOAL_REQUIRES_TOP_LEVEL`.
