@@ -28,6 +28,25 @@ describe('LayoutModeSwitch', () => {
     expect(code.getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('uses icons instead of visible labels, keeping accessible names and hints', () => {
+    render(<LayoutModeSwitch />);
+
+    const chat = screen.getByRole('button', { name: 'Chat' });
+    const code = screen.getByRole('button', { name: 'Code' });
+
+    expect(chat.textContent).toBe('');
+    expect(code.textContent).toBe('');
+    expect(chat.getAttribute('title')).toBe('Layout de conversa');
+    expect(code.getAttribute('title')).toBe('Layout de código');
+
+    for (const button of [chat, code]) {
+      const icon = button.querySelector('svg');
+      expect(icon).not.toBeNull();
+      expect(icon?.getAttribute('aria-hidden')).toBe('true');
+      expect(icon?.getAttribute('class')).toContain('size-4');
+    }
+  });
+
   it('switches the layout mode and persists the choice', () => {
     render(<LayoutModeSwitch />);
 

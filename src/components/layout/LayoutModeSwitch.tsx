@@ -1,3 +1,4 @@
+import { Code, MessageSquare, type LucideIcon } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useUiStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
@@ -7,11 +8,12 @@ interface LayoutModeOption {
   value: 'chat' | 'code';
   label: string;
   title: string;
+  icon: LucideIcon;
 }
 
 const MODES: readonly LayoutModeOption[] = [
-  { value: 'chat', label: 'Chat', title: 'Layout de conversa' },
-  { value: 'code', label: 'Code', title: 'Layout de código' },
+  { value: 'chat', label: 'Chat', title: 'Layout de conversa', icon: MessageSquare },
+  { value: 'code', label: 'Code', title: 'Layout de código', icon: Code },
 ];
 
 /**
@@ -34,17 +36,18 @@ export function LayoutModeSwitch({ className }: { className?: string }) {
         className,
       )}
     >
-      {MODES.map((mode) => {
-        const active = layoutMode === mode.value;
+      {MODES.map(({ value, label, title, icon: Icon }) => {
+        const active = layoutMode === value;
         return (
           <button
-            key={mode.value}
+            key={value}
             type="button"
-            title={mode.title}
+            title={title}
+            aria-label={label}
             aria-pressed={active}
-            onClick={() => setLayoutMode(mode.value)}
+            onClick={() => setLayoutMode(value)}
             className={cn(
-              'relative flex h-8 items-center justify-center rounded-full px-4 text-[13px] font-medium',
+              'relative flex h-8 w-12 items-center justify-center rounded-full',
               'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
               active ? 'text-foreground' : 'text-foreground-muted hover:text-foreground',
             )}
@@ -57,7 +60,7 @@ export function LayoutModeSwitch({ className }: { className?: string }) {
                 transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
               />
             ) : null}
-            <span className="relative">{mode.label}</span>
+            <Icon aria-hidden className="relative size-4" />
           </button>
         );
       })}
