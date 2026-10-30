@@ -8,7 +8,7 @@ import {
   providers as catalogProviders,
 } from '@/lib/catalog';
 import type { ProviderInfo, ReasoningSelection, Settings } from '@/lib/types';
-import { selectModelLocked, useAppStore, useChatStore } from '@/lib/store';
+import { selectActiveConversationStarted, useAppStore, useChatStore } from '@/lib/store';
 import { Badge, NativeSelect } from '@/components/ui';
 import { CapabilityBadges } from '@/components/models';
 import { ThinkingSelector } from '@/components/models/ThinkingSelector';
@@ -41,13 +41,14 @@ export function ModelTab() {
   const setSelection = useAppStore((state) => state.setSelection);
   const setReasoning = useAppStore((state) => state.setReasoning);
   const saveSettings = useAppStore((state) => state.saveSettings);
-  const locked = useChatStore(selectModelLocked);
+  const started = useChatStore(selectActiveConversationStarted);
 
   const providerList: ProviderInfo[] = storeProviders.length ? storeProviders : catalogProviders();
 
-  // This tab edits the *default* model (used by new conversations). Once a
-  // conversation has started its model is locked, so the tab must never touch
-  // the active selection — only the persisted defaults.
+  // This tab edits the *default* model (used by new conversations). A started
+  // conversation owns its model in every layout (a Code session can change it
+  // from the composer/palette, never from here), so the tab must never touch the
+  // active selection — only the persisted defaults.
   const [displayProviderId, setDisplayProviderId] = useState(
     settings.defaultProvider || selection.providerId,
   );
@@ -97,7 +98,7 @@ export function ModelTab() {
       reasoningDefault: reasoningDefaultOf(reasoning),
     });
     // A started conversation keeps its model; only future chats use the default.
-    if (!locked) {
+    if (!started) {
       setSelection({ providerId, modelId, reasoning });
       setReasoning(reasoning);
     }
@@ -126,12 +127,12 @@ export function ModelTab() {
         title="Modelo padrão"
         description="Usado em novas conversas e como seleção inicial do composer."
       >
-        {locked ? (
+        {started ? (
           <SettingsBlock>
             <p className="flex items-start gap-2 text-[11px] leading-relaxed text-warning">
               <Lock aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-              A conversa atual está com o modelo bloqueado. As alterações abaixo valem apenas para as
-              próximas conversas.
+              A conversa atual já foi iniciada. As alterações abaixo valem apenas para as próximas
+              conversas.
             </p>
           </SettingsBlock>
         ) : null}
@@ -189,7 +190,7 @@ export function ModelTab() {
                 value={pendingReasoning}
                 onChange={(reasoning) => {
                   setPendingReasoning(reasoning);
-                  if (!locked) setReasoning(reasoning);
+                  if (!started) setReasoning(reasoning);
                   void saveSettings({ reasoningDefault: reasoningDefaultOf(reasoning) });
                 }}
               />

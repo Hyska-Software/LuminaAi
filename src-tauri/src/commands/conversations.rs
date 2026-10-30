@@ -3,7 +3,11 @@
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::domain::{Conversation, ConversationDetail, MessageRole, MessageStatus, ToolCallStatus};
+use crate::config;
+use crate::domain::{
+    Conversation, ConversationDetail, MessageRole, MessageStatus, PermissionMode, Settings,
+    ToolCallStatus,
+};
 use crate::state::AppState;
 
 fn to_error(error: impl std::fmt::Display) -> String {
@@ -75,6 +79,20 @@ fn resolve_defaults(
 /* CRUD                                                                */
 /* ------------------------------------------------------------------ */
 
+/// Modo de permissão inicial de uma sessão nova.
+///
+/// O Code nasce com o padrão configurado pelo usuário (Configurações →
+/// Ferramentas, `Settings::code_default_permission_mode`); o Chat ignora os
+/// modos, então grava `Edit` (o default histórico da coluna) e não depende da
+/// preferência do Code.
+fn initial_permission_mode(mode: &str, settings: &Settings) -> PermissionMode {
+    if mode == crate::domain::CONVERSATION_MODE_CODE {
+        settings.code_default_permission_mode
+    } else {
+        PermissionMode::Edit
+    }
+}
+
 #[tauri::command]
 pub fn list_conversations(state: State<'_, AppState>) -> Result<Vec<Conversation>, String> {
     state.db.list_conversations().map_err(to_error)
@@ -82,6 +100,7 @@ pub fn list_conversations(state: State<'_, AppState>) -> Result<Vec<Conversation
 
 #[tauri::command]
 pub fn create_conversation(
+    app: AppHandle,
     state: State<'_, AppState>,
     title: Option<String>,
     provider_id: Option<String>,
@@ -95,9 +114,17 @@ pub fn create_conversation(
     let (provider_id, model_id) = resolve_defaults(&state, provider_id, model_id);
     // `mode` ausente/inválido cai no layout padrão (Chat).
     let mode = crate::domain::conversation_mode_or_default(mode.as_deref());
+    let settings = config::load_settings(&app);
+    let permission_mode = initial_permission_mode(&mode, &settings);
     state
         .db
-        .create_conversation_with_mode(&title, &provider_id, &model_id, &mode)
+        .create_conversation_with_mode_and_permission(
+            &title,
+            &provider_id,
+            &model_id,
+            &mode,
+            permission_mode,
+        )
         .map_err(to_error)
 }
 
@@ -139,16 +166,34 @@ pub fn set_conversation_pinned(
 /// Compartilha uma sessão do Chat com o layout Code (`linked = true`) ou
 /// desfaz o vínculo (`linked = false`). Só sessões criadas no Chat podem ser
 /// compartilhadas; o backend devolve a conversa atualizada.
+///
+/// Ao entrar no Code a sessão adota o modo de permissão padrão configurado pelo
+/// usuário (Configurações → Ferramentas): no layout Chat os modos são ignorados,
+/// então é a primeira vez que ele passa a valer.
 #[tauri::command]
 pub fn set_conversation_code_linked(
+    app: AppHandle,
     state: State<'_, AppState>,
     id: String,
     linked: bool,
 ) -> Result<Conversation, String> {
-    state
+    let conversation = state
         .db
         .set_conversation_code_linked(&id, linked)
-        .map_err(to_error)
+        .map_err(to_error)?;
+    if !linked {
+        return Ok(conversation);
+    }
+    let settings = config::load_settings(&app);
+    state
+        .db
+        .set_conversation_permission_mode(&id, settings.code_default_permission_mode)
+        .map_err(to_error)?;
+    state
+        .db
+        .get_conversation(&id)
+        .map_err(to_error)?
+        .ok_or_else(|| "conversa não encontrada após vincular ao Code".to_string())
 }
 
 #[tauri::command]
@@ -169,6 +214,98 @@ pub fn truncate_conversation(
         .db
         .delete_messages_from(&conversation_id, &from_message_id)
         .map_err(to_error)
+}
+
+/* ------------------------------------------------------------------ */
+/* Model change (mid-session, Code only)                               */
+/* ------------------------------------------------------------------ */
+
+/// Valida uma troca de provedor/modelo antes de persistir: normaliza os ids,
+/// exige uma sessão do layout Code e confirma que o par resolve no catálogo.
+///
+/// O Chat mantém o modelo travado após a primeira mensagem; o layout Code —
+/// nativo (`mode == "code"`) ou sessão do Chat vinculada (`codeLinked`) — pode
+/// trocar a rota no meio da conversa. As respostas antigas continuam com o
+/// modelo em que foram geradas (o harness faz o fallback neutro do replay).
+///
+/// O prefixo `MODEL_LOCKED: ` é contrato com o renderer, que o remove ao
+/// mostrar a recusa em pt-BR.
+pub(crate) fn validate_model_change(
+    conversation: &Conversation,
+    provider_id: &str,
+    model_id: &str,
+    provider_known: impl Fn(&str) -> bool,
+    model_known: impl Fn(&str, &str) -> bool,
+) -> Result<(String, String), String> {
+    let provider_id = provider_id.trim();
+    let model_id = model_id.trim();
+    if provider_id.is_empty() {
+        return Err("selecione um provedor para a sessão".to_string());
+    }
+    if model_id.is_empty() {
+        return Err("selecione um modelo para a sessão".to_string());
+    }
+    let is_code_session =
+        conversation.mode == crate::domain::CONVERSATION_MODE_CODE || conversation.code_linked;
+    if !is_code_session {
+        return Err(
+            "MODEL_LOCKED: o modelo do Chat fica travado após a primeira mensagem; \
+             use uma sessão do Code"
+                .to_string(),
+        );
+    }
+    if !provider_known(provider_id) {
+        return Err(format!("provedor desconhecido: {provider_id}"));
+    }
+    if !model_known(provider_id, model_id) {
+        return Err(format!(
+            "modelo `{model_id}` não está disponível no provedor `{provider_id}`"
+        ));
+    }
+    Ok((provider_id.to_string(), model_id.to_string()))
+}
+
+/// Troca o provedor/modelo de uma sessão **do Code** no meio da conversa.
+///
+/// Defesa em profundidade do requisito: o renderer já só oferece a troca em
+/// sessões do Code e fora de um turno ativo; o backend revalida para que a
+/// regra valha também para chamadas IPC diretas. O par precisa resolver na
+/// visão mesclada do catálogo (inclui os modelos que só a conta conhece).
+#[tauri::command]
+pub fn set_conversation_model(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    provider_id: String,
+    model_id: String,
+) -> Result<Conversation, String> {
+    let conversation_id = conversation_id.trim();
+    if conversation_id.is_empty() {
+        return Err("conversa não informada".to_string());
+    }
+    let conversation = state
+        .db
+        .get_conversation(conversation_id)
+        .map_err(to_error)?
+        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))?;
+    let (provider_id, model_id) = validate_model_change(
+        &conversation,
+        &provider_id,
+        &model_id,
+        |provider_id| state.catalog.provider(provider_id).is_some(),
+        |provider_id, model_id| state.model(provider_id, model_id).is_some(),
+    )?;
+    if state.has_active_turn_for(conversation_id) {
+        return Err("MODEL_LOCKED: aguarde a resposta atual terminar".to_string());
+    }
+    state
+        .db
+        .update_conversation_model(conversation_id, &provider_id, &model_id)
+        .map_err(to_error)?;
+    state
+        .db
+        .get_conversation(conversation_id)
+        .map_err(to_error)?
+        .ok_or_else(|| "conversa não encontrada após atualizar o modelo".to_string())
 }
 
 /* ------------------------------------------------------------------ */
@@ -461,6 +598,33 @@ mod tests {
     }
 
     #[test]
+    fn new_code_sessions_start_with_the_configured_permission_mode() {
+        let mut settings = Settings::default();
+        assert_eq!(
+            initial_permission_mode(crate::domain::CONVERSATION_MODE_CODE, &settings),
+            PermissionMode::Autonomous,
+            "padrão de fábrica das novas sessões do Code é Autônomo"
+        );
+
+        settings.code_default_permission_mode = PermissionMode::Review;
+        assert_eq!(
+            initial_permission_mode(crate::domain::CONVERSATION_MODE_CODE, &settings),
+            PermissionMode::Review
+        );
+
+        // O Chat ignora os modos e mantém o valor histórico da coluna.
+        assert_eq!(
+            initial_permission_mode(crate::domain::CONVERSATION_MODE_CHAT, &settings),
+            PermissionMode::Edit
+        );
+        assert_eq!(
+            initial_permission_mode("", &settings),
+            PermissionMode::Edit,
+            "modo ausente cai no layout Chat"
+        );
+    }
+
+    #[test]
     fn markdown_export_includes_messages_reasoning_tools_and_citations() {
         let markdown = export_markdown(&sample_detail());
         assert!(markdown.starts_with("# Receita de bolo\n"));
@@ -493,5 +657,123 @@ mod tests {
         let long = summarize(&"y".repeat(50), 10);
         assert!(long.ends_with('…'));
         assert_eq!(long.chars().count(), 11);
+    }
+
+    fn sample_conversation(mode: &str, code_linked: bool) -> Conversation {
+        let mut conversation = sample_detail().conversation;
+        conversation.mode = mode.to_string();
+        conversation.code_linked = code_linked;
+        conversation
+    }
+
+    #[test]
+    fn model_change_is_locked_for_native_chat_sessions() {
+        let conversation = sample_conversation(crate::domain::CONVERSATION_MODE_CHAT, false);
+        let error =
+            validate_model_change(&conversation, "openai", "gpt-6-luna", |_| true, |_, _| true)
+                .expect_err("Chat nativa não troca de modelo");
+        assert!(
+            error.starts_with("MODEL_LOCKED: "),
+            "o renderer remove esse prefixo: {error}"
+        );
+        assert!(
+            error.contains("Code"),
+            "a recusa deve indicar o Code: {error}"
+        );
+    }
+
+    #[test]
+    fn model_change_is_locked_for_chat_before_touching_the_catalog() {
+        let conversation = sample_conversation(crate::domain::CONVERSATION_MODE_CHAT, false);
+        let error = validate_model_change(
+            &conversation,
+            "openai",
+            "gpt-6-luna",
+            |_| panic!("o catálogo não deve ser consultado antes da regra de layout"),
+            |_, _| panic!("o catálogo não deve ser consultado antes da regra de layout"),
+        )
+        .expect_err("Chat nativa não troca de modelo");
+        assert!(error.starts_with("MODEL_LOCKED: "), "{error}");
+    }
+
+    #[test]
+    fn model_change_is_allowed_for_code_sessions() {
+        let conversation = sample_conversation(crate::domain::CONVERSATION_MODE_CODE, false);
+        let changed =
+            validate_model_change(&conversation, "openai", "gpt-6-luna", |_| true, |_, _| true)
+                .expect("sessão nativa do Code troca de modelo");
+        assert_eq!(changed, ("openai".to_string(), "gpt-6-luna".to_string()));
+    }
+
+    #[test]
+    fn model_change_is_allowed_for_code_linked_chat_sessions() {
+        let conversation = sample_conversation(crate::domain::CONVERSATION_MODE_CHAT, true);
+        let changed = validate_model_change(
+            &conversation,
+            "anthropic",
+            "claude-opus-5-5",
+            |provider_id| provider_id == "anthropic",
+            |provider_id, model_id| provider_id == "anthropic" && model_id == "claude-opus-5-5",
+        )
+        .expect("sessão do Chat vinculada ao Code troca de modelo");
+        assert_eq!(
+            changed,
+            ("anthropic".to_string(), "claude-opus-5-5".to_string())
+        );
+    }
+
+    #[test]
+    fn model_change_trims_the_ids_before_looking_them_up() {
+        let conversation = sample_conversation(crate::domain::CONVERSATION_MODE_CODE, false);
+        let changed = validate_model_change(
+            &conversation,
+            "  openai  ",
+            "  gpt-6-luna  ",
+            |provider_id| provider_id == "openai",
+            |provider_id, model_id| provider_id == "openai" && model_id == "gpt-6-luna",
+        )
+        .expect("ids com espaços nas pontas");
+        assert_eq!(changed, ("openai".to_string(), "gpt-6-luna".to_string()));
+    }
+
+    #[test]
+    fn model_change_rejects_blank_ids() {
+        let conversation = sample_conversation(crate::domain::CONVERSATION_MODE_CODE, false);
+        let provider_error =
+            validate_model_change(&conversation, "   ", "gpt-6-luna", |_| true, |_, _| true)
+                .expect_err("provedor vazio");
+        assert!(provider_error.contains("provedor"), "{provider_error}");
+        assert!(
+            !provider_error.starts_with("MODEL_LOCKED"),
+            "{provider_error}"
+        );
+
+        let model_error =
+            validate_model_change(&conversation, "openai", "\t", |_| true, |_, _| true)
+                .expect_err("modelo vazio");
+        assert!(model_error.contains("modelo"), "{model_error}");
+        assert!(!model_error.starts_with("MODEL_LOCKED"), "{model_error}");
+    }
+
+    #[test]
+    fn model_change_rejects_unknown_provider_and_model() {
+        let conversation = sample_conversation(crate::domain::CONVERSATION_MODE_CODE, false);
+        let provider_error =
+            validate_model_change(&conversation, "nope", "x", |_| false, |_, _| true)
+                .expect_err("provedor desconhecido");
+        assert_eq!(provider_error, "provedor desconhecido: nope");
+
+        let model_error = validate_model_change(
+            &conversation,
+            "openai",
+            "gpt-inexistente",
+            |_| true,
+            |_, _| false,
+        )
+        .expect_err("modelo desconhecido");
+        assert_eq!(
+            model_error,
+            "modelo `gpt-inexistente` não está disponível no provedor `openai`"
+        );
     }
 }

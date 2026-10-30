@@ -17,7 +17,7 @@ export interface WorkspaceTrustDialogProps {
   workspace: Workspace | null;
   /** Requisição em andamento: mantém o diálogo aberto e desabilita as ações. */
   busy?: boolean;
-  /** Confiar: libera leitura, edição e comandos (modo Editar). */
+  /** Confiar: libera leitura, edição e comandos (mantém o modo da sessão). */
   onConfirm: () => void;
   /** Abrir em leitura: o agente só pode ler até o usuário confiar depois. */
   onReadOnly: () => void;

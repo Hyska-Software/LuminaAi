@@ -192,7 +192,7 @@ describe('useWorkspaces — abrir pasta e confiança', () => {
     expect(mocks.addWorkspace).not.toHaveBeenCalled();
   });
 
-  it('resolver a confiança aplica trusted + modo de permissão e limpa a pendência', async () => {
+  it('confiar libera o workspace e mantém o modo de permissão padrão da sessão', async () => {
     const ws = workspace();
     mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
     mocks.addWorkspace.mockResolvedValue(ws);
@@ -205,9 +205,37 @@ describe('useWorkspaces — abrir pasta e confiança', () => {
     });
 
     mocks.setWorkspaceTrusted.mockResolvedValue({ ...ws, trusted: true });
+
+    await act(async () => {
+      await result.current.resolveTrust(true);
+    });
+
+    expect(mocks.setWorkspaceTrusted).toHaveBeenCalledWith('ws-1', true);
+    // Confiar não força "Editar": a sessão mantém o padrão configurado nas
+    // settings (Autônomo de fábrica) e a escolha por sessão do chip.
+    expect(mocks.setPermissionMode).not.toHaveBeenCalled();
+    // O snapshot do codeStore é recarregado: os chips de permissão/Plano do
+    // composer refletem o modo em vigor assim que o diálogo fecha.
+    expect(mocks.getCodeSessionState).toHaveBeenCalledWith('c-new');
+    await waitFor(() => expect(result.current.pendingTrust).toBeNull());
+  });
+
+  it('abrir em leitura força Leitura na sessão e mantém o workspace sem confiança', async () => {
+    const ws = workspace();
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.addWorkspace.mockResolvedValue(ws);
+    mocks.listWorkspaces.mockResolvedValue([ws]);
+
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    await act(async () => {
+      await result.current.openFolder();
+    });
+
+    mocks.setWorkspaceTrusted.mockResolvedValue({ ...ws, trusted: false });
     mocks.setPermissionMode.mockResolvedValue({
       conversationId: 'c-new',
-      permissionMode: 'edit',
+      permissionMode: 'read_only',
       planMode: false,
       todos: [],
       jobs: [],
@@ -215,13 +243,11 @@ describe('useWorkspaces — abrir pasta e confiança', () => {
     });
 
     await act(async () => {
-      await result.current.resolveTrust(true);
+      await result.current.resolveTrust(false);
     });
 
-    expect(mocks.setWorkspaceTrusted).toHaveBeenCalledWith('ws-1', true);
-    expect(mocks.setPermissionMode).toHaveBeenCalledWith('c-new', 'edit');
-    // O snapshot do codeStore é recarregado: os chips de permissão/Plano do
-    // composer refletem o modo aplicado assim que o diálogo fecha.
+    expect(mocks.setWorkspaceTrusted).toHaveBeenCalledWith('ws-1', false);
+    expect(mocks.setPermissionMode).toHaveBeenCalledWith('c-new', 'read_only');
     expect(mocks.getCodeSessionState).toHaveBeenCalledWith('c-new');
     await waitFor(() => expect(result.current.pendingTrust).toBeNull());
   });

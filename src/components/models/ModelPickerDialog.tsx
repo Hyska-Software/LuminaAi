@@ -38,13 +38,13 @@ import type {
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
-  MODEL_LOCKED_DESCRIPTION,
-  MODEL_LOCKED_TITLE,
-  selectModelLocked,
+  modelLockCopy,
+  modelLockReason,
   useAppStore,
   useChatStore,
   useUiStore,
 } from '@/lib/store';
+import type { ModelLockReason } from '@/lib/store';
 import {
   Badge,
   Button,
@@ -156,8 +156,6 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
   const auth = useAppStore((state) => state.auth);
   const storeProviders = useAppStore((state) => state.providers);
   const toggleFavorite = useAppStore((state) => state.toggleFavorite);
-  const setSelection = useAppStore((state) => state.setSelection);
-  const setReasoning = useAppStore((state) => state.setReasoning);
 
   const providerList = useMemo<ProviderInfo[]>(
     () => (storeProviders.length ? storeProviders : catalogProviders()),
@@ -309,23 +307,30 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
     setFilters([]);
   };
 
-  const commitSelection = (next: PreviewState) => {
+  const commitSelection = async (next: PreviewState) => {
     if (!next.modelId) return;
-    setSelection({ providerId: next.providerId, modelId: next.modelId, reasoning: next.reasoning });
-    setReasoning(next.reasoning);
-    onClose();
+    // The store owns the routing rules: a started Code session persists the pair
+    // on the session, while new/empty chats keep the previous behavior. When the
+    // choice is refused (turn running, backend error) the dialog stays open so
+    // the toast is visible.
+    const committed = await useChatStore.getState().chooseModel({
+      providerId: next.providerId,
+      modelId: next.modelId,
+      reasoning: next.reasoning,
+    });
+    if (committed) onClose();
   };
 
   const commitPreview = () => {
     if (!previewModel || previewUnavailable) return;
-    commitSelection(preview);
+    void commitSelection(preview);
   };
 
   const commitEntry = (entry: ModelListEntry) => {
     if (entry.model.status === 'unavailable') return;
     const same =
       preview.providerId === entry.providerId && preview.modelId === entry.model.id;
-    commitSelection({
+    void commitSelection({
       providerId: entry.providerId,
       modelId: entry.model.id,
       reasoning: same ? preview.reasoning : reasoningForModel(entry.model, preview.reasoning),
@@ -587,11 +592,19 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
 }
 
 /**
- * Shown instead of the selector once the conversation has started: the model is
- * locked for the rest of the conversation, so the dialog only explains why and
- * summarizes the model in use (the thinking mode stays editable in the composer).
+ * Shown instead of the selector while the model cannot change: a started Chat
+ * conversation (or a Code session with a turn running). The compact dialog only
+ * explains why and summarizes the model in use — the thinking mode stays
+ * editable in the composer.
  */
-function ModelLockedDialog({ onClose }: { onClose: () => void }) {
+function ModelLockedDialog({
+  reason,
+  onClose,
+}: {
+  reason: ModelLockReason;
+  onClose: () => void;
+}) {
+  const copy = modelLockCopy(reason);
   const selection = useAppStore((state) => state.selection);
   const storeProviders = useAppStore((state) => state.providers);
   const providerList = storeProviders.length ? storeProviders : catalogProviders();
@@ -608,8 +621,8 @@ function ModelLockedDialog({ onClose }: { onClose: () => void }) {
     >
       <DialogHeader className="gap-3 px-5 pb-4 pt-5">
         <div className="flex flex-col gap-1">
-          <DialogTitle>{MODEL_LOCKED_TITLE}</DialogTitle>
-          <DialogDescription>{MODEL_LOCKED_DESCRIPTION}</DialogDescription>
+          <DialogTitle>{copy.title}</DialogTitle>
+          <DialogDescription>{copy.description}</DialogDescription>
         </div>
 
         <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5">
@@ -647,21 +660,23 @@ function ModelLockedDialog({ onClose }: { onClose: () => void }) {
  *
  * Mounted once in `App` and driven by `useUiStore.modelPickerOpen`; the dialog
  * body is only rendered while open, so every opening starts from a clean state.
- * Once the conversation has messages (or a turn is streaming) the model cannot
- * change anymore: the same dialog then shows the locked explanation instead of
- * the selector (`selectModelLocked`).
+ * The store decides when the model can change: a Chat conversation is locked
+ * after its first message, a Code session stays switchable between turns and a
+ * running turn locks every layout. When locked, the same dialog shows the
+ * explanation instead of the selector (`modelLockReason`).
  */
 export function ModelPickerDialog() {
   const open = useUiStore((state) => state.modelPickerOpen);
   const setOpen = useUiStore((state) => state.setModelPickerOpen);
-  const locked = useChatStore(selectModelLocked);
+  const layoutMode = useUiStore((state) => state.layoutMode);
+  const lockReason = useChatStore((state) => modelLockReason(state, layoutMode));
   const onClose = () => setOpen(false);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       {open ? (
-        locked ? (
-          <ModelLockedDialog onClose={onClose} />
+        lockReason ? (
+          <ModelLockedDialog reason={lockReason} onClose={onClose} />
         ) : (
           <ModelPickerDialogBody onClose={onClose} />
         )

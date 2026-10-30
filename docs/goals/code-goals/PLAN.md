@@ -628,10 +628,12 @@ UI (done): refresh → goal_can_continue → runGoalRound
 - **Botão somente ícone** (`Target`), sem rótulo/`N/M` (pedido de produto v1.12):
   o estado é comunicado pela cor do ícone, pelo spinner durante a rodada e pelo
   `aria-label`/tooltip (`Objetivo: <status> — Rodada N de M`).
-- **Sem objetivo**: o ícone tracejado ativa o chip `/goal` no composer
-  (`requestGoalCreation` → evento `lumina:goal-intent`) e foca o campo — a
-  criação é sempre "mensagem do usuário → tool `goal` create do agente", nunca
-  um formulário nem um prompt automático.
+- **Sem objetivo**: o ícone outline **alterna** o chip `/goal` no composer
+  (`requestGoalCreation`/`onToggleGoalIntent` → `lumina:goal-intent`), com o
+  mesmo comportamento visual e de ativação do toggle do modo Plano — `accent` +
+  `aria-pressed` quando armado; clique de novo no botão (ou clique no badge)
+  desativa a intenção. A criação é sempre "mensagem do usuário → tool `goal`
+  create do agente", nunca um formulário nem um prompt automático.
 - **Com objetivo**: ativo+auto (`accent-soft`), ativo+manual (outline), pausado
   (`warning-soft`), bloqueado (`danger-soft`), concluído (`success-soft`).
   `aria-label` completo e `aria-expanded` vêm do Radix.
@@ -705,7 +707,9 @@ UI (done): refresh → goal_can_continue → runGoalRound
 ### 10.7 Composer
 
 - `CodeSessionControls` ganha `<GoalControls>` entre "Plano" e "Plano e
-  tarefas" — botão **somente ícone** (sem texto/rounds no botão).
+  tarefas" — botão **somente ícone** (sem texto/rounds no botão), com
+  `aria-pressed` e accent quando o chip `/goal` está armado (mesmo padrão do
+  toggle de Plano).
 - **Ativação (v1.12)**: `/goal` em `commands.ts` tem `action: 'intent'` — o
   comando vira um **chip `/goal`** dentro do composer (removível), **não altera
   o texto digitado** e não injeta prompt automático. O usuário digita a tarefa e
@@ -713,15 +717,17 @@ UI (done): refresh → goal_can_continue → runGoalRound
   context instrui o agente a chamar a tool `goal` (action `create`) com
   objective/title/max_rounds/auto_continue. A mensagem do usuário permanece
   exatamente como ele digitou.
-- O ícone sem objetivo ativa o mesmo chip (`requestGoalCreation` →
-  `lumina:goal-intent`); com objetivo, abre o popover de controle. Nenhum
-  caminho abre o formulário de criação.
+- O ícone sem objetivo alterna o mesmo chip (`requestGoalCreation`/
+  `onToggleGoalIntent` → `lumina:goal-intent`): clique liga, clique no botão ou
+  no chip desliga — visual e comportamento idênticos ao toggle do modo Plano.
+  Com objetivo, abre o popover de controle. Nenhum caminho abre o formulário de
+  criação.
 
 ### 10.8 Matriz de estados
 
 | Estado | Pill | Ações | Badge | Card de atenção |
 | --- | --- | --- | --- | --- |
-| inexistente | ícone tracejado (sem texto) | ativa o chip `/goal` no composer | — | — |
+| inexistente | ícone outline (sem texto; accent + `aria-pressed` com o chip armado) | alterna o chip `/goal` no composer (pressed, como o toggle de Plano) | — | — |
 | active+armed idle | accent (ícone) | pausar, concluir, editar, encerrar, abrir | `N/M` | — |
 | active+armed rodando | accent+spinner | pausar após rodada, abrir | spinner+`N/M` | — |
 | active+manual | outline (ícone) | armar, nova rodada, concluir, editar, encerrar | `N/M` | — |
@@ -910,8 +916,8 @@ mudanças de contrato passam pelo Lead.
 | `GoalDialog` | modo legado (sem entrada de UI), edição, Switch só com objetivo ativo, perigo, Esc/foco |
 | `GoalPanel` | vazio (CTA → `/goal` volta para a sessão), carregando, erro/retry, timeline, ações, objetivo longo |
 | `MessageItem` | `goal_round` ⇒ divisor, sem editar/regenerar; `user` normal inalterado |
-| `Composer`/`commands` | `/goal` ativa o chip (mensagem intocada, sem enviar/abrir painel) e o envio leva `goalRequest: true`; remover o chip volta ao turno normal; filtro |
-| `CodeSessionControls` | botão do objetivo somente ícone (`textContent` vazio), `aria-label` completo, ordem Plano → Objetivo → Plano/tarefas |
+| `Composer`/`commands` | `/goal` alterna o chip (mensagem intocada, sem enviar/abrir painel) e o envio leva `goalRequest: true`; clicar no chip (pill accent, sem X) remove a intenção e volta ao turno normal; filtro |
+| `CodeSessionControls` | botão do objetivo somente ícone (`textContent` vazio), `aria-label` completo, `aria-pressed` acompanhando o chip, ordem Plano → Objetivo → Plano/tarefas |
 | `CodeSessionHeader` | badge/aba, teclado, fechamento |
 | `WorkspaceCenter` | `codeView='goal'`; regressão das outras views |
 | `ToolPresentationCard`/`agentTrace` | `kind:'goal'` real/legado/malformado; labels pt-BR; ícone |

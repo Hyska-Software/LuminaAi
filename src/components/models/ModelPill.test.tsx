@@ -8,10 +8,12 @@ import { toast } from 'sonner';
 import { TooltipProvider } from '@/components/ui';
 import { ModelPill } from '@/components/models/ModelPill';
 import { catalog } from '@/lib/catalog';
-import type { ChatMessage } from '@/lib/types';
+import type { ChatMessage, Conversation } from '@/lib/types';
 import {
   MODEL_LOCKED_DESCRIPTION,
   MODEL_LOCKED_TITLE,
+  MODEL_STREAMING_LOCKED_DESCRIPTION,
+  MODEL_STREAMING_LOCKED_TITLE,
   useAppStore,
   useChatStore,
   useUiStore,
@@ -19,11 +21,12 @@ import {
 
 // The store persists the selection through the settings command; there is no
 // Tauri IPC in jsdom, so the call stays pending (the pill never awaits it).
-vi.mock('@/lib/api', () => ({
-  api: {
-    saveSettings: vi.fn(() => new Promise(() => {})),
-  },
+const apiMocks = vi.hoisted(() => ({
+  saveSettings: vi.fn(() => new Promise(() => {})),
+  setConversationModel: vi.fn(),
 }));
+
+vi.mock('@/lib/api', () => ({ api: apiMocks }));
 
 vi.mock('sonner', () => ({
   toast: {
@@ -114,8 +117,51 @@ function modelLockedTrigger(): HTMLButtonElement {
   }) as HTMLButtonElement;
 }
 
+function streamingLockedTrigger(): HTMLButtonElement {
+  return screen.getByRole('button', {
+    name: /^Troca de modelo indisponível durante a resposta\. Atual:/,
+  }) as HTMLButtonElement;
+}
+
+/** A session born in the Code layout: its model can change between turns. */
+function codeSession(overrides: Partial<Conversation> = {}): Conversation {
+  return {
+    id: 'conv-code',
+    title: 'Sessão de código',
+    createdAt: 1,
+    updatedAt: 1,
+    pinned: false,
+    providerId: GO,
+    modelId: CURRENT_MODEL,
+    messageCount: 1,
+    mode: 'code',
+    ...overrides,
+  };
+}
+
+/** Opens a started Code session and records the per-session model persistence. */
+function startCodeSession(session: Conversation = codeSession()): Conversation {
+  useUiStore.setState({ layoutMode: 'code' });
+  useChatStore.setState({
+    activeId: session.id,
+    conversations: [session],
+    messagesByConversation: { [session.id]: [messageFor(session.id)] },
+    streaming: null,
+  });
+  apiMocks.setConversationModel.mockImplementation(
+    async (conversationId: string, providerId: string, modelId: string) => ({
+      ...session,
+      id: conversationId,
+      providerId,
+      modelId,
+    }),
+  );
+  return session;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  apiMocks.setConversationModel.mockReset();
   useAppStore.setState({
     providers: catalog.providers,
     selection: {
@@ -134,7 +180,7 @@ beforeEach(() => {
       defaultModel: CURRENT_MODEL,
     },
   });
-  useUiStore.setState({ modelPickerOpen: false, settingsOpen: false });
+  useUiStore.setState({ modelPickerOpen: false, settingsOpen: false, layoutMode: 'chat' });
   useChatStore.setState({
     conversations: [],
     activeId: null,
@@ -717,7 +763,75 @@ describe('ModelPill (model locked)', () => {
     });
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(modelLockedTrigger()).toBeTruthy();
+    expect(streamingLockedTrigger()).toBeTruthy();
+  });
+
+  it('switches the model of a started Code session through chooseModel', async () => {
+    startCodeSession();
+    const user = userEvent.setup();
+    renderPill();
+
+    const trigger = modelTrigger();
+    expect(trigger.getAttribute('aria-disabled')).toBeNull();
+    expect(trigger.querySelector('svg.lucide-lock')).toBeNull();
+
+    const dialog = await openModelStage(user);
+    await user.click(within(dialog).getByRole('option', { name: 'MiMo-V2.6-Flash' }));
+
+    await waitFor(() =>
+      expect(apiMocks.setConversationModel).toHaveBeenCalledWith(
+        'conv-code',
+        GO,
+        'mimo-v2.6-flash',
+      ),
+    );
+    // The pair is a session property: persisted on the conversation, while the
+    // configured defaults stay untouched.
+    await waitFor(() =>
+      expect(useChatStore.getState().conversations[0]).toMatchObject({
+        providerId: GO,
+        modelId: 'mimo-v2.6-flash',
+      }),
+    );
+    expect(useAppStore.getState().selection).toMatchObject({
+      providerId: GO,
+      modelId: 'mimo-v2.6-flash',
+    });
+    expect(apiMocks.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('explains the streaming lock in the Code layout with the specific copy', async () => {
+    startCodeSession();
+    useChatStore.setState({
+      streaming: {
+        turnId: 'turn-1',
+        conversationId: 'conv-code',
+        assistantId: 'assistant-1',
+        userMessageId: null,
+        phase: 'text',
+        step: 1,
+        startedAt: 1,
+        turnKind: 'user',
+      },
+    });
+    const user = userEvent.setup();
+    renderPill();
+
+    const trigger = streamingLockedTrigger();
+    expect(trigger.getAttribute('aria-label')).toBe(
+      'Troca de modelo indisponível durante a resposta. Atual: DeepSeek V4.1 Flash',
+    );
+    expect(trigger.getAttribute('aria-disabled')).toBe('true');
+    expect(trigger.getAttribute('aria-haspopup')).toBeNull();
+    expect(trigger.getAttribute('title')).toBe(MODEL_STREAMING_LOCKED_DESCRIPTION);
+    expect(trigger.querySelector('svg.lucide-lock')).toBeTruthy();
+
+    await user.click(trigger);
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(toast.info).toHaveBeenCalledWith(MODEL_STREAMING_LOCKED_TITLE, {
+      description: MODEL_STREAMING_LOCKED_DESCRIPTION,
+    });
   });
 });
 

@@ -17,7 +17,7 @@ import type {
   TurnKind,
 } from '../types';
 import { deriveTitle, newId } from '../utils';
-import { defaultSelection, getModel } from '../catalog';
+import { defaultSelection, findModelIn, getModel } from '../catalog';
 import { filterConversationsForLayout } from '../conversations';
 import { reasoningForModel } from '../modelMenu';
 import { shouldContinueGoal } from '../goalRunner';
@@ -86,6 +86,17 @@ interface ChatState {
   deleteConversation: (id: string) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   togglePinned: (id: string) => Promise<void>;
+  /**
+   * Applies a model/provider choice (and its thinking mode).
+   *
+   * A started Code session treats the pair as a **session property**: the
+   * change is persisted immediately (the next turn, goal rounds and reopening
+   * the session use it) without touching the configured defaults. Everywhere
+   * else the previous behavior is kept: the selection is applied and becomes
+   * the default for new conversations. Locked targets are ignored with the
+   * same copy the selector surfaces show.
+   */
+  chooseModel: (selection: ModelSelection) => Promise<boolean>;
   addAttachments: (paths: string[]) => Promise<void>;
   removeAttachment: (id: string) => Promise<void>;
   clearAttachments: () => void;
@@ -134,12 +145,23 @@ export interface SendOptions {
 const EMPTY: ChatMessage[] = [];
 
 /**
- * A conversation's model is locked in as soon as it has messages (or a turn is
- * running). Switching models mid-conversation would mix answers from different
- * models and invalidate the reasoning/provider_state replay.
+ * Why the model selector is locked for the active layout (`null` = switching is
+ * allowed).
+ *
+ * - Chat keeps the model of a started conversation locked: mixing answers from
+ *   different models there would change the identity of the thread and the
+ *   replay of the reasoning (`provider_state`).
+ * - Code sessions are long-running and users need to escalate to a stronger
+ *   model/provider mid-task. The backend persists the pair per session and
+ *   replays older messages neutrally (each reply keeps its own model), so the
+ *   switch is allowed between turns.
+ * - A running turn always locks the selector: the model is resolved when the
+ *   turn starts and must not change under it.
  */
-export function selectModelLocked(state: ChatState): boolean {
-  if (state.streaming) return true;
+export type ModelLockReason = 'started' | 'streaming';
+
+/** True when the active conversation already has messages (any layout). */
+export function selectActiveConversationStarted(state: ChatState): boolean {
   const conversationId = state.activeId;
   if (!conversationId) return false;
   const messages = state.messagesByConversation[conversationId];
@@ -148,15 +170,55 @@ export function selectModelLocked(state: ChatState): boolean {
   return (conversation?.messageCount ?? 0) > 0;
 }
 
+/** A session visible in the Code layout: Code-born or shared from Chat. */
+function isCodeSessionConversation(conversation: Conversation | undefined): boolean {
+  return Boolean(conversation && (conversation.mode === 'code' || conversation.codeLinked));
+}
+
+/** Lock state of the model selector, given the active layout. */
+export function modelLockReason(state: ChatState, layout: LayoutMode): ModelLockReason | null {
+  const conversation = state.activeId
+    ? state.conversations.find((entry) => entry.id === state.activeId)
+    : undefined;
+  // Only Code sessions get the per-session model switch; a Chat-only session
+  // shown here (transitional state) keeps the Chat rules.
+  const unlockable = layout === 'code' && isCodeSessionConversation(conversation);
+  if (!unlockable && selectActiveConversationStarted(state)) return 'started';
+  if (state.streaming) return 'streaming';
+  return null;
+}
+
 /** Copy shared by every surface that blocks model switching. */
 export const MODEL_LOCKED_TITLE = 'Modelo bloqueado nesta conversa';
 export const MODEL_LOCKED_DESCRIPTION =
   'O modelo não pode ser alterado depois de iniciar a conversa. Ajuste o modo de pensamento pelo botão ✦.';
+export const MODEL_STREAMING_LOCKED_TITLE = 'Aguarde a resposta atual terminar';
+export const MODEL_STREAMING_LOCKED_DESCRIPTION =
+  'A troca de modelo fica disponível quando a resposta atual terminar.';
+
+/** Title/description for a lock reason, shared by the pill, dialog and palette. */
+export function modelLockCopy(reason: ModelLockReason): { title: string; description: string } {
+  return reason === 'streaming'
+    ? { title: MODEL_STREAMING_LOCKED_TITLE, description: MODEL_STREAMING_LOCKED_DESCRIPTION }
+    : { title: MODEL_LOCKED_TITLE, description: MODEL_LOCKED_DESCRIPTION };
+}
+
+/**
+ * Resolves a model in the **merged** view the composer uses: the bundled
+ * catalog plus the account-only list of each provider (`useAppStore.providers`).
+ * An account-only model chosen in a Code session must resolve here too — the
+ * static catalog alone would silently keep a stale selection when the session is
+ * reopened, and the next send would overwrite the persisted pair.
+ */
+function modelForRoute(providerId: string, modelId: string) {
+  const merged = useAppStore.getState().providers;
+  return findModelIn(merged, providerId, modelId) ?? getModel(providerId, modelId);
+}
 
 /** Aligns the active selection with the model a conversation was started with. */
 function syncSelectionToConversation(conversation: Conversation, messageCount: number): void {
   if (messageCount === 0) return;
-  const model = getModel(conversation.providerId, conversation.modelId);
+  const model = modelForRoute(conversation.providerId, conversation.modelId);
   if (!model) return;
   const app = useAppStore.getState();
   const current = app.selection;
@@ -174,18 +236,18 @@ function syncSelectionToConversation(conversation: Conversation, messageCount: n
 }
 
 /**
- * Hard guarantee for started conversations: the model used by a turn always
- * comes from the conversation, never from a stale/mutated global selection.
- * Returns `null` when the model is not locked (new/custom turns keep the
- * selection from the composer).
+ * Hard guarantee for started Chat conversations: the model used by a turn
+ * always comes from the conversation, never from a stale/mutated global
+ * selection. Returns `null` when the model is not locked (new/custom turns and
+ * Code sessions, whose model is persisted per session by `chooseModel`).
  */
 function lockedSelectionFor(state: ChatState): ModelSelection | null {
-  if (!selectModelLocked(state)) return null;
+  if (modelLockReason(state, useUiStore.getState().layoutMode) !== 'started') return null;
   const conversationId = state.activeId;
   if (!conversationId) return null;
   const conversation = state.conversations.find((entry) => entry.id === conversationId);
   if (!conversation) return null;
-  const model = getModel(conversation.providerId, conversation.modelId);
+  const model = modelForRoute(conversation.providerId, conversation.modelId);
   if (!model) return null;
   const current = useAppStore.getState().selection;
   const reasoning =
@@ -824,8 +886,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
       useUiStore.getState().setActiveView('chat');
       useUiStore.getState().setCodeView('session');
       // Leaving a started conversation resets the composer to the configured
-      // default model (the previous conversation's model is locked to it).
-      if (selectModelLocked(get())) {
+      // default model (the previous conversation keeps its own model, which may
+      // have been changed during the session in the Code layout).
+      if (selectActiveConversationStarted(get())) {
         useAppStore
           .getState()
           .setActiveSelection(defaultSelection(useAppStore.getState().settings));
@@ -915,6 +978,74 @@ export const useChatStore = create<ChatState>()((set, get) => {
         await refreshList();
       } catch (error) {
         toast.error('Não foi possível fixar', { description: String(error) });
+      }
+    },
+
+    chooseModel: async (selection) => {
+      const state = get();
+      const layout = currentLayout();
+      const lock = modelLockReason(state, layout);
+      if (lock) {
+        const copy = modelLockCopy(lock);
+        toast.info(copy.title, { description: copy.description });
+        return false;
+      }
+      const app = useAppStore.getState();
+      const previous = app.selection;
+      const conversationId = state.activeId;
+      const conversation = conversationId
+        ? state.conversations.find((entry) => entry.id === conversationId)
+        : undefined;
+      // A **started Code session** owns its model: persist the pair immediately
+      // so the next turn, goal rounds and reopening the session use the same
+      // route, while the configured defaults stay untouched. Older replies keep
+      // their own model (the harness replays them through the neutral history).
+      const startedCodeSession =
+        layout === 'code' &&
+        isCodeSessionConversation(conversation) &&
+        selectActiveConversationStarted(state);
+      if (!startedCodeSession || !conversationId) {
+        // New/empty conversation: same behavior as before — apply the selection
+        // and remember it as the default for new conversations.
+        app.setSelection(selection);
+        return true;
+      }
+      const samePair =
+        conversation?.providerId === selection.providerId &&
+        conversation?.modelId === selection.modelId;
+      if (samePair) {
+        // Only the thinking mode changed: keep the session route as-is.
+        app.setActiveSelection(selection);
+        return true;
+      }
+
+      app.setActiveSelection(selection);
+      try {
+        const updated = await api.setConversationModel(
+          conversationId,
+          selection.providerId,
+          selection.modelId,
+        );
+        set((current) => ({
+          conversations: current.conversations.map((entry) =>
+            entry.id === updated.id ? updated : entry,
+          ),
+        }));
+        const name = modelForRoute(updated.providerId, updated.modelId)?.name ?? updated.modelId;
+        toast.success('Modelo da sessão alterado', {
+          description: `As próximas respostas usarão ${name}.`,
+        });
+        return true;
+      } catch (error) {
+        // Reverting only while the user is still on this session: a stale
+        // failure must not clobber the selection of another conversation.
+        if (get().activeId === conversationId) app.setActiveSelection(previous);
+        const description = String(error instanceof Error ? error.message : error).replace(
+          /^MODEL_LOCKED:\s*/,
+          '',
+        );
+        toast.error('Não foi possível alterar o modelo', { description });
+        return false;
       }
     },
 
@@ -1223,7 +1354,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           return false;
         }
       }
-      const model = getModel(conversation.providerId, conversation.modelId);
+      const model = modelForRoute(conversation.providerId, conversation.modelId);
       const current = app.selection;
       const reasoning =
         current.providerId === conversation.providerId &&

@@ -110,6 +110,36 @@ removeu o parâmetro). Raciocínio segue a tabela do protocolo `anthropic` abaix
 (`adaptive` + `output_config.effort` para modelos com esforço; `enabled` +
 `budget_tokens` ≥1024 para os que só têm orçamento).
 
+## Troca de modelo/provedor no meio da conversa (layout Code)
+
+Sessões do **layout Code** podem trocar de modelo e de provedor entre turnos
+(nativas ou compartilhadas do Chat). O Chat mantém o travamento após o primeiro
+envio. Regras:
+
+- A troca vale **entre turnos**: durante o streaming o seletor fica bloqueado
+  (o modelo é resolvido no início do turno) e o backend recusa a mudança com
+  turno ativo (`MODEL_LOCKED`).
+- O par escolhido é uma propriedade da sessão: em uma sessão **já iniciada** é
+  persistido imediatamente (`set_conversation_model`, só sessões do Code) sem
+  alterar `Settings.defaultProvider/defaultModel`; o próximo turno, as rodadas
+  automáticas do objetivo e a reabertura da sessão usam o par novo. Numa sessão
+  nova/vazia vale o comportamento anterior: a escolha também vira o modelo
+  padrão das próximas conversas.
+- Cada resposta guarda o modelo que a produziu. Ao montar o histórico de um
+  turno com outro modelo/provedor, as mensagens assistant antigas caem no
+  **fallback neutro** (texto + tool calls + tool results), sem replay bruto de
+  `provider_state` de outra rota — o payload verbatim de outro protocolo é
+  inválido. Nada de conteúdo é perdido; o raciocínio com assinatura de outro
+  modelo deixa de ser reenviado.
+- **Custo de cache**: a rota faz parte do domínio de cache, então a troca zera o
+  prefixo cacheável daquele turno (novo epoch em `harness/cache/epoch.rs`,
+  motivo `model_switch`). O medidor de contexto mostra “Modelo ou provedor
+  mudou”; o hit volta a subir nos turnos seguintes.
+- O transcript marca o ponto da troca com um divisor “Modelo alterado para …”;
+  o rodapé de cada resposta continua mostrando o nome do modelo que a gerou.
+- Configurações › Modelo padrão nunca altera uma sessão já iniciada — ela edita
+  apenas o padrão das próximas conversas.
+
 ## Cache de prompt
 
 O cache é medido por request de wire e exibido em tempo real no medidor de

@@ -8,7 +8,9 @@
  * `uiStore`. O card em si é o `GoalCard` (puro) de `@/components/agent`.
  *
  * Regras:
- * - sem objetivo ⇒ pill fantasma "Objetivo" que abre o diálogo de criação;
+ * - sem objetivo ⇒ botão só-ícone com o mesmo toggle do modo Plano: inativo
+ *   cria a intenção `/goal` (fallback `requestGoalCreation()`); ativo
+ *   (`goalIntent`) desativa a intenção;
  * - durante uma rodada (`streaming.turnKind === 'goal_round'`) as ações ficam
  *   desabilitadas, exceto "Pausar após esta rodada" (desarma a continuidade);
  * - "Concluir" pede confirmação inline antes do IPC;
@@ -88,13 +90,26 @@ function statusHint(
 export interface GoalControlsProps {
   conversationId: string;
   className?: string;
+  /**
+   * Intenção `/goal` do turno (badge no campo), controlada pelo `Composer`.
+   * Sem as props, o botão sem objetivo mantém o fallback
+   * `requestGoalCreation()` (evento `lumina:goal-intent`).
+   */
+  goalIntent?: boolean;
+  /** Alterna a intenção `/goal`; ausente ⇒ fallback `requestGoalCreation()`. */
+  onToggleGoalIntent?: () => void;
 }
 
 /**
  * Controle do objetivo no composer: pill de estado + popover com o `GoalCard`
  * completo (resumo, progresso e ações) e os atalhos "Abrir objetivo"/"Editar".
  */
-export function GoalControls({ conversationId, className }: GoalControlsProps) {
+export function GoalControls({
+  conversationId,
+  className,
+  goalIntent = false,
+  onToggleGoalIntent,
+}: GoalControlsProps) {
   const session = useCodeStore((state) => state.byConversation[conversationId]);
   const streaming = useChatStore((state) => state.streaming);
   const activeId = useChatStore((state) => state.activeId);
@@ -230,21 +245,40 @@ export function GoalControls({ conversationId, className }: GoalControlsProps) {
   };
 
   if (!goal) {
+    /** Barra: mesmo toggle do modo Plano; sem handler próprio, dispara o evento. */
+    const toggleGoalIntent = () => {
+      if (onToggleGoalIntent) {
+        onToggleGoalIntent();
+        return;
+      }
+      startGoalCreation();
+    };
+
     return (
       <div className={cn('flex items-center', className)}>
         <Tooltip
           side="top"
-          content="Criar objetivo: use /goal e descreva a tarefa na próxima mensagem."
+          content={
+            goalIntent
+              ? 'Objetivo ativo — clique para desativar'
+              : 'Criar objetivo: use /goal e descreva a tarefa na próxima mensagem.'
+          }
         >
           <button
             type="button"
-            aria-label="Criar objetivo com /goal"
-            onClick={startGoalCreation}
-            className={cn(ICON_PILL_CLASS_NAME, TONE_PILL.neutral)}
+            aria-label={goalIntent ? 'Desativar objetivo' : 'Criar objetivo com /goal'}
+            aria-pressed={goalIntent}
+            onClick={toggleGoalIntent}
+            className={cn(
+              ICON_PILL_CLASS_NAME,
+              goalIntent
+                ? 'border-accent/40 bg-accent-soft'
+                : 'border-border bg-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+            )}
           >
             <Target
               aria-hidden
-              className={cn('size-3.5 shrink-0', TONE_ICON.neutral)}
+              className={cn('size-3.5 shrink-0', goalIntent ? 'text-accent' : undefined)}
               strokeWidth={1.75}
             />
           </button>

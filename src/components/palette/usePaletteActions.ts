@@ -41,14 +41,14 @@ import { conversationCitations } from '@/lib/citations';
 import { SETTINGS_TABS } from '@/lib/settingsTabs';
 import { SETTINGS_TAB_ICONS } from '@/components/settings/tabIcons';
 import {
-  MODEL_LOCKED_DESCRIPTION,
-  MODEL_LOCKED_TITLE,
+  modelLockCopy,
+  modelLockReason,
   resolveDark,
-  selectModelLocked,
   useAppStore,
   useChatStore,
   useUiStore,
 } from '@/lib/store';
+import type { ModelLockReason } from '@/lib/store';
 import type { SettingsTabId } from '@/lib/settingsTabs';
 import type { ChatMessage } from '@/lib/types';
 import type { PaletteAction } from '@/lib/palette/types';
@@ -214,9 +214,10 @@ function togglePinnedConversation(): void {
   });
 }
 
-function switchModel(locked: boolean): void {
-  if (locked) {
-    toast.info(MODEL_LOCKED_TITLE, { description: MODEL_LOCKED_DESCRIPTION });
+function switchModel(reason: ModelLockReason | null): void {
+  if (reason) {
+    const copy = modelLockCopy(reason);
+    toast.info(copy.title, { description: copy.description });
     return;
   }
   useUiStore.getState().setModelPickerOpen(true);
@@ -235,7 +236,6 @@ export function usePaletteActions(): PaletteAction[] {
   );
   const streaming = useChatStore((state) => state.streaming !== null);
   const pendingAttachments = useChatStore((state) => state.pendingAttachments);
-  const locked = useChatStore(selectModelLocked);
 
   const settings = useAppStore((state) => state.settings);
   const theme = useUiStore((state) => state.theme);
@@ -243,6 +243,9 @@ export function usePaletteActions(): PaletteAction[] {
   const layoutMode = useUiStore((state) => state.layoutMode);
   const codeView = useUiStore((state) => state.codeView);
   const artifacts = useUiStore((state) => state.artifacts);
+  // Chat locks the model of a started conversation; a Code session can switch it
+  // between turns (a running turn locks it in every layout).
+  const lockReason = useChatStore((state) => modelLockReason(state, layoutMode));
 
   const activeConversation = conversations.find((entry) => entry.id === activeId);
   const activeMessages = messages ?? [];
@@ -250,6 +253,7 @@ export function usePaletteActions(): PaletteAction[] {
   const lastUser = [...activeMessages].reverse().find((message) => message.role === 'user');
   const citations = conversationCitations(activeMessages);
   const dark = resolveDark(theme);
+  const lockCopy = lockReason ? modelLockCopy(lockReason) : null;
   const actions: PaletteAction[] = [];
 
   /* -------- Conversas -------- */
@@ -503,11 +507,11 @@ export function usePaletteActions(): PaletteAction[] {
   actions.push({
     id: 'trocar-modelo',
     group: 'navegacao',
-    label: locked ? MODEL_LOCKED_TITLE : 'Trocar modelo',
-    description: locked ? MODEL_LOCKED_DESCRIPTION : 'Escolher modelo e modo de pensamento',
-    icon: locked ? Lock : Sparkles,
+    label: lockCopy ? lockCopy.title : 'Trocar modelo',
+    description: lockCopy ? lockCopy.description : 'Escolher modelo e modo de pensamento',
+    icon: lockCopy ? Lock : Sparkles,
     keywords: 'modelo raciocínio pensamento provider',
-    run: () => switchModel(locked),
+    run: () => switchModel(lockReason),
   });
 
   /* -------- Ferramentas -------- */

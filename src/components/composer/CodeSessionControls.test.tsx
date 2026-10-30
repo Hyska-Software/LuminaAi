@@ -141,10 +141,10 @@ describe('CodeSessionControls — fallback e snapshot da sessão', () => {
     expect(planToggle().getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('sem linha nem snapshot cai no modo Editar', () => {
+  it('sem linha nem snapshot cai no modo padrão do Code', () => {
     render(<CodeSessionControls conversationId="c-1" />);
 
-    expect(screen.getByRole('button', { name: 'Modo de permissão: Editar' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Modo de permissão: Autônomo' })).toBeTruthy();
   });
 });
 
@@ -196,7 +196,7 @@ describe('CodeSessionControls — troca de permissão', () => {
   });
 
   it('reverte o modo e mantém o toast de erro quando o backend falha', async () => {
-    seedSession();
+    seedSession({ permissionMode: 'edit' });
     mocks.setPermissionMode.mockRejectedValue(new Error('negado'));
     render(<CodeSessionControls conversationId="c-1" />);
 
@@ -215,6 +215,20 @@ describe('CodeSessionControls — troca de permissão', () => {
 });
 
 describe('CodeSessionControls — modo Plano', () => {
+  it('o toggle do Plano é somente ícone (sem texto visível) nos dois estados', () => {
+    seedSession();
+    const { unmount } = render(<CodeSessionControls conversationId="c-1" />);
+
+    expect(planToggle().textContent?.trim() ?? '').toBe('');
+    unmount();
+
+    seedSession({ planMode: true });
+    render(<CodeSessionControls conversationId="c-1" />);
+
+    expect(planToggle().textContent?.trim() ?? '').toBe('');
+    expect(planToggle().getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('alterna o Plano de forma otimista e reflete o snapshot devolvido pela API', async () => {
     seedSession();
     render(<CodeSessionControls conversationId="c-1" />);
@@ -331,6 +345,24 @@ describe('CodeSessionControls — objetivo da sessão', () => {
     render(<CodeSessionControls conversationId="c-1" />);
 
     expect(screen.getByRole('button', { name: 'Criar objetivo com /goal' })).toBeTruthy();
+  });
+
+  it('repasse de goalIntent/onToggleGoalIntent para o botão do objetivo', () => {
+    seedSession();
+    const onToggleGoalIntent = vi.fn();
+    render(
+      <CodeSessionControls
+        conversationId="c-1"
+        goalIntent
+        onToggleGoalIntent={onToggleGoalIntent}
+      />,
+    );
+
+    const goalButton = screen.getByRole('button', { name: 'Desativar objetivo' });
+    expect(goalButton.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(goalButton);
+
+    expect(onToggleGoalIntent).toHaveBeenCalledTimes(1);
   });
 
   it('posiciona o controle do objetivo entre o Plano e o popover "Plano e tarefas"', () => {

@@ -225,11 +225,15 @@ tratado como dado. `read_tool_output` só lê spills da própria sessão.
 | Modo | Leitura | Escrita no workspace | Shell | Git (UI) | Fora do workspace | Uso |
 | --- | --- | --- | --- | --- | --- | --- |
 | **Leitura** | ✅ | ❌ (erro de política) | ❌ | só leitura | ❌ | explorar/entender código |
-| **Editar** (padrão) | ✅ | ✅ auto | **pergunta** | stage/commit manual | pergunta | dia a dia |
+| **Editar** | ✅ | ✅ auto | **pergunta** | stage/commit manual | pergunta | dia a dia |
 | **Autônomo** | ✅ | ✅ auto | ✅ auto **exceto destrutivo** | stage/commit manual | pergunta | tarefas longas confiadas |
 | **Revisar** (saída do Plano) | ✅ | ✅ **com aprovação por escrita** | pergunta | stage/commit manual | pergunta | revisar cada edição após aprovar um plano |
 | **Plano** (overlay) | ✅ | ❌ | ❌ | só leitura | ❌ | planejar antes de executar |
 
+- Sessões novas do Code nascem no **modo padrão configurado pelo usuário**
+  (`Settings.codeDefaultPermissionMode`, padrão **Autônomo**; Configurações → Ferramentas →
+  Sessões de código); uma sessão do Chat compartilhada com o Code adota esse padrão ao entrar
+  no layout. O chip do composer troca o modo por sessão a qualquer momento.
 - Mudança de modo é **ação explícita do usuário** (chip ou `/permissoes`), registrada na sessão
   (`permission/mode` em `code_events`) e informada ao modelo **no mesmo turno**: a política relê
   `permission_mode`/`plan_mode` do banco a cada tool call e o loop anexa uma nota de
@@ -241,7 +245,9 @@ tratado como dado. `read_tool_output` só lê spills da própria sessão.
   aprovado é o persistido.
 - A aprovação destrava a execução **no mesmo turno** (não exige nova mensagem); o turno continua
   bloqueado até a decisão, com timeout individual de aprovação (default 10 min, configurável).
-- A UI **nunca** muda o modo automaticamente. O modelo nunca muda o modo (pode sugerir).
+- A UI **nunca** muda o modo de uma sessão em andamento automaticamente (o padrão configurado
+  só é aplicado na criação da sessão e ao compartilhá-la com o Code). O modelo nunca muda o modo
+  (pode sugerir).
 
 ### 6.2 Matriz de decisão (ordem de precedência)
 

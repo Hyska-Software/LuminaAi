@@ -5,11 +5,15 @@ export {
   useChatStore,
   selectActiveConversation,
   selectActiveMessages,
-  selectModelLocked,
+  selectActiveConversationStarted,
+  modelLockReason,
+  modelLockCopy,
   MODEL_LOCKED_TITLE,
   MODEL_LOCKED_DESCRIPTION,
+  MODEL_STREAMING_LOCKED_TITLE,
+  MODEL_STREAMING_LOCKED_DESCRIPTION,
 } from './chatStore';
-export type { StreamingState, SendOptions } from './chatStore';
+export type { StreamingState, SendOptions, ModelLockReason } from './chatStore';
 export {
   useUiStore,
   resolveDark,

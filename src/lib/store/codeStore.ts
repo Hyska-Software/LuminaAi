@@ -67,7 +67,9 @@ export interface CodeSessionUi {
 export function emptyCodeSession(conversationId: string): CodeSessionUi {
   return {
     conversationId,
-    permissionMode: 'edit',
+    // Fallback antes do snapshot do backend: o padrão de fábrica do Code é
+    // Autônomo (a sessão real sempre carrega o modo persistido em seguida).
+    permissionMode: 'autonomous',
     planMode: false,
     plan: null,
     goal: null,

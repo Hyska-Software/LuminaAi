@@ -186,8 +186,11 @@ resultado é `null` (exceto ⌘K). Isso torna o bloqueio testável sem montar o 
   indisponível; mostrando título e prévia.”
 - **Vazio:** “Nenhum resultado para ‘termo’” + dica de escopos.
 - **Indisponível:** comandos que não podem rodar no contexto **não entram na
-  lista**; a exceção é o modelo bloqueado, que continua visível com cadeado e
-  explicação ao executar. Ao reabrir, a primeira linha volta a ficar ativa.
+  lista**; a exceção é o modelo travado (Chat com conversa iniciada ou turno em
+  streaming), que continua visível com cadeado e explicação ao executar. No
+  layout Code, sessões do Code permitem trocar modelo/provedor entre turnos, e o
+  comando abre o dialog normalmente. Ao reabrir, a primeira linha volta a ficar
+  ativa.
 - **Checked:** tema vigente e toggles de ferramentas mostram ícone de check.
 
 ### 4.6 Acessibilidade

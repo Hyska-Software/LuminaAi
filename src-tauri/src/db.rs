@@ -1732,12 +1732,40 @@ impl Db {
     /// Cria uma conversa no layout `mode` (`"chat"` | `"code"`; qualquer outro
     /// valor, inclusive vazio, cai em `"chat"`). Sessões novas nunca nascem
     /// compartilhadas com o outro layout (`code_linked = 0`).
+    ///
+    /// Atalho para chamadores que não escolhem o modo de permissão (Chat e
+    /// testes): grava [`PermissionMode::Edit`], o mesmo default da coluna.
+    /// Sessões do Code criadas pela UI usam
+    /// [`Db::create_conversation_with_mode_and_permission`] com o padrão
+    /// configurado pelo usuário (`Settings::code_default_permission_mode`).
     pub fn create_conversation_with_mode(
         &self,
         title: &str,
         provider_id: &str,
         model_id: &str,
         mode: &str,
+    ) -> anyhow::Result<Conversation> {
+        self.create_conversation_with_mode_and_permission(
+            title,
+            provider_id,
+            model_id,
+            mode,
+            PermissionMode::Edit,
+        )
+    }
+
+    /// Cria uma conversa no layout `mode` já com o modo de permissão da sessão.
+    ///
+    /// O Chat ignora os modos; o comando `create_conversation` resolve o modo
+    /// inicial das sessões do Code a partir de
+    /// `Settings::code_default_permission_mode` (padrão: Autônomo).
+    pub fn create_conversation_with_mode_and_permission(
+        &self,
+        title: &str,
+        provider_id: &str,
+        model_id: &str,
+        mode: &str,
+        permission_mode: PermissionMode,
     ) -> anyhow::Result<Conversation> {
         let mode = conversation_mode_or_default(Some(mode));
         let id = uuid::Uuid::new_v4().to_string();
@@ -1752,9 +1780,18 @@ impl Db {
             let conn = self.conn.lock();
             conn.execute(
                 "INSERT INTO conversations (id, title, created_at, updated_at, pinned, \
-                 provider_id, model_id, message_count, preview, mode, code_linked) \
-                 VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, 0, NULL, ?7, 0)",
-                params![&id, title, now, now, provider_id, model_id, &mode],
+                 provider_id, model_id, message_count, preview, mode, code_linked, permission_mode) \
+                 VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, 0, NULL, ?7, 0, ?8)",
+                params![
+                    &id,
+                    title,
+                    now,
+                    now,
+                    provider_id,
+                    model_id,
+                    &mode,
+                    permission_mode.as_str()
+                ],
             )
             .context("falha ao criar conversa")?;
         }
@@ -3926,6 +3963,35 @@ mod tests {
         let found = db.search_conversations("Projeto").expect("search code");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].mode, "code");
+    }
+
+    #[test]
+    fn creates_code_conversations_with_an_explicit_permission_mode() {
+        let db = test_db();
+        let code = db
+            .create_conversation_with_mode_and_permission(
+                "Projeto Aurora",
+                "opencode-go",
+                "glm-5.3-flash",
+                "code",
+                PermissionMode::Autonomous,
+            )
+            .expect("create code autonomous");
+        assert_eq!(code.mode, "code");
+        assert_eq!(code.permission_mode, PermissionMode::Autonomous);
+        assert_eq!(
+            db.get_conversation_permission_mode(&code.id)
+                .expect("modo persistido")
+                .expect("sessão presente"),
+            PermissionMode::Autonomous
+        );
+
+        // O atalho sem modo explícito continua usando o default da coluna (Editar)
+        // para não mudar o contrato dos chamadores existentes.
+        let chat = db
+            .create_conversation_with_mode("Chat", "opencode-go", "glm-5.3-flash", "chat")
+            .expect("create chat");
+        assert_eq!(chat.permission_mode, PermissionMode::Edit);
     }
 
     #[test]

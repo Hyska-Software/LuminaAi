@@ -89,6 +89,10 @@ Eventos (`TurnEvent`): `turn_started`, `step_started`, `reasoning_delta`, `reaso
 mesmo loop: prompt, catálogo de tools, política e orçamentos. O perfil `code` só é aceito em sessão
 do Code (nativa ou `code_linked`) e, a cada passo, passa por: compactação de contexto (se
 necessário), política/aprovação por tool, journal de arquivos e emissão de eventos de sessão.
+No layout Code o par `provider_id`/`model_id` é uma **propriedade da sessão** e pode ser trocado
+entre turnos (comando `set_conversation_model`); cada resposta persiste o modelo que a produziu e
+mensagens assistant de outra rota entram no histórico seguinte pelo fallback neutro
+(`render::frozen_replay_mode`), nunca pelo replay bruto do `provider_state`.
 
 **Objetivo (Goal).** Além do perfil, o turno tem `TurnPayload.turnKind` (`user` default |
 `goal_round`) e `TurnPayload.goalRequest` (fluxo `/goal`: intenção de criação no turno humano,
@@ -154,7 +158,11 @@ conversa). Bancos antigos ganham as duas colunas na abertura via migração
 aditiva, com `mode='chat'` e `code_linked=0` (logo o Code começa vazio para
 quem já usava o app). O renderer filtra as listas por layout em
 `src/lib/conversations.ts`; `list_conversations`/`search_conversations`
-continuam devolvendo todas as sessões com os dois campos.
+continuam devolvendo todas as sessões com os dois campos. O par
+`provider_id`/`model_id` da conversa é o modelo **atual** da sessão: o harness o
+atualiza no início de cada turno e, no layout Code, `set_conversation_model`
+permite trocá-lo entre turnos (o Chat mantém o modelo travado após o primeiro
+envio).
 
 `provider_state` guarda o replay do turno do agente no formato **v2** (JSON opaco, só no backend — não trafega no IPC): `{"version":2,"steps":[{"state":<payload bruto do passo ou null>,"text":"<texto do passo>","toolCallIds":["id1", …]}]}`. Há um passo por resposta do provedor — um por passo com ferramentas e um para a resposta final (a resposta final forçada é o último) — e `toolCallIds` referencia `tool_calls` em ordem cronológica. No turno seguinte o harness reconstrói o turno multi-step no histórico (um assistant por passo + os tool results daquele passo), exatamente como o loop em memória faz, para que o provedor aceite os outputs das ferramentas. Bancos antigos (payload bruto de um único passo) continuam funcionando: o estado só é replayado quando a mensagem não tem tool calls e o modelo/provedor conferem; caso contrário é descartado e o histórico cai no fallback neutro (texto + tool calls + tool results).
 
@@ -176,8 +184,12 @@ continuam devolvendo todas as sessões com os dois campos.
 `workspaces.path` aponta para uma pasta real do usuário (nada é copiado para o app-data);
 `conversations.workspace_id` é nulo em sessões sem workspace, e `conversations.agent_kind`
 (`lumina`) deixa a porta aberta para agentes externos via ACP no futuro.
-`conversations.permission_mode` (`read_only` | `edit` | `autonomous`) é o modo de permissões da
-sessão de código. `code_events` é o log append-only dos fatos da sessão (permissões, plano,
+`conversations.permission_mode` (`read_only` | `review` | `edit` | `autonomous`) é o modo de
+permissões da sessão de código; o Chat ignora os modos. Cada sessão guarda o próprio modo (o
+chip do composer troca por sessão) e as **novas sessões do Code** nascem com
+`Settings.codeDefaultPermissionMode` — padrão **Autônomo**, configurável em
+Configurações → Ferramentas → Sessões de código — inclusive quando uma sessão do Chat é
+compartilhada com o Code. `code_events` é o log append-only dos fatos da sessão (permissões, plano,
 tarefas, contexto, aprovações, alterações, reversões, turno encerrado); `file_journal` guarda as
 capturas por turno (hash antes/depois) que dão o diff e o "reverter turno/arquivo";
 `session_summaries` guarda os resumos de compactação; `approval_rules` guarda as regras
@@ -382,8 +394,9 @@ estruturadas com opções e texto livre, respondidas pelo card da timeline via
 (subagente somente leitura, profundidade 1) e tools dinâmicas de servidores **MCP**
 (mcp__servidor__tool, stdio\nJSON-RPC, aprovação sempre explícita; config <app-data>/mcp.json).
    O modelo **não** recebe commit/push.
-4. **Política e aprovação** (`policy/`): modos `read_only`/`edit`/`autonomous` + overlay Plano
-   + regras persistidas. Toda mutação passa por `policy::decide` → `ApprovalRegistry`
+4. **Política e aprovação** (`policy/`): modos `read_only`/`review`/`edit`/`autonomous` + overlay Plano
+   + regras persistidas. Novas sessões nascem no modo padrão configurado (Autônomo de fábrica). Toda
+   mutação passa por `policy::decide` → `ApprovalRegistry`
    (evento `approval_requested`, card na timeline, `respond_approval`) ou negação com código
    estável. Timeout/cancelamento resolvem como falha fechada.
 5. **Confinamento e journal** (`workspace/`): todo path resolve contra a raiz do workspace
@@ -415,8 +428,16 @@ estruturadas com opções e texto livre, respondidas pelo card da timeline via
     progresso/conclusão/bloqueio. **Ativação (v1.12)**: `/goal` ativa um chip no composer (a
     mensagem do usuário não é alterada); o turno humano leva `goalRequest=true` e o runtime context
     instrui o agente a criar o objetivo (`goal` action `create` com objetivo/título/limite/
-    `auto_continue=true`); o botão do objetivo no composer é somente ícone (controles no popover).
+    `auto_continue=true`); o botão do objetivo no composer é somente ícone e **alterna** o chip
+    `/goal` com o mesmo padrão do toggle de Plano (accent + `aria-pressed` quando armado; clicar no
+    chip remove a intenção); com objetivo persistente, abre o popover de controle.
     Plano completo: `docs/goals/code-goals/PLAN.md`.
+12. **Troca de modelo/provedor na sessão**: `set_conversation_model` persiste o par da conversa
+    entre turnos (só sessões do Code; recusa turno ativo e sessão nativa do Chat). A UI libera o
+    seletor no layout Code, mantém o bloqueio durante o streaming e marca a troca no transcript com
+    o divisor "Modelo alterado para …". As respostas antigas mantêm o modelo que as produziu
+    (histórico neutro) e o epoch de cache registra “Modelo ou provedor mudou”. Contrato/evidência:
+    `docs/goals/code-model-switch/`.
 
 Contratos completos (tools/eventos/comandos/UI): `docs/goals/code-harness/TOOLS.md`,
 `HARNESS.md` e `WORKBENCH.md`.
@@ -696,8 +717,9 @@ openai_login_cancel, openai_sign_out, openai_auth_status,
 list_conversations, create_conversation (mode: chat|code), get_conversation,
 get_cache_stats,  -- agregado/amostras de cache da conversa (medidor em tempo real)
 rename_conversation, delete_conversation, set_conversation_pinned,
-set_conversation_code_linked (Chat session → Code), search_conversations,
-truncate_conversation, export_conversation, import_attachments, get_attachment,
+set_conversation_code_linked (Chat session → Code),
+set_conversation_model (Code: troca o par provedor/modelo da sessão entre turnos),
+search_conversations, truncate_conversation, export_conversation, import_attachments, get_attachment,
 delete_attachment, list_artifacts, list_library_artifacts, import_library_files,
 rename_artifact, set_artifact_favorite, get_artifact_thumbnail,
 get_artifact_content, get_artifact_preview,

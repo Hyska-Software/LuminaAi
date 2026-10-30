@@ -72,6 +72,16 @@ pub const SPILL_RETENTION_MAX_DAYS: u32 = 365;
 pub const APPROVAL_TIMEOUT_MIN_SECS: u32 = 30;
 pub const APPROVAL_TIMEOUT_MAX_SECS: u32 = 3_600;
 
+/// Versão do `settings.json`. Arquivos sem `settingsVersion` são v1.
+///
+/// v2 (harness de código): o default de fábrica do modo de permissão das novas
+/// sessões do Code passa de `edit` (Editar) para `autonomous` (Autônomo) e o
+/// campo ganha controle em Configurações → Ferramentas. Como o campo existia no
+/// arquivo desde a v1.9 **sem** nenhuma UI, um `"edit"` persistido num arquivo
+/// v1 é o default de fábrica antigo, não uma escolha do usuário — a migração de
+/// leitura o converte (ver [`parse_settings_json`]).
+const SETTINGS_VERSION: u32 = 2;
+
 /// Normaliza a lista de skills desativadas vinda do disco ou do renderer:
 /// `trim`, descarta entradas vazias, remove duplicatas e ordena (a comparação
 /// com o catálogo é por nome canônico). `skills_panel_enabled` é booleano e não
@@ -169,20 +179,59 @@ fn normalize_settings(mut settings: Settings) -> Settings {
 /// gravado à mão faria o `serde` falhar o arquivo inteiro e `load_settings`
 /// cair em `Settings::default()`, apagando todas as preferências. Aqui a chave
 /// inválida é removida antes da tipagem, então só ela volta ao default.
+///
+/// Também aplica a migração de leitura v1 → v2: arquivos sem `settingsVersion`
+/// (ou de versão anterior) trocam o `"edit"` legado do modo de permissão do Code
+/// pelo novo default `"autonomous"`; valores gravados pela v2 são preservados.
 fn parse_settings_json(raw: &str) -> Result<Settings, serde_json::Error> {
     let mut value: serde_json::Value = serde_json::from_str(raw)?;
     if let Some(object) = value.as_object_mut() {
+        let version = object
+            .get("settingsVersion")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        if version < u64::from(SETTINGS_VERSION) {
+            let legacy_default = object
+                .get("codeDefaultPermissionMode")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|mode| mode.trim() == "edit");
+            if legacy_default {
+                object.insert(
+                    "codeDefaultPermissionMode".to_string(),
+                    serde_json::Value::String("autonomous".to_string()),
+                );
+            }
+        }
         let invalid_mode = object
             .get("codeDefaultPermissionMode")
             .and_then(serde_json::Value::as_str)
-            .map_or(false, |mode| {
-                !matches!(mode.trim(), "read_only" | "edit" | "autonomous")
+            .is_some_and(|mode| {
+                !matches!(
+                    mode.trim(),
+                    "read_only" | "review" | "edit" | "autonomous"
+                )
             });
         if invalid_mode {
             object.remove("codeDefaultPermissionMode");
         }
     }
     serde_json::from_value(value)
+}
+
+/// Serializa as configurações normalizadas já com a versão do schema.
+///
+/// `settingsVersion` **não** faz parte de [`Settings`] (não trafega no IPC):
+/// existe só no arquivo, para que as migrações de leitura saibam distinguir um
+/// default antigo de uma escolha do usuário.
+fn serialize_settings_json(settings: &Settings) -> anyhow::Result<String> {
+    let mut value = serde_json::to_value(settings).context("falha ao serializar as configurações")?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "settingsVersion".to_string(),
+            serde_json::Value::from(SETTINGS_VERSION),
+        );
+    }
+    serde_json::to_string_pretty(&value).context("falha ao serializar as configurações")
 }
 
 pub fn load_settings(app: &AppHandle) -> Settings {
@@ -197,8 +246,7 @@ pub fn load_settings(app: &AppHandle) -> Settings {
 
 pub fn save_settings(app: &AppHandle, settings: &Settings) -> anyhow::Result<()> {
     let normalized = normalize_settings(settings.clone());
-    let raw = serde_json::to_string_pretty(&normalized)
-        .context("falha ao serializar as configurações")?;
+    let raw = serialize_settings_json(&normalized)?;
     write_private(&settings_path(app), &raw)
 }
 
@@ -1720,9 +1768,11 @@ mod tests {
         assert_eq!(defaults.spill_retention_days, 30);
         assert_eq!(defaults.approval_timeout_secs, 600);
         assert!(defaults.notifications_enabled);
+        // Padrão do produto: novas sessões do Code nascem Autônomas (configurável
+        // em Configurações → Ferramentas).
         assert_eq!(
             defaults.code_default_permission_mode,
-            crate::domain::PermissionMode::Edit
+            crate::domain::PermissionMode::Autonomous
         );
         // Pasta nova pede confirmação explícita.
         assert!(!defaults.trust_workspaces_by_default);
@@ -1812,7 +1862,7 @@ mod tests {
         assert!(normalized.notifications_enabled);
         assert_eq!(
             normalized.code_default_permission_mode,
-            crate::domain::PermissionMode::Edit
+            crate::domain::PermissionMode::Autonomous
         );
         assert!(!normalized.trust_workspaces_by_default);
         assert_eq!(normalized.diff_open_mode, "tab");
@@ -1843,6 +1893,74 @@ mod tests {
         assert!(!normalized.shell_enabled);
         assert_eq!(
             normalized.code_default_permission_mode,
+            crate::domain::PermissionMode::Autonomous
+        );
+    }
+
+    #[test]
+    fn legacy_settings_v1_migrates_the_default_permission_mode_to_autonomous() {
+        // Arquivo do app antes da v2: `"edit"` foi gravado pelo default de fábrica
+        // (o campo não tinha UI), então migra para o novo padrão Autônomo.
+        let raw = r#"{"theme":"dark","codeDefaultPermissionMode":"edit"}"#;
+        let parsed = parse_settings_json(raw).expect("migrar arquivo v1");
+        assert_eq!(
+            normalize_settings(parsed).code_default_permission_mode,
+            crate::domain::PermissionMode::Autonomous
+        );
+
+        // Arquivo sem a chave: o default do struct (Autônomo) vale.
+        let parsed = parse_settings_json(r#"{"theme":"dark"}"#).expect("parse sem a chave");
+        assert_eq!(
+            normalize_settings(parsed).code_default_permission_mode,
+            crate::domain::PermissionMode::Autonomous
+        );
+    }
+
+    #[test]
+    fn settings_v2_respects_an_explicit_edit_default() {
+        // Depois da v2 o usuário pode escolher Editar no seletor: o valor
+        // persistido (com `settingsVersion`) sobrevive a reabrir o app.
+        let raw = r#"{"settingsVersion":2,"codeDefaultPermissionMode":"edit"}"#;
+        let parsed = parse_settings_json(raw).expect("parse v2");
+        assert_eq!(
+            normalize_settings(parsed).code_default_permission_mode,
+            crate::domain::PermissionMode::Edit
+        );
+    }
+
+    #[test]
+    fn review_is_a_valid_persisted_default_permission_mode() {
+        // "Revisar" é um dos quatro modos do chip e precisa sobreviver ao parse
+        // tolerante (antes ele era descartado como inválido).
+        let raw = r#"{"settingsVersion":2,"codeDefaultPermissionMode":"review"}"#;
+        let parsed = parse_settings_json(raw).expect("parse review");
+        assert_eq!(
+            normalize_settings(parsed).code_default_permission_mode,
+            crate::domain::PermissionMode::Review
+        );
+    }
+
+    #[test]
+    fn settings_serialization_stamps_the_schema_version() {
+        let raw = serialize_settings_json(&Settings::default()).expect("serializar settings");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(value["settingsVersion"], u64::from(SETTINGS_VERSION));
+        assert_eq!(value["codeDefaultPermissionMode"], "autonomous");
+
+        // Idempotência do contrato de arquivo: reler o que foi gravado devolve os
+        // mesmos valores (inclusive um Editar escolhido pelo usuário).
+        let parsed = parse_settings_json(&raw).expect("reler settings gravados");
+        assert_eq!(
+            normalize_settings(parsed).code_default_permission_mode,
+            crate::domain::PermissionMode::Autonomous
+        );
+
+        let mut custom = Settings::default();
+        custom.code_default_permission_mode = crate::domain::PermissionMode::Edit;
+        let raw = serialize_settings_json(&custom).expect("serializar Editar");
+        let parsed = parse_settings_json(&raw).expect("reler Editar");
+        assert_eq!(
+            normalize_settings(parsed).code_default_permission_mode,
             crate::domain::PermissionMode::Edit
         );
     }
@@ -1857,7 +1975,7 @@ mod tests {
         assert_eq!(value["spillRetentionDays"], 30);
         assert_eq!(value["approvalTimeoutSecs"], 600);
         assert_eq!(value["notificationsEnabled"], true);
-        assert_eq!(value["codeDefaultPermissionMode"], "edit");
+        assert_eq!(value["codeDefaultPermissionMode"], "autonomous");
         assert_eq!(value["trustWorkspacesByDefault"], false);
         assert_eq!(value["diffOpenMode"], "tab");
         assert!(value.get("code_max_steps").is_none());
@@ -1868,7 +1986,7 @@ mod tests {
         assert_eq!(parsed.code_max_steps, 120);
         assert_eq!(
             parsed.code_default_permission_mode,
-            crate::domain::PermissionMode::Edit
+            crate::domain::PermissionMode::Autonomous
         );
     }
 }

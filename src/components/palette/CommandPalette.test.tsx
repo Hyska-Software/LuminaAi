@@ -25,7 +25,14 @@ vi.mock('sonner', () => ({
 
 import { toast } from 'sonner';
 import { CommandPalette } from './CommandPalette';
-import { MODEL_LOCKED_TITLE, useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import {
+  MODEL_LOCKED_TITLE,
+  MODEL_STREAMING_LOCKED_DESCRIPTION,
+  MODEL_STREAMING_LOCKED_TITLE,
+  useAppStore,
+  useChatStore,
+  useUiStore,
+} from '@/lib/store';
 import { PALETTE_RECENTS_KEY } from '@/lib/palette/recents';
 
 function settings(overrides: Partial<Settings> = {}): Settings {
@@ -511,6 +518,52 @@ describe('CommandPalette — comandos contextuais e deep-links', () => {
     fireEvent.click(option);
     await waitFor(() => expect(vi.mocked(toast.info)).toHaveBeenCalled());
     expect(mocks.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('opens the model picker for a started Code session', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-1', mode: 'code', messageCount: 1 })],
+      activeId: 'conv-1',
+      messagesByConversation: { 'conv-1': [userMessage()] },
+    });
+
+    renderPalette();
+    typeQuery('trocar modelo');
+
+    const option = await screen.findByRole('option', { name: /Trocar modelo/ });
+    fireEvent.click(option);
+
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(true));
+    expect(vi.mocked(toast.info)).not.toHaveBeenCalledWith(
+      MODEL_LOCKED_TITLE,
+      expect.anything(),
+    );
+  });
+
+  it('explains the streaming lock with the specific copy', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-1', mode: 'code', messageCount: 1 })],
+      activeId: 'conv-1',
+      messagesByConversation: { 'conv-1': [userMessage()] },
+      streaming: streamingState(),
+    });
+
+    renderPalette();
+    typeQuery('trocar modelo');
+
+    const option = await screen.findByRole('option', {
+      name: new RegExp(MODEL_STREAMING_LOCKED_TITLE),
+    });
+    fireEvent.click(option);
+
+    await waitFor(() =>
+      expect(vi.mocked(toast.info)).toHaveBeenCalledWith(MODEL_STREAMING_LOCKED_TITLE, {
+        description: MODEL_STREAMING_LOCKED_DESCRIPTION,
+      }),
+    );
+    expect(useUiStore.getState().modelPickerOpen).toBe(false);
   });
 
   it('opens Settings on the requested tab', async () => {

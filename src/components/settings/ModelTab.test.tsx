@@ -16,7 +16,7 @@ vi.mock('@/lib/api', () => ({
 
 // Imported after the mock above.
 import { ModelTab } from '@/components/settings/ModelTab';
-import { useAppStore, useChatStore } from '@/lib/store';
+import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 
 afterEach(() => cleanup());
 
@@ -76,11 +76,12 @@ const messages: ChatMessage[] = [
   },
 ];
 
-function setStartedConversation(): void {
+function setStartedConversation(overrides: Partial<Conversation> = {}): void {
+  const started = { ...conversation, ...overrides };
   useChatStore.setState({
-    conversations: [conversation],
-    activeId: 'conv-1',
-    messagesByConversation: { 'conv-1': messages },
+    conversations: [started],
+    activeId: started.id,
+    messagesByConversation: { [started.id]: messages },
     streaming: null,
     loadingConversationId: null,
   });
@@ -108,15 +109,19 @@ beforeEach(() => {
     streaming: null,
     loadingConversationId: null,
   });
+  useUiStore.setState({ layoutMode: 'chat' });
 });
 
-describe('ModelTab — model lock', () => {
-  it('updates only the default model (not the active selection) when a conversation is locked', async () => {
+describe('ModelTab — started conversation', () => {
+  const STARTED_WARNING =
+    /A conversa atual já foi iniciada\. As alterações abaixo valem apenas para as próximas conversas\./;
+
+  it('updates only the default model (not the active selection) when a conversation is started', async () => {
     setStartedConversation();
     const user = userEvent.setup();
     render(<ModelTab />);
 
-    expect(screen.getByText(/conversa atual está com o modelo bloqueado/i)).toBeTruthy();
+    expect(screen.getByText(STARTED_WARNING)).toBeTruthy();
 
     await user.selectOptions(screen.getByLabelText('Modelo padrão'), 'claude-haiku-5-5');
 
@@ -133,11 +138,35 @@ describe('ModelTab — model lock', () => {
     });
   });
 
+  it('never changes a started Code session from this screen', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    setStartedConversation({ mode: 'code' });
+    const user = userEvent.setup();
+    render(<ModelTab />);
+
+    expect(screen.getByText(STARTED_WARNING)).toBeTruthy();
+
+    await user.selectOptions(screen.getByLabelText('Modelo padrão'), 'claude-haiku-5-5');
+
+    await waitFor(() => {
+      expect(mocks.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ defaultModel: 'claude-haiku-5-5' }),
+      );
+    });
+    // Code sessions persist their model on the session itself (composer/palette),
+    // so the settings tab must leave both the conversation and the selection alone.
+    expect(useChatStore.getState().conversations[0]).toMatchObject({
+      providerId: GO,
+      modelId: 'deepseek-v4.1-flash',
+    });
+    expect(useAppStore.getState().selection.modelId).toBe('deepseek-v4.1-flash');
+  });
+
   it('also changes the composer selection when there is no started conversation', async () => {
     const user = userEvent.setup();
     render(<ModelTab />);
 
-    expect(screen.queryByText(/conversa atual está com o modelo bloqueado/i)).toBeNull();
+    expect(screen.queryByText(STARTED_WARNING)).toBeNull();
 
     await user.selectOptions(screen.getByLabelText('Modelo padrão'), 'claude-haiku-5-5');
 

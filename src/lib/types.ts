@@ -1151,7 +1151,7 @@ export interface Settings {
   approvalTimeoutSecs?: number;
   /** Notificações do sistema no fim de turnos em segundo plano. */
   notificationsEnabled?: boolean;
-  /** Modo de permissão padrão de novas sessões do Code. */
+  /** Modo de permissão inicial de novas sessões do Code (padrão: Autônomo). */
   codeDefaultPermissionMode?: PermissionMode;
   /** Confia automaticamente em workspaces abertos antes. */
   trustWorkspacesByDefault?: boolean;

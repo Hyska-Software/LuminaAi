@@ -320,7 +320,47 @@ describe('ToolsTab — painel de skills', () => {
   });
 });
 
-describe('ToolsTab — workbench de código', () => {
+describe('ToolsTab — sessões de código', () => {
+  const permissionSelect = (): HTMLSelectElement =>
+    screen.getByRole('combobox', {
+      name: 'Modo de permissão padrão das novas sessões do Code',
+    }) as HTMLSelectElement;
+
+  it('novas sessões do Code começam em Autônomo por padrão', () => {
+    render(<ToolsTab />);
+
+    const select = permissionSelect();
+    expect(select.value).toBe('autonomous');
+    // Opções do chip de permissão, da mais restrita à mais ampla.
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      'read_only',
+      'review',
+      'edit',
+      'autonomous',
+    ]);
+  });
+
+  it('reflete o modo padrão configurado nas settings', () => {
+    useAppStore.setState({ settings: settings({ codeDefaultPermissionMode: 'review' }) });
+
+    render(<ToolsTab />);
+
+    expect(permissionSelect().value).toBe('review');
+  });
+
+  it('salva o modo escolhido para as próximas sessões do Code', async () => {
+    render(<ToolsTab />);
+
+    fireEvent.change(permissionSelect(), { target: { value: 'read_only' } });
+
+    await waitFor(() => {
+      expect(mocks.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ codeDefaultPermissionMode: 'read_only' }),
+      );
+    });
+    expect(useAppStore.getState().settings.codeDefaultPermissionMode).toBe('read_only');
+  });
+
   it('abre o diff em uma aba do chat por padrão', () => {
     render(<ToolsTab />);
 

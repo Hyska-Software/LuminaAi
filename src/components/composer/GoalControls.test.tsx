@@ -108,7 +108,7 @@ afterEach(() => {
 });
 
 describe('GoalControls — sem objetivo', () => {
-  it('mostra o botão só com ícone e ativa o chip /goal no composer', () => {
+  it('sem props mantém o fallback: botão só-ícone dispara lumina:goal-intent', () => {
     const listener = vi.fn();
     window.addEventListener('lumina:goal-intent', listener);
     try {
@@ -117,11 +117,55 @@ describe('GoalControls — sem objetivo', () => {
       const trigger = pill('Criar objetivo com /goal');
       // Pedido de produto: botão sem texto, apenas o ícone.
       expect(trigger.textContent?.trim() ?? '').toBe('');
+      expect(trigger.getAttribute('aria-pressed')).toBe('false');
       fireEvent.click(trigger);
 
       expect(listener).toHaveBeenCalledTimes(1);
       // O chip é uma intenção do turno; nenhum diálogo de criação é aberto.
       expect(useUiStore.getState().goalDialog).toBeNull();
+    } finally {
+      window.removeEventListener('lumina:goal-intent', listener);
+    }
+  });
+
+  it('com goalIntent=false fica inativo e alterna pelo handler do Composer', () => {
+    const onToggleGoalIntent = vi.fn();
+    render(
+      <GoalControls
+        conversationId={CONVERSATION_ID}
+        goalIntent={false}
+        onToggleGoalIntent={onToggleGoalIntent}
+      />,
+    );
+
+    const trigger = pill('Criar objetivo com /goal');
+    expect(trigger.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(trigger);
+
+    expect(onToggleGoalIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it('com goalIntent=true fica accent/aria-pressed e "Desativar objetivo" alterna', () => {
+    const onToggleGoalIntent = vi.fn();
+    const listener = vi.fn();
+    window.addEventListener('lumina:goal-intent', listener);
+    try {
+      render(
+        <GoalControls
+          conversationId={CONVERSATION_ID}
+          goalIntent
+          onToggleGoalIntent={onToggleGoalIntent}
+        />,
+      );
+
+      const trigger = pill('Desativar objetivo');
+      expect(trigger.getAttribute('aria-pressed')).toBe('true');
+      expect(trigger.textContent?.trim() ?? '').toBe('');
+
+      fireEvent.click(trigger);
+      expect(onToggleGoalIntent).toHaveBeenCalledTimes(1);
+      // Com handler próprio o evento global (fallback) não é disparado.
+      expect(listener).not.toHaveBeenCalled();
     } finally {
       window.removeEventListener('lumina:goal-intent', listener);
     }

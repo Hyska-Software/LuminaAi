@@ -11,7 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@/components/ui';
 import { ModelPill } from '@/components/models/ModelPill';
@@ -27,7 +27,12 @@ vi.mock('@/lib/api', () => ({
   },
 }));
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  // Safety net: the fake-timer test restores real timers in its own `finally`,
+  // but a failing assertion must never leak fake timers into the next test.
+  vi.useRealTimers();
+});
 
 const GO = 'opencode-go';
 const ZEN = 'opencode-zen';
@@ -151,6 +156,13 @@ describe('ModelPill (edge) — bolha de detalhes flutuante', () => {
   });
 
   it('respeita a janela de tolerância (~120ms) antes de esconder a bolha', async () => {
+    // Abertura e hover usam timers reais: nesta combinação RTL/Vitest o
+    // `asyncWrapper` do user-event não funciona com fake timers (ele drena com
+    // `setTimeout` sem avançar o relógio falso). A janela de tolerância em si é
+    // verificada com fake timers, tornando a asserção determinística: com sleep
+    // real de 40 ms, a carga da suíte completa podia ultrapassar os 120 ms do
+    // hide timer e a bolha sumia antes da asserção (flaky "expected null to be
+    // truthy").
     const user = userEvent.setup();
     renderPill();
 
@@ -159,14 +171,30 @@ describe('ModelPill (edge) — bolha de detalhes flutuante', () => {
     await user.hover(row);
     expect(await within(dialog).findByRole('group', { name: 'Detalhes do modelo' })).toBeTruthy();
 
-    await user.unhover(row);
+    vi.useFakeTimers();
+    try {
+      // Sair da linha agenda o hide timer (já sob fake timers) via onMouseLeave
+      // da lista — `mouseOut` com relatedTarget fora é como o React sintetiza o
+      // onMouseLeave do contêiner.
+      fireEvent.mouseOut(row, { relatedTarget: document.body });
 
-    // Não esconde imediatamente: o ponteiro ainda pode entrar na bolha.
-    expect(detailsBubble(dialog)).toBeTruthy();
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    expect(detailsBubble(dialog)).toBeTruthy();
-    // Depois da janela, some.
-    await waitFor(() => expect(detailsBubble(dialog)).toBeNull());
+      // Não esconde imediatamente: o ponteiro ainda pode entrar na bolha.
+      expect(detailsBubble(dialog)).toBeTruthy();
+
+      // Ainda dentro da janela de tolerância (~120 ms) a bolha continua visível.
+      act(() => {
+        vi.advanceTimersByTime(100);
+      });
+      expect(detailsBubble(dialog)).toBeTruthy();
+
+      // Passada a janela, some.
+      act(() => {
+        vi.advanceTimersByTime(40);
+      });
+      expect(detailsBubble(dialog)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('revela a bolha na navegação por teclado e mantém `aria-activedescendant` válido', async () => {

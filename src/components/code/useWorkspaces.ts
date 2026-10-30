@@ -175,9 +175,11 @@ export async function openFolder(options: OpenFolderOptions = {}): Promise<Works
 }
 
 /**
- * Resolve o diálogo de confiança: `true` libera edições (modo Editar), `false`
- * mantém a pasta em modo leitura. A sessão criada ao abrir a pasta acompanha a
- * escolha (contrato `api.setPermissionMode`).
+ * Resolve o diálogo de confiança: `true` libera o workspace e **mantém** o modo
+ * de permissão da sessão (as novas sessões do Code nascem com o padrão
+ * configurado pelo usuário); `false` força Leitura até o usuário confiar depois.
+ * A sessão criada ao abrir a pasta acompanha a escolha (contrato
+ * `api.setPermissionMode`).
  */
 export async function resolvePendingTrust(trusted: boolean): Promise<void> {
   const pending = snapshot.pendingTrust;
@@ -185,9 +187,11 @@ export async function resolvePendingTrust(trusted: boolean): Promise<void> {
   try {
     await api.setWorkspaceTrusted(pending.workspace.id, trusted);
     if (pending.conversationId) {
-      await api.setPermissionMode(pending.conversationId, trusted ? 'edit' : 'read_only');
-      // Espelha o novo modo no snapshot da sessão: os chips de permissão/Plano
-      // ficam no composer e precisam refletir "Leitura"/"Editar" na hora.
+      // Confiar não sobrescreve o modo da sessão: antes o fluxo forçava "Editar",
+      // o que desfaria o padrão Autônomo configurado nas settings.
+      if (!trusted) await api.setPermissionMode(pending.conversationId, 'read_only');
+      // Espelha o modo em vigor no snapshot: os chips de permissão/Plano do
+      // composer precisam refletir a escolha assim que o diálogo fecha.
       void useCodeStore.getState().refresh(pending.conversationId);
     }
     emit({ pendingTrust: null });

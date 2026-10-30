@@ -51,6 +51,8 @@ const DEFAULT_SETTINGS: Settings = {
   codeNodePath: '',
   skillsPanelEnabled: true,
   disabledSkills: [],
+  // Padrão do produto para novas sessões do Code (Configurações → Ferramentas).
+  codeDefaultPermissionMode: 'autonomous',
 };
 
 interface AppState {

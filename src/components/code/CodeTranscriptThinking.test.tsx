@@ -137,6 +137,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
     messageCount: 2,
     mode: 'code',
     workspaceId: 'ws-1',
+    permissionMode: 'edit',
     ...overrides,
   };
 }

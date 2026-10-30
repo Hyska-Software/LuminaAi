@@ -57,12 +57,27 @@ const PERMISSION_ORDER: PermissionMode[] = ['read_only', 'review', 'edit', 'auto
 const PILL_CLASS_NAME =
   'flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border px-2.5 text-[12.5px] font-medium text-foreground-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-60';
 
+/**
+ * Toggle do modo Plano **somente ícone** (pedido de produto): mesma geometria
+ * do botão do objetivo do `GoalControls` (size-8 circular), estado comunicado
+ * por cor + `aria-pressed`/`aria-label`/tooltip.
+ */
+const PLAN_ICON_BUTTON_CLASS_NAME =
+  'flex size-8 shrink-0 items-center justify-center rounded-full border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-60';
+
 const PLAN_TITLE_ON = 'Modo Plano ativo: o agente planeja antes de editar';
 const PLAN_TITLE_OFF = 'Ativar modo Plano (planejar antes de editar)';
 
 export interface CodeSessionControlsProps {
   conversationId: string;
   className?: string;
+  /**
+   * Intenção `/goal` do turno (badge no campo): o botão do objetivo reflete o
+   * estado ativo como o toggle do modo Plano (paridade de ativação).
+   */
+  goalIntent?: boolean;
+  /** Alterna a intenção `/goal`; ausente ⇒ fallback do `GoalControls`. */
+  onToggleGoalIntent?: () => void;
 }
 
 /**
@@ -73,7 +88,12 @@ export interface CodeSessionControlsProps {
  * O snapshot da sessão vem do `codeStore` (o `chatStore` o carrega ao abrir a
  * conversa); a linha da conversa é o fallback enquanto ele não chegou.
  */
-export function CodeSessionControls({ conversationId, className }: CodeSessionControlsProps) {
+export function CodeSessionControls({
+  conversationId,
+  className,
+  goalIntent,
+  onToggleGoalIntent,
+}: CodeSessionControlsProps) {
   const session = useCodeStore((state) => state.byConversation[conversationId]);
   const fallbackPermissionMode = useChatStore(
     (state) =>
@@ -87,7 +107,9 @@ export function CodeSessionControls({ conversationId, className }: CodeSessionCo
   const [planBusy, setPlanBusy] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
 
-  const permissionMode = session?.permissionMode ?? fallbackPermissionMode ?? 'edit';
+  // O modo real vem da sessão (snapshot) ou da linha da conversa; o fallback
+  // final é o padrão de fábrica do Code (Autônomo) enquanto nada carregou.
+  const permissionMode = session?.permissionMode ?? fallbackPermissionMode ?? 'autonomous';
   const planMode = session?.planMode ?? false;
   const plan = session?.plan ?? null;
   const todos = session?.todos ?? [];
@@ -169,12 +191,10 @@ export function CodeSessionControls({ conversationId, className }: CodeSessionCo
           disabled={planBusy}
           onClick={() => void togglePlanMode()}
           className={cn(
-            PILL_CLASS_NAME,
+            PLAN_ICON_BUTTON_CLASS_NAME,
             planMode
-              ? // Texto com contraste AA sobre `accent-soft` (o `text-accent` dava
-                // 4,40:1 no tema claro); o accent fica no ícone/borda.
-                'border-accent/40 bg-accent-soft text-foreground hover:bg-accent-soft'
-              : 'bg-transparent',
+              ? 'border-accent/40 bg-accent-soft'
+              : 'border-border bg-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
           )}
         >
           <ListChecks
@@ -182,13 +202,16 @@ export function CodeSessionControls({ conversationId, className }: CodeSessionCo
             className={cn('size-3.5 shrink-0', planMode ? 'text-accent' : undefined)}
             strokeWidth={1.75}
           />
-          <span className="truncate">Plano</span>
         </button>
       </Tooltip>
 
       {/* Objetivo da sessão entre o modo Plano e o popover "Plano e tarefas"
           (docs/goals/code-goals/PLAN.md §10.7). */}
-      <GoalControls conversationId={conversationId} />
+      <GoalControls
+        conversationId={conversationId}
+        goalIntent={goalIntent}
+        onToggleGoalIntent={onToggleGoalIntent}
+      />
 
       <Popover open={planOpen} onOpenChange={setPlanOpen}>
         <PopoverTrigger asChild>

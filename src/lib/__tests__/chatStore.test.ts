@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
     deleteConversation: vi.fn(),
     setConversationPinned: vi.fn(),
     setConversationCodeLinked: vi.fn(),
+    setConversationModel: vi.fn(),
     searchConversations: vi.fn(),
     truncateConversation: vi.fn(),
     importAttachments: vi.fn(),
@@ -47,10 +48,15 @@ vi.mock('sonner', () => ({
 
 // Imported after the mocks above.
 import { useAppStore } from '@/lib/store/appStore';
-import { useChatStore, selectModelLocked } from '@/lib/store/chatStore';
+import {
+  useChatStore,
+  selectActiveConversationStarted,
+  modelLockReason,
+} from '@/lib/store/chatStore';
 import { emptyCodeSession, useCodeStore } from '@/lib/store/codeStore';
 import { useUiStore } from '@/lib/store/uiStore';
 import { catalog } from '@/lib/catalog';
+import { toast } from 'sonner';
 import type { GoalView } from '@/lib/types';
 
 const conversation = (overrides: Partial<Conversation> = {}): Conversation => ({
@@ -124,6 +130,7 @@ function resetStores(): void {
   useUiStore.setState({ artifacts: [], layoutMode: 'chat' });
   useCodeStore.setState({ byConversation: {} });
   useAppStore.setState({
+    providers: [],
     selection: {
       providerId: 'opencode-go',
       modelId: 'deepseek-v4.1-flash',
@@ -154,6 +161,14 @@ beforeEach(() => {
     approvals: [],
   });
   mocks.api.goalCanContinue.mockResolvedValue({ ok: false, reason: 'no_goal' });
+  mocks.api.saveSettings.mockResolvedValue({
+    settings: useAppStore.getState().settings,
+    keys: [],
+  });
+  mocks.api.setConversationModel.mockImplementation(
+    async (conversationId: string, providerId: string, modelId: string) =>
+      conversation({ id: conversationId, providerId, modelId, messageCount: 2 }),
+  );
   mocks.api.updateGoal.mockResolvedValue({
     conversationId: 'conv-1',
     permissionMode: 'edit',
@@ -627,42 +642,368 @@ describe('chatStore artifact change detection', () => {
 });
 
 describe('model lock', () => {
-  it('locks as soon as the conversation has messages, is streaming or is known to be non-empty', () => {
-    expect(selectModelLocked(useChatStore.getState())).toBe(false);
+  const streamingState = (conversationId: string): NonNullable<ReturnType<typeof useChatStore.getState>['streaming']> => ({
+    turnId: 'turn-1',
+    conversationId,
+    assistantId: 'assistant-1',
+    userMessageId: 'user-1',
+    phase: 'text',
+    step: 1,
+    startedAt: Date.now(),
+    turnKind: 'user',
+  });
+
+  it('locks Chat conversations once started and during a turn', () => {
+    expect(modelLockReason(useChatStore.getState(), 'chat')).toBeNull();
 
     useChatStore.setState({
       activeId: 'conv-1',
       conversations: [conversation({ messageCount: 0 })],
       messagesByConversation: { 'conv-1': [] },
     });
-    expect(selectModelLocked(useChatStore.getState())).toBe(false);
+    expect(modelLockReason(useChatStore.getState(), 'chat')).toBeNull();
 
     useChatStore.setState({ messagesByConversation: { 'conv-1': [userMessage()] } });
-    expect(selectModelLocked(useChatStore.getState())).toBe(true);
+    expect(modelLockReason(useChatStore.getState(), 'chat')).toBe('started');
 
     // The conversation list alone already says the conversation started.
     useChatStore.setState({
       messagesByConversation: {},
       conversations: [conversation({ messageCount: 2 })],
     });
-    expect(selectModelLocked(useChatStore.getState())).toBe(true);
+    expect(modelLockReason(useChatStore.getState(), 'chat')).toBe('started');
 
-    // A running turn also locks the model.
+    // A running turn also locks the model (empty conversation fixture).
     useChatStore.setState({
       messagesByConversation: {},
       conversations: [conversation({ messageCount: 0 })],
-      streaming: {
-        turnId: 'turn-1',
-        conversationId: 'conv-1',
-        assistantId: 'assistant-1',
-        userMessageId: 'user-1',
-        phase: 'text',
-        step: 1,
-        startedAt: Date.now(),
-        turnKind: 'user',
+      streaming: streamingState('conv-1'),
+    });
+    expect(modelLockReason(useChatStore.getState(), 'chat')).toBe('streaming');
+  });
+
+  it('unlocks model switching for Code sessions in the Code layout, except while streaming', () => {
+    useChatStore.setState({
+      activeId: 'code-1',
+      conversations: [conversation({ id: 'code-1', mode: 'code', messageCount: 2 })],
+      messagesByConversation: { 'code-1': [userMessage(), assistantMessage()] },
+      streaming: null,
+    });
+    expect(modelLockReason(useChatStore.getState(), 'code')).toBeNull();
+    // The same conversation seen from the Chat layout keeps the Chat rules.
+    expect(modelLockReason(useChatStore.getState(), 'chat')).toBe('started');
+
+    // Shared (codeLinked) sessions follow the Code layout where they appear.
+    useChatStore.setState({
+      conversations: [
+        conversation({ id: 'code-1', mode: 'chat', codeLinked: true, messageCount: 2 }),
+      ],
+    });
+    expect(modelLockReason(useChatStore.getState(), 'code')).toBeNull();
+    expect(modelLockReason(useChatStore.getState(), 'chat')).toBe('started');
+
+    // A running turn always locks the selector (the model is already resolved).
+    useChatStore.setState({ streaming: streamingState('code-1') });
+    expect(modelLockReason(useChatStore.getState(), 'code')).toBe('streaming');
+  });
+
+  it('selectActiveConversationStarted tracks messages regardless of layout', () => {
+    expect(selectActiveConversationStarted(useChatStore.getState())).toBe(false);
+    useChatStore.setState({
+      activeId: 'code-1',
+      conversations: [conversation({ id: 'code-1', mode: 'code', messageCount: 0 })],
+      messagesByConversation: { 'code-1': [] },
+    });
+    expect(selectActiveConversationStarted(useChatStore.getState())).toBe(false);
+    useChatStore.setState({
+      conversations: [conversation({ id: 'code-1', mode: 'code', messageCount: 3 })],
+    });
+    expect(selectActiveConversationStarted(useChatStore.getState())).toBe(true);
+  });
+
+  it('chooseModel persists the pair of a started Code session without changing the defaults', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState({
+      activeId: 'code-1',
+      conversations: [
+        conversation({
+          id: 'code-1',
+          mode: 'code',
+          providerId: 'opencode-go',
+          modelId: 'deepseek-v4.1-flash',
+          messageCount: 2,
+        }),
+      ],
+      messagesByConversation: {
+        'code-1': [
+          userMessage({ conversationId: 'code-1' }),
+          assistantMessage({ conversationId: 'code-1' }),
+        ],
       },
     });
-    expect(selectModelLocked(useChatStore.getState())).toBe(true);
+    const next = {
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet-5-5',
+      reasoning: { mode: 'effort' as const, effort: 'high' as const },
+    };
+    mocks.api.setConversationModel.mockResolvedValue(
+      conversation({
+        id: 'code-1',
+        mode: 'code',
+        providerId: next.providerId,
+        modelId: next.modelId,
+        messageCount: 2,
+      }),
+    );
+
+    await expect(useChatStore.getState().chooseModel(next)).resolves.toBe(true);
+
+    expect(mocks.api.setConversationModel).toHaveBeenCalledWith(
+      'code-1',
+      'anthropic',
+      'claude-sonnet-5-5',
+    );
+    expect(useAppStore.getState().selection).toMatchObject({
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet-5-5',
+      reasoning: next.reasoning,
+    });
+    expect(useChatStore.getState().conversations[0]).toMatchObject({
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet-5-5',
+    });
+    // Session-level change: the configured default for new chats is untouched.
+    expect(mocks.api.saveSettings).not.toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalled();
+  });
+
+  it('chooseModel only updates the thinking mode when the session keeps the same route', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState({
+      activeId: 'code-1',
+      conversations: [
+        conversation({
+          id: 'code-1',
+          mode: 'code',
+          providerId: 'opencode-go',
+          modelId: 'deepseek-v4.1-flash',
+          messageCount: 2,
+        }),
+      ],
+      messagesByConversation: { 'code-1': [userMessage(), assistantMessage()] },
+    });
+
+    await expect(
+      useChatStore.getState().chooseModel({
+        providerId: 'opencode-go',
+        modelId: 'deepseek-v4.1-flash',
+        reasoning: { mode: 'effort', effort: 'low' },
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.api.setConversationModel).not.toHaveBeenCalled();
+    expect(useAppStore.getState().selection.reasoning).toEqual({
+      mode: 'effort',
+      effort: 'low',
+    });
+    expect(mocks.api.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('chooseModel keeps the old behavior for a new/empty Code session (defaults)', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState({
+      activeId: 'code-1',
+      conversations: [conversation({ id: 'code-1', mode: 'code', messageCount: 0 })],
+      messagesByConversation: { 'code-1': [] },
+    });
+
+    await expect(
+      useChatStore
+        .getState()
+        .chooseModel({ providerId: 'anthropic', modelId: 'claude-haiku-5-5', reasoning: null }),
+    ).resolves.toBe(true);
+
+    expect(mocks.api.setConversationModel).not.toHaveBeenCalled();
+    expect(useAppStore.getState().selection).toMatchObject({
+      providerId: 'anthropic',
+      modelId: 'claude-haiku-5-5',
+    });
+    await vi.waitFor(() => {
+      expect(mocks.api.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultProvider: 'anthropic',
+          defaultModel: 'claude-haiku-5-5',
+        }),
+      );
+    });
+  });
+
+  it('chooseModel refuses to bypass the Chat lock', async () => {
+    useChatStore.setState({
+      activeId: 'conv-1',
+      conversations: [conversation({ messageCount: 2 })],
+      messagesByConversation: { 'conv-1': [userMessage()] },
+    });
+
+    await expect(
+      useChatStore
+        .getState()
+        .chooseModel({ providerId: 'opencode-go', modelId: 'glm-5.3-flash', reasoning: null }),
+    ).resolves.toBe(false);
+
+    expect(mocks.api.setConversationModel).not.toHaveBeenCalled();
+    expect(useAppStore.getState().selection.modelId).toBe('deepseek-v4.1-flash');
+    expect(toast.info).toHaveBeenCalled();
+  });
+
+  it('chooseModel reverts the optimistic selection when the backend rejects', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState({
+      activeId: 'code-1',
+      conversations: [
+        conversation({
+          id: 'code-1',
+          mode: 'code',
+          providerId: 'opencode-go',
+          modelId: 'deepseek-v4.1-flash',
+          messageCount: 2,
+        }),
+      ],
+      messagesByConversation: { 'code-1': [userMessage(), assistantMessage()] },
+    });
+    mocks.api.setConversationModel.mockRejectedValue(
+      new Error('MODEL_LOCKED: aguarde a resposta atual terminar'),
+    );
+
+    await expect(
+      useChatStore
+        .getState()
+        .chooseModel({ providerId: 'anthropic', modelId: 'claude-sonnet-5-5', reasoning: null }),
+    ).resolves.toBe(false);
+
+    expect(useAppStore.getState().selection).toMatchObject({
+      providerId: 'opencode-go',
+      modelId: 'deepseek-v4.1-flash',
+    });
+    expect(toast.error).toHaveBeenCalledWith('Não foi possível alterar o modelo', {
+      description: 'aguarde a resposta atual terminar',
+    });
+  });
+
+  it('chooseModel refuses to switch while a turn is streaming', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState({
+      activeId: 'code-1',
+      conversations: [
+        conversation({
+          id: 'code-1',
+          mode: 'code',
+          providerId: 'opencode-go',
+          modelId: 'deepseek-v4.1-flash',
+          messageCount: 2,
+        }),
+      ],
+      messagesByConversation: { 'code-1': [userMessage(), assistantMessage()] },
+      streaming: streamingState('code-1'),
+    });
+
+    await expect(
+      useChatStore
+        .getState()
+        .chooseModel({ providerId: 'anthropic', modelId: 'claude-sonnet-5-5', reasoning: null }),
+    ).resolves.toBe(false);
+
+    expect(mocks.api.setConversationModel).not.toHaveBeenCalled();
+    expect(useAppStore.getState().selection).toMatchObject({
+      providerId: 'opencode-go',
+      modelId: 'deepseek-v4.1-flash',
+    });
+    expect(toast.info).toHaveBeenCalledWith('Aguarde a resposta atual terminar', {
+      description: 'A troca de modelo fica disponível quando a resposta atual terminar.',
+    });
+  });
+
+  it('keeps the Chat lock for a Chat-native session even in the Code layout', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState({
+      activeId: 'chat-1',
+      conversations: [conversation({ id: 'chat-1', mode: 'chat', messageCount: 2 })],
+      messagesByConversation: { 'chat-1': [userMessage(), assistantMessage()] },
+    });
+
+    expect(modelLockReason(useChatStore.getState(), 'code')).toBe('started');
+    await expect(
+      useChatStore
+        .getState()
+        .chooseModel({ providerId: 'opencode-go', modelId: 'glm-5.3-flash', reasoning: null }),
+    ).resolves.toBe(false);
+    expect(mocks.api.setConversationModel).not.toHaveBeenCalled();
+  });
+
+  it('send uses the composer selection of a started Code session (model unlocked)', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useChatStore.setState({
+      activeId: 'code-1',
+      conversations: [
+        conversation({
+          id: 'code-1',
+          mode: 'code',
+          providerId: 'opencode-go',
+          modelId: 'deepseek-v4.1-flash',
+          messageCount: 2,
+        }),
+      ],
+      messagesByConversation: {
+        'code-1': [
+          userMessage({ conversationId: 'code-1' }),
+          assistantMessage({ conversationId: 'code-1' }),
+        ],
+      },
+    });
+    useAppStore.setState({
+      selection: {
+        providerId: 'anthropic',
+        modelId: 'claude-sonnet-5-5',
+        reasoning: { mode: 'effort', effort: 'high' },
+      },
+    });
+
+    const payloads: TurnPayload[] = [];
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        payloads.push(payload);
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-2',
+          assistantMessageId: 'assistant-2',
+        });
+        const result = {
+          userMessage: userMessage({ id: 'user-2', conversationId: 'code-1' }),
+          assistantMessage: assistantMessage({ id: 'assistant-2', conversationId: 'code-1' }),
+          usage: null,
+          error: null,
+          conversation: conversation({
+            id: 'code-1',
+            mode: 'code',
+            providerId: 'anthropic',
+            modelId: 'claude-sonnet-5-5',
+            messageCount: 4,
+          }),
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    await useChatStore.getState().send('continua');
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+
+    expect(payloads[0]).toMatchObject({
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet-5-5',
+      profile: 'code',
+    });
   });
 
   it('syncs the active selection to the conversation model when opening a started conversation', async () => {
@@ -680,6 +1021,42 @@ describe('model lock', () => {
     expect(useAppStore.getState().selection).toMatchObject({
       providerId: 'opencode-go',
       modelId: 'glm-5.3-flash',
+    });
+  });
+
+  it('syncs the selection for an account-only model when reopening a started Code session', async () => {
+    const baseProvider = catalog.providers.find((provider) => provider.id === 'openai');
+    expect(baseProvider).toBeTruthy();
+    const accountModel = {
+      ...baseProvider!.models[0],
+      id: 'gpt-account-only',
+      name: 'GPT Conta',
+    };
+    useAppStore.setState({
+      providers: [
+        { ...baseProvider!, models: [accountModel, ...baseProvider!.models] },
+        ...catalog.providers.filter((provider) => provider.id !== 'openai'),
+      ],
+    });
+    mocks.api.getConversation.mockResolvedValue({
+      conversation: conversation({
+        id: 'code-1',
+        mode: 'code',
+        providerId: 'openai',
+        modelId: 'gpt-account-only',
+        messageCount: 2,
+      }),
+      messages: [userMessage(), assistantMessage()],
+    });
+    useUiStore.setState({ layoutMode: 'code' });
+
+    await useChatStore.getState().openConversation('code-1');
+
+    // The merged view (catalog + account-only models) must resolve the session
+    // pair; the static catalog alone would leave the composer on a stale model.
+    expect(useAppStore.getState().selection).toMatchObject({
+      providerId: 'openai',
+      modelId: 'gpt-account-only',
     });
   });
 

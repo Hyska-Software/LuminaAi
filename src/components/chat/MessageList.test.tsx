@@ -7,8 +7,8 @@
  * (`CodeTurnSummary.test.tsx`); aqui o alvo é o gate da montagem e o workspace
  * da sessão, que torna as linhas clicáveis (abrem o diff como aba central).
  */
-import { afterEach, describe, expect, it } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ChatMessage, Conversation, FileChangeKind, ToolCallRecord } from '@/lib/types';
 import { useChatStore, useUiStore, type StreamingState } from '@/lib/store';
 import { MessageList } from './MessageList';
@@ -256,5 +256,114 @@ describe('MessageList — workspace da sessão no fecho do turno', () => {
     expect(summaryCard()).toBeTruthy();
     expect(screen.getByText('1 arquivo alterado')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Abrir diff de / })).toBeNull();
+  });
+});
+
+describe('MessageList — divisor de troca de modelo no meio da conversa', () => {
+  const GO_FLASH = { providerId: 'opencode-go', modelId: 'deepseek-v4.1-flash' } as const;
+  const OPENAI_LUNA = { providerId: 'openai', modelId: 'gpt-6-luna' } as const;
+
+  beforeEach(() => {
+    useUiStore.setState({ layoutMode: 'chat' });
+  });
+
+  function followUpUser(id: string, content: string, createdAt: number): ChatMessage {
+    return { ...userMessage(), id, content, createdAt };
+  }
+
+  function routedAssistant(
+    id: string,
+    content: string,
+    route: { providerId: string | null; modelId: string | null },
+    createdAt: number,
+  ): ChatMessage {
+    return assistantMessage({ id, content, createdAt, toolCalls: [], ...route });
+  }
+
+  /** Conversa com troca no meio: Go/Flash -> OpenAI/Luna (e um turno repetindo). */
+  function mixedConversation(): ChatMessage[] {
+    return [
+      userMessage(),
+      routedAssistant('assistant-1', 'Resposta A.', GO_FLASH, 2),
+      followUpUser('user-2', 'Agora com outro modelo.', 3),
+      routedAssistant('assistant-2', 'Resposta B.', OPENAI_LUNA, 4),
+      followUpUser('user-3', 'Continua.', 5),
+      routedAssistant('assistant-3', 'Resposta C.', OPENAI_LUNA, 6),
+    ];
+  }
+
+  it('mostra um único divisor, como sibling imediatamente antes da resposta nova', () => {
+    render(<MessageList messages={mixedConversation()} streaming={null} />);
+
+    const dividers = screen.getAllByRole('separator', { name: /Modelo alterado para/ });
+    expect(dividers).toHaveLength(1);
+
+    const divider = dividers[0];
+    expect(divider.getAttribute('title')).toBe('Modelo alterado para GPT-6 Luna · ChatGPT');
+    // O divisor é irmão do MessageItem dentro do role="log" — não envolve a mensagem.
+    const log = screen.getByRole('log');
+    expect(divider.parentElement).toBe(log);
+    const item = divider.nextElementSibling as HTMLElement;
+    expect(within(item).getByText('Resposta B.')).toBeTruthy();
+    expect(within(item).queryByText('Resposta A.')).toBeNull();
+  });
+
+  it('não mostra divisor quando a conversa inteira usa a mesma rota', () => {
+    const messages = [
+      userMessage(),
+      routedAssistant('assistant-1', 'Resposta A.', GO_FLASH, 2),
+      followUpUser('user-2', 'Mais uma pergunta.', 3),
+      routedAssistant('assistant-2', 'Resposta B.', GO_FLASH, 4),
+    ];
+
+    render(<MessageList messages={messages} streaming={null} />);
+
+    expect(screen.queryByRole('separator')).toBeNull();
+    expect(screen.queryByText(/Modelo alterado para/)).toBeNull();
+  });
+
+  it('mantém o role="log"/aria-live e o divisor acessível durante o streaming', () => {
+    const messages = mixedConversation();
+    const { rerender } = render(<MessageList messages={messages} streaming={null} />);
+
+    const log = screen.getByRole('log');
+    expect(log.getAttribute('aria-live')).toBe('off');
+    const divider = screen.getByRole('separator', {
+      name: 'Modelo alterado para GPT-6 Luna · ChatGPT',
+    });
+    expect(log.contains(divider)).toBe(true);
+    expect(divider.textContent).toContain('Modelo alterado para GPT-6 Luna');
+
+    rerender(<MessageList messages={messages} streaming={streamingState('assistant-2')} />);
+    expect(screen.getByRole('log').getAttribute('aria-live')).toBe('polite');
+    expect(
+      screen.getByRole('separator', { name: /Modelo alterado para GPT-6 Luna/ }),
+    ).toBeTruthy();
+  });
+
+  it('ignora resposta antiga sem modelId ao comparar a rota anterior', () => {
+    const messages = [
+      userMessage(),
+      routedAssistant('assistant-1', 'Resposta A.', GO_FLASH, 2),
+      followUpUser('user-2', 'Segue.', 3),
+      assistantMessage({
+        id: 'assistant-legacy',
+        content: 'Resposta legada.',
+        createdAt: 4,
+        toolCalls: [],
+        providerId: null,
+        modelId: null,
+      }),
+      followUpUser('user-3', 'Troquei o modelo.', 5),
+      routedAssistant('assistant-3', 'Resposta C.', OPENAI_LUNA, 6),
+    ];
+
+    render(<MessageList messages={messages} streaming={null} />);
+
+    // A resposta sem modelId não interrompe a comparação: o divisor vem antes da C.
+    const divider = screen.getByRole('separator', { name: /Modelo alterado para GPT-6 Luna/ });
+    const item = divider.nextElementSibling as HTMLElement;
+    expect(within(item).getByText('Resposta C.')).toBeTruthy();
+    expect(screen.queryByText('Resposta legada.')).toBeTruthy();
   });
 });

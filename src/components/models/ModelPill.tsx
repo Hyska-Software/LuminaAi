@@ -31,9 +31,8 @@ import { openExternal } from '@/lib/genui/open-external';
 import type { ReasoningSelection } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
-  MODEL_LOCKED_DESCRIPTION,
-  MODEL_LOCKED_TITLE,
-  selectModelLocked,
+  modelLockCopy,
+  modelLockReason,
   useAppStore,
   useChatStore,
   useUiStore,
@@ -212,11 +211,14 @@ export function ModelPill({
   const keys = useAppStore((state) => state.keys);
   const auth = useAppStore((state) => state.auth);
   const storeProviders = useAppStore((state) => state.providers);
-  const setSelection = useAppStore((state) => state.setSelection);
   const setReasoning = useAppStore((state) => state.setReasoning);
   const toggleFavorite = useAppStore((state) => state.toggleFavorite);
-  // A conversation's model is locked in once it has messages or a turn running.
-  const locked = useChatStore(selectModelLocked);
+  // Chat locks the model once the conversation starts; a Code session keeps it
+  // switchable between turns (a running turn always locks it).
+  const layoutMode = useUiStore((state) => state.layoutMode);
+  const lockReason = useChatStore((state) => modelLockReason(state, layoutMode));
+  const locked = lockReason !== null;
+  const lockCopy = lockReason ? modelLockCopy(lockReason) : null;
 
   const reactId = useId();
   const listId = `model-pill-${domId(reactId)}-models`;
@@ -259,6 +261,15 @@ export function ModelPill({
   const reasoningSupported = Boolean(model && reasoningUi(model).supported);
   const effortText = effortSegmentLabel(model, effectiveReasoning);
   const currentKey = mid ? modelKey(pid, mid) : null;
+  // The lock explanation changes with the reason: a started Chat conversation
+  // keeps the original copy, a running turn explains that it must finish first.
+  const lockAriaLabel = locked
+    ? `${
+        lockReason === 'streaming'
+          ? 'Troca de modelo indisponível durante a resposta'
+          : 'Modelo bloqueado nesta conversa'
+      }. Atual: ${name}`
+    : null;
 
   const searching = normalizeSearch(query).length > 0;
 
@@ -471,7 +482,7 @@ export function ModelPill({
   const handleModelSegment = () => {
     if (disabled) return;
     if (locked) {
-      toast.info(MODEL_LOCKED_TITLE, { description: MODEL_LOCKED_DESCRIPTION });
+      if (lockCopy) toast.info(lockCopy.title, { description: lockCopy.description });
       return;
     }
     if (!open) {
@@ -541,14 +552,19 @@ export function ModelPill({
     const nextKey = entryKey(entry);
     const nextReasoning = reasoningForModel(entry.model, effectiveReasoning);
 
-    setSelection({ providerId: entry.providerId, modelId: entry.model.id, reasoning: nextReasoning });
-    if (nextReasoning) setReasoning(nextReasoning);
-
     setActiveKey(nextKey);
     setListProviderId(entry.providerId);
     setThinkingTargetKey(nextKey);
     setThinkingValue(nextReasoning);
     setActiveThinkingId(currentThinkingId(nextReasoning));
+
+    // `chooseModel` persists the pair on a started Code session (the change is a
+    // session property there) and keeps the old behavior on new/empty chats.
+    void useChatStore.getState().chooseModel({
+      providerId: entry.providerId,
+      modelId: entry.model.id,
+      reasoning: nextReasoning,
+    });
 
     // Continue inside the same popover: choose the thinking mode right away.
     if (reasoningUi(entry.model).supported) {
@@ -690,12 +706,8 @@ export function ModelPill({
             aria-haspopup={locked ? undefined : 'dialog'}
             aria-expanded={locked ? undefined : open && stage === 'model'}
             aria-disabled={locked || undefined}
-            aria-label={
-              locked
-                ? `Modelo bloqueado nesta conversa. Atual: ${name}`
-                : `Selecionar modelo. Atual: ${name}`
-            }
-            title={locked ? MODEL_LOCKED_DESCRIPTION : undefined}
+            aria-label={lockAriaLabel ?? `Selecionar modelo. Atual: ${name}`}
+            title={locked ? lockCopy?.description : undefined}
             onClick={handleModelSegment}
             className={cn(
               'flex min-w-0 items-center gap-1.5 rounded-l-full pl-1 pr-1.5',
@@ -720,7 +732,7 @@ export function ModelPill({
                 compact ? 'max-w-24' : 'max-w-36',
                 locked && 'text-foreground-subtle',
               )}
-              title={locked ? MODEL_LOCKED_DESCRIPTION : name}
+              title={locked ? lockCopy?.description : name}
             >
               {name}
             </span>

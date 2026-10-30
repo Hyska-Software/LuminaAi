@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@/components/ui';
@@ -9,10 +9,29 @@ import type { ChatMessage, Conversation } from '@/lib/types';
 import {
   MODEL_LOCKED_DESCRIPTION,
   MODEL_LOCKED_TITLE,
+  MODEL_STREAMING_LOCKED_DESCRIPTION,
+  MODEL_STREAMING_LOCKED_TITLE,
   useAppStore,
   useChatStore,
   useUiStore,
 } from '@/lib/store';
+
+// No Tauri IPC in jsdom: the settings write stays pending (fire-and-forget) and
+// the per-session model persistence is asserted through its mock.
+const apiMocks = vi.hoisted(() => ({
+  saveSettings: vi.fn(() => new Promise(() => {})),
+  setConversationModel: vi.fn(),
+}));
+
+vi.mock('@/lib/api', () => ({ api: apiMocks }));
+
+const toastMocks = vi.hoisted(() => ({
+  info: vi.fn(),
+  success: vi.fn(),
+  error: vi.fn(),
+}));
+
+vi.mock('sonner', () => ({ toast: toastMocks }));
 
 afterEach(() => cleanup());
 
@@ -21,7 +40,9 @@ const CURRENT_MODEL = 'deepseek-v4.1-flash';
 const FAVORITES = ['glm-5.3-flash', 'deepseek-v4.1-flash', 'claude-haiku-5-5', 'gpt-6-luna'];
 
 beforeEach(() => {
-  useUiStore.setState({ modelPickerOpen: true, settingsOpen: false });
+  vi.clearAllMocks();
+  apiMocks.setConversationModel.mockReset();
+  useUiStore.setState({ modelPickerOpen: true, settingsOpen: false, layoutMode: 'chat' });
   // Every test starts before the first message, so the model is still editable.
   useChatStore.setState({
     activeId: null,
@@ -75,7 +96,7 @@ function selectedModelName(): string | undefined {
 }
 
 /** Starts a conversation with messages, which locks the model selection. */
-function lockConversation(): void {
+function lockConversation(overrides: Partial<Conversation> = {}): Conversation {
   const conversation: Conversation = {
     id: 'conv-locked',
     title: 'Conversa em andamento',
@@ -86,6 +107,7 @@ function lockConversation(): void {
     modelId: CURRENT_MODEL,
     messageCount: 2,
     preview: 'Olá',
+    ...overrides,
   };
   const messages: ChatMessage[] = [
     {
@@ -117,6 +139,29 @@ function lockConversation(): void {
     messagesByConversation: { [conversation.id]: messages },
     streaming: null,
   });
+  return conversation;
+}
+
+/**
+ * A started session born in the Code layout: unlike Chat, it keeps the model
+ * switchable between turns, persisting the pair on the session itself.
+ */
+function startCodeSession(): Conversation {
+  useUiStore.setState({ layoutMode: 'code' });
+  const conversation = lockConversation({
+    id: 'conv-code',
+    title: 'Sessão de código',
+    mode: 'code',
+  });
+  apiMocks.setConversationModel.mockImplementation(
+    async (conversationId: string, providerId: string, modelId: string) => ({
+      ...conversation,
+      id: conversationId,
+      providerId,
+      modelId,
+    }),
+  );
+  return conversation;
 }
 
 describe('ModelPickerDialog', () => {
@@ -449,7 +494,8 @@ describe('ModelPickerDialog (modelo bloqueado após iniciar a conversa)', () => 
     });
     await renderDialog();
 
-    expect(screen.getByRole('heading', { name: MODEL_LOCKED_TITLE })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: MODEL_STREAMING_LOCKED_TITLE })).toBeTruthy();
+    expect(screen.getByText(MODEL_STREAMING_LOCKED_DESCRIPTION)).toBeTruthy();
     expect(screen.queryByRole('combobox')).toBeNull();
   });
 
@@ -474,5 +520,114 @@ describe('ModelPickerDialog (modelo bloqueado após iniciar a conversa)', () => 
     expect(screen.getByRole('heading', { name: MODEL_LOCKED_TITLE })).toBeTruthy();
     expect(screen.getByText('fantasma')).toBeTruthy();
     expect(screen.getByText('desaparecido')).toBeTruthy();
+  });
+});
+
+describe('ModelPickerDialog (troca de modelo na sessão do Code)', () => {
+  it('abre o seletor completo e persiste o par na sessão do Code', async () => {
+    startCodeSession();
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    expect(screen.getByRole('heading', { name: 'Selecionar modelo' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: MODEL_LOCKED_TITLE })).toBeNull();
+    expect(searchField()).toBeTruthy();
+
+    await user.click(screen.getByRole('option', { name: /GLM-5\.3-Flash/ }));
+    await user.click(screen.getByRole('button', { name: 'Usar este modelo' }));
+
+    await waitFor(() =>
+      expect(apiMocks.setConversationModel).toHaveBeenCalledWith(
+        'conv-code',
+        CURRENT_PROVIDER,
+        'glm-5.3-flash',
+      ),
+    );
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(useChatStore.getState().conversations[0].modelId).toBe('glm-5.3-flash');
+    expect(useAppStore.getState().selection.modelId).toBe('glm-5.3-flash');
+    // The pair is a session property: the configured defaults stay untouched.
+    expect(apiMocks.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('troca de provedor no meio da conversa: aba Zen, modelo do Zen e commit na sessão', async () => {
+    startCodeSession();
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    // Sai do Go (rota atual da sessão) para o Zen e escolhe um modelo daquele provedor.
+    await user.click(screen.getByRole('tab', { name: 'Zen' }));
+    await user.click(await screen.findByRole('option', { name: /Claude Haiku 5\.5/ }));
+    expect(screen.getByRole('heading', { name: 'Claude Haiku 5.5' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Usar este modelo' }));
+
+    await waitFor(() =>
+      expect(apiMocks.setConversationModel).toHaveBeenCalledWith(
+        'conv-code',
+        'opencode-zen',
+        'claude-haiku-5-5',
+      ),
+    );
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
+    // A conversa e a seleção passam para o par novo; os padrões não mudam.
+    expect(useChatStore.getState().conversations[0]).toMatchObject({
+      providerId: 'opencode-zen',
+      modelId: 'claude-haiku-5-5',
+    });
+    expect(useAppStore.getState().selection).toMatchObject({
+      providerId: 'opencode-zen',
+      modelId: 'claude-haiku-5-5',
+    });
+    expect(apiMocks.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('não fecha o dialog quando o commit é recusado pelo backend', async () => {
+    startCodeSession();
+    apiMocks.setConversationModel.mockRejectedValueOnce(new Error('turno em andamento'));
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('option', { name: /GLM-5\.3-Flash/ }));
+    await user.click(screen.getByRole('button', { name: 'Usar este modelo' }));
+
+    await waitFor(() => expect(apiMocks.setConversationModel).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(toastMocks.error).toHaveBeenCalledWith(
+        'Não foi possível alterar o modelo',
+        expect.objectContaining({ description: 'turno em andamento' }),
+      ),
+    );
+    // The dialog stays open so the user sees the toast, and the selection reverts.
+    expect(useUiStore.getState().modelPickerOpen).toBe(true);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(useAppStore.getState().selection.modelId).toBe(CURRENT_MODEL);
+  });
+
+  it('bloqueia durante o streaming na sessão do Code com a copy específica', async () => {
+    startCodeSession();
+    useChatStore.setState({
+      streaming: {
+        turnId: 'turn-1',
+        conversationId: 'conv-code',
+        assistantId: 'assistant-1',
+        userMessageId: null,
+        phase: 'text',
+        step: 1,
+        startedAt: Date.now(),
+        turnKind: 'user',
+      },
+    });
+    await renderDialog();
+    const user = userEvent.setup();
+
+    expect(screen.getByRole('heading', { name: MODEL_STREAMING_LOCKED_TITLE })).toBeTruthy();
+    expect(screen.getByText(MODEL_STREAMING_LOCKED_DESCRIPTION)).toBeTruthy();
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Usar este modelo' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Fechar' }));
+    await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
   });
 });

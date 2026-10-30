@@ -410,3 +410,20 @@ Superfícies:
 - Configurações › Modelo padrão: altera apenas os padrões (novas conversas),
   nunca a conversa em andamento.
 
+### 12.1 Atualização: troca no meio da conversa no layout Code (2026-10-30)
+
+O bloqueio passou a ser **por layout** (ver `docs/goals/code-model-switch/`):
+
+- **Chat**: mantém o comportamento acima (modelo travado após o primeiro envio).
+- **Code**: sessões do Code (nativas ou `codeLinked`) liberam modelo e provedor
+  entre turnos. A escolha é persistida na sessão via `set_conversation_model`
+  sem tocar no modelo padrão; o próximo turno e as rodadas do objetivo usam o
+  par novo, e as respostas antigas são relidas pelo fallback neutro.
+- **Streaming**: continua bloqueado nos dois layouts, com copy própria
+  ("Aguarde a resposta atual terminar").
+- **UI**: `ModelPill`/`ModelPickerDialog`/paleta consultam
+  `modelLockReason(state, layoutMode)` (não mais um booleano global) e commitam
+  por `chatStore.chooseModel(...)`; o transcript ganha o divisor “Modelo
+  alterado para …”. `ModelTab` usa `selectActiveConversationStarted` para nunca
+  alterar uma sessão iniciada (em nenhum layout).
+

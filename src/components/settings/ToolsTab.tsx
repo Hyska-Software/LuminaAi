@@ -2,7 +2,12 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Copy, FolderOpen, Sparkles, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import type { CacheSettings, CodeEnvironmentStatus, InterpreterInfo } from '@/lib/types';
+import type {
+  CacheSettings,
+  CodeEnvironmentStatus,
+  InterpreterInfo,
+  PermissionMode,
+} from '@/lib/types';
 import { MAX_STEPS_LIMIT, useAppStore, useUiStore } from '@/lib/store';
 import { cn, copyText } from '@/lib/utils';
 import { Badge, Button, IconButton, NativeSelect, Slider, Spinner, Switch } from '@/components/ui';
@@ -12,6 +17,17 @@ import { SettingRow, SettingsBlock, SettingsSection } from './shared';
 const TIMEOUT_MIN = 10;
 const TIMEOUT_MAX = 600;
 const TIMEOUT_STEP = 10;
+
+/** Modos de permissão do harness (mesma ordem do chip do composer). */
+const CODE_PERMISSION_OPTIONS: { value: PermissionMode; label: string }[] = [
+  { value: 'read_only', label: 'Leitura' },
+  { value: 'review', label: 'Revisar' },
+  { value: 'edit', label: 'Editar' },
+  { value: 'autonomous', label: 'Autônomo' },
+];
+
+/** Padrão de fábrica quando o backend ainda não devolveu o campo. */
+const CODE_DEFAULT_PERMISSION_FALLBACK: PermissionMode = 'autonomous';
 
 function interpreterSourceLabel(source: string): string {
   if (source === 'settings') return 'caminho configurado';
@@ -81,6 +97,8 @@ export function ToolsTab() {
   }, [environmentAttempt]);
 
   const temperatureEnabled = settings.temperature != null;
+  const codeDefaultPermissionMode: PermissionMode =
+    settings.codeDefaultPermissionMode ?? CODE_DEFAULT_PERMISSION_FALLBACK;
   const cacheSettings: CacheSettings = {
     showIndicator: settings.cache?.showIndicator ?? true,
     anthropicTtl: settings.cache?.anthropicTtl ?? '1h',
@@ -304,9 +322,31 @@ export function ToolsTab() {
       </SettingsSection>
 
       <SettingsSection
-        title="Workbench de código"
-        description="Como o layout Code mostra as alterações e os diffs do agente."
+        title="Sessões de código"
+        description="Padrões das novas sessões do layout Code e como o workbench mostra as alterações."
       >
+        <SettingRow
+          label="Modo de permissão padrão"
+          description="Toda nova sessão do Code começa neste modo. Você pode trocar pelo chip de permissão no composer a qualquer momento — a mudança aqui vale para as próximas sessões."
+        >
+          <NativeSelect
+            value={codeDefaultPermissionMode}
+            onChange={(event) => {
+              const mode = CODE_PERMISSION_OPTIONS.find(
+                (option) => option.value === event.target.value,
+              )?.value;
+              if (mode) void saveSettings({ codeDefaultPermissionMode: mode });
+            }}
+            aria-label="Modo de permissão padrão das novas sessões do Code"
+          >
+            {CODE_PERMISSION_OPTIONS.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </NativeSelect>
+        </SettingRow>
+
         <SettingRow
           label="Abrir diff dos arquivos"
           description="Escolha onde o diff de um arquivo da aba Alterações abre ao clicar."

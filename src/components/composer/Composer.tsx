@@ -8,7 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { ArrowUp, FilePlus, Globe, Plus, Square, Target, TriangleAlert, X } from 'lucide-react';
+import { ArrowUp, FilePlus, Globe, Plus, Square, Target, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { credentialGateMessage } from '@/components/chat/turnError';
 import { useReduceMotion } from '@/components/layout/hooks';
@@ -19,6 +19,7 @@ import {
   Popover,
   PopoverAnchor,
   PopoverContent,
+  Tooltip,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
@@ -34,6 +35,7 @@ import {
   mentionOptionId,
 } from './MentionMenu';
 import { addMention, composeMessage, withoutMention, type MentionedFile } from './mentions';
+import { PlanModeChip } from './PlanModeChip';
 import { SLASH_LISTBOX_ID, SlashMenu, slashOptionId } from './SlashMenu';
 import { ToolsToggle } from './ToolsToggle';
 
@@ -106,6 +108,17 @@ export function Composer() {
     (activeConversation.mode === 'code' || activeConversation.codeLinked)
       ? activeConversation
       : undefined;
+  /**
+   * Modo Plano da sessão do Code: controla o badge (pill) dentro do campo.
+   * Sem sessão de código não há badge (nem assinatura ao `codeStore`).
+   */
+  const planModeActive = useCodeStore((state) =>
+    codeSessionConversation
+      ? (state.byConversation[codeSessionConversation.id]?.planMode ?? false)
+      : false,
+  );
+  /** A linha de chips acima do textarea existe quando há `/goal` e/ou Plano. */
+  const showComposerChips = goalIntent || planModeActive;
   const workspaceId = activeConversation?.workspaceId || activeWorkspaceId || null;
   /** `@` menções e `/` comandos só existem no modo Code com workspace. */
   const codeMenusEnabled = isCodeLayout && Boolean(workspaceId);
@@ -592,23 +605,39 @@ export function Composer() {
         >
           <PopoverAnchor asChild>
             <div className="px-3 pb-1 pt-3">
-              {goalIntent ? (
-                <div className="mb-2 flex items-center gap-1.5">
-                  <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft pl-2.5 pr-1 text-[12px] font-medium text-foreground">
-                    <Target aria-hidden className="size-3.5 text-accent" strokeWidth={1.75} />
-                    /goal
-                    <button
-                      type="button"
-                      aria-label="Remover objetivo"
-                      onClick={() => {
-                        setGoalIntent(false);
-                        textareaRef.current?.focus();
-                      }}
-                      className="flex size-5 items-center justify-center rounded-full text-foreground-muted transition-colors hover:bg-surface-active hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                    >
-                      <X aria-hidden className="size-3" />
-                    </button>
-                  </span>
+              {showComposerChips ? (
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  {goalIntent ? (
+                    // Mesmo padrão do badge de Plano: um único botão-pill accent;
+                    // clicar em qualquer parte remove a intenção.
+                    <Tooltip side="top" content="Objetivo ativo — clique para desativar">
+                      <button
+                        type="button"
+                        aria-label="Desativar objetivo"
+                        aria-pressed={true}
+                        onClick={() => {
+                          setGoalIntent(false);
+                          textareaRef.current?.focus();
+                        }}
+                        className={cn(
+                          'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft px-2.5',
+                          'text-[12px] font-medium text-foreground',
+                          'transition-colors duration-150 hover:bg-accent-soft/80',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                        )}
+                      >
+                        <Target
+                          aria-hidden
+                          className="size-3.5 shrink-0 text-accent"
+                          strokeWidth={1.75}
+                        />
+                        /goal
+                      </button>
+                    </Tooltip>
+                  ) : null}
+                  {codeSessionConversation ? (
+                    <PlanModeChip conversationId={codeSessionConversation.id} />
+                  ) : null}
                 </div>
               ) : null}
 
@@ -703,7 +732,11 @@ export function Composer() {
           </IconButton>
 
           {codeSessionConversation ? (
-            <CodeSessionControls conversationId={codeSessionConversation.id} />
+            <CodeSessionControls
+              conversationId={codeSessionConversation.id}
+              goalIntent={goalIntent}
+              onToggleGoalIntent={() => setGoalIntent((current) => !current)}
+            />
           ) : isCodeLayout ? null : (
             <>
               <ToolsToggle

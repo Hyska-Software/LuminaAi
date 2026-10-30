@@ -50,6 +50,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
     preview: null,
     mode: 'code',
     workspaceId: 'ws-1',
+    permissionMode: 'edit',
     ...overrides,
   };
 }
@@ -195,6 +196,63 @@ describe('Composer — controles de sessão no layout Code', () => {
     expect(
       screen.getByRole('button', { name: 'Modo Plano: ativado' }).getAttribute('aria-pressed'),
     ).toBe('true');
+  });
+});
+
+describe('Composer — badge do modo Plano no campo', () => {
+  function seedPlanMode(planMode: boolean): void {
+    useCodeStore.setState({
+      byConversation: { 'c-1': { ...emptyCodeSession('c-1'), planMode } },
+    });
+  }
+
+  it('não mostra o badge quando o modo Plano está desativado', () => {
+    render(<Composer />);
+
+    expect(screen.queryByRole('button', { name: 'Desativar modo Plano' })).toBeNull();
+  });
+
+  it('mostra o badge com o rótulo "Plano" quando o snapshot da sessão tem planMode', () => {
+    seedPlanMode(true);
+    render(<Composer />);
+
+    const chip = screen.getByRole('button', { name: 'Desativar modo Plano' });
+    expect(chip.textContent?.trim()).toBe('Plano');
+  });
+
+  it('clique no badge desativa o Plano pelo store', async () => {
+    seedPlanMode(true);
+    render(<Composer />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Desativar modo Plano' }));
+
+    await waitFor(() => expect(mocks.setPlanMode).toHaveBeenCalledWith('c-1', false));
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Desativar modo Plano' })).toBeNull(),
+    );
+  });
+
+  it('divide a linha de chips acima do textarea com o chip /goal', async () => {
+    seedPlanMode(true);
+    render(<Composer />);
+
+    typeInComposer('/goal');
+    await screen.findByRole('option', { name: /\/goal/ });
+    fireEvent.keyDown(textarea(), { key: 'Enter' });
+
+    const goalChip = screen.getByText('/goal');
+    const planChip = screen.getByRole('button', { name: 'Desativar modo Plano' });
+    const row = planChip.parentElement;
+    expect(row?.contains(goalChip)).toBe(true);
+    expect(goalChip.closest('.mb-2')).toBe(row);
+  });
+
+  it('não mostra o badge fora do layout Code (sem sessão de código)', () => {
+    seedPlanMode(true);
+    useUiStore.setState({ layoutMode: 'chat' });
+    render(<Composer />);
+
+    expect(screen.queryByRole('button', { name: 'Desativar modo Plano' })).toBeNull();
   });
 });
 
@@ -468,9 +526,12 @@ describe('Composer — comando /goal', () => {
     await screen.findByRole('option', { name: /\/goal/ });
     fireEvent.keyDown(textarea(), { key: 'Enter' });
 
-    // O comando vira chip; não injeta prompt automático no texto.
-    expect(screen.getByRole('button', { name: 'Remover objetivo' })).toBeTruthy();
+    // O comando vira badge no campo; não injeta prompt automático no texto.
     expect(screen.getByText('/goal')).toBeTruthy();
+    // Badge (campo) + botão da barra refletem a intenção ativa.
+    const goalButtons = screen.getAllByRole('button', { name: 'Desativar objetivo' });
+    expect(goalButtons).toHaveLength(2);
+    expect(goalButtons.every((button) => button.getAttribute('aria-pressed') === 'true')).toBe(true);
     expect(textarea().value).toBe('');
     expect(screen.queryByRole('listbox')).toBeNull();
     expect(send).not.toHaveBeenCalled();
@@ -479,7 +540,7 @@ describe('Composer — comando /goal', () => {
     expect(useUiStore.getState().codeView).toBe('session');
   });
 
-  it('envia a mensagem intacta com goalRequest=true e limpa o chip', async () => {
+  it('envia a mensagem intacta com goalRequest=true e limpa o badge', async () => {
     const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(undefined);
     render(<Composer />);
 
@@ -497,22 +558,62 @@ describe('Composer — comando /goal', () => {
         goalRequest: true,
       }),
     );
-    expect(screen.queryByRole('button', { name: 'Remover objetivo' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Desativar objetivo' })).toBeNull();
+    expect(screen.queryByText('/goal')).toBeNull();
+    // A barra volta ao estado inativo.
+    expect(
+      screen.getByRole('button', { name: 'Criar objetivo com /goal' }).getAttribute('aria-pressed'),
+    ).toBe('false');
     expect(textarea().value).toBe('');
   });
 
-  it('remover o chip volta ao turno normal', async () => {
+  it('remover o badge volta ao turno normal', async () => {
     const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(undefined);
     render(<Composer />);
 
     typeInComposer('/goal');
     await screen.findByRole('option', { name: /\/goal/ });
     fireEvent.keyDown(textarea(), { key: 'Enter' });
-    fireEvent.click(screen.getByRole('button', { name: 'Remover objetivo' }));
+
+    // O badge é um único botão: clicar em qualquer parte remove a intenção.
+    fireEvent.click(screen.getByText('/goal'));
+
+    expect(screen.queryByText('/goal')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Desativar objetivo' })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Criar objetivo com /goal' }).getAttribute('aria-pressed'),
+    ).toBe('false');
 
     fireEvent.change(textarea(), { target: { value: 'Oi' } });
     fireEvent.click(screen.getByRole('button', { name: 'Enviar mensagem' }));
 
     await waitFor(() => expect(send).toHaveBeenCalledWith('Oi', undefined));
+  });
+
+  it('o botão da barra liga e desliga o badge /goal (paridade com o modo Plano)', () => {
+    render(<Composer />);
+
+    expect(screen.queryByText('/goal')).toBeNull();
+    const inactive = screen.getByRole('button', { name: 'Criar objetivo com /goal' });
+    expect(inactive.getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(inactive);
+
+    // Badge no campo + botão da barra ativo (dois botões com o mesmo rótulo).
+    const active = screen.getAllByRole('button', { name: 'Desativar objetivo' });
+    expect(active).toHaveLength(2);
+    expect(active.every((button) => button.getAttribute('aria-pressed') === 'true')).toBe(true);
+    expect(screen.getByText('/goal')).toBeTruthy();
+
+    // Desliga pelo botão da barra (o único sem texto; o badge tem "/goal").
+    const barButton = active.find((button) => (button.textContent ?? '').trim() === '');
+    expect(barButton).toBeTruthy();
+    fireEvent.click(barButton as HTMLElement);
+
+    expect(screen.queryByText('/goal')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Desativar objetivo' })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Criar objetivo com /goal' }).getAttribute('aria-pressed'),
+    ).toBe('false');
   });
 });

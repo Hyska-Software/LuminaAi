@@ -4,7 +4,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import type {
   AppInfo,
   ApprovalRequest,
-  CodeSessionState,
   Conversation,
   GoalView,
   Settings,
@@ -113,18 +112,6 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
     preview: null,
     // Session fixtures here are Code sessions unless the test says otherwise.
     mode: 'code',
-    ...overrides,
-  };
-}
-
-function sessionState(overrides: Partial<CodeSessionState> = {}): CodeSessionState {
-  return {
-    conversationId: 'c-new',
-    permissionMode: 'edit',
-    planMode: false,
-    todos: [],
-    jobs: [],
-    approvals: [],
     ...overrides,
   };
 }
@@ -384,13 +371,12 @@ describe('CodeSessionHeader — workspace real', () => {
 });
 
 describe('CodeSessionHeader — confiança da pasta', () => {
-  it('“Confiar” aplica trusted + permissão na sessão recém-criada', async () => {
+  it('“Confiar” aplica trusted e mantém o modo de permissão da sessão', async () => {
     const ws = workspace({ trusted: false });
     mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
     mocks.addWorkspace.mockResolvedValue(ws);
     mocks.listWorkspaces.mockResolvedValue([ws]);
     mocks.setWorkspaceTrusted.mockResolvedValue({ ...ws, trusted: true });
-    mocks.setPermissionMode.mockResolvedValue(sessionState({ permissionMode: 'edit' }));
 
     render(<CodeSessionHeader />);
     const chip = await screen.findByRole('button', { name: /Sem workspace/ });
@@ -402,9 +388,9 @@ describe('CodeSessionHeader — confiança da pasta', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confiar' }));
 
     await waitFor(() => expect(mocks.setWorkspaceTrusted).toHaveBeenCalledWith('ws-1', true));
-    await waitFor(() =>
-      expect(mocks.setPermissionMode).toHaveBeenCalledWith('c-new', 'edit'),
-    );
+    // A sessão recém-criada já nasce no modo padrão configurado (Autônomo de
+    // fábrica); confiar não pode rebaixá-la para "Editar".
+    expect(mocks.setPermissionMode).not.toHaveBeenCalled();
   });
 });
 

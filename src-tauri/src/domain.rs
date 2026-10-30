@@ -1058,7 +1058,8 @@ pub struct Settings {
     pub approval_timeout_secs: u32,
     /// Notificações do sistema no fim de turnos em segundo plano.
     pub notifications_enabled: bool,
-    /// Modo de permissão padrão de novas sessões do Code.
+    /// Modo de permissão inicial de novas sessões do Code (padrão: Autônomo),
+    /// configurável em Configurações → Ferramentas. O Chat ignora os modos.
     pub code_default_permission_mode: PermissionMode,
     /// Confia automaticamente em workspaces já abertos antes (o usuário pode
     /// revogar por workspace); quando falso, cada pasta nova pede confirmação.
@@ -1102,7 +1103,9 @@ impl Default for Settings {
             spill_retention_days: 30,
             approval_timeout_secs: 600,
             notifications_enabled: true,
-            code_default_permission_mode: PermissionMode::Edit,
+            // Padrão do produto: o Code nasce Autônomo (o usuário troca em
+            // Configurações → Ferramentas e por sessão no chip do composer).
+            code_default_permission_mode: PermissionMode::Autonomous,
             trust_workspaces_by_default: false,
             diff_open_mode: "tab".into(),
             cache: CacheSettings::default(),

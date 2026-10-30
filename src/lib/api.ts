@@ -119,6 +119,14 @@ export const api = {
   /** Compartilha uma sessão do Chat com o layout Code (ou remove o vínculo). */
   setConversationCodeLinked: (id: string, linked: boolean) =>
     invoke<Conversation>('set_conversation_code_linked', { id, linked }),
+  /**
+   * Sessões do Code: persiste o par provedor/modelo da sessão (o modelo pode ser
+   * trocado no meio da conversa nesse layout). O Chat mantém o modelo travado
+   * após a primeira mensagem; o backend recusa sessão nativa do Chat e turno em
+   * andamento.
+   */
+  setConversationModel: (conversationId: string, providerId: string, modelId: string) =>
+    invoke<Conversation>('set_conversation_model', { conversationId, providerId, modelId }),
   searchConversations: (query: string) =>
     invoke<Conversation[]>('search_conversations', { query }),
   truncateConversation: (conversationId: string, fromMessageId: string) =>

@@ -250,7 +250,9 @@ Reaproveita o `Composer` atual (draft, anexos, model picker, envio/parada) com:
 3. **Controles**: modelo (existente), anexos (existente), enviar/parar e, no lugar dos pills globais
    de ferramentas do Chat (`Busca web`/`Criar arquivos`), os **controles da sessão**: **modo de
    permissão** (chip/escudo: Leitura/Editar/Revisar/Autônomo, menu com a descrição de cada modo e
-   atualização otimista com rollback), **Plano** (toggle com `aria-pressed`) e o **popover de
+   atualização otimista com rollback), **Plano** (toggle somente ícone com `aria-pressed`; quando
+   ativo o campo mostra um badge accent com o ícone e o rótulo “Plano” — `aria-label="Desativar
+   modo Plano"` — na área de chips, ao lado do `/goal`, que desativa o modo ao clique) e o **popover de
    plano/tarefas** (estado do plano, markdown e status dos itens). Tudo com `aria-label` e navegável.
 4. **Placeholder por estado**: com workspace → "Descreva a tarefa… @ para arquivos, / para comandos";
    sem workspace → "Abra uma pasta para trabalhar com código".
@@ -520,7 +522,7 @@ Produto/contrato completo: `docs/goals/code-goals/PLAN.md` §10. Superfícies e 
 
 | Superfície | Componente | Comportamento |
 | --- | --- | --- |
-| Pill + popover no composer | `GoalControls` (entre **Plano** e **Plano e tarefas**) | botão **somente ícone** (sem texto/rounds): sem objetivo ativa o chip `/goal`; com objetivo abre popover com `GoalCard` completo (Pausar/Retomar/Armar/Nova rodada/Concluir com confirmação/Editar/Estender/Abrir). Durante streaming só "Pausar após esta rodada" + Abrir |
+| Pill + popover no composer | `GoalControls` (entre **Plano** e **Plano e tarefas**) | botão **somente ícone** (sem texto/rounds), no mesmo padrão do toggle de Plano: sem objetivo alterna o chip `/goal` (`accent` + `aria-pressed` quando armado; clicar no chip remove a intenção); com objetivo abre popover com `GoalCard` completo (Pausar/Retomar/Armar/Nova rodada/Concluir com confirmação/Editar/Estender/Abrir). Durante streaming só "Pausar após esta rodada" + Abrir |
 | Badge + aba no header | `CodeSessionHeader` | badge clicável → `openCodeGoal()` (accent+spinner na rodada, warning pausado, danger bloqueado, `N/M` ativo, oculto concluído); aba central "Objetivo" com teclado setas/Home/End/Delete e X |
 | Painel central | `GoalPanel` (`codeView='goal'`, `id="code-goal-panel"`) | resumo (rodadas/tempo/tokens/custo/última atividade), objetivo em Markdown com scroll/copiar, timeline de rodadas (200 máx; Em andamento/Concluída/Cancelada/Erro/Interrompida), estados vazio/loading/erro+retry |
 | Diálogo | `GoalDialog` (`uiStore.goalDialog`) | caminho de **edição** (título/objetivo/limite; Switch de continuidade só com objetivo ativo) + zona de perigo "Encerrar objetivo"; criação não é mais aberta pela UI (fluxo `/goal`); `Esc` fecha; `aria-invalid`/`aria-describedby`/`aria-busy` |

@@ -1159,7 +1159,10 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
 
 - `workspaces(id, name, path UNIQUE, …trusted)`; a pasta é do usuário (nada é copiado).
 - `conversations.workspace_id` (nulo = sem workspace), `agent_kind` (`lumina`),
-  `permission_mode` (`read_only` | `edit` | `autonomous`).
+  `permission_mode` (`read_only` | `review` | `edit` | `autonomous`). Sessões novas do Code
+  nascem com `Settings.codeDefaultPermissionMode` (padrão `autonomous`, configurável em
+  Configurações → Ferramentas → Sessões de código); uma sessão do Chat compartilhada com o Code
+  adota esse padrão ao entrar no layout.
 - Confinamento: `workspace/safe_path.rs` resolve todo path contra a raiz, rejeita `..`,
   symlink/junction para fora, device paths e caminhos relativos de drive; leitura fora do
   workspace exige aprovação; escrita fora é negada no modo Leitura.
@@ -1221,7 +1224,7 @@ Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested
 ### 16.6 Diff de arquivo como aba central
 
 - Clicar num arquivo da aba **Alterações** abre o diff como **aba do chat** (por padrão): a barra de abas da sessão ganha a aba `Diff` (rolável, fechável, teclado incluído), o centro mostra `CodeDiffView` (cabeçalho com path, `+N −M`, copiar patch, recarregar) e o chat compartilhado continua montado oculto (estado preservado).
-- Syntax highlighting: `DiffView` tokeniza cada linha visível com o Prism/tema compartilhado (`src/lib/highlight`), preservando fundos de adição/remoção; guarda de custo em 4.000 linhas e `memo` por linha.`n- `Settings.diffOpenMode` (`tab` | `panel`, padrão `tab`) é normalizado no backend e configurável em **Configurações → Ferramentas → Workbench de código**; `panel` mantém o detalhe inline antigo do painel.
+- Syntax highlighting: `DiffView` tokeniza cada linha visível com o Prism/tema compartilhado (`src/lib/highlight`), preservando fundos de adição/remoção; guarda de custo em 4.000 linhas e `memo` por linha.`n- `Settings.diffOpenMode` (`tab` | `panel`, padrão `tab`) é normalizado no backend e configurável em **Configurações → Ferramentas → Sessões de código** (mesma seção do modo de permissão padrão); `panel` mantém o detalhe inline antigo do painel.
 - Alvo volátil em `uiStore.codeDiffTab` (não persistido); evento nenhum no backend (usa `get_file_diff`/journal).
 
 ### 16.7 Histórico de commits (aba central)
