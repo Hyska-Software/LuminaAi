@@ -98,6 +98,18 @@ pub fn list_conversations(state: State<'_, AppState>) -> Result<Vec<Conversation
     state.db.list_conversations().map_err(to_error)
 }
 
+/// Retained subagent transcripts of a parent session (hidden from the sidebar).
+#[tauri::command]
+pub fn list_subagent_conversations(
+    state: State<'_, AppState>,
+    parent_id: String,
+) -> Result<Vec<Conversation>, String> {
+    state
+        .db
+        .list_subagent_conversations(&parent_id)
+        .map_err(to_error)
+}
+
 #[tauri::command]
 pub fn create_conversation(
     app: AppHandle,
@@ -592,6 +604,9 @@ mod tests {
                 workspace_id: None,
                 agent_kind: "lumina".to_string(),
                 permission_mode: crate::domain::PermissionMode::Edit,
+                parent_conversation_id: None,
+                subagent_task_call_id: None,
+                subagent_type: None,
             },
             messages: vec![user, assistant],
         }

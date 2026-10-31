@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   Conversation,
   ConversationDetail,
+  SubagentLiveState,
   TurnPayload,
   TurnEvent,
 } from '@/lib/types';
@@ -1772,5 +1773,91 @@ describe('chatStore — rodadas do objetivo (Goal)', () => {
 
     expect(mocks.api.cancelTurn).toHaveBeenCalledWith('turn-goal');
     expect(mocks.api.updateGoal).toHaveBeenCalledWith('conv-1', 'pause', null, 2);
+  });
+
+  it('tracks the live subagent transcript while the parent task runs', async () => {
+    useChatStore.setState({
+      conversations: [conversation()],
+      activeId: 'conv-1',
+      activeIdByLayout: { chat: null, code: 'conv-1' },
+    });
+    let live: SubagentLiveState | undefined;
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent({
+          type: 'subagent_started',
+          taskCallId: 'task-1',
+          conversationId: 'child-1',
+          subagentType: 'explore',
+          description: 'Mapear src',
+          providerId: 'opencode-go',
+          modelId: 'deepseek-v4.1-flash',
+          effort: 'high',
+        });
+        onEvent({
+          type: 'subagent_event',
+          taskCallId: 'task-1',
+          event: { type: 'step_started', step: 2 },
+        });
+        onEvent({
+          type: 'subagent_event',
+          taskCallId: 'task-1',
+          event: { type: 'text_delta', delta: 'Achei src/app.ts' },
+        });
+        onEvent({
+          type: 'subagent_event',
+          taskCallId: 'task-1',
+          event: {
+            type: 'tool_call_started',
+            toolCall: {
+              id: 'child-tool-1',
+              name: 'read_file',
+              arguments: '{"path":"src/app.ts"}',
+              status: 'running',
+              result: null,
+            },
+          },
+        });
+        live = useChatStore.getState().streaming?.subagents?.['task-1'];
+        onEvent({
+          type: 'subagent_finished',
+          taskCallId: 'task-1',
+          conversationId: 'child-1',
+          status: 'done',
+          durationMs: 42,
+          usage: { totalTokens: 120 },
+        });
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage({ content: 'Concluído' }),
+          usage: null,
+          error: null,
+          conversation: conversation(),
+        };
+        onEvent({
+          type: 'done',
+          result,
+        });
+        return result;
+      },
+    );
+
+    await useChatStore.getState().send('Delegue a exploração');
+
+    expect(live).toMatchObject({
+      conversationId: 'child-1',
+      status: 'running',
+      steps: 2,
+      text: 'Achei src/app.ts',
+      effort: 'high',
+    });
+    expect(live?.toolCalls[0]).toMatchObject({ name: 'read_file', status: 'running' });
+    expect(useChatStore.getState().streaming).toBeNull();
   });
 });

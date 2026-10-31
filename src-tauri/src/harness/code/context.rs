@@ -308,6 +308,9 @@ mod tests {
             workspace_id,
             agent_kind: "lumina".to_string(),
             permission_mode: PermissionMode::Edit,
+            parent_conversation_id: None,
+            subagent_task_call_id: None,
+            subagent_type: None,
         }
     }
 

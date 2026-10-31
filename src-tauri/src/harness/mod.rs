@@ -223,7 +223,11 @@ const PLAN_NOT_ELIGIBLE_HINT: &str = "Esta conta/workspace não tem acesso ao pl
 
 /// Resolves the turn model: test `model_source` → managed `AppState` (account
 /// list merged with the catalog) → bundled catalog.
-fn resolve_model(deps: &HarnessDeps, provider: &ProviderInfo, model_id: &str) -> Option<ModelInfo> {
+pub(crate) fn resolve_model(
+    deps: &HarnessDeps,
+    provider: &ProviderInfo,
+    model_id: &str,
+) -> Option<ModelInfo> {
     if let Some(source) = deps.model_source.as_ref() {
         if let Some(model) = source.model(&provider.id, model_id) {
             return Some(model);
@@ -2021,6 +2025,9 @@ pub async fn run_turn(
                 skills_roots: skills_roots.clone(),
                 enabled_tools,
                 subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                subagent_slots: Arc::new(tokio::sync::Semaphore::new(
+                    code::subagent::MAX_CONCURRENT_SUBAGENTS,
+                )),
                 subagent: if subagent_turn {
                     None
                 } else {

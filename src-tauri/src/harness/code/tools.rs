@@ -231,6 +231,9 @@ mod tests {
                     .collect(),
             ),
             subagent_budget: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            subagent_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(
+                crate::harness::code::subagent::MAX_CONCURRENT_SUBAGENTS,
+            )),
             skills_roots: Vec::new(),
             emit: None,
             rules: Vec::new(),

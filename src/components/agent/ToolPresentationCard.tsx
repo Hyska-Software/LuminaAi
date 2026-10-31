@@ -367,10 +367,14 @@ function PresentationContent({ presentation, className }: ToolPresentationCardPr
       const usage = asRecord(value.usage);
       const totalTokens =
         usage && typeof usage.totalTokens === 'number' ? usage.totalTokens : null;
+      const modelId = nonEmptyString(value.modelId);
+      const effort = nonEmptyString(value.effort);
       const meta = [
         steps != null ? `${steps} ${steps === 1 ? 'passo' : 'passos'}` : null,
         durationMs != null ? `${(durationMs / 1000).toFixed(1)} s` : null,
         totalTokens != null ? `${totalTokens} tokens` : null,
+        modelId,
+        effort ? `esforço ${effort}` : null,
       ].filter(Boolean);
       return (
         <div

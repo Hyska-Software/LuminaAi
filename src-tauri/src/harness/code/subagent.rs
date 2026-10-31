@@ -19,10 +19,11 @@ use futures_util::future::BoxFuture;
 use parking_lot::Mutex;
 use tokio_util::sync::CancellationToken;
 
+use crate::catalog::ModelInfo;
 use crate::db::Db;
 use crate::domain::{
-    MessageStatus, PermissionMode, Settings, TurnOptions, TurnPayload, TurnProfile, UsageInfo,
-    CONVERSATION_MODE_CODE,
+    MessageStatus, PermissionMode, ReasoningMode, ReasoningSelection, Settings, TurnOptions,
+    TurnPayload, TurnProfile, UsageInfo,
 };
 use crate::events::TurnEvent;
 use crate::harness::code::questions::QuestionRegistry;
@@ -37,6 +38,8 @@ pub const SUBAGENT_TIMEOUT_SECS: u64 = 15 * 60;
 pub const SUBAGENT_CANCEL_GRACE_SECS: u64 = 5;
 /// Hard cap of delegations per turn (cost/loop guardrail).
 pub const MAX_DELEGATIONS_PER_TURN: u32 = 4;
+/// Hard cap of subagents running at the same time.
+pub const MAX_CONCURRENT_SUBAGENTS: usize = 4;
 /// Maximum delegation depth (1 level: user session → child).
 pub const MAX_DELEGATION_DEPTH: u32 = 1;
 
@@ -107,14 +110,23 @@ pub struct ParentTurnContext {
 /// Delegation request coming from the `task` tool.
 #[derive(Debug, Clone)]
 pub struct SubagentRequest {
+    pub task_call_id: String,
     pub description: String,
     pub prompt: String,
     pub kind: SubagentKind,
+    /// Optional `provider/model` (or a model id in the parent provider).
+    pub model: Option<String>,
+    /// Optional reasoning effort (model-declared values, or `off`).
+    pub effort: Option<String>,
 }
 
 /// Child result (the text goes to the parent; usage is aggregated in the turn).
 #[derive(Debug, Clone)]
 pub struct SubagentOutcome {
+    pub conversation_id: String,
+    pub provider_id: String,
+    pub model_id: String,
+    pub effort: Option<String>,
     pub text: String,
     pub usage: Option<UsageInfo>,
     pub steps: u32,
@@ -128,6 +140,7 @@ pub trait SubagentRunner: Send + Sync {
         &self,
         request: SubagentRequest,
         cancel: CancellationToken,
+        progress: Option<Arc<dyn EventEmitter>>,
     ) -> BoxFuture<'static, anyhow::Result<SubagentOutcome>>;
 }
 
@@ -144,6 +157,7 @@ impl SubagentRunner for RunnerImpl {
         &self,
         request: SubagentRequest,
         cancel: CancellationToken,
+        progress: Option<Arc<dyn EventEmitter>>,
     ) -> BoxFuture<'static, anyhow::Result<SubagentOutcome>> {
         if !can_delegate(self.depth) {
             return Box::pin(async move {
@@ -156,7 +170,8 @@ impl SubagentRunner for RunnerImpl {
         let depth = self.depth.saturating_add(1);
         let usage = self.usage.clone();
         Box::pin(async move {
-            let outcome = run_child(deps, settings, parent, request, depth, cancel).await?;
+            let outcome =
+                run_child(deps, settings, parent, request, depth, cancel, progress).await?;
             if let Some(child_usage) = outcome.usage.as_ref() {
                 let mut total = usage.lock();
                 harness::merge_usage(&mut total, child_usage);
@@ -183,24 +198,60 @@ pub fn runner(
     })
 }
 
-struct DiscardEmitter;
-
-impl EventEmitter for DiscardEmitter {
-    fn emit(&self, _event: TurnEvent) {}
+/// Forwards a filtered subset of child events to the parent turn channel.
+struct SubagentForwarder {
+    parent: Option<Arc<dyn EventEmitter>>,
+    task_call_id: String,
 }
 
-/// Guard that deletes the ephemeral conversation on **any** exit (including a
-/// future drop by timeout/cancellation). It also removes the spill directory and
-/// cancels pending approvals/questions as defense in depth.
-struct EphemeralConversation {
+impl EventEmitter for SubagentForwarder {
+    fn emit(&self, event: TurnEvent) {
+        let Some(parent) = self.parent.as_ref() else {
+            return;
+        };
+        let Some(event) = forwardable_event(&event) else {
+            return;
+        };
+        parent.emit(TurnEvent::SubagentEvent {
+            task_call_id: self.task_call_id.clone(),
+            event: Box::new(event),
+        });
+    }
+}
+
+fn forwardable_event(event: &TurnEvent) -> Option<TurnEvent> {
+    match event {
+        TurnEvent::StepStarted { .. }
+        | TurnEvent::ReasoningDelta { .. }
+        | TurnEvent::ReasoningDone
+        | TurnEvent::TextDelta { .. }
+        | TurnEvent::ToolCallStarted { .. }
+        | TurnEvent::ToolCallArgs { .. }
+        | TurnEvent::ToolCallFinished { .. }
+        | TurnEvent::ToolProgress { .. }
+        | TurnEvent::Usage { .. }
+        | TurnEvent::Error { .. }
+        | TurnEvent::Cancelled => Some(event.clone()),
+        _ => None,
+    }
+}
+
+/// Guard that cleans up a retained subagent conversation.
+///
+/// Before the child turn starts (`retain == false`) a setup failure deletes the
+/// empty conversation. After it starts the transcript is retained for audit and
+/// only its `usage_log` row is removed (usage is aggregated into the parent
+/// turn), so billing is not double-counted.
+struct SubagentConversation {
     db: Arc<Db>,
     id: String,
     spill_dir: Option<PathBuf>,
     approvals: Option<Arc<ApprovalRegistry>>,
     questions: Option<Arc<QuestionRegistry>>,
+    retain: bool,
 }
 
-impl Drop for EphemeralConversation {
+impl Drop for SubagentConversation {
     fn drop(&mut self) {
         if let Some(questions) = &self.questions {
             questions.cancel_for_conversation(&self.id);
@@ -208,12 +259,21 @@ impl Drop for EphemeralConversation {
         if let Some(approvals) = &self.approvals {
             approvals.cancel_for_conversation(&self.id);
         }
+        if self.retain {
+            if let Err(error) = self.db.delete_usage_for_conversation(&self.id) {
+                eprintln!(
+                    "lumina: falha ao remover o usage_log do subagente {}: {error:#}",
+                    self.id
+                );
+            }
+            return;
+        }
         if let Some(dir) = &self.spill_dir {
             let _ = std::fs::remove_dir_all(dir);
         }
         if let Err(error) = self.db.delete_conversation(&self.id) {
             eprintln!(
-                "lumina: falha ao apagar a conversa efêmera do subagente {}: {error:#}",
+                "lumina: falha ao apagar a conversa do subagente {}: {error:#}",
                 self.id
             );
         }
@@ -237,6 +297,130 @@ fn resolve_data_dir(deps: &HarnessDeps) -> Option<PathBuf> {
     })
 }
 
+fn resolve_route(
+    deps: &HarnessDeps,
+    parent: &ParentTurnContext,
+    requested: Option<&str>,
+) -> anyhow::Result<(String, String, ModelInfo)> {
+    let requested = requested.map(str::trim).filter(|value| !value.is_empty());
+    let (provider_id, model_id) = match requested {
+        None => (parent.provider_id.clone(), parent.model_id.clone()),
+        Some(value) => match value.split_once('/') {
+            Some((provider, model))
+                if !provider.trim().is_empty()
+                    && !model.trim().is_empty()
+                    && deps.catalog.provider(provider.trim()).is_some() =>
+            {
+                (provider.trim().to_string(), model.trim().to_string())
+            }
+            _ => (parent.provider_id.clone(), value.to_string()),
+        },
+    };
+    let provider = deps
+        .catalog
+        .provider(&provider_id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("SUBAGENT_MODEL_INVALID: provedor desconhecido: {provider_id}"))?;
+    let model = harness::resolve_model(deps, &provider, &model_id).ok_or_else(|| {
+        anyhow::anyhow!(
+            "SUBAGENT_MODEL_INVALID: modelo `{model_id}` indisponível no provedor `{}`",
+            provider.id
+        )
+    })?;
+    Ok((provider.id, model.id.clone(), model))
+}
+
+fn reasoning_selection(
+    model: &ModelInfo,
+    effort: Option<&str>,
+) -> anyhow::Result<Option<ReasoningSelection>> {
+    let Some(value) = effort.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let value = value.to_ascii_lowercase();
+    if value == "auto" || value == "default" {
+        return Ok(None);
+    }
+    if value == "off" || value == "none" {
+        return Ok(Some(ReasoningSelection {
+            mode: ReasoningMode::Off,
+            effort: None,
+            budget: None,
+        }));
+    }
+    if !model.reasoning {
+        anyhow::bail!(
+            "SUBAGENT_REASONING_UNSUPPORTED: o modelo `{}` não aceita reasoning",
+            model.id
+        );
+    }
+    let allowed: Vec<&str> = model
+        .reasoning_options
+        .iter()
+        .filter_map(|option| option.efforts())
+        .flatten()
+        .map(String::as_str)
+        .collect();
+    if !allowed.is_empty()
+        && !allowed
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&value))
+    {
+        anyhow::bail!(
+            "SUBAGENT_REASONING_INVALID: effort `{value}` inválido para `{}` (use {})",
+            model.id,
+            allowed.join(", ")
+        );
+    }
+    Ok(Some(ReasoningSelection {
+        mode: ReasoningMode::Effort,
+        effort: Some(value),
+        budget: None,
+    }))
+}
+
+fn emit_started(
+    progress: &Option<Arc<dyn EventEmitter>>,
+    request: &SubagentRequest,
+    conversation_id: &str,
+    provider_id: &str,
+    model_id: &str,
+    effort: Option<&str>,
+) {
+    if let Some(progress) = progress.as_ref() {
+        progress.emit(TurnEvent::SubagentStarted {
+            task_call_id: request.task_call_id.clone(),
+            conversation_id: conversation_id.to_string(),
+            subagent_type: request.kind.as_str().to_string(),
+            description: request.description.clone(),
+            provider_id: provider_id.to_string(),
+            model_id: model_id.to_string(),
+            effort: effort.map(str::to_string),
+        });
+    }
+}
+
+fn emit_finished(
+    progress: &Option<Arc<dyn EventEmitter>>,
+    task_call_id: &str,
+    conversation_id: Option<String>,
+    status: &str,
+    usage: Option<UsageInfo>,
+    duration_ms: u64,
+    error: Option<String>,
+) {
+    if let Some(progress) = progress.as_ref() {
+        progress.emit(TurnEvent::SubagentFinished {
+            task_call_id: task_call_id.to_string(),
+            conversation_id,
+            status: status.to_string(),
+            usage,
+            duration_ms,
+            error,
+        });
+    }
+}
+
 async fn run_child(
     deps: HarnessDeps,
     settings: Settings,
@@ -244,19 +428,31 @@ async fn run_child(
     request: SubagentRequest,
     depth: u32,
     cancel: CancellationToken,
+    progress: Option<Arc<dyn EventEmitter>>,
 ) -> anyhow::Result<SubagentOutcome> {
     let db: Arc<Db> = deps.db.clone();
     let data_dir = resolve_data_dir(&deps);
+    let (provider_id, model_id, model) =
+        resolve_route(&deps, &parent, request.model.as_deref())?;
+    let reasoning = reasoning_selection(&model, request.effort.as_deref())?;
+    let effort = request
+        .effort
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase);
     let title = format!("Subagente: {}", truncate(request.description.trim(), 48));
-    let child = db.create_conversation_with_mode(
+    let child = db.create_subagent_conversation(
         &title,
-        &parent.provider_id,
-        &parent.model_id,
-        CONVERSATION_MODE_CODE,
+        &provider_id,
+        &model_id,
+        &parent.conversation_id,
+        &request.task_call_id,
+        request.kind.as_str(),
     )?;
-    // Created immediately after the conversation exists: any `?`/drop below
-    // goes through `Drop` and leaves no orphan row.
-    let _guard = EphemeralConversation {
+    // Created immediately after the conversation exists: setup failures delete
+    // the empty child; once the turn starts the transcript is retained.
+    let mut guard = SubagentConversation {
         db: db.clone(),
         id: child.id.clone(),
         spill_dir: data_dir
@@ -264,6 +460,7 @@ async fn run_child(
             .map(|dir| dir.join("spill").join(&child.id)),
         approvals: deps.approvals.clone(),
         questions: deps.questions.clone(),
+        retain: false,
     };
     db.set_conversation_workspace(&child.id, parent.workspace_id.as_deref())?;
     // The child is read-only: policy denies writes/shell; the catalog is also
@@ -281,9 +478,9 @@ async fn run_child(
         conversation_id: child.id.clone(),
         content: request.prompt.clone(),
         attachment_ids: Vec::new(),
-        provider_id: parent.provider_id.clone(),
-        model_id: parent.model_id.clone(),
-        reasoning: None,
+        provider_id: provider_id.clone(),
+        model_id: model_id.clone(),
+        reasoning,
         options: TurnOptions {
             max_steps: SUBAGENT_MAX_STEPS,
             delegation_depth: depth,
@@ -299,27 +496,117 @@ async fn run_child(
         goal_request: false,
         turn_id: None,
     };
-    let emitter: Arc<dyn EventEmitter> = Arc::new(DiscardEmitter);
+    emit_started(
+        &progress,
+        &request,
+        &child.id,
+        &provider_id,
+        &model_id,
+        effort.as_deref(),
+    );
+    guard.retain = true;
+    let emitter: Arc<dyn EventEmitter> = Arc::new(SubagentForwarder {
+        parent: progress.clone(),
+        task_call_id: request.task_call_id.clone(),
+    });
     let started = Instant::now();
     let result = harness::run_turn(deps, payload, settings, emitter, cancel).await;
     let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    let result = result?;
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            emit_finished(
+                &progress,
+                &request.task_call_id,
+                Some(child.id.clone()),
+                "error",
+                None,
+                duration_ms,
+                Some(format!("{error:#}")),
+            );
+            return Err(error);
+        }
+    };
     if let Some(error) = result.error.as_deref() {
+        emit_finished(
+            &progress,
+            &request.task_call_id,
+            Some(child.id.clone()),
+            "error",
+            result.usage.clone(),
+            duration_ms,
+            Some(error.to_string()),
+        );
         anyhow::bail!("subagente falhou: {error}");
     }
     match result.assistant_message.status {
         MessageStatus::Complete => {}
-        MessageStatus::Cancelled => anyhow::bail!("SUBAGENT_CANCELLED: subagente cancelado"),
-        MessageStatus::Error => anyhow::bail!("subagente terminou com erro"),
-        MessageStatus::Streaming => anyhow::bail!("subagente terminou incompleto"),
+        MessageStatus::Cancelled => {
+            emit_finished(
+                &progress,
+                &request.task_call_id,
+                Some(child.id.clone()),
+                "cancelled",
+                result.usage.clone(),
+                duration_ms,
+                None,
+            );
+            anyhow::bail!("SUBAGENT_CANCELLED: subagente cancelado")
+        }
+        MessageStatus::Error => {
+            emit_finished(
+                &progress,
+                &request.task_call_id,
+                Some(child.id.clone()),
+                "error",
+                result.usage.clone(),
+                duration_ms,
+                Some("o subagente terminou com erro".to_string()),
+            );
+            anyhow::bail!("subagente terminou com erro")
+        }
+        MessageStatus::Streaming => {
+            emit_finished(
+                &progress,
+                &request.task_call_id,
+                Some(child.id.clone()),
+                "error",
+                result.usage.clone(),
+                duration_ms,
+                Some("o subagente terminou incompleto".to_string()),
+            );
+            anyhow::bail!("subagente terminou incompleto")
+        }
     }
     let text = result.assistant_message.content.trim().to_string();
     if text.is_empty() {
+        emit_finished(
+            &progress,
+            &request.task_call_id,
+            Some(child.id.clone()),
+            "error",
+            result.usage.clone(),
+            duration_ms,
+            Some("o subagente terminou sem resposta útil".to_string()),
+        );
         anyhow::bail!("o subagente terminou sem resposta útil");
     }
     let steps = u32::try_from(result.assistant_message.trace.len()).unwrap_or(u32::MAX);
     let usage = result.usage;
+    emit_finished(
+        &progress,
+        &request.task_call_id,
+        Some(child.id.clone()),
+        "done",
+        usage.clone(),
+        duration_ms,
+        None,
+    );
     Ok(SubagentOutcome {
+        conversation_id: child.id,
+        provider_id,
+        model_id,
+        effort,
         text,
         usage,
         steps,
@@ -400,14 +687,17 @@ mod tests {
 
     fn request(prompt: &str) -> SubagentRequest {
         SubagentRequest {
+            task_call_id: "task-call-1".to_string(),
             description: "Explorar src".to_string(),
             prompt: prompt.to_string(),
             kind: SubagentKind::Explore,
+            model: None,
+            effort: None,
         }
     }
 
     #[tokio::test]
-    async fn runner_executes_a_child_turn_and_deletes_the_ephemeral_conversation() {
+    async fn runner_executes_a_child_turn_and_retains_the_transcript() {
         use crate::domain::{Settings, CONVERSATION_MODE_CODE};
         use crate::harness::CredentialOverride;
         use crate::providers::ProviderEvent;
@@ -468,17 +758,31 @@ mod tests {
         let outcome = runner
             .run(
                 SubagentRequest {
+                    task_call_id: "task-call-1".to_string(),
                     description: "Explorar src".to_string(),
                     prompt: "O que há em src/app.ts?".to_string(),
                     kind: SubagentKind::Explore,
+                    model: None,
+                    effort: None,
                 },
                 CancellationToken::new(),
+                None,
             )
             .await
             .expect("resumo do filho");
         assert!(outcome.text.contains("achei src/app.ts"));
-        // The ephemeral subagent conversation was removed; only the parent remains.
+        // The child transcript is retained but hidden from the sidebar.
         assert_eq!(db.list_conversations().expect("conversas").len(), 1);
+        assert_eq!(
+            db.list_subagent_conversations(&parent.id)
+                .expect("subagentes")
+                .len(),
+            1
+        );
+        assert!(db
+            .get_conversation(&outcome.conversation_id)
+            .expect("conversa filha")
+            .is_some());
     }
 
     #[tokio::test]
@@ -512,7 +816,7 @@ mod tests {
         let runner = runner(&deps, &Settings::default(), parent_context(&parent), 0, usage.clone());
         let sentinel = "SENTINEL_PARENT_REQUEST";
         let outcome = runner
-            .run(request(sentinel), CancellationToken::new())
+            .run(request(sentinel), CancellationToken::new(), None)
             .await
             .expect("resumo");
         assert!(outcome.steps <= 1);
@@ -533,7 +837,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dropping_the_runner_future_deletes_the_ephemeral_conversation() {
+    async fn child_events_are_forwarded_to_the_parent_recorder() {
+        use crate::providers::ProviderEvent;
+
+        #[derive(Default)]
+        struct Recorder {
+            events: parking_lot::Mutex<Vec<TurnEvent>>,
+        }
+        impl EventEmitter for Recorder {
+            fn emit(&self, event: TurnEvent) {
+                self.events.lock().push(event);
+            }
+        }
+
+        let streamer: crate::harness::ProviderStreamer = Arc::new(|_request, sink| {
+            Box::pin(async move {
+                let _ = sink.send(ProviderEvent::TextDelta("olá do filho".to_string()));
+                let _ = sink.send(ProviderEvent::Done);
+                Ok(())
+            })
+        });
+        let (db, deps, parent) = fixture(streamer);
+        let recorder = Arc::new(Recorder::default());
+        let progress: Arc<dyn EventEmitter> = recorder.clone();
+        let runner = runner(
+            &deps,
+            &Settings::default(),
+            parent_context(&parent),
+            0,
+            Arc::new(Mutex::new(UsageInfo::default())),
+        );
+        let outcome = runner
+            .run(
+                request("diga olá"),
+                CancellationToken::new(),
+                Some(progress),
+            )
+            .await
+            .expect("resumo");
+        let events = recorder.events.lock();
+        assert!(events.iter().any(|event| matches!(event, TurnEvent::SubagentStarted { .. })));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::SubagentEvent { event, .. }
+                if matches!(event.as_ref(), TurnEvent::TextDelta { delta } if delta == "olá do filho")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::SubagentFinished { conversation_id: Some(id), .. }
+                if id == &outcome.conversation_id
+        )));
+        assert!(db
+            .get_conversation(&outcome.conversation_id)
+            .expect("filho")
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn aborting_the_runner_retains_the_child_transcript() {
         let started = Arc::new(tokio::sync::Notify::new());
         let started_for_stream = started.clone();
         let streamer: crate::harness::ProviderStreamer = Arc::new(move |_request, sink| {
@@ -555,16 +916,27 @@ mod tests {
             0,
             Arc::new(Mutex::new(UsageInfo::default())),
         );
-        let handle = tokio::spawn(runner.run(request("pending"), CancellationToken::new()));
+        let handle = tokio::spawn(runner.run(request("pending"), CancellationToken::new(), None));
         started.notified().await;
-        assert_eq!(db.list_conversations().expect("conversas").len(), 2);
+        assert_eq!(
+            db.list_subagent_conversations(&parent.id)
+                .expect("subagentes")
+                .len(),
+            1
+        );
         handle.abort();
         let _ = handle.await;
         assert_eq!(db.list_conversations().expect("conversas").len(), 1);
+        assert_eq!(
+            db.list_subagent_conversations(&parent.id)
+                .expect("subagentes")
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
-    async fn cancelling_the_child_finishes_and_cleans_up() {
+    async fn cancelling_the_child_finishes_and_keeps_the_transcript() {
         let started = Arc::new(tokio::sync::Notify::new());
         let started_for_stream = started.clone();
         let streamer: crate::harness::ProviderStreamer = Arc::new(move |_request, sink| {
@@ -584,13 +956,19 @@ mod tests {
             Arc::new(Mutex::new(UsageInfo::default())),
         );
         let cancel = CancellationToken::new();
-        let handle = tokio::spawn(runner.run(request("pending"), cancel.clone()));
+        let handle = tokio::spawn(runner.run(request("pending"), cancel.clone(), None));
         started.notified().await;
         cancel.cancel();
         let completed = tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
         assert!(completed.is_ok(), "o filho não terminou após o cancelamento");
         assert!(completed.expect("timeout").expect("join").is_err());
         assert_eq!(db.list_conversations().expect("conversas").len(), 1);
+        assert_eq!(
+            db.list_subagent_conversations(&parent.id)
+                .expect("subagentes")
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -612,12 +990,18 @@ mod tests {
             Arc::new(Mutex::new(UsageInfo::default())),
         );
         let error = runner
-            .run(request("falhe"), CancellationToken::new())
+            .run(request("falhe"), CancellationToken::new(), None)
             .await
             .expect_err("erro do provider");
         let message = format!("{error:#}");
         assert!(message.contains("provider boom"), "{message}");
         assert_eq!(db.list_conversations().expect("conversas").len(), 1);
+        assert_eq!(
+            db.list_subagent_conversations(&parent.id)
+                .expect("subagentes")
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -640,11 +1024,49 @@ mod tests {
             Arc::new(Mutex::new(UsageInfo::default())),
         );
         let error = runner
-            .run(request("x"), CancellationToken::new())
+            .run(request("x"), CancellationToken::new(), None)
             .await
             .expect_err("workspace inválido");
         assert!(format!("{error:#}").contains("workspace"), "{error:#}");
         assert_eq!(db.list_conversations().expect("conversas").len(), 1);
+        assert!(db
+            .list_subagent_conversations(&parent.id)
+            .expect("subagentes")
+            .is_empty());
+    }
+
+    #[test]
+    fn model_and_effort_are_validated_for_the_child_route() {
+        let streamer: crate::harness::ProviderStreamer = Arc::new(|_request, sink| {
+            Box::pin(async move {
+                let _ = sink.send(crate::providers::ProviderEvent::TextDelta("ok".to_string()));
+                let _ = sink.send(crate::providers::ProviderEvent::Done);
+                Ok(())
+            })
+        });
+        let (_db, deps, parent) = fixture(streamer);
+        let context = parent_context(&parent);
+        let model = deps
+            .catalog
+            .model("opencode-go", "deepseek-v4.1-flash")
+            .expect("modelo do fixture");
+        assert!(reasoning_selection(&model, None).expect("auto").is_none());
+        assert_eq!(
+            reasoning_selection(&model, Some("high"))
+                .expect("effort válido")
+                .and_then(|selection| selection.effort),
+            Some("high".to_string())
+        );
+        assert!(reasoning_selection(&model, Some("not-an-effort")).is_err());
+        let (provider, model_id, _) = resolve_route(
+            &deps,
+            &context,
+            Some("opencode-go/deepseek-v4.1-flash"),
+        )
+        .expect("rota válida");
+        assert_eq!(provider, "opencode-go");
+        assert_eq!(model_id, "deepseek-v4.1-flash");
+        assert!(resolve_route(&deps, &context, Some("nope/model")).is_err());
     }
 
     #[test]

@@ -123,6 +123,8 @@ pub struct ToolCtx {
     pub enabled_tools: Arc<std::collections::HashSet<String>>,
     /// Remaining delegation budget for the turn (`task`).
     pub subagent_budget: Arc<std::sync::atomic::AtomicU32>,
+    /// Concurrency slots for parallel `task` calls (per turn).
+    pub subagent_slots: Arc<tokio::sync::Semaphore>,
     /// Raízes de skills externas para `list_skills`/`read_skill`.
     pub skills_roots: Vec<crate::tools::skills::ExternalSkillRoot>,
 }
@@ -148,7 +150,7 @@ impl ToolCtx {
         use std::sync::atomic::Ordering;
         let limit = crate::harness::code::subagent::MAX_DELEGATIONS_PER_TURN;
         self.subagent_budget
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
                 (used < limit).then_some(used.saturating_add(1))
             })
             .is_ok()
@@ -819,6 +821,9 @@ mod tests {
                     .collect(),
             ),
             subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            subagent_slots: Arc::new(tokio::sync::Semaphore::new(
+                crate::harness::code::subagent::MAX_CONCURRENT_SUBAGENTS,
+            )),
             skills_roots: Vec::new(),
         }
     }

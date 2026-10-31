@@ -1159,10 +1159,12 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
 
 - `workspaces(id, name, path UNIQUE, …trusted)`; a pasta é do usuário (nada é copiado).
 - `conversations.workspace_id` (nulo = sem workspace), `agent_kind` (`lumina`),
-  `permission_mode` (`read_only` | `review` | `edit` | `autonomous`). Sessões novas do Code
-  nascem com `Settings.codeDefaultPermissionMode` (padrão `autonomous`, configurável em
-  Configurações → Ferramentas → Sessões de código); uma sessão do Chat compartilhada com o Code
-  adota esse padrão ao entrar no layout.
+  `permission_mode` (`read_only` | `review` | `edit` | `autonomous`), além de
+  `parent_conversation_id`/`subagent_task_call_id`/`subagent_type` para transcripts de subagente
+  retidos (ocultos da sidebar e apagados em cascata). Sessões novas do Code nascem com
+  `Settings.codeDefaultPermissionMode` (padrão `autonomous`, configurável em Configurações →
+  Ferramentas → Sessões de código); uma sessão do Chat compartilhada com o Code adota esse padrão
+  ao entrar no layout.
 - Confinamento: `workspace/safe_path.rs` resolve todo path contra a raiz, rejeita `..`,
   symlink/junction para fora, device paths e caminhos relativos de drive; leitura fora do
   workspace exige aprovação; escrita fora é negada no modo Leitura.
@@ -1187,7 +1189,7 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
 | `submit_plan` | plano do modo Plano com revisão bloqueante | Ask |
 | `ask_user` | perguntas com opções (single/multi + texto livre); o card da timeline responde via `respond_question` (timeout/cancelamento = pulada) | Ask |
 | `run_checks` | roda a verificação detectada do projeto (test/lint/build) pelo pipeline do shell | ExecuteCommand |
-| `task` | subagente somente leitura (explore/review/general; profundidade 1; conversa efêmera; sem MCP/escrita/shell; prompt único e session id do pai) | Read |
+| `task` | subagente somente leitura (explore/review/general; profundidade 1; transcript filho retido/oculto com cascata; eventos ao vivo; modelo/effort opcionais; paralelismo limitado; sem MCP/escrita/shell; prompt único e session id do pai) | Read |
 | `web_search` / `fetch_url` | reaproveitadas do Chat (documentação/erros) | Network (livre) |
 | `list_skills` / `read_skill` | reaproveitadas do Chat (skills instaladas) | Read (livre) |
 | `mcp__servidor__tool` | tools dinâmicas de servidores MCP (`<app-data>/mcp.json`, stdio JSON-RPC), descobertas por `tools/list` (indisponíveis em subagentes) | Ask (sempre) |

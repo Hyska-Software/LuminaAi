@@ -146,6 +146,58 @@ pub enum TurnEvent {
         answers: Vec<crate::domain::AskUserAnswer>,
         skipped: bool,
     },
+
+    /* ------------------------------------------------------------------ */
+    /* Subagent live transcript (retained child conversation)              */
+    /* ------------------------------------------------------------------ */
+    /// A child agent started; the UI opens a live entry under the `task` call.
+    SubagentStarted {
+        task_call_id: String,
+        conversation_id: String,
+        subagent_type: String,
+        description: String,
+        provider_id: String,
+        model_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effort: Option<String>,
+    },
+    /// One filtered child event (reasoning/text/tool/usage/error) for the live card.
+    SubagentEvent {
+        task_call_id: String,
+        event: Box<TurnEvent>,
+    },
+    /// The child finished (done/error/cancelled); transcript id is retained.
+    SubagentFinished {
+        task_call_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conversation_id: Option<String>,
+        status: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<UsageInfo>,
+        duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subagent_events_serialize_with_camel_case_and_nested_payload() {
+        let value = serde_json::to_value(TurnEvent::SubagentEvent {
+            task_call_id: "task-1".to_string(),
+            event: Box::new(TurnEvent::TextDelta {
+                delta: "hello".to_string(),
+            }),
+        })
+        .expect("serialize subagent event");
+        assert_eq!(value["type"], "subagent_event");
+        assert_eq!(value["taskCallId"], "task-1");
+        assert_eq!(value["event"]["type"], "text_delta");
+        assert_eq!(value["event"]["delta"], "hello");
+    }
 }
 
 /// Eventos de streaming de um terminal PTY (layout Code).

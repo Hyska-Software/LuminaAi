@@ -21,7 +21,7 @@ import {
   PopoverTrigger,
   Tooltip,
 } from '@/components/ui';
-import { JobsBar, PlanCard, TodoCard } from '@/components/agent';
+import { JobsBar, PlanCard, SubagentList, TodoCard } from '@/components/agent';
 import { useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import type { PermissionMode } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -291,6 +291,9 @@ export function CodeSessionControls({
                   Nenhum trabalho em segundo plano.
                 </p>
               )}
+            </div>
+            <div className="border-t border-border pt-2">
+              <SubagentList conversationId={conversationId} />
             </div>
           </div>
         </PopoverContent>

@@ -94,6 +94,8 @@ export const api = {
 
   /* -------- conversations -------- */
   listConversations: () => invoke<Conversation[]>('list_conversations'),
+  listSubagentConversations: (parentId: string) =>
+    invoke<Conversation[]>('list_subagent_conversations', { parentId }),
   createConversation: (
     title?: string,
     providerId?: string,

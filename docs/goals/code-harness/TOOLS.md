@@ -358,32 +358,42 @@ M  src/app.ts           (staged)
 #### `task` (subagente somente leitura)
 
 ```json
-{ "description": "Explorar o módulo de pagamentos", "prompt": "Liste os arquivos…", "subagent_type": "explore" }
+{ "description": "Explorar o módulo de pagamentos", "prompt": "Liste os arquivos…", "subagent_type": "explore", "model": "openai/gpt-6-luna", "effort": "high" }
 ```
 
-- Cria uma conversa **efêmera** com o workspace/provider/modelo efetivos do pai e permissão
+- Cria uma conversa filha **retida para auditoria** com o workspace do pai e permissão
   `read_only`, roda o perfil Code com orçamento curto (24 passos) e catálogo reduzido a leitura
   (`read_file`, `list_dir`, `search_*`, `read_tool_output`, `git_status/diff/log`); devolve o
-  resumo final e apaga a conversa **em qualquer desfecho** (sucesso, erro, timeout ou
-  cancelamento, inclusive quando o future é dropado).
+  resumo final. A conversa filha fica oculta da sidebar (`parent_conversation_id`), é consultável
+  por `get_conversation` e é apagada em cascata quando o pai é excluído. `usage_log` do filho é
+  removido (o consumo é agregado ao pai, sem dupla contagem).
 - `subagent_type`: `explore` (mapear/responder), `review` (criticar o diff) ou `general`; valor
   desconhecido → `SUBAGENT_INVALID_TYPE`; omitido → `explore`.
+- `model` (opcional): `provider/model` ou id de modelo do provedor pai; validado no runner
+  (`SUBAGENT_MODEL_INVALID`). `effort` (opcional): valor declarado pelo modelo, ou `off`/`auto`;
+  validado contra `reasoningOptions` (`SUBAGENT_REASONING_*`). Sem ambos, herda a rota do pai.
 - Profundidade máxima **1**: o filho não recebe `task` e o runner recusa aninhamento
   (`DELEGATION_DEPTH`). O filho não pode editar, rodar shell, usar MCP, perguntar ao usuário ou
   delegar; a política `read_only` e o catálogo efetivo (`enabled_tools`) são defesa em
   profundidade.
-- **Política**: `Read` no pai (a delegação em si não muta); eventos do filho são descartados (o
-  resumo aparece no “Thinking”/resultado da tool). Timeout de 15 min; cancelamento do pai propaga
-  o token ao filho e espera a limpeza (período de graça). Cada turno tem no máximo 4 delegações.
+- **Política**: `Read` no pai (a delegação em si não muta); `task` é `Safe`, então chamadas
+  independentes no mesmo passo rodam em paralelo (semáforo de 4; teto de 4 delegações por turno).
+  Eventos filtrados do filho são encaminhados como `subagent_started`/`subagent_event`/
+  `subagent_finished` para o card ao vivo do “Thinking”. Timeout de 15 min; cancelamento do pai
+  propaga o token ao filho e espera a limpeza (período de graça).
 - **Prompt/cache**: o pedido do pai vai **uma vez** na mensagem de usuário; o
   `system_prompt_override` contém só as instruções constantes do tipo (prompt-base read-only, sem
   edição/`ask_user`). O filho usa o `conversation_id` do pai como `x-opencode-session` (F4.3b) e
   seus tokens/custo entram no `usage` do turno pai.
-- **UI**: resumo/label no bloco “Thinking”; a `presentation` `subagent` é persistida com
-  `steps`/`durationMs`/`usage` (sem card separado no transcript, conforme `WORKBENCH.md` §5.1).
+- **UI**: linha ao vivo no bloco “Thinking” (status, passos, modelo/effort, texto recente) e botão
+  “Ver transcrição” que abre o transcript retido; o popover do composer tem uma seção
+  “Subagentes” com todos os transcripts retidos do pai (inclusive erro/cancelamento). A
+  `presentation` `subagent` persiste
+  `conversationId`/`providerId`/`modelId`/`effort`/`steps`/`durationMs`/`usage`.
 - **Testes**: kinds/parse, catálogo reduzido sem MCP, guarda de profundidade, execução de um turno
   filho real com provider falso, prompt não duplicado, session id do pai, uso agregado, erro do
-  provider não mascarado, limpeza em drop/cancelamento/timeout e tool fora do catálogo recusada.
+  provider não mascarado, retenção/cascata, eventos ao vivo, modelo/effort, paralelismo e tool fora
+  do catálogo recusada.
 
 #### Servidores MCP (`mcp__<servidor>__<tool>`)
 

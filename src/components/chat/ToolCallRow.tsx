@@ -9,8 +9,10 @@ import {
 import { toast } from 'sonner';
 
 import { DiffView } from '@/components/code/DiffView';
+import { SubagentTranscriptDialog } from '@/components/agent/SubagentTranscriptDialog';
 import { Spinner } from '@/components/ui';
 import { describeCodeTool, type CodeToolLabel } from '@/lib/agentTrace';
+import { useChatStore } from '@/lib/store/chatStore';
 import type { ToolCallRecord } from '@/lib/types';
 import { cn, copyText, formatDuration } from '@/lib/utils';
 
@@ -125,6 +127,14 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
   const [expanded, setExpanded] = useState(
     () => hasDetails && (tool.status === 'error' || (exitCode !== null && exitCode !== 0)),
   );
+  const liveSubagent = useChatStore(
+    (state) => state.streaming?.subagents?.[tool.id] ?? null,
+  );
+  const subagentPresentation =
+    tool.presentation?.kind === 'subagent' ? tool.presentation : null;
+  const subagentConversationId =
+    liveSubagent?.conversationId ?? subagentPresentation?.conversationId ?? null;
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
 
   const header = (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -204,6 +214,57 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
         )}
       </div>
 
+      {liveSubagent || subagentConversationId ? (
+        <div className="ml-[26px] mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-foreground-muted">
+          {liveSubagent ? (
+            <>
+              <span
+                className={cn(
+                  'rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                  liveSubagent.status === 'running'
+                    ? 'bg-accent-soft text-accent'
+                    : liveSubagent.status === 'error'
+                      ? 'bg-danger-soft text-danger'
+                      : 'bg-success-soft text-success',
+                )}
+              >
+                {liveSubagent.status === 'running'
+                  ? 'ao vivo'
+                  : liveSubagent.status === 'done'
+                    ? 'concluído'
+                    : liveSubagent.status === 'error'
+                      ? 'falhou'
+                      : 'cancelado'}
+              </span>
+              <span className="tabular-nums">{liveSubagent.steps} passos</span>
+              {liveSubagent.usage?.totalTokens != null ? (
+                <span className="tabular-nums">{liveSubagent.usage.totalTokens} tokens</span>
+              ) : null}
+              {liveSubagent.effort ? <span>esforço {liveSubagent.effort}</span> : null}
+              <code className="min-w-0 truncate font-mono text-[10.5px] text-foreground-subtle">
+                {liveSubagent.providerId}/{liveSubagent.modelId}
+              </code>
+              {liveSubagent.error ? (
+                <span className="min-w-0 truncate text-danger">{liveSubagent.error}</span>
+              ) : liveSubagent.text.trim() ? (
+                <span className="min-w-0 max-w-[420px] truncate text-foreground-subtle">
+                  {liveSubagent.text.trim().slice(-140)}
+                </span>
+              ) : null}
+            </>
+          ) : null}
+          {subagentConversationId ? (
+            <button
+              type="button"
+              onClick={() => setTranscriptOpen(true)}
+              className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            >
+              Ver transcrição
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       {expanded && hasDetails ? (
         <div className="ml-[26px]">
           {diff ? (
@@ -218,6 +279,12 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
           )}
         </div>
       ) : null}
+
+      <SubagentTranscriptDialog
+        conversationId={subagentConversationId}
+        open={transcriptOpen}
+        onOpenChange={setTranscriptOpen}
+      />
     </li>
   );
 }

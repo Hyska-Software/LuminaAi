@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   setPlanMode: vi.fn(),
   killJob: vi.fn(),
   listJobs: vi.fn(),
+  listSubagentConversations: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -117,6 +118,7 @@ beforeEach(() => {
   mocks.setPlanMode.mockResolvedValue(sessionState({ planMode: true }));
   mocks.killJob.mockResolvedValue(job({ status: 'killed' }));
   mocks.listJobs.mockResolvedValue([]);
+  mocks.listSubagentConversations.mockResolvedValue([]);
 });
 
 afterEach(() => {

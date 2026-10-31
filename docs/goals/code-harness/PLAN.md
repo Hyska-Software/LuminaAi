@@ -409,8 +409,9 @@ kill tree; sem promessa de sandbox. Spikes S1/S2 antes.
 
 ### F8 — Agentes, extensões e diagnóstico (v1.2) · ~3 sem
 
-Subagentes (`task` com tools restritas, profundidade 1, resumo no “Thinking”, presentation
-persistida); MCP client
+Subagentes (`task` com tools restritas, profundidade 1, transcript retido/auditável, linha ao
+vivo no “Thinking”, modelo/effort por delegação, paralelismo limitado e presentation persistida);
+MCP client
 (`rmcp`, stdio, namespace `mcp:<server>:<tool>`, aprovação por tool com origem); checks do projeto
 (`/test`, `/review`, `/init`, `diagnostics` por comandos configuráveis); hooks (subset
 `pre_tool_use`/`post_tool_use`/`stop`); comandos de projeto (`.lumina/commands/*.md`); `apply_patch`

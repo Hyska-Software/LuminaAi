@@ -59,6 +59,15 @@ pub struct Conversation {
     /// Modo de permissão da sessão de código (Chat ignora).
     #[serde(default)]
     pub permission_mode: PermissionMode,
+    /// Parent conversation when this row is a retained subagent transcript.
+    #[serde(default)]
+    pub parent_conversation_id: Option<String>,
+    /// `task` tool call that spawned this subagent (audit/deep link).
+    #[serde(default)]
+    pub subagent_task_call_id: Option<String>,
+    /// Subagent kind (`explore`, `review`, `general`).
+    #[serde(default)]
+    pub subagent_type: Option<String>,
 }
 
 fn default_agent_kind() -> String {
@@ -2273,6 +2282,9 @@ mod tests {
             workspace_id: Some("ws-1".into()),
             agent_kind: "lumina".into(),
             permission_mode: PermissionMode::Edit,
+            parent_conversation_id: None,
+            subagent_task_call_id: None,
+            subagent_type: None,
         };
         let json = serde_json::to_value(&conversation).expect("serialize conversation");
         assert_eq!(json["mode"], "code");

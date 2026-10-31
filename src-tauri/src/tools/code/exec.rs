@@ -1593,6 +1593,21 @@ async fn bridge_chat_tool(ctx: &ToolCtx, name: &str, args: &Value) -> ToolOutcom
     crate::tools::execute(&runtime, &call).await
 }
 
+fn subagent_failure(error: anyhow::Error) -> ToolOutcome {
+    let message = format!("{error:#}");
+    for code in [
+        "SUBAGENT_MODEL_INVALID",
+        "SUBAGENT_REASONING_UNSUPPORTED",
+        "SUBAGENT_REASONING_INVALID",
+        "DELEGATION_DEPTH",
+    ] {
+        if message.contains(code) {
+            return err(code, message);
+        }
+    }
+    err("SUBAGENT_FAILED", message)
+}
+
 /// `task`: delega exploração/revisão a um subagente somente leitura.
 async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     use crate::harness::code::subagent::{
@@ -1639,13 +1654,25 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             ),
         );
     }
+    let _slot = match ctx.subagent_slots.acquire().await {
+        Ok(permit) => permit,
+        Err(_) => {
+            return err(
+                "SUBAGENT_UNAVAILABLE",
+                "o limite de subagentes concorrentes não está disponível",
+            )
+        }
+    };
     let request = SubagentRequest {
+        task_call_id: ctx.tool_call_id.clone(),
         description: description.clone(),
         prompt,
         kind,
+        model: opt_str(args, "model"),
+        effort: opt_str(args, "effort"),
     };
     let child_cancel = ctx.cancel.child_token();
-    let run = runner.run(request, child_cancel.clone());
+    let run = runner.run(request, child_cancel.clone(), ctx.emit.clone());
     tokio::pin!(run);
     let outcome = tokio::select! {
         _ = ctx.cancel.cancelled() => {
@@ -1655,6 +1682,14 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 &mut run,
             )
             .await;
+            ctx.emit_event(crate::events::TurnEvent::SubagentFinished {
+                task_call_id: ctx.tool_call_id.clone(),
+                conversation_id: None,
+                status: "cancelled".to_string(),
+                usage: None,
+                duration_ms: 0,
+                error: None,
+            });
             return err("SUBAGENT_CANCELLED", "o turno foi cancelado");
         }
         result = tokio::time::timeout(
@@ -1664,9 +1699,17 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             Ok(Ok(outcome)) => outcome,
             Ok(Err(error)) => {
                 if ctx.cancel.is_cancelled() {
+                    ctx.emit_event(crate::events::TurnEvent::SubagentFinished {
+                        task_call_id: ctx.tool_call_id.clone(),
+                        conversation_id: None,
+                        status: "cancelled".to_string(),
+                        usage: None,
+                        duration_ms: 0,
+                        error: None,
+                    });
                     return err("SUBAGENT_CANCELLED", "o turno foi cancelado");
                 }
-                return err("SUBAGENT_FAILED", format!("{error:#}"));
+                return subagent_failure(error);
             }
             Err(_) => {
                 child_cancel.cancel();
@@ -1675,6 +1718,17 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                     &mut run,
                 )
                 .await;
+                ctx.emit_event(crate::events::TurnEvent::SubagentFinished {
+                    task_call_id: ctx.tool_call_id.clone(),
+                    conversation_id: None,
+                    status: "error".to_string(),
+                    usage: None,
+                    duration_ms: 0,
+                    error: Some(format!(
+                        "o subagente excedeu {} minutos",
+                        SUBAGENT_TIMEOUT_SECS / 60
+                    )),
+                });
                 return err(
                     "SUBAGENT_TIMEOUT",
                     format!(
@@ -1685,6 +1739,10 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             }
         },
     };
+    let conversation_id = outcome.conversation_id;
+    let provider_id = outcome.provider_id;
+    let model_id = outcome.model_id;
+    let effort = outcome.effort;
     let text = outcome.text;
     let short: String = description.chars().take(60).collect();
     let summary = format!(
@@ -1705,9 +1763,15 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         "kind": "subagent",
         "description": description,
         "subagentType": kind.as_str(),
+        "conversationId": conversation_id,
+        "providerId": provider_id,
+        "modelId": model_id,
         "steps": outcome.steps,
         "durationMs": outcome.duration_ms,
     });
+    if let Some(effort) = effort {
+        presentation["effort"] = Value::String(effort);
+    }
     if let Some(usage) = outcome.usage {
         presentation["usage"] = serde_json::to_value(usage).unwrap_or(Value::Null);
     }
@@ -3088,6 +3152,9 @@ mod tests {
                         .collect(),
                 ),
                 subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                subagent_slots: Arc::new(tokio::sync::Semaphore::new(
+                    crate::harness::code::subagent::MAX_CONCURRENT_SUBAGENTS,
+                )),
                 skills_roots: Vec::new(),
             }
         }
@@ -4022,12 +4089,17 @@ mod tests {
                 &self,
                 request: crate::harness::code::subagent::SubagentRequest,
                 _cancel: tokio_util::sync::CancellationToken,
+                _progress: Option<std::sync::Arc<dyn crate::harness::EventEmitter>>,
             ) -> futures_util::future::BoxFuture<
                 'static,
                 anyhow::Result<crate::harness::code::subagent::SubagentOutcome>,
             > {
                 Box::pin(async move {
                     Ok(crate::harness::code::subagent::SubagentOutcome {
+                        conversation_id: "child-conv".to_string(),
+                        provider_id: "opencode-go".to_string(),
+                        model_id: "deepseek-v4.1-flash".to_string(),
+                        effort: None,
                         text: format!("resumo de `{}`", request.description),
                         usage: Some(crate::domain::UsageInfo {
                             input_tokens: Some(10),
@@ -4062,6 +4134,117 @@ mod tests {
         assert_eq!(presentation["steps"], 2);
         assert_eq!(presentation["durationMs"], 5);
         assert_eq!(presentation["usage"]["totalTokens"], 15);
+    }
+
+    #[tokio::test]
+    async fn task_forwards_model_and_effort_to_the_runner() {
+        struct CapturingRunner {
+            seen: Arc<std::sync::Mutex<Option<crate::harness::code::subagent::SubagentRequest>>>,
+        }
+        impl crate::harness::code::subagent::SubagentRunner for CapturingRunner {
+            fn run(
+                &self,
+                request: crate::harness::code::subagent::SubagentRequest,
+                _cancel: tokio_util::sync::CancellationToken,
+                _progress: Option<Arc<dyn crate::harness::EventEmitter>>,
+            ) -> futures_util::future::BoxFuture<
+                'static,
+                anyhow::Result<crate::harness::code::subagent::SubagentOutcome>,
+            > {
+                *self.seen.lock().expect("lock") = Some(request.clone());
+                Box::pin(async move {
+                    Ok(crate::harness::code::subagent::SubagentOutcome {
+                        conversation_id: "child-conv".to_string(),
+                        provider_id: "openai".to_string(),
+                        model_id: "gpt-6-luna".to_string(),
+                        effort: Some("high".to_string()),
+                        text: "ok".to_string(),
+                        usage: None,
+                        steps: 1,
+                        duration_ms: 1,
+                    })
+                })
+            }
+        }
+
+        let fixture = Fixture::new();
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let mut ctx = fixture.ctx();
+        ctx.subagent = Some(Arc::new(CapturingRunner { seen: seen.clone() }));
+        let outcome = call(
+            &ctx,
+            "task",
+            json!({
+                "description": "Revisar",
+                "prompt": "Aponte bugs",
+                "subagent_type": "review",
+                "model": "openai/gpt-6-luna",
+                "effort": "high"
+            }),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        let request = seen.lock().expect("lock").clone().expect("request");
+        assert_eq!(request.task_call_id, "call-1");
+        assert_eq!(request.model.as_deref(), Some("openai/gpt-6-luna"));
+        assert_eq!(request.effort.as_deref(), Some("high"));
+        let presentation = outcome.presentation.expect("presentation");
+        assert_eq!(presentation["providerId"], "openai");
+        assert_eq!(presentation["modelId"], "gpt-6-luna");
+        assert_eq!(presentation["effort"], "high");
+    }
+
+    #[tokio::test]
+    async fn independent_task_calls_run_in_parallel() {
+        struct BarrierRunner {
+            barrier: Arc<tokio::sync::Barrier>,
+        }
+        impl crate::harness::code::subagent::SubagentRunner for BarrierRunner {
+            fn run(
+                &self,
+                _request: crate::harness::code::subagent::SubagentRequest,
+                _cancel: tokio_util::sync::CancellationToken,
+                _progress: Option<Arc<dyn crate::harness::EventEmitter>>,
+            ) -> futures_util::future::BoxFuture<
+                'static,
+                anyhow::Result<crate::harness::code::subagent::SubagentOutcome>,
+            > {
+                let barrier = self.barrier.clone();
+                Box::pin(async move {
+                    barrier.wait().await;
+                    Ok(crate::harness::code::subagent::SubagentOutcome {
+                        conversation_id: "child-conv".to_string(),
+                        provider_id: "opencode-go".to_string(),
+                        model_id: "deepseek-v4.1-flash".to_string(),
+                        effort: None,
+                        text: "ok".to_string(),
+                        usage: None,
+                        steps: 1,
+                        duration_ms: 1,
+                    })
+                })
+            }
+        }
+
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.subagent = Some(Arc::new(BarrierRunner {
+            barrier: Arc::new(tokio::sync::Barrier::new(2)),
+        }));
+        let mut first = crate::domain::ToolCallRecord::running("task-1", "task");
+        first.arguments =
+            json!({ "description": "Explorar A", "prompt": "Mapeie A" }).to_string();
+        let mut second = crate::domain::ToolCallRecord::running("task-2", "task");
+        second.arguments =
+            json!({ "description": "Explorar B", "prompt": "Mapeie B" }).to_string();
+        let outcomes = tokio::time::timeout(
+            Duration::from_secs(3),
+            crate::harness::code::tools::execute_batch(&ctx, &[first, second]),
+        )
+        .await
+        .expect("as duas tasks devem rodar em paralelo");
+        assert_eq!(outcomes.len(), 2);
+        assert!(outcomes.iter().all(|outcome| !outcome.is_error), "{outcomes:?}");
     }
 
     #[tokio::test]
@@ -4109,6 +4292,7 @@ mod tests {
             &self,
             _request: crate::harness::code::subagent::SubagentRequest,
             _cancel: tokio_util::sync::CancellationToken,
+            _progress: Option<std::sync::Arc<dyn crate::harness::EventEmitter>>,
         ) -> futures_util::future::BoxFuture<
             'static,
             anyhow::Result<crate::harness::code::subagent::SubagentOutcome>,
@@ -4142,12 +4326,17 @@ mod tests {
             &self,
             _request: crate::harness::code::subagent::SubagentRequest,
             _cancel: tokio_util::sync::CancellationToken,
+            _progress: Option<std::sync::Arc<dyn crate::harness::EventEmitter>>,
         ) -> futures_util::future::BoxFuture<
             'static,
             anyhow::Result<crate::harness::code::subagent::SubagentOutcome>,
         > {
             Box::pin(async move {
                 Ok(crate::harness::code::subagent::SubagentOutcome {
+                    conversation_id: "child-conv".to_string(),
+                    provider_id: "opencode-go".to_string(),
+                    model_id: "deepseek-v4.1-flash".to_string(),
+                    effort: None,
                     text: "ok".to_string(),
                     usage: None,
                     steps: 1,

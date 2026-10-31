@@ -128,18 +128,20 @@ Pesquisa (5 documentos em `docs/research/`, ~190 KB): `dsh-harness-map.md` (DSH 
   (`workspace::project`) reutilizando o pipeline do `run_command` (política/aprovação, streaming,
   spill, exit code), com `check` opcional e erros `NO_CHECKS`/`CHECK_NOT_FOUND`. Catálogo Code passou
   a 19 tools (23 com web/skills reaproveitadas); testes cobrem ausência de checks, modo Plano e execução real (pulado sem shell).
-- **`task` (subagente)**: delegação para um agente filho **somente leitura** (conversa efêmera no
-  mesmo workspace/provider/modelo do pai, permissão `read_only`, catálogo reduzido a leitura sem
-  MCP, 24 passos, eventos descartados, conversa apagada em **qualquer** desfecho por guarda RAII,
-  profundidade máxima 1 com guarda `DELEGATION_DEPTH`). O catálogo efetivo (`enabled_tools`) é a
+- **`task` (subagente)**: delegação para um agente filho **somente leitura** (workspace do pai,
+  permissão `read_only`, catálogo reduzido a leitura sem MCP, 24 passos, transcript filho retido e
+  oculto da sidebar, eventos filtrados ao vivo, profundidade máxima 1 com guarda
+  `DELEGATION_DEPTH`). O catálogo efetivo (`enabled_tools`) é a
   fronteira de execução: tools alucinadas/fora do turno retornam `TOOL_NOT_ENABLED`. O prompt do
   filho recebe o pedido uma vez no user message e só as instruções constantes do tipo no
   `system_prompt_override`; o `x-opencode-session` é o id da conversa pai (F4.3b) e o uso do
   filho entra no `TurnResult.usage` do pai. Testes: kinds/parse, catálogo reduzido, guarda de
   profundidade, execução de um turno filho real com provider falso, prompt não duplicado,
   session id do pai, uso agregado, erro do provider não mascarado, limpeza em
-  drop/cancelamento e tool fora do catálogo recusada. O resumo aparece no bloco “Thinking”; a
-  presentation `subagent` é persistida (sem card separado, conforme `WORKBENCH.md` §5.1).
+  drop/cancelamento e tool fora do catálogo recusada. O resumo aparece no bloco “Thinking” com
+  linha ao vivo; o transcript filho é retido e aberto por “Ver transcrição”/seção “Subagentes”.
+  A `presentation` `subagent` persiste id/modelo/effort/steps/usage (sem card separado, conforme
+  `WORKBENCH.md` §5.1).
 - **Composer**: `/test`, `/review` e `/init` agora preenchem prompts que citam `run_checks`,
   `task` (revisão delegada) e revisão do AGENTS.md antes de gravar.
 - Docs atualizados (`TOOLS.md` §2.6, `ARCHITECTURE` §8.3, `FILES` §16). Verificação no fecho da
@@ -292,11 +294,17 @@ configuração para MCP/servidores e "Verificações" no painel (backend exposto
 - **MCP**: subagentes não recebem tools MCP no catálogo, no prompt nem no `ToolCtx`; `run_turn`
   não faz refresh MCP quando `delegation_depth > 0`; `run_mcp` falha fechado. Teste
   `subagent_catalog_and_prompt_exclude_mcp`.
-- **Ciclo de vida**: `EphemeralConversation` (Drop) apaga a conversa do filho em
-  sucesso/erro/timeout/cancelamento/drop, remove `spill/<child>` e cancela aprovações/perguntas
-  pendentes. `Db::delete_conversation` também remove `usage_log` da conversa (sem linha órfã do
-  filho nem dupla contagem no billing). Testes de drop, cancelamento, falha de workspace, falha
-  do provider e limpeza de `usage_log`.
+- **Ciclo de vida e auditoria**: `SubagentConversation` (Drop) mantém o transcript do filho
+  (`parent_conversation_id`/`subagent_task_call_id`/`subagent_type`), oculto da sidebar e
+  consultável por `get_conversation`/`list_subagent_conversations`; falha de setup antes do turno
+  apaga a conversa vazia, e `Db::delete_conversation` apaga os filhos em cascata. O `usage_log` do filho é removido (o
+  consumo é agregado ao pai, sem dupla contagem). Testes de retenção/cascata, drop, cancelamento,
+  falha de workspace, falha do provider e limpeza de `usage_log`.
+- **Roadmap restante entregue**: `TurnEvent::Subagent*` encaminha eventos filtrados do filho para
+  a linha ao vivo; `SubagentTranscriptDialog`/seção “Subagentes” do popover abrem transcripts
+  retidos; `task` aceita `model`/`effort` validados (`SUBAGENT_MODEL_INVALID`/
+  `SUBAGENT_REASONING_*`); `task` é `Safe` com semáforo de 4 e execução paralela de chamadas
+  independentes.
 - **Cancelamento**: `run_task` usa `cancel.child_token()`, propaga ao `run_turn` e espera um
   período de graça; o filho não cria token próprio.
 - **Contexto/prompt/cache**: `ParentTurnContext` usa provider/modelo/workspace efetivos; o pedido
@@ -306,5 +314,7 @@ configuração para MCP/servidores e "Verificações" no painel (backend exposto
   presentation `subagent` os persiste.
 - **Guardrails**: máximo 4 delegações por turno (`SUBAGENT_LIMIT`); `subagent_type` inválido →
   `SUBAGENT_INVALID_TYPE`.
-- **Testes**: 14 testes de subagente (`cargo test --lib subagent`) + `task_*` (4) + allowlist (1)
-  + prompt; verificação final registrada no fecho.
+- **Testes**: 18 testes de subagente (`cargo test --lib subagent`), `task_*` (6), allowlist (1),
+  retenção/cascata, rota/modelo/effort, eventos ao vivo e transcript na UI; verificação final:
+  `cargo test --lib` 1032 verdes, `pnpm test` 132 arquivos/2425 testes verdes, `pnpm typecheck` e
+  `pnpm build` verdes.

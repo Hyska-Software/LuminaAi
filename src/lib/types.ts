@@ -507,6 +507,10 @@ export type ToolPresentation =
       kind: 'subagent';
       description: string;
       subagentType: string;
+      conversationId?: string | null;
+      providerId?: string | null;
+      modelId?: string | null;
+      effort?: string | null;
       steps?: number;
       durationMs?: number;
       usage?: UsageInfo;
@@ -691,6 +695,26 @@ export interface UsageInfo {
   durationMs?: number | null;
 }
 
+/** Live state of a `task` child, keyed by the parent tool-call id. */
+export interface SubagentLiveState {
+  taskCallId: string;
+  conversationId: string;
+  subagentType: string;
+  description: string;
+  providerId: string;
+  modelId: string;
+  effort?: string | null;
+  status: 'running' | 'done' | 'error' | 'cancelled';
+  startedAt: number;
+  steps: number;
+  text: string;
+  reasoning: string;
+  toolCalls: ToolCallRecord[];
+  usage?: UsageInfo;
+  durationMs?: number;
+  error?: string | null;
+}
+
 export type CacheState =
   | 'cold'
   | 'warming'
@@ -828,6 +852,12 @@ export interface Conversation {
   agentKind?: string;
   /** Modo de permissão da sessão de código (o Chat ignora). */
   permissionMode?: PermissionMode;
+  /** Parent session when this row is a retained subagent transcript. */
+  parentConversationId?: string | null;
+  /** `task` call that spawned this retained subagent transcript. */
+  subagentTaskCallId?: string | null;
+  /** Subagent kind (`explore` | `review` | `general`). */
+  subagentType?: string | null;
 }
 
 export interface ConversationDetail {
@@ -926,7 +956,27 @@ export type TurnEvent =
   | { type: 'job_updated'; job: JobView }
   | { type: 'profile_changed'; profile: TurnProfile; permissionMode: PermissionMode; planMode: boolean }
   | { type: 'question_requested'; request: AskUserRequest }
-  | { type: 'question_resolved'; requestId: string; answers: AskUserAnswer[]; skipped: boolean };
+  | { type: 'question_resolved'; requestId: string; answers: AskUserAnswer[]; skipped: boolean }
+  | {
+      type: 'subagent_started';
+      taskCallId: string;
+      conversationId: string;
+      subagentType: string;
+      description: string;
+      providerId: string;
+      modelId: string;
+      effort?: string | null;
+    }
+  | { type: 'subagent_event'; taskCallId: string; event: TurnEvent }
+  | {
+      type: 'subagent_finished';
+      taskCallId: string;
+      conversationId?: string | null;
+      status: 'done' | 'error' | 'cancelled';
+      usage?: UsageInfo;
+      durationMs: number;
+      error?: string | null;
+    };
 
 /* ------------------------------------------------------------------ */
 /* Artifacts                                                           */

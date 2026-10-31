@@ -8,6 +8,7 @@ import type {
   Conversation,
   ModelSelection,
   ReasoningSelection,
+  SubagentLiveState,
   TraceStep,
   TurnEvent,
   TurnOptions,
@@ -36,6 +37,8 @@ export interface StreamingState {
   startedAt: number;
   /** `user` (turno do usuário) ou `goal_round` (rodada automática do objetivo). */
   turnKind: TurnKind;
+  /** Live child agents of this turn, keyed by the parent `task` call id. */
+  subagents?: Record<string, SubagentLiveState>;
 }
 
 interface ChatState {
@@ -514,6 +517,25 @@ export const useChatStore = create<ChatState>()((set, get) => {
       flushHandle = setTimeout(flush, 33);
     };
 
+    const patchSubagent = (
+      taskCallId: string,
+      update: (current: SubagentLiveState) => SubagentLiveState,
+    ) => {
+      set((state) => {
+        const current = state.streaming?.subagents?.[taskCallId];
+        if (!state.streaming || !current) return {};
+        return {
+          streaming: {
+            ...state.streaming,
+            subagents: {
+              ...(state.streaming.subagents ?? {}),
+              [taskCallId]: update(current),
+            },
+          },
+        };
+      });
+    };
+
     const handleEvent = (event: TurnEvent) => {
       // O estado de harness de código (aprovações/plano/tarefas/contexto/
       // alterações/jobs) é ortogonal ao streaming e vive no `codeStore`.
@@ -706,6 +728,132 @@ export const useChatStore = create<ChatState>()((set, get) => {
           void syncArtifacts(context.conversationId);
           void useCodeStore.getState().refresh(context.conversationId);
           toast.error('Falha na resposta', { description: event.hint ?? event.message });
+          break;
+        case 'subagent_started':
+          set((state) =>
+            state.streaming
+              ? {
+                  streaming: {
+                    ...state.streaming,
+                    subagents: {
+                      ...(state.streaming.subagents ?? {}),
+                      [event.taskCallId]: {
+                        taskCallId: event.taskCallId,
+                        conversationId: event.conversationId,
+                        subagentType: event.subagentType,
+                        description: event.description,
+                        providerId: event.providerId,
+                        modelId: event.modelId,
+                        effort: event.effort ?? null,
+                        status: 'running',
+                        startedAt: Date.now(),
+                        steps: 0,
+                        text: '',
+                        reasoning: '',
+                        toolCalls: [],
+                      },
+                    },
+                  },
+                }
+              : {},
+          );
+          break;
+        case 'subagent_event': {
+          const nested = event.event;
+          if (nested.type === 'step_started') {
+            patchSubagent(event.taskCallId, (current) => ({
+              ...current,
+              steps: Math.max(current.steps, nested.step),
+            }));
+          } else if (nested.type === 'reasoning_delta') {
+            patchSubagent(event.taskCallId, (current) => ({
+              ...current,
+              reasoning: current.reasoning + nested.delta,
+            }));
+          } else if (nested.type === 'text_delta') {
+            patchSubagent(event.taskCallId, (current) => ({
+              ...current,
+              text: current.text + nested.delta,
+            }));
+          } else if (nested.type === 'tool_call_started') {
+            patchSubagent(event.taskCallId, (current) => ({
+              ...current,
+              toolCalls: [
+                ...current.toolCalls.filter((tool) => tool.id !== nested.toolCall.id),
+                nested.toolCall,
+              ],
+            }));
+          } else if (nested.type === 'tool_call_args') {
+            patchSubagent(event.taskCallId, (current) => ({
+              ...current,
+              toolCalls: current.toolCalls.map((tool) =>
+                tool.id === nested.id
+                  ? { ...tool, arguments: tool.arguments + nested.delta }
+                  : tool,
+              ),
+            }));
+          } else if (nested.type === 'tool_call_finished') {
+            patchSubagent(event.taskCallId, (current) => ({
+              ...current,
+              toolCalls: current.toolCalls.map((tool) =>
+                tool.id === nested.id
+                  ? {
+                      ...tool,
+                      status: nested.status,
+                      result: nested.result,
+                      summary: nested.summary ?? tool.summary,
+                      presentation: nested.presentation ?? tool.presentation ?? null,
+                      finishedAt: Date.now(),
+                    }
+                  : tool,
+              ),
+            }));
+          } else if (nested.type === 'tool_progress') {
+            patchSubagent(event.taskCallId, (current) => {
+              const target =
+                current.toolCalls.find((tool) => tool.id === nested.id) ??
+                [...current.toolCalls].reverse().find((tool) => tool.status === 'running');
+              return {
+                ...current,
+                toolCalls: target
+                  ? current.toolCalls.map((tool) =>
+                      tool.id === target.id
+                        ? { ...tool, result: `${tool.result ?? ''}${nested.delta}` }
+                        : tool,
+                    )
+                  : current.toolCalls,
+              };
+            });
+          } else if (nested.type === 'usage') {
+            patchSubagent(event.taskCallId, (current) => ({
+              ...current,
+              usage: { ...(current.usage ?? {}), ...nested.usage },
+            }));
+          } else if (nested.type === 'error') {
+            patchSubagent(event.taskCallId, (current) => ({
+              ...current,
+              status: 'error',
+              error: nested.hint ?? nested.message,
+            }));
+          } else if (nested.type === 'cancelled') {
+            patchSubagent(event.taskCallId, (current) => ({
+              ...current,
+              status: 'cancelled',
+            }));
+          }
+          break;
+        }
+        case 'subagent_finished':
+          patchSubagent(event.taskCallId, (current) => ({
+            ...current,
+            status: event.status,
+            conversationId: event.conversationId ?? current.conversationId,
+            usage: event.usage
+              ? { ...(current.usage ?? {}), ...event.usage }
+              : current.usage,
+            durationMs: event.durationMs,
+            error: event.error ?? current.error ?? null,
+          }));
           break;
         default:
           break;
@@ -1207,6 +1355,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           step: 1,
           startedAt: now,
           turnKind: 'user',
+          subagents: {},
         },
       }));
 
@@ -1289,6 +1438,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           step: 1,
           startedAt: Date.now(),
           turnKind: 'user',
+          subagents: {},
         },
         error: null,
         errorCode: null,
@@ -1459,6 +1609,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
             step: 1,
             startedAt: now,
             turnKind: 'goal_round',
+            subagents: {},
           },
         }));
 

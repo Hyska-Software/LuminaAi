@@ -238,11 +238,15 @@ describe('ToolPresentationCard — tarefas, job, changes e subagente', () => {
           steps: 3,
           durationMs: 12_500,
           usage: { totalTokens: 1_200 },
+          modelId: 'gpt-6-luna',
+          effort: 'high',
         }}
       />,
     );
     expect(screen.getByText('Subagente de revisão')).toBeTruthy();
-    expect(screen.getByText('3 passos · 12.5 s · 1200 tokens')).toBeTruthy();
+    expect(
+      screen.getByText('3 passos · 12.5 s · 1200 tokens · gpt-6-luna · esforço high'),
+    ).toBeTruthy();
   });
 
   it('não renderiza apresentações informativas desconhecidas', () => {

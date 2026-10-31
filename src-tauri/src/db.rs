@@ -21,6 +21,7 @@ use crate::domain::{
     ArtifactKind, AttachmentInfo, CacheBreakReason, CacheSample, CacheState, ChatMessage,
     Conversation, ConversationDetail, FileChangeKind, LibraryArtifact, MessageRole, MessageStatus,
     PermissionMode, SegmentDigest, TurnKind, UsageInfo, Workspace, CONVERSATION_MODE_CHAT,
+    CONVERSATION_MODE_CODE,
 };
 
 /* ------------------------------------------------------------------ */
@@ -29,7 +30,7 @@ use crate::domain::{
 
 const CONVERSATION_COLUMNS: &str = "id, title, created_at, updated_at, pinned, \
      provider_id, model_id, message_count, preview, mode, code_linked, workspace_id, \
-     agent_kind, permission_mode";
+     agent_kind, permission_mode, parent_conversation_id, subagent_task_call_id, subagent_type";
 
 const WORKSPACE_COLUMNS: &str = "id, name, path, created_at, updated_at, last_opened_at, \
      pinned, trusted";
@@ -80,7 +81,12 @@ CREATE TABLE IF NOT EXISTS conversations (
   -- ('read_only' | 'edit' | 'autonomous'). O Chat ignora os três.
   workspace_id    TEXT,
   agent_kind      TEXT NOT NULL DEFAULT 'lumina',
-  permission_mode TEXT NOT NULL DEFAULT 'edit'
+  permission_mode TEXT NOT NULL DEFAULT 'edit',
+  -- Retained subagent transcript: parent session + task call + kind. NULL for
+  -- normal sessions; children are hidden from the sidebar and cascade on delete.
+  parent_conversation_id TEXT,
+  subagent_task_call_id  TEXT,
+  subagent_type          TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -812,14 +818,16 @@ fn migrate_messages_schema(conn: &Connection) -> Result<()> {
 
 /// Migração aditiva e idempotente da tabela `conversations`:
 ///
-/// 1. separação Chat/Code: bancos criados antes dos dois layouts ganham `mode`
-///    (`'chat'` em todas as linhas existentes) e `code_linked` (`0`);
-/// 2. harness de código: bancos criados antes do harness ganham `workspace_id`
-///    (`NULL` = sem workspace), `agent_kind` (`'lumina'`) e `permission_mode`
-///    (`'edit'`). O Chat ignora os três; `workspace_id` é preenchido quando o
-///    usuário abre uma sessão de código com workspace.
+/// 1. Chat/Code split: databases created before the two layouts get `mode`
+///    (`'chat'` on every existing row) and `code_linked` (`0`);
+/// 2. code harness: databases created before the harness get `workspace_id`
+///    (`NULL` = no workspace), `agent_kind` (`'lumina'`) and `permission_mode`
+///    (`'edit'`). Chat ignores the three; `workspace_id` is filled when the
+///    user opens a Code session with a workspace;
+/// 3. subagents: `parent_conversation_id`, `subagent_task_call_id` and
+///    `subagent_type` (`NULL` on normal sessions) for retained transcripts.
 ///
-/// Nenhuma linha é perdida e a migração pode rodar quantas vezes for preciso.
+/// No row is lost and the migration is idempotent.
 fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
     ensure_column(
         conn,
@@ -850,6 +858,25 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         "conversations",
         "permission_mode",
         "ALTER TABLE conversations ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'edit'",
+    )?;
+    // Retained subagent transcripts: parent link, task call id and kind.
+    ensure_column(
+        conn,
+        "conversations",
+        "parent_conversation_id",
+        "ALTER TABLE conversations ADD COLUMN parent_conversation_id TEXT",
+    )?;
+    ensure_column(
+        conn,
+        "conversations",
+        "subagent_task_call_id",
+        "ALTER TABLE conversations ADD COLUMN subagent_task_call_id TEXT",
+    )?;
+    ensure_column(
+        conn,
+        "conversations",
+        "subagent_type",
+        "ALTER TABLE conversations ADD COLUMN subagent_type TEXT",
     )?;
     Ok(())
 }
@@ -1191,6 +1218,9 @@ fn conversation_from_row(row: &Row<'_>) -> rusqlite::Result<Conversation> {
         workspace_id: row.get(11)?,
         agent_kind: row.get(12)?,
         permission_mode: PermissionMode::from_str(&permission_mode),
+        parent_conversation_id: row.get(14)?,
+        subagent_task_call_id: row.get(15)?,
+        subagent_type: row.get(16)?,
     })
 }
 
@@ -1709,6 +1739,7 @@ impl Db {
         let conn = self.conn.lock();
         let sql = format!(
             "SELECT {CONVERSATION_COLUMNS} FROM conversations \
+             WHERE parent_conversation_id IS NULL \
              ORDER BY pinned DESC, updated_at DESC"
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -1799,6 +1830,74 @@ impl Db {
             .ok_or_else(|| anyhow::anyhow!("conversa recém-criada não encontrada"))
     }
 
+    /// Creates a retained, hidden subagent transcript for `parent_id`.
+    ///
+    /// The child is a normal Code conversation with `read_only` permission; it
+    /// is filtered out of the sidebar and cascades when the parent is deleted.
+    pub fn create_subagent_conversation(
+        &self,
+        title: &str,
+        provider_id: &str,
+        model_id: &str,
+        parent_id: &str,
+        task_call_id: &str,
+        subagent_type: &str,
+    ) -> anyhow::Result<Conversation> {
+        let child = self.create_conversation_with_mode_and_permission(
+            title,
+            provider_id,
+            model_id,
+            CONVERSATION_MODE_CODE,
+            PermissionMode::ReadOnly,
+        )?;
+        if let Err(error) =
+            self.set_conversation_subagent_meta(&child.id, parent_id, task_call_id, subagent_type)
+        {
+            let _ = self.delete_conversation(&child.id);
+            return Err(error);
+        }
+        self.get_conversation(&child.id)?
+            .ok_or_else(|| anyhow::anyhow!("conversa de subagente não encontrada"))
+    }
+
+    /// Links an existing conversation to its parent subagent transcript.
+    pub fn set_conversation_subagent_meta(
+        &self,
+        id: &str,
+        parent_id: &str,
+        task_call_id: &str,
+        subagent_type: &str,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE conversations SET parent_conversation_id = ?2, \
+                 subagent_task_call_id = ?3, subagent_type = ?4 WHERE id = ?1",
+                params![id, parent_id, task_call_id, subagent_type],
+            )
+            .context("falha ao vincular a conversa ao subagente")?;
+        if changed == 0 {
+            return Err(anyhow::anyhow!("conversa não encontrada: {id}"));
+        }
+        Ok(())
+    }
+
+    /// Parent-visible list of retained subagent transcripts (newest first).
+    pub fn list_subagent_conversations(
+        &self,
+        parent_id: &str,
+    ) -> anyhow::Result<Vec<Conversation>> {
+        let conn = self.conn.lock();
+        let sql = format!(
+            "SELECT {CONVERSATION_COLUMNS} FROM conversations \
+             WHERE parent_conversation_id = ?1 ORDER BY created_at DESC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([parent_id], |row| conversation_from_row(row))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar os subagentes da conversa")
+    }
+
     /// Compartilha (`linked = true`) ou remove o vínculo de uma sessão do Chat
     /// com o layout Code. Só sessões `mode == "chat"` podem ser compartilhadas:
     /// uma conversa criada no Code pertence somente ao Code.
@@ -1866,6 +1965,18 @@ impl Db {
     /// code harness, prompt cache and `usage_log`). Orphan Library attachments
     /// are preserved by product decision.
     pub fn delete_conversation(&self, id: &str) -> anyhow::Result<()> {
+        // Retained subagent transcripts are children of this conversation and
+        // must be deleted with it (they are hidden from the sidebar).
+        let child_ids: Vec<String> = {
+            let conn = self.conn.lock();
+            let mut stmt =
+                conn.prepare("SELECT id FROM conversations WHERE parent_conversation_id = ?1")?;
+            let rows = stmt.query_map([id], |row| row.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for child_id in child_ids {
+            self.delete_conversation(&child_id)?;
+        }
         let conn = self.conn.lock();
         let artifact_paths: Vec<(String, String)> = {
             let mut stmt =
@@ -1932,10 +2043,12 @@ impl Db {
         let sql = format!(
             "SELECT DISTINCT c.id, c.title, c.created_at, c.updated_at, c.pinned, \
              c.provider_id, c.model_id, c.message_count, c.preview, c.mode, c.code_linked, \
-             c.workspace_id, c.agent_kind, c.permission_mode \
+             c.workspace_id, c.agent_kind, c.permission_mode, c.parent_conversation_id, \
+             c.subagent_task_call_id, c.subagent_type \
              FROM conversations c \
              LEFT JOIN messages m ON m.conversation_id = c.id \
-             WHERE c.title LIKE ?1 ESCAPE '\\' OR m.content LIKE ?1 ESCAPE '\\' \
+             WHERE c.parent_conversation_id IS NULL \
+               AND (c.title LIKE ?1 ESCAPE '\\' OR m.content LIKE ?1 ESCAPE '\\') \
              ORDER BY c.pinned DESC, c.updated_at DESC"
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -2150,6 +2263,7 @@ impl Db {
         let conn = self.conn.lock();
         let sql = format!(
             "SELECT {CONVERSATION_COLUMNS} FROM conversations WHERE workspace_id = ?1 \
+             AND parent_conversation_id IS NULL \
              ORDER BY pinned DESC, updated_at DESC"
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -2950,6 +3064,18 @@ impl Db {
     }
 
     /* ---------------- usage ---------------- */
+
+    /// Removes only the usage rows of a conversation (used by retained
+    /// subagent transcripts: their usage is aggregated into the parent turn).
+    pub fn delete_usage_for_conversation(&self, conversation_id: &str) -> anyhow::Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM usage_log WHERE conversation_id = ?1",
+            [conversation_id],
+        )
+        .context("falha ao remover o uso da conversa")?;
+        Ok(())
+    }
 
     /// Registra o uso de um turno em `usage_log` (billing; 1 linha por turno,
     /// conforme §5.3 do plano). Os contadores de cache de `UsageInfo` são
@@ -5490,6 +5616,42 @@ mod tests {
             )
             .expect("contar usage_log");
         assert_eq!(usage_rows, 0, "uso da conversa efêmera não pode ficar órfão");
+    }
+
+    #[test]
+    fn subagent_transcripts_are_hidden_and_cascade_with_the_parent() {
+        let db = test_db();
+        let parent = code_conversation(&db);
+        let child = db
+            .create_subagent_conversation(
+                "Subagente: revisar",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                &parent.id,
+                "task-call-1",
+                "review",
+            )
+            .expect("subagente");
+        assert_eq!(child.parent_conversation_id.as_deref(), Some(parent.id.as_str()));
+        assert_eq!(child.subagent_task_call_id.as_deref(), Some("task-call-1"));
+        assert_eq!(child.subagent_type.as_deref(), Some("review"));
+        assert_eq!(child.permission_mode, PermissionMode::ReadOnly);
+        assert_eq!(db.list_conversations().expect("sidebar").len(), 1);
+        assert_eq!(
+            db.list_subagent_conversations(&parent.id)
+                .expect("subagentes")
+                .len(),
+            1
+        );
+        db.delete_conversation(&parent.id).expect("excluir pai");
+        assert!(db
+            .get_conversation(&child.id)
+            .expect("buscar filho")
+            .is_none());
+        assert!(db
+            .list_subagent_conversations(&parent.id)
+            .expect("subagentes")
+            .is_empty());
     }
 
     #[test]

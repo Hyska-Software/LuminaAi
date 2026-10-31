@@ -64,6 +64,7 @@ pub fn run() {
             commands::oauth::openai_sign_out,
             commands::oauth::openai_auth_status,
             commands::conversations::list_conversations,
+            commands::conversations::list_subagent_conversations,
             commands::conversations::create_conversation,
             commands::conversations::get_conversation,
             commands::cache::get_cache_stats,
