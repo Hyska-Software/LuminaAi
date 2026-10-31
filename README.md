@@ -102,6 +102,10 @@ Documentação: [Arquitetura](docs/ARCHITECTURE.md) · [Arquivos, código e skil
 
 Conversas, anexos e artefatos ficam apenas na sua máquina. As API keys são armazenadas localmente (`secrets.json` no app-data) e nunca são expostas ao renderer. Requisições vão direto para o provedor escolhido (gateway do OpenCode, API da OpenAI ou API da Anthropic); nada passa por um servidor do Lumina.
 
+## Natureza do projeto
+
+O Lumina é um projeto de código aberto (open source), mantido sem fins lucrativos. Essa declaração descreve a finalidade do projeto e não restringe os direitos concedidos pela licença MIT.
+
 ## Licença
 
-MIT.
+MIT ([LICENSE](LICENSE)).
