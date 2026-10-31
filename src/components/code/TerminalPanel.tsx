@@ -15,6 +15,9 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { CircleStop, Eraser, Plus, RotateCcw, SquareTerminal, X } from 'lucide-react';
+// Mandatory: without xterm.css the viewport/screen/char-measure elements fall
+// back to normal DOM flow (visible "WWWW…" measure text and broken rows).
+import '@xterm/xterm/css/xterm.css';
 
 import {
   Button,

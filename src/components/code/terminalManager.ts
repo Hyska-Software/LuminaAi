@@ -152,7 +152,7 @@ function terminalHost(): HTMLDivElement {
   const host = document.createElement('div');
   host.className = 'absolute inset-0';
   host.dataset.terminalHost = 'true';
-  host.style.visibility = 'hidden';
+  host.style.opacity = '0';
   host.setAttribute('role', 'group');
   host.setAttribute('aria-label', 'Terminal interativo');
   return host;
@@ -163,12 +163,21 @@ function createTerminal(): XTerm {
     cursorBlink: !prefersReducedMotion(),
     fontFamily: terminalFontFamily(),
     fontSize: TERMINAL_FONT_SIZE,
-    lineHeight: 1.2,
     scrollback: 5_000,
     allowProposedApi: true,
     screenReaderMode: true,
     theme: buildTerminalTheme(),
   });
+}
+
+/** Waits for the web font before measuring cells (avoids stale rows/columns). */
+async function loadTerminalFont(): Promise<void> {
+  if (typeof document === 'undefined' || !document.fonts?.load) return;
+  try {
+    await document.fonts.load(`${TERMINAL_FONT_SIZE}px "JetBrains Mono Variable"`);
+  } catch {
+    // Fall back to the bundled stack; FitAddon will measure whatever loads.
+  }
 }
 
 /** Imperative store used by the Code layout terminal panel. */
@@ -197,11 +206,9 @@ class TerminalManager {
     if (runtime.container === container) return;
     if (runtime.container) this.detachHosts(runtime);
     runtime.container = container;
-    // Defensive: a previous panel instance could leave a host behind if it was
-    // unmounted outside the normal cleanup path.
-    for (const host of Array.from(container.querySelectorAll<HTMLElement>('[data-terminal-host]'))) {
-      host.remove();
-    }
+    // The container belongs exclusively to the terminal hosts; clearing it
+    // protects against stale hosts from a previous implementation/HMR.
+    container.replaceChildren();
     for (const id of runtime.order) {
       const instance = runtime.instances.get(id);
       if (instance) container.appendChild(instance.host);
@@ -244,6 +251,8 @@ class TerminalManager {
     runtime.loading = true;
     runtime.error = null;
     this.notify(runtime);
+
+    await loadTerminalFont();
 
     const term = createTerminal();
     const fit = new FitAddon();
@@ -560,16 +569,14 @@ class TerminalManager {
   private detachHosts(runtime: ConversationRuntime): void {
     const container = runtime.container;
     if (!container) return;
-    for (const host of Array.from(container.querySelectorAll<HTMLElement>('[data-terminal-host]'))) {
-      host.remove();
-    }
+    container.replaceChildren();
   }
 
   private syncVisibility(runtime: ConversationRuntime): void {
     for (const [id, instance] of runtime.instances) {
       const active = id === runtime.activeId;
       instance.host.hidden = !active;
-      instance.host.style.visibility = active ? '' : 'hidden';
+      instance.host.style.opacity = active ? '' : '0';
       if (active) instance.host.removeAttribute('aria-hidden');
       else instance.host.setAttribute('aria-hidden', 'true');
     }
