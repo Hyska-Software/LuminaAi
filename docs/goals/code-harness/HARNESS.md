@@ -464,8 +464,10 @@ pub struct ExecRequest {
   usuário vê no terminal, e o CLI cobre worktrees/config/hooks. Risco: git ausente/antigo →
   degradação explícita. (Confirmar com `workspace-runtime-options.md`; se o spike mostrar que
   `status`/`diff` via CLI é lento em repos grandes, otimizar com cache por mtime/índice.)
-- **Commit**: staging selecionado ou "tudo"; mensagem obrigatória (não vazia), convenção detectada
-  do repo (Commitlint/Conventional Commits se configurado); rodar hooks do git (usuário conhece).
+- **Commit**: staging selecionado ou **"tudo"** (nesse alvo o comando roda `git add -A` antes do
+  `commit -m`, incluindo modificados, novos e deletados); mensagem obrigatória (não vazia), convenção
+  detectada do repo (Commitlint/Conventional Commits se configurado); rodar hooks do git (usuário
+  conhece).
   A mensagem sugerida pela IA é gerada por request curto não-streaming (sanitizada, máx 200 chars)
   e **nunca** commitada automaticamente.
 

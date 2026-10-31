@@ -328,8 +328,9 @@ Clique abre o **diff**:
 Rodapé: **barra de commit** — alvo (tudo/staged/seleção), `+N −M`, campo de mensagem (com
 **sugestão de IA** via botão `✨` → `suggest_commit_message`), botão **Commit** (desabilitado se
 nada selecionado; tooltip explica), e **Commits recentes** colapsável (hash curto, mensagem, autor,
-tempo; clique mostra o commit no painel). Push/PR ficam para depois (badge "em breve" não — apenas
-não existem).
+tempo; clique mostra o commit no painel). **Tudo** roda `git add -A` antes do commit, incluindo
+arquivos modificados, novos e deletados; **Preparados** usa o índice existente; **Seleção** prepara
+apenas os caminhos marcados. Push/PR ficam para depois (badge "em breve" não — apenas não existem).
 
 ### 7.3 Terminal (v1.1)
 

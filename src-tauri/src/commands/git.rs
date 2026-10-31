@@ -176,6 +176,9 @@ pub async fn git_discard(
     status_of(&state, &workspace_id).await
 }
 
+/// Creates a commit from the working tree. `paths = None` means "Tudo": stage
+/// every pending change (`git add -A`) before committing; `Some(paths)` stages
+/// only those paths first.
 #[tauri::command]
 pub async fn git_commit(
     state: State<'_, AppState>,
@@ -191,12 +194,20 @@ pub async fn git_commit(
         return Err("a mensagem do commit é longa demais".to_string());
     }
     let root = workspace_path(&state, &workspace_id)?;
-    if let Some(paths) = paths.filter(|paths| !paths.is_empty()) {
-        let mut add_args = vec!["add", "--"];
-        for path in &paths {
-            add_args.push(path.as_str());
+    match paths {
+        Some(paths) if !paths.is_empty() => {
+            crate::workspace::git::stage(&root, &paths)
+                .await
+                .map_err(map_err)?;
         }
-        run_git(&root, &add_args).await?;
+        Some(_) => {}
+        // "Tudo" sends no explicit paths: stage the whole working tree so
+        // modified, new and deleted files are all included in the commit.
+        None => {
+            crate::workspace::git::stage_all(&root)
+                .await
+                .map_err(map_err)?;
+        }
     }
     crate::workspace::git::commit(&root, trimmed)
         .await

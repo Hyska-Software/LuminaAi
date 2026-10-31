@@ -227,6 +227,12 @@ pub async fn stage(root: &Path, paths: &[String]) -> Result<(), ExecError> {
     Ok(())
 }
 
+/// `git add -A`: stages every pending change, including new and deleted files.
+pub async fn stage_all(root: &Path) -> Result<(), ExecError> {
+    run_git_checked(root, &["add", "-A"], TEXT_CAP).await?;
+    Ok(())
+}
+
 /// `git restore --staged -- <paths>` (desfaz o staging, mantém o working tree).
 pub async fn unstage(root: &Path, paths: &[String]) -> Result<(), ExecError> {
     let mut args: Vec<&str> = vec!["restore", "--staged", "--"];
@@ -785,6 +791,24 @@ mod tests {
 
         let branches = branches(temp.path()).await.expect("branches");
         assert!(branches.contains(&"main".to_string()), "branches: {branches:?}");
+    }
+
+    #[tokio::test]
+    async fn stage_all_includes_modified_and_untracked_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        fs::write(temp.path().join("a.txt"), "linha1\nlinha2\n").expect("modificar a");
+        fs::write(temp.path().join("b.txt"), "novo\n").expect("criar b");
+
+        stage_all(temp.path()).await.expect("stage all");
+
+        let status = detect(temp.path()).await;
+        assert!(status.staged.iter().any(|file| file.path == "a.txt"));
+        assert!(status.staged.iter().any(|file| file.path == "b.txt"));
+        assert!(status.unstaged.is_empty(), "unstaged: {:?}", status.unstaged);
+        assert!(status.untracked.is_empty(), "untracked: {:?}", status.untracked);
     }
 
     #[tokio::test]
