@@ -10,7 +10,6 @@
 import {
   useEffect,
   useRef,
-  useState,
   useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
@@ -21,12 +20,6 @@ import '@xterm/xterm/css/xterm.css';
 
 import {
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   IconButton,
   Spinner,
   Tooltip,
@@ -48,13 +41,10 @@ function tabDisplayName(tab: TerminalTabInfo): string {
 /** Aba "Terminal" do painel direito: abas de terminais, xterm e foco. */
 export function TerminalPanel({ conversationId, className }: TerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const tabStripRef = useRef<HTMLDivElement | null>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const emptyCtaRef = useRef<HTMLButtonElement | null>(null);
   const previousTabs = useRef({ conversationId, count: 0 });
-  const [pendingClose, setPendingClose] = useState<{
-    conversationId: string;
-    tab: TerminalTabInfo;
-  } | null>(null);
   const snapshot = useSyncExternalStore(
     terminalManager.subscribe,
     () => terminalManager.getSnapshot(conversationId),
@@ -65,10 +55,6 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
   const atLimit = tabs.length >= limit;
   const blocked = atLimit;
-
-  useEffect(() => {
-    setPendingClose(null);
-  }, [conversationId]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -114,6 +100,28 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
     }
   }, [activeId, tabs.length]);
 
+  /* A vertical wheel scrolls the horizontal strip: otherwise the tabs that
+     overflow a narrow panel are only reachable with a trackpad or Shift+wheel.
+     The native listener is non-passive so it can stop the parent from scrolling. */
+  useEffect(() => {
+    const strip = tabStripRef.current;
+    if (!strip) return;
+    const onWheel = (event: WheelEvent) => {
+      if (strip.scrollWidth <= strip.clientWidth) return;
+      // Trackpad gestures already carry deltaX; a mouse wheel only has deltaY.
+      const delta =
+        Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (delta === 0) return;
+      const maxScroll = strip.scrollWidth - strip.clientWidth;
+      const next = Math.min(maxScroll, Math.max(0, strip.scrollLeft + delta));
+      if (next === strip.scrollLeft) return;
+      event.preventDefault();
+      strip.scrollLeft = next;
+    };
+    strip.addEventListener('wheel', onWheel, { passive: false });
+    return () => strip.removeEventListener('wheel', onWheel);
+  }, []);
+
   /* Closing the last tab should not drop focus on <body>. */
   useEffect(() => {
     const previous = previousTabs.current;
@@ -127,19 +135,8 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
     terminalManager.activate(conversationId, id, { focusTerminal });
   };
 
-  const requestClose = (tab: TerminalTabInfo) => {
-    if (tab.running) {
-      setPendingClose({ conversationId, tab });
-      return;
-    }
+  const closeTab = (tab: TerminalTabInfo) => {
     void terminalManager.close(conversationId, tab.id);
-  };
-
-  const confirmClose = () => {
-    if (!pendingClose) return;
-    const { conversationId: targetConversation, tab } = pendingClose;
-    setPendingClose(null);
-    void terminalManager.close(targetConversation, tab.id);
   };
 
   const handleTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, id: string) => {
@@ -171,8 +168,9 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col bg-surface-raised', className)}>
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
+      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
         <div
+          ref={tabStripRef}
           role="tablist"
           aria-label="Terminais abertos"
           className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
@@ -184,10 +182,10 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                 key={tab.id}
                 role="presentation"
                 className={cn(
-                  'flex h-7 max-w-48 shrink-0 items-center rounded-md border text-[12px]',
+                  'flex h-7 max-w-40 shrink-0 items-center rounded-lg text-[12px] transition-colors duration-150',
                   selected
-                    ? 'border-border bg-background text-foreground'
-                    : 'border-transparent text-foreground-muted hover:bg-surface-hover',
+                    ? 'bg-surface-active text-foreground'
+                    : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
                 )}
               >
                 <button
@@ -204,7 +202,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                   title={tab.cwd ? `${tabDisplayName(tab)} — ${tab.cwd}` : tabDisplayName(tab)}
                   onClick={() => selectTab(tab.id)}
                   onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
-                  className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-md pl-2 pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                  className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2 pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                 >
                   <SquareTerminal
                     aria-hidden
@@ -226,8 +224,8 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                   type="button"
                   aria-label={`Fechar ${tab.title}`}
                   title="Fechar aba e encerrar o shell"
-                  onClick={() => requestClose(tab)}
-                  className="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-foreground-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                  onClick={() => closeTab(tab)}
+                  className="mr-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-foreground-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                 >
                   <X aria-hidden className="size-3.5" />
                 </button>
@@ -243,6 +241,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                 <IconButton
                   label="Limpar terminal"
                   size="sm"
+                  className="size-7"
                   onClick={() => terminalManager.clear(conversationId, active.id)}
                 >
                   <Eraser aria-hidden className="size-3.5" strokeWidth={1.75} />
@@ -253,6 +252,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                   <IconButton
                     label="Matar processo"
                     size="sm"
+                    className="size-7"
                     disabled={active.killing}
                     onClick={() => void terminalManager.kill(conversationId, active.id)}
                   >
@@ -268,6 +268,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                   <IconButton
                     label="Reiniciar terminal"
                     size="sm"
+                    className="size-7"
                     disabled={loading}
                     onClick={() => void terminalManager.restart(conversationId, active.id)}
                   >
@@ -286,6 +287,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
               <IconButton
                 label="Novo terminal"
                 size="sm"
+                className="size-7"
                 loading={loading}
                 disabled={blocked}
                 onClick={() => void terminalManager.open(conversationId)}
@@ -384,32 +386,6 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
           </span>
         </span>
       </div>
-
-      <Dialog
-        open={pendingClose !== null}
-        onOpenChange={(open) => {
-          if (!open) setPendingClose(null);
-        }}
-      >
-        <DialogContent size="sm">
-          <DialogHeader>
-            <DialogTitle>Fechar terminal?</DialogTitle>
-          </DialogHeader>
-          <DialogDescription className="px-6 pb-4">
-            {pendingClose
-              ? `${pendingClose.tab.title} e os processos iniciados nele serão encerrados.`
-              : ''}
-          </DialogDescription>
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setPendingClose(null)}>
-              Cancelar
-            </Button>
-            <Button variant="danger" size="sm" onClick={confirmClose}>
-              Fechar terminal
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

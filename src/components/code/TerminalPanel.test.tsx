@@ -120,24 +120,25 @@ describe('TerminalPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Fechar Terminal 1' }));
 
-    expect(apiMock.closeTerminal).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: 'Fechar terminal' }));
-
-    expect(apiMock.closeTerminal).toHaveBeenCalledWith('term-1');
+    // Closing a running terminal is immediate: no confirmation dialog.
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(apiMock.closeTerminal).toHaveBeenCalledWith('term-1'));
     expect(screen.queryByRole('tab', { name: 'Terminal 1' })).toBeNull();
     expect(screen.getByText('Nenhum terminal aberto')).toBeTruthy();
   });
 
-  it('destaca a aba ativa com borda e sem sombra', async () => {
+  it('mantém o destaque compacto das abas: preenchimento neutro e sem sombra', async () => {
     render(<TerminalPanel conversationId="conv-1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Abrir terminal' }));
 
     const selected = await screen.findByRole('tab', { name: 'Terminal 1' });
-    expect(selected.parentElement?.className).toContain('border-border');
+    expect(selected.parentElement?.className).toContain('h-7');
+    expect(selected.parentElement?.className).toContain('bg-surface-active');
+    expect(selected.parentElement?.className).not.toContain('border');
     expect(selected.parentElement?.className).not.toContain('shadow-sm');
   });
 
-  it('fecha uma aba encerrada sem pedir confirmação', async () => {
+  it('fecha uma aba encerrada diretamente', async () => {
     render(<TerminalPanel conversationId="conv-1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Abrir terminal' }));
     await screen.findByRole('tab', { name: 'Terminal 1' });
@@ -230,6 +231,30 @@ describe('TerminalPanel', () => {
     expect(screen.getAllByRole('tab')).toHaveLength(4);
     const add = screen.getByRole('button', { name: 'Novo terminal' }) as HTMLButtonElement;
     expect(add.disabled).toBe(true);
+  });
+
+  it('rola a faixa de abas com a roda do mouse quando há overflow', async () => {
+    render(<TerminalPanel conversationId="conv-1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir terminal' }));
+    await screen.findByRole('tab', { name: 'Terminal 1' });
+
+    for (let index = 2; index <= 4; index += 1) {
+      fireEvent.click(screen.getByRole('button', { name: 'Novo terminal' }));
+      await screen.findByRole('tab', { name: `Terminal ${index}` });
+    }
+
+    const strip = screen.getByRole('tablist', { name: 'Terminais abertos' });
+    // jsdom has no layout: declare an overflowing strip and scroll from the start.
+    Object.defineProperty(strip, 'scrollWidth', { configurable: true, value: 800 });
+    Object.defineProperty(strip, 'clientWidth', { configurable: true, value: 200 });
+    strip.scrollLeft = 0;
+
+    fireEvent.wheel(strip, { deltaY: 120 });
+    expect(strip.scrollLeft).toBe(120);
+
+    // Clamps at the end instead of overscrolling.
+    fireEvent.wheel(strip, { deltaY: 5000 });
+    expect(strip.scrollLeft).toBe(600);
   });
 
   it('degrada com erro amigável e sem retry inútil no limite', async () => {
