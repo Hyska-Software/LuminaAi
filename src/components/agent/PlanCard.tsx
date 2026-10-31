@@ -1,15 +1,12 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
-import { CheckCircle2, ChevronDown, ChevronRight, ListChecks, PencilLine } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight, ListChecks, Target } from 'lucide-react';
 import { Markdown } from '@/components/chat/Markdown';
 import { Badge, Button, Spinner, Textarea } from '@/components/ui';
 import type { PlanView } from '@/lib/types';
 import { cn, relativeTime } from '@/lib/utils';
 
 /** Saídas do card de plano (WORKBENCH §5.4). */
-export type PlanAction = 'approve_run' | 'approve_review' | 'keep_planning';
-
-/** Teto do plano no backend (`submit_plan`): 20 000 caracteres. */
-export const MAX_PLAN_CHARS = 20_000;
+export type PlanAction = 'approve_run' | 'approve_review' | 'approve_goal' | 'keep_planning';
 
 /** A partir deste tamanho o conteúdo é recolhido/rolável (WORKBENCH §5.2). */
 const LONG_PLAN_CHARS = 1_200;
@@ -18,10 +15,10 @@ export interface PlanCardProps {
   /** Nunca `undefined`: payload inválido degrada para uma linha curta. */
   plan: PlanView | null;
   /**
-   * Callback do gate interativo. `planMarkdown` é o texto revisado no editor
-   * auxiliar (quando o usuário editou o plano antes de aprovar).
+   * Callback do gate interativo. `feedback` acompanha apenas
+   * `keep_planning`; aprovações não carregam mais markdown editado.
    */
-  onAction?: (action: PlanAction, feedback?: string, planMarkdown?: string) => void;
+  onAction?: (action: PlanAction, feedback?: string) => void;
   /** Somente leitura (timeline/histórico e popover): nunca mostra ações mortas. */
   readOnly?: boolean;
   /**
@@ -31,6 +28,11 @@ export interface PlanCardProps {
   onViewPlan?: (plan: PlanView) => void;
   /** Enquanto o host envia a decisão: desabilita as ações e marca `aria-busy`. */
   busy?: boolean;
+  /**
+   * Pré-condição que impede "Executar como Objetivo" (objetivo ativo/pausado/
+   * bloqueado). O botão fica desabilitado e o motivo é anunciado pelo card.
+   */
+  goalBlockedReason?: string | null;
   className?: string;
 }
 
@@ -38,12 +40,12 @@ export interface PlanCardProps {
  * Card do modo Plano: Markdown do plano + gate de aprovação (WORKBENCH §5.4).
  *
  * - Interativo (gate ao vivo): `role="alertdialog"`, foco no botão primário,
- *   `Esc` fecha o feedback/editor ou devolve o plano (`keep_planning`),
+ *   `Esc` fecha o feedback ou devolve o plano (`keep_planning`),
  *   `aria-busy`/`disabled` durante o envio e anúncio `aria-live` curto.
  * - `readOnly` (timeline/popover): mesmas informações, **sem** botões — um
  *   card histórico não pode prometer ações que não existem.
- * - Plano editável antes de aprovar: textarea auxiliar (≤ 20 000), validação
- *   de não-vazio e `Ctrl+Enter` aprova com o markdown revisado.
+ * - "Executar como Objetivo" aprova/persiste o plano via o mesmo gate e cria
+ *   um Goal no backend; a primeira rodada roda ao fim do turno.
  */
 export function PlanCard({
   plan,
@@ -51,18 +53,16 @@ export function PlanCard({
   readOnly = false,
   onViewPlan,
   busy = false,
+  goalBlockedReason = null,
   className,
 }: PlanCardProps) {
   const titleId = useId();
   const contentId = useId();
   const feedbackId = useId();
-  const editorId = useId();
-  const editorErrorId = useId();
+  const goalBlockedId = useId();
   const primaryRef = useRef<HTMLButtonElement>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [draft, setDraft] = useState('');
   // Recolhido por padrão no histórico quando o plano é longo.
   const [expanded, setExpanded] = useState(false);
 
@@ -74,8 +74,7 @@ export function PlanCard({
   const planning = state === 'planning';
   const interactive = reviewing && !readOnly;
   const long = markdown.length > LONG_PLAN_CHARS;
-  const draftValid = draft.trim().length > 0;
-  const edited = editorOpen && draftValid && draft !== markdown;
+  const goalBlocked = Boolean(goalBlockedReason);
 
   // Foco inicial no primário (WORKBENCH §10). Roda ao montar o gate; não
   // rouba o foco de novo quando `busy` alterna.
@@ -94,28 +93,16 @@ export function PlanCard({
 
   if (state === 'inactive' && !markdown && !persistedFeedback) return null;
 
-  const act = (action: PlanAction, planMarkdown?: string) => {
+  const act = (action: PlanAction, feedbackValue?: string) => {
     if (!onAction || busy) return;
-    // Preserva a assinatura curta quando não há markdown revisado (contrato
-    // do card é `(action, feedback?, planMarkdown?)`).
-    if (planMarkdown === undefined) onAction(action);
-    else onAction(action, undefined, planMarkdown);
+    // Preserva a assinatura curta do card quando não há feedback.
+    if (feedbackValue === undefined) onAction(action);
+    else onAction(action, feedbackValue);
   };
 
-  const approve = (action: 'approve_run' | 'approve_review') => {
+  const approve = (action: 'approve_run' | 'approve_review' | 'approve_goal') => {
     if (busy) return;
-    if (editorOpen && !draftValid) return;
-    act(action, edited ? draft : undefined);
-  };
-
-  const openEditor = () => {
-    setDraft(markdown);
-    setEditorOpen(true);
-  };
-
-  const closeEditor = () => {
-    setEditorOpen(false);
-    setDraft('');
+    act(action);
   };
 
   const submitFeedback = () => {
@@ -123,7 +110,7 @@ export function PlanCard({
     const value = feedback.trim();
     setFeedbackOpen(false);
     setFeedback('');
-    onAction?.('keep_planning', value ? value : undefined);
+    act('keep_planning', value ? value : undefined);
   };
 
   const handleFeedbackKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -133,29 +120,18 @@ export function PlanCard({
     }
   };
 
-  const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      if (draftValid) approve('approve_run');
-    }
-  };
-
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (!interactive || event.key !== 'Escape' || busy) return;
-    // Esc nunca aprova/nega por acidente: fecha editor/feedback ou devolve o
-    // plano para o agente continuar planejando.
+    // Esc nunca aprova/nega por acidente: fecha o feedback ou devolve o plano
+    // para o agente continuar planejando.
     event.preventDefault();
     event.stopPropagation();
-    if (editorOpen) {
-      closeEditor();
-      return;
-    }
     if (feedbackOpen) {
       setFeedbackOpen(false);
       setFeedback('');
       return;
     }
-    onAction?.('keep_planning');
+    act('keep_planning');
   };
 
   const announcement = busy
@@ -304,7 +280,7 @@ export function PlanCard({
               ref={primaryRef}
               size="sm"
               variant="primary"
-              disabled={busy || (editorOpen && !draftValid)}
+              disabled={busy}
               onClick={() => approve('approve_run')}
             >
               Aprovar e executar
@@ -312,7 +288,7 @@ export function PlanCard({
             <Button
               size="sm"
               variant="secondary"
-              disabled={busy || (editorOpen && !draftValid)}
+              disabled={busy}
               onClick={() => approve('approve_review')}
             >
               Aprovar e revisar cada edição
@@ -330,15 +306,21 @@ export function PlanCard({
             <Button
               size="sm"
               variant="ghost"
-              aria-expanded={editorOpen}
-              aria-controls={editorId}
-              disabled={busy}
-              leftIcon={<PencilLine aria-hidden className="size-3.5" />}
-              onClick={() => (editorOpen ? closeEditor() : openEditor())}
+              disabled={busy || goalBlocked}
+              aria-describedby={goalBlocked ? goalBlockedId : undefined}
+              title="Aprova o plano e inicia uma execução autônoma em rodadas"
+              leftIcon={<Target aria-hidden className="size-3.5" />}
+              onClick={() => approve('approve_goal')}
             >
-              Editar plano antes de aprovar
+              Executar como Objetivo
             </Button>
           </div>
+
+          {goalBlocked ? (
+            <p id={goalBlockedId} className="text-[11px] leading-relaxed text-foreground-muted">
+              {goalBlockedReason}
+            </p>
+          ) : null}
 
           {feedbackOpen ? (
             <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-2">
@@ -361,51 +343,6 @@ export function PlanCard({
                 <Button size="sm" variant="secondary" disabled={busy} onClick={submitFeedback}>
                   Enviar feedback
                 </Button>
-              </div>
-            </div>
-          ) : null}
-
-          {editorOpen ? (
-            <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-2">
-              <label htmlFor={editorId} className="text-[11px] font-medium text-foreground-muted">
-                Plano revisado (será o plano aprovado e persistido)
-              </label>
-              <Textarea
-                id={editorId}
-                rows={8}
-                maxLength={MAX_PLAN_CHARS}
-                value={draft}
-                autoFocus
-                aria-invalid={draftValid ? undefined : true}
-                aria-describedby={editorErrorId}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={handleEditorKeyDown}
-              />
-              <div className="flex items-center justify-between gap-2">
-                <p
-                  id={editorErrorId}
-                  className={cn(
-                    'text-[11px]',
-                    draftValid ? 'text-foreground-muted' : 'text-danger',
-                  )}
-                >
-                  {draftValid
-                    ? `${draft.length} / ${MAX_PLAN_CHARS.toLocaleString('pt-BR')} caracteres · Ctrl+Enter aprova`
-                    : 'O plano não pode ficar vazio.'}
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="ghost" onClick={closeEditor}>
-                    Cancelar
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={busy || !draftValid}
-                    onClick={() => approve('approve_run')}
-                  >
-                    Aprovar com este plano
-                  </Button>
-                </div>
               </div>
             </div>
           ) : null}

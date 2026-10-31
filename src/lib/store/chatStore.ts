@@ -458,6 +458,10 @@ export const useChatStore = create<ChatState>()((set, get) => {
     let flushHandle: ReturnType<typeof setTimeout> | null = null;
     let finished = false;
     let started = false;
+    /** Primeiro texto depois de um novo passo ganha um parágrafo. */
+    let pendingTextBreak = false;
+    /** Fecho terminal: `cancelled`/`error` não têm `done.result`. */
+    let terminal: 'cancelled' | 'error' | null = null;
 
     const flush = () => {
       if (flushHandle) {
@@ -482,6 +486,27 @@ export const useChatStore = create<ChatState>()((set, get) => {
           content: message.content + delta,
         }));
       }
+    };
+
+    /**
+     * Cancelado/erro: reconcilia o resultado autoritativo sem apagar a
+     * narração já visível. O backend persiste só o texto do último passo nesse
+     * caminho; se o usuário já vê os parágrafos anteriores, eles ficam.
+     */
+    const reconcileTerminalResult = (result: TurnResult) => {
+      const final = result.assistantMessage;
+      if (!final) return;
+      patchMessage(context.conversationId, context.assistantId, (message) => {
+        const visible = message.content ?? '';
+        const hasVisibleText = visible.trim().length > 0;
+        return {
+          ...message,
+          content: hasVisibleText ? visible : (final.content ?? ''),
+          usage: final.usage ?? message.usage,
+          toolCalls: final.toolCalls.length ? final.toolCalls : message.toolCalls,
+          citations: final.citations.length ? final.citations : message.citations,
+        };
+      });
     };
 
     const schedule = () => {
@@ -518,8 +543,10 @@ export const useChatStore = create<ChatState>()((set, get) => {
         }
         case 'step_started':
           // A new agent loop step begins: the streamed reasoning that follows
-          // belongs to its own timeline entry.
+          // belongs to its own timeline entry. The text of this step starts a
+          // new paragraph once it arrives (not on an empty step).
           flush();
+          pendingTextBreak = true;
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
             trace: [...(message.trace ?? []), { toolCalls: 0 }],
@@ -537,6 +564,16 @@ export const useChatStore = create<ChatState>()((set, get) => {
           flush();
           break;
         case 'text_delta':
+          if (!event.delta) break;
+          if (pendingTextBreak) {
+            pendingTextBreak = false;
+            const current = get().messagesByConversation[context.conversationId]?.find(
+              (message) => message.id === context.assistantId,
+            );
+            if (current?.content && !current.content.endsWith('\n')) {
+              textBuffer += '\n\n';
+            }
+          }
           textBuffer += event.delta;
           set((state) => (state.streaming ? { streaming: { ...state.streaming, phase: 'text' } } : {}));
           schedule();
@@ -641,6 +678,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         case 'cancelled':
           flush();
           finished = true;
+          terminal = 'cancelled';
           void syncCacheStats(context.conversationId);
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
@@ -653,6 +691,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         case 'error':
           flush();
           finished = true;
+          terminal = 'error';
           void syncCacheStats(context.conversationId);
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
@@ -705,6 +744,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (!finished) {
         finished = true;
         applyResult(result);
+      } else if (terminal) {
+        reconcileTerminalResult(result);
       }
     } catch (error) {
       flush();

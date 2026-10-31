@@ -21,8 +21,8 @@ pub struct ApprovalOutcome {
     pub decision: ApprovalDecision,
     pub scope: Option<ApprovalScope>,
     pub feedback: Option<String>,
-    /// Escolha do gate do plano: `approve_run` | `approve_review` (None nas
-    /// demais aprovações).
+    /// Escolha do gate do plano: `approve_run` | `approve_review` |
+    /// `approve_goal` (None nas demais aprovações).
     pub choice: Option<String>,
     /// Markdown revisado pelo usuário antes de aprovar o plano.
     pub plan_markdown: Option<String>,
@@ -40,7 +40,7 @@ impl ApprovalOutcome {
     }
 
     /// Aprovação do gate de plano, carregando a escolha (`approve_run` /
-    /// `approve_review`) e o eventual markdown revisado.
+    /// `approve_review` / `approve_goal`) e o eventual markdown revisado.
     pub fn approved_plan(choice: Option<String>, plan_markdown: Option<String>) -> Self {
         Self {
             decision: ApprovalDecision::Approved,
@@ -88,6 +88,13 @@ impl ApprovalOutcome {
     /// `true` quando o usuário escolheu "Aprovar e revisar cada edição".
     pub fn review_each_edit(&self) -> bool {
         self.choice.as_deref() == Some("approve_review")
+    }
+
+    /// `true` quando o usuário escolheu "Executar como Objetivo": aprova o
+    /// plano, preserva o modo de permissão e deixa a primeira rodada do Goal
+    /// executá-lo.
+    pub fn execute_as_goal(&self) -> bool {
+        self.choice.as_deref() == Some("approve_goal")
     }
 }
 

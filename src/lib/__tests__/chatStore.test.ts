@@ -282,6 +282,187 @@ describe('chatStore.send', () => {
     });
   });
 
+  const streamedAssistant = () =>
+    useChatStore.getState().messagesByConversation['conv-1'][1];
+
+  it('separa a narração de passos consecutivos no streaming', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent({ type: 'step_started', step: 1 });
+        onEvent({ type: 'text_delta', delta: 'Primeiro.' });
+        onEvent({ type: 'step_started', step: 2 });
+        onEvent({ type: 'text_delta', delta: 'Segundo.' });
+        await gate;
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage({ content: 'Final.' }),
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 2 }),
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    await useChatStore.getState().send('Oi');
+    await vi.waitFor(() => expect(streamedAssistant().content).toBe('Primeiro.\n\nSegundo.'));
+    expect(streamedAssistant().content.startsWith('\n')).toBe(false);
+
+    release();
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+    // O texto persistido continua sendo o resultado autoritativo do turno.
+    expect(streamedAssistant().content).toBe('Final.');
+  });
+
+  it('não insere separador no primeiro passo', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent({ type: 'step_started', step: 1 });
+        onEvent({ type: 'text_delta', delta: 'Primeiro.' });
+        await gate;
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage({ content: 'Primeiro.' }),
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 2 }),
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    await useChatStore.getState().send('Oi');
+    await vi.waitFor(() => expect(streamedAssistant().content).toBe('Primeiro.'));
+    expect(streamedAssistant().content.startsWith('\n')).toBe(false);
+    release();
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+  });
+
+  it('passo sem texto não deixa separador sobrando', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent({ type: 'step_started', step: 1 });
+        onEvent({ type: 'text_delta', delta: 'Primeiro.' });
+        // Passo intermediário sem narração: a fronteira fica pendente e o
+        // próximo texto recebe exatamente um separador. Delta vazio não
+        // consome a fronteira.
+        onEvent({ type: 'step_started', step: 2 });
+        onEvent({ type: 'text_delta', delta: '' });
+        onEvent({ type: 'step_started', step: 3 });
+        onEvent({ type: 'text_delta', delta: 'Segundo.' });
+        await gate;
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage({ content: 'Primeiro.\n\nSegundo.' }),
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 2 }),
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    await useChatStore.getState().send('Oi');
+    await vi.waitFor(() => expect(streamedAssistant().content).toBe('Primeiro.\n\nSegundo.'));
+    expect(streamedAssistant().content.match(/\n\n/g)).toHaveLength(1);
+    release();
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+  });
+
+  it('cancelado preserva a narração separada e o status', async () => {
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent({ type: 'step_started', step: 1 });
+        onEvent({ type: 'text_delta', delta: 'Primeiro.' });
+        onEvent({ type: 'step_started', step: 2 });
+        onEvent({ type: 'text_delta', delta: 'Segundo.' });
+        onEvent({ type: 'cancelled' });
+        return {
+          userMessage: userMessage(),
+          // O backend guarda só o último passo em cancelamento; a tela não
+          // pode perder a narração anterior já visível.
+          assistantMessage: assistantMessage({ content: 'Segundo.', status: 'cancelled' }),
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 2 }),
+        };
+      },
+    );
+
+    await useChatStore.getState().send('Oi');
+    await vi.waitFor(() => expect(streamedAssistant().status).toBe('cancelled'));
+    expect(streamedAssistant().content).toBe('Primeiro.\n\nSegundo.');
+  });
+
+  it('erro preserva a narração separada e o status coerente', async () => {
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent({ type: 'step_started', step: 1 });
+        onEvent({ type: 'text_delta', delta: 'Primeiro.' });
+        onEvent({ type: 'step_started', step: 2 });
+        onEvent({ type: 'text_delta', delta: 'Segundo.' });
+        onEvent({ type: 'error', message: 'gateway falhou', code: 'PROVIDER_ERROR' });
+        return {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage({ content: 'Segundo.' }),
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 2 }),
+        };
+      },
+    );
+
+    await useChatStore.getState().send('Oi');
+    await vi.waitFor(() => expect(streamedAssistant().status).toBe('complete'));
+    expect(streamedAssistant().content).toBe('Primeiro.\n\nSegundo.');
+    expect(useChatStore.getState().error).toContain('gateway falhou');
+  });
+
   it('records an error and keeps partial content when the turn rejects', async () => {
     mocks.api.runTurn.mockImplementation(
       async (_payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {

@@ -13,7 +13,7 @@ export type {
   ApprovalResolution,
 } from './ApprovalCard';
 
-export { PlanCard, MAX_PLAN_CHARS } from './PlanCard';
+export { PlanCard } from './PlanCard';
 export type { PlanAction, PlanCardProps } from './PlanCard';
 export {
   PresentationBoundary,

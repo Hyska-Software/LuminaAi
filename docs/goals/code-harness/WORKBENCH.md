@@ -215,12 +215,15 @@ Implementação: `AgentSteps` + `ToolCallRow` (chat) + `describeCodeTool` (`src/
 
 - Card com Markdown renderizado do plano + metadados (arquivos que serão tocados, passos,
   verificação). O gate é acessível (`role="alertdialog"`, foco no botão primário, `Esc`, `aria-busy`
-  enquanto envia) e possui três saídas:
+  enquanto envia) e possui quatro saídas:
   **Aprovar e executar** (sai do Plano → **Editar**; o turno segue **no mesmo turno**) /
   **Aprovar e revisar cada edição** (sai do Plano → **Revisar**: cada escrita pede aprovação) /
-  **Continuar planejando** (feedback livre persistido; o agente revisa e reenvia).
-- **Editar plano antes de aprovar**: textarea auxiliar (markdown, limite do backend); o texto
-  editado é o plano aprovado/persistido.
+  **Continuar planejando** (feedback livre persistido; o agente revisa e reenvia) /
+  **Executar como Objetivo** (`approve_goal`: aprova/persiste o plano, preserva o modo de permissão,
+  cria um Goal com continuidade automática e deixa a primeira rodada começar no `done` do turno).
+- O plano aprovado entra integralmente no contexto da rodada do Goal (até 20 000 caracteres). O
+  CTA de objetivo fica desabilitado, com motivo visível, quando a sessão já tem objetivo
+  ativo/pausado/bloqueado; sem workspace o backend recusa a criação.
 - O draft é persistido na submissão (`plan/submitted`) e o feedback em `plan/feedback`, então
   reabrir a sessão mostra o estado correto (planejando/aguardando revisão/aprovado).
 - Depois de aprovado, o plano permanece acessível no popover do chip "Plano" (estado, markdown e

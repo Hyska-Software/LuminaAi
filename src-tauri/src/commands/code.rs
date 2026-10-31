@@ -341,7 +341,7 @@ struct ApprovalAnswer {
     decision: ApprovalDecision,
     scope: Option<ApprovalScope>,
     feedback: Option<String>,
-    /// Escolha do gate de plano: `approve_run` | `approve_review`.
+    /// Escolha do gate de plano: `approve_run` | `approve_review` | `approve_goal`.
     choice: Option<String>,
     /// Markdown revisado pelo usuário antes de aprovar o plano (D3).
     plan_markdown: Option<String>,
@@ -505,7 +505,7 @@ fn state_create_rule(
 fn validate_plan_choice(choice: Option<&str>, plan_markdown: Option<&str>) -> Result<(), String> {
     if let Some(choice) = choice {
         match choice {
-            "approve_run" | "approve_review" => {}
+            "approve_run" | "approve_review" | "approve_goal" => {}
             other => {
                 return Err(format!(
                     "APPROVAL_INVALID: escolha de plano desconhecida: `{other}`"
@@ -1492,6 +1492,7 @@ mod tests {
         assert!(validate_plan_choice(None, None).is_ok());
         assert!(validate_plan_choice(Some("approve_run"), None).is_ok());
         assert!(validate_plan_choice(Some("approve_review"), Some("# Plano")).is_ok());
+        assert!(validate_plan_choice(Some("approve_goal"), Some("# Plano")).is_ok());
         assert!(validate_plan_choice(Some("keep_planning"), None).is_err());
         assert!(validate_plan_choice(Some("qualquer"), None).is_err());
         assert!(validate_plan_choice(None, Some("   ")).is_err());
@@ -1654,6 +1655,35 @@ mod tests {
         assert!(outcome.is_approved());
         assert!(outcome.review_each_edit());
         assert_eq!(outcome.plan_markdown.as_deref(), Some("# Plano revisado"));
+        assert!(
+            db.list_approval_rules().expect("regras").is_empty(),
+            "aprovação de plano não cria regra"
+        );
+    }
+
+    #[test]
+    fn goal_plan_choice_reaches_the_approval_outcome_without_a_rule() {
+        let (db, conversation_id) = db_with_conversation();
+        let registry = ApprovalRegistry::new();
+        let mut request = approval_request(&conversation_id, "submit_plan");
+        request.id = "apr-goal".to_string();
+        let mut rx = registry.register_request(request);
+        let resolved = apply_approval_decision(
+            &db,
+            &registry,
+            "apr-goal",
+            ApprovalAnswer {
+                decision: ApprovalDecision::Approved,
+                choice: Some("approve_goal".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("aprovar plano como objetivo");
+        assert!(resolved);
+        let outcome: ApprovalOutcome = rx.try_recv().expect("outcome");
+        assert!(outcome.is_approved());
+        assert!(outcome.execute_as_goal());
+        assert!(!outcome.review_each_edit());
         assert!(
             db.list_approval_rules().expect("regras").is_empty(),
             "aprovação de plano não cria regra"

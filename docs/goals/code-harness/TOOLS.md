@@ -304,19 +304,21 @@ M  src/app.ts           (staged)
 ```
 
 - Só válido em **modo Plano**; publica o plano para revisão na UI (persistido em
-  `plan/submitted` **antes** da decisão) e bloqueia o turno até a decisão. Três saídas:
+  `plan/submitted` **antes** da decisão) e bloqueia o turno até a decisão. Quatro saídas:
   **Aprovar e executar** (`approve_run` → modo Editar), **Aprovar e revisar cada edição**
-  (`approve_review` → modo Revisar, cada escrita pede aprovação) e **Continuar planejando**
-  (nega + feedback persistido em `plan/feedback`, o agente revisa e reenvia). O plano é
-  **editável antes de valer**: `respond_approval.planMarkdown` substitui o markdown aprovado.
-  Sem canal de revisão (headless/teste) → falha fechada com dica `/plan off`.
+  (`approve_review` → modo Revisar, cada escrita pede aprovação), **Continuar planejando**
+  (nega + feedback persistido em `plan/feedback`, o agente revisa e reenvia) e
+  **Executar como Objetivo** (`approve_goal` → aprova/persiste o plano, preserva o modo de
+  permissão atual, cria um Goal e deixa a primeira rodada começar no `done`). O gate não edita
+  mais o plano; `respond_approval.planMarkdown` continua aceito por compatibilidade e substitui o
+  markdown aprovado. Sem canal de revisão (headless/teste) → falha fechada com dica `/plan off`.
 - **Regras de prompt**: plano começa com heading, inclui arquivos a tocar, passos, riscos e como
   verificar; sem código completo (é plano, não implementação).
 - **Política**: `Ask` (revisão humana obrigatória, **sem** "sempre permitir"); o timeout da tool é
   o do broker de aprovação (10 min default), não o timeout curto do runtime. **Testes**: fora do
   modo → erro; aprovação → transição + mensagem + mutação liberada no mesmo turno; revisar cada
-  edição → `ASK` na escrita seguinte; feedback → mensagem/persistência; plano editado; timeout/
-  cancelamento.
+  edição → `ASK` na escrita seguinte; feedback → mensagem/persistência; executar como objetivo →
+  plano aprovado + Goal criado sem trocar o modo; timeout/cancelamento.
 
 #### `ask_user`
 

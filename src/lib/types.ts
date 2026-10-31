@@ -315,7 +315,7 @@ export interface TodoItem {
 export type PlanState = 'inactive' | 'planning' | 'reviewing' | 'approved';
 
 /** Ação escolhida no gate de aprovação do plano (`respond_approval.choice`). */
-export type PlanApprovalChoice = 'approve_run' | 'approve_review';
+export type PlanApprovalChoice = 'approve_run' | 'approve_review' | 'approve_goal';
 
 export interface PlanView {
   state: PlanState;

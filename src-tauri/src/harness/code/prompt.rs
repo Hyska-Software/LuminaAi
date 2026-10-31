@@ -69,6 +69,10 @@ pub const MAX_AGENTS_MD_CHARS: usize = 32_768;
 pub const MAX_TREE_CHARS: usize = 4_000;
 /// Limite de cada descrição de tool no prompt.
 pub const MAX_TOOL_GUIDANCE_CHARS: usize = 900;
+/// Limite do plano aprovado no contexto volátil: o mesmo teto aceito por
+/// `submit_plan`/`PlanCard` (20 000), para não perder fases do plano na rodada
+/// do Goal.
+pub const MAX_PLAN_PROMPT_CHARS: usize = 20_000;
 
 fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
@@ -228,7 +232,7 @@ fn planning_section(ctx: &CodeContext, has_todo_write: bool) -> String {
         }
         if let Some(markdown) = &plan.markdown {
             out.push_str("\n```markdown\n");
-            out.push_str(&truncate(markdown, 8_000));
+            out.push_str(&truncate(markdown, MAX_PLAN_PROMPT_CHARS));
             out.push_str("\n```\n");
         }
     }
@@ -700,6 +704,31 @@ mod tests {
             "{runtime}"
         );
         assert!(runtime.contains("send `[]` to clear"), "{runtime}");
+    }
+
+    #[test]
+    fn runtime_context_keeps_the_full_approved_plan_up_to_the_20k_cap() {
+        let mut context = ctx();
+        let markdown = format!(
+            "# Plano aprovado\n\n{}",
+            "Fase com passos, arquivos e critérios de verificação.\n".repeat(250)
+        );
+        let size = markdown.chars().count();
+        assert!(size > 8_000 && size < MAX_PLAN_PROMPT_CHARS, "plano de teste: {size}");
+        context.plan = Some(PlanView {
+            state: PlanState::Approved,
+            markdown: Some(markdown.clone()),
+            feedback: None,
+            updated_at: 2,
+        });
+
+        let runtime = build_runtime_context(&context, true);
+        assert!(runtime.contains("Session plan: approved"), "{runtime}");
+        assert!(
+            runtime.contains(&markdown),
+            "o plano de {size} caracteres não pode ser truncado antes de 20k"
+        );
+        assert!(!runtime.contains("…[truncated]"), "{runtime}");
     }
 
     #[test]

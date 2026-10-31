@@ -24,9 +24,18 @@ import { useCacheStore } from '@/lib/store/cacheStore';
 import type {
   ApprovalDecision,
   ApprovalRequest,
+  GoalView,
   PlanApprovalChoice,
   PlanView,
 } from '@/lib/types';
+
+/** Motivo que impede criar um novo Goal sem sobrescrever o atual. */
+function goalExecutionBlocker(goal: GoalView | null | undefined): string | null {
+  if (!goal || goal.status === 'completed') return null;
+  const status =
+    goal.status === 'active' ? 'ativo' : goal.status === 'paused' ? 'pausado' : 'bloqueado';
+  return `Esta sessão já tem um objetivo ${status}. Conclua ou encerre o objetivo atual antes de executar o plano como objetivo.`;
+}
 
 /**
  * Aprovações, plano e perguntas da sessão de código ativa.
@@ -49,6 +58,7 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
   const planApprovals = session.approvals.filter((approval) => approval.tool === 'submit_plan');
   const otherApprovals = session.approvals.filter((approval) => approval.tool !== 'submit_plan');
   const goal = session.goal;
+  const goalBlocker = goalExecutionBlocker(goal);
   /* Card de atenção do objetivo (PLAN §10.5): só para estados que exigem decisão
      humana e enquanto esta revisão não foi dispensada pelo usuário. */
   const showGoalAttention = Boolean(
@@ -78,7 +88,6 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
     decision: ApprovalDecision,
     options?: ApprovalDecisionOptions & {
       choice?: PlanApprovalChoice | null;
-      planMarkdown?: string | null;
     },
   ) => {
     // Duplo clique / dois listeners no mesmo gate: só a primeira decisão vale.
@@ -92,7 +101,6 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
         scope: options?.scope ?? null,
         feedback: options?.feedback ?? null,
         choice: options?.choice ?? null,
-        planMarkdown: options?.planMarkdown ?? null,
       });
     } finally {
       submittingRef.current = null;
@@ -104,7 +112,6 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
     approval: ApprovalRequest,
     action: PlanAction,
     feedback?: string,
-    planMarkdown?: string,
   ) => {
     if (action === 'keep_planning') {
       void decide(approval, 'denied', {
@@ -113,12 +120,12 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
       return;
     }
     const choice: PlanApprovalChoice =
-      action === 'approve_review' ? 'approve_review' : 'approve_run';
-    const edited = planMarkdown?.trim();
-    void decide(approval, 'approved', {
-      choice,
-      planMarkdown: edited ? edited : null,
-    });
+      action === 'approve_goal'
+        ? 'approve_goal'
+        : action === 'approve_review'
+          ? 'approve_review'
+          : 'approve_run';
+    void decide(approval, 'approved', { choice });
   };
 
   const announcement =
@@ -159,9 +166,8 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
             key={approval.id}
             plan={plan}
             busy={responding === approval.id}
-            onAction={(action, feedback, planMarkdown) =>
-              handlePlanAction(approval, action, feedback, planMarkdown)
-            }
+            goalBlockedReason={goalBlocker}
+            onAction={(action, feedback) => handlePlanAction(approval, action, feedback)}
           />
         );
       })}

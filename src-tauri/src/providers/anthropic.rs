@@ -252,6 +252,13 @@ struct Handler<'a> {
     /// the latter; the cache fields may arrive in either).
     raw_usage: Value,
     has_usage: bool,
+    /// Já houve texto emitido neste request. Usado para separar blocos de
+    /// texto distintos com um parágrafo (defensivo: o mesmo turno pode ter
+    /// mais de um bloco `text` na mesma resposta).
+    has_text: bool,
+    /// Um novo bloco de texto começou depois de outro texto; o separador entra
+    /// no primeiro delta para não sobrar quando o bloco vier vazio.
+    pending_text_break: bool,
 }
 
 impl<'a> Handler<'a> {
@@ -266,6 +273,8 @@ impl<'a> Handler<'a> {
             cached_tokens: None,
             raw_usage: json!({}),
             has_usage: false,
+            has_text: false,
+            pending_text_break: false,
         }
     }
 
@@ -296,6 +305,10 @@ impl<'a> Handler<'a> {
                             .and_then(Value::as_str)
                             .unwrap_or_default()
                             .to_string();
+                        // Blocos de texto consecutivos são parágrafos
+                        // distintos; o separador só entra no primeiro delta do
+                        // novo bloco (bloco vazio não deixa separador).
+                        self.pending_text_break = self.has_text;
                         self.blocks.insert(index, BlockState::Text(text));
                     }
                     Some("thinking") => {
@@ -362,9 +375,17 @@ impl<'a> Handler<'a> {
                             .and_then(Value::as_str)
                             .unwrap_or_default();
                         if !text.is_empty() {
+                            if self.pending_text_break {
+                                self.pending_text_break = false;
+                                emit(
+                                    self.sink,
+                                    ProviderEvent::TextDelta("\n\n".to_string()),
+                                )?;
+                            }
                             if let Some(BlockState::Text(buffer)) = self.blocks.get_mut(&index) {
                                 buffer.push_str(text);
                             }
+                            self.has_text = true;
                             emit(self.sink, ProviderEvent::TextDelta(text.to_string()))?;
                         }
                     }
@@ -684,6 +705,55 @@ mod tests {
             body.get("temperature").is_none(),
             "temperature não deve ir junto de thinking: {body}"
         );
+    }
+
+    /// Dois blocos de texto na mesma resposta são parágrafos distintos: o
+    /// primeiro não ganha separador e o segundo ganha exatamente um `\n\n`.
+    #[tokio::test]
+    async fn handler_separates_distinct_text_blocks() {
+        let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
+        {
+            let mut handler = Handler::new(&sink, "anthropic".to_string());
+            handler
+                .on_event(
+                    Some("content_block_start"),
+                    r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+                )
+                .expect("bloco 1");
+            handler
+                .on_event(
+                    Some("content_block_delta"),
+                    r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Primeiro."}}"#,
+                )
+                .expect("texto 1");
+            handler
+                .on_event(
+                    Some("content_block_stop"),
+                    r#"{"type":"content_block_stop","index":0}"#,
+                )
+                .expect("fim 1");
+            handler
+                .on_event(
+                    Some("content_block_start"),
+                    r#"{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}"#,
+                )
+                .expect("bloco 2");
+            handler
+                .on_event(
+                    Some("content_block_delta"),
+                    r#"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Segundo."}}"#,
+                )
+                .expect("texto 2");
+            handler.finish().expect("finish");
+        }
+
+        let mut deltas = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let ProviderEvent::TextDelta(delta) = event {
+                deltas.push(delta);
+            }
+        }
+        assert_eq!(deltas, vec!["Primeiro.", "\n\n", "Segundo."]);
     }
 
     /// The usage arrives split across `message_start` (cache + input) and

@@ -15,7 +15,7 @@ use crate::domain::UsageInfo;
 
 use super::sse;
 use super::{
-    cache, emit, image_data_url, make_usage, max_output_tokens, pointer_u32, reasoning,
+    as_u32, cache, emit, image_data_url, make_usage, max_output_tokens, pointer_u32, reasoning,
     system_text, to_provider_error, valid_json_arguments, CompletionRequest, EventSink,
     HistoryMessage, HistoryRole, ProviderError, ProviderEvent, ProviderResult, ReasoningRequest,
     WireProtocol,
@@ -263,6 +263,11 @@ struct Handler<'a> {
     /// `usage.opencode.tokens` fallback).
     provider_id: String,
     text: String,
+    /// Texto já emitido por item de mensagem. Evita duplicar no
+    /// `output_item.done` o que veio pelos deltas.
+    text_items: HashMap<String, String>,
+    /// Item de mensagem atual; uma troca de item vira um parágrafo novo.
+    current_text_item: Option<String>,
     usage: Option<UsageInfo>,
     /// Verbatim `response.usage` block (safe excerpt is emitted as `UsageRaw`).
     raw_usage: Option<Value>,
@@ -277,6 +282,8 @@ impl<'a> Handler<'a> {
             sink,
             provider_id,
             text: String::new(),
+            text_items: HashMap::new(),
+            current_text_item: None,
             usage: None,
             raw_usage: None,
             output: None,
@@ -298,8 +305,8 @@ impl<'a> Handler<'a> {
             "response.output_text.delta" | "response.refusal.delta" => {
                 if let Some(delta) = value.get("delta").and_then(Value::as_str) {
                     if !delta.is_empty() {
-                        self.text.push_str(delta);
-                        emit(self.sink, ProviderEvent::TextDelta(delta.to_string()))?;
+                        let key = text_item_key(&value);
+                        self.append_text(&key, delta)?;
                     }
                 }
             }
@@ -460,24 +467,38 @@ impl<'a> Handler<'a> {
             }
             Some("message") => {
                 // Some gateways skip the incremental deltas; recover the text
-                // from the finished output item when nothing was streamed.
-                if self.text.is_empty() {
-                    if let Some(content) = item.get("content").and_then(Value::as_array) {
-                        for part in content {
-                            if part.get("type").and_then(Value::as_str) == Some("output_text") {
-                                if let Some(text) = part.get("text").and_then(Value::as_str) {
-                                    if !text.is_empty() {
-                                        self.text.push_str(text);
-                                        emit(
-                                            self.sink,
-                                            ProviderEvent::TextDelta(text.to_string()),
-                                        )?;
-                                    }
-                                }
+                // from the finished output item. If this item already streamed,
+                // only a missing suffix is appended (never the prefix twice). A
+                // different item starts a new paragraph, never glued to the
+                // previous one.
+                let key = text_item_key(value);
+                let mut recovered = String::new();
+                if let Some(content) = item.get("content").and_then(Value::as_array) {
+                    for part in content {
+                        if part.get("type").and_then(Value::as_str) == Some("output_text") {
+                            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                                recovered.push_str(text);
                             }
                         }
                     }
                 }
+                if recovered.is_empty() {
+                    return Ok(());
+                }
+                if let Some(streamed) = self.text_items.get(&key).cloned() {
+                    if recovered.starts_with(&streamed) {
+                        let suffix = &recovered[streamed.len()..];
+                        if !suffix.is_empty() {
+                            self.text.push_str(suffix);
+                            if let Some(buffer) = self.text_items.get_mut(&key) {
+                                buffer.push_str(suffix);
+                            }
+                            emit(self.sink, ProviderEvent::TextDelta(suffix.to_string()))?;
+                        }
+                    }
+                    return Ok(());
+                }
+                self.append_text(&key, &recovered)?;
                 Ok(())
             }
             _ => Ok(()),
@@ -501,6 +522,27 @@ impl<'a> Handler<'a> {
             return Err(anyhow::Error::new(ProviderError::from_stream_error(error)));
         }
         Ok(())
+    }
+
+    /// Anexa texto ao item de mensagem `key`. Um item diferente do anterior
+    /// começa um novo parágrafo; item vazio não deixa separador.
+    fn append_text(&mut self, key: &str, text: &str) -> anyhow::Result<()> {
+        if text.is_empty() {
+            return Ok(());
+        }
+        if self.current_text_item.as_deref() != Some(key) {
+            if !self.text.is_empty() {
+                self.text.push_str("\n\n");
+                emit(self.sink, ProviderEvent::TextDelta("\n\n".to_string()))?;
+            }
+            self.current_text_item = Some(key.to_string());
+        }
+        self.text.push_str(text);
+        self.text_items
+            .entry(key.to_string())
+            .or_default()
+            .push_str(text);
+        emit(self.sink, ProviderEvent::TextDelta(text.to_string()))
     }
 
     fn ensure_tool(&mut self, item_id: &str) -> anyhow::Result<usize> {
@@ -581,6 +623,25 @@ impl<'a> Handler<'a> {
         }
         Value::Array(output)
     }
+}
+
+/// Chave estável do item de texto: `item.id` no `output_item.done`, `item_id`
+/// nos deltas e `output_index` como fallback quando o gateway omite o id.
+fn text_item_key(value: &Value) -> String {
+    value
+        .get("item")
+        .and_then(|item| item.get("id"))
+        .or_else(|| value.get("item_id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            value
+                .get("output_index")
+                .and_then(as_u32)
+                .map(|index| format!("output:{index}"))
+        })
+        .unwrap_or_else(|| "default".to_string())
 }
 
 fn parse_usage(usage: &Value, provider_id: &str) -> UsageInfo {
@@ -879,6 +940,73 @@ mod tests {
         let digest_planned = cache::digest(WireProtocol::OpenaiResponses, "openai", &planned);
         assert_eq!(digest_plain.segments, digest_planned.segments);
         assert_eq!(digest_plain.total_chars, digest_planned.total_chars);
+    }
+
+    /// Itens `message` distintos na mesma resposta são parágrafos distintos.
+    #[tokio::test]
+    async fn handler_separates_distinct_message_items() {
+        let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
+        {
+            let mut handler = Handler::new(&sink, "openai".to_string());
+            handler
+                .on_event(
+                    None,
+                    r#"{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"Primeiro."}"#,
+                )
+                .expect("texto 1");
+            handler
+                .on_event(
+                    None,
+                    r#"{"type":"response.output_text.delta","item_id":"msg_2","output_index":1,"delta":"Segundo."}"#,
+                )
+                .expect("texto 2");
+            handler.finish().expect("finish");
+        }
+
+        let mut deltas = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let ProviderEvent::TextDelta(delta) = event {
+                deltas.push(delta);
+            }
+        }
+        assert_eq!(deltas, vec!["Primeiro.", "\n\n", "Segundo."]);
+    }
+
+    /// A recuperação de `output_item.done` respeita a fronteira e não duplica
+    /// o texto que já chegou por delta no mesmo item.
+    #[tokio::test]
+    async fn handler_recovers_finished_items_without_duplicating_deltas() {
+        let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
+        {
+            let mut handler = Handler::new(&sink, "openai".to_string());
+            handler
+                .on_event(
+                    None,
+                    r#"{"type":"response.output_text.delta","item_id":"msg_1","delta":"A"}"#,
+                )
+                .expect("delta");
+            handler
+                .on_event(
+                    None,
+                    r#"{"type":"response.output_item.done","item":{"id":"msg_1","type":"message","content":[{"type":"output_text","text":"AB"}]}}"#,
+                )
+                .expect("item 1 completa o sufixo sem duplicar");
+            handler
+                .on_event(
+                    None,
+                    r#"{"type":"response.output_item.done","item":{"id":"msg_2","type":"message","content":[{"type":"output_text","text":"C"}]}}"#,
+                )
+                .expect("item 2 recuperado");
+            handler.finish().expect("finish");
+        }
+
+        let mut deltas = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let ProviderEvent::TextDelta(delta) = event {
+                deltas.push(delta);
+            }
+        }
+        assert_eq!(deltas, vec!["A", "B", "\n\n", "C"]);
     }
 
     /// B2: `UsageRaw` carries the safe `response.usage` excerpt after `Usage`.

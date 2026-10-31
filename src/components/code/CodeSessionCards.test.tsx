@@ -64,13 +64,18 @@ function snapshot(overrides: Partial<CodeSessionState> = {}): CodeSessionState {
   };
 }
 
-function seed(approvals: ApprovalRequest[], todos: { content: string; status: 'pending' | 'in_progress' | 'completed' }[] = []): void {
+function seed(
+  approvals: ApprovalRequest[],
+  todos: { content: string; status: 'pending' | 'in_progress' | 'completed' }[] = [],
+  goalValue: GoalView | null = null,
+): void {
   useCodeStore.setState({
     byConversation: {
       'c-1': {
         ...emptyCodeSession('c-1'),
         approvals,
         todos,
+        goal: goalValue,
       },
     },
   });
@@ -131,24 +136,31 @@ describe('CodeSessionCards — gate do plano', () => {
     );
   });
 
-  it('aprova com o plano editado antes de aprovar (planMarkdown)', async () => {
+  it('"Executar como Objetivo" envia choice=approve_goal', async () => {
     seed([planApproval()]);
     render(<CodeSessionCards conversationId="c-1" />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Editar plano antes de aprovar/ }));
-    fireEvent.change(
-      screen.getByLabelText('Plano revisado (será o plano aprovado e persistido)'),
-      { target: { value: '## Plano revisado\n\nPasso 1' } },
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Aprovar com este plano' }));
+    fireEvent.click(screen.getByRole('button', { name: /Executar como Objetivo/ }));
 
     await waitFor(() =>
       expect(mocks.respondApproval).toHaveBeenCalledWith(
         'apr-plan',
         'approved',
-        expect.objectContaining({ planMarkdown: '## Plano revisado\n\nPasso 1' }),
+        expect.objectContaining({ choice: 'approve_goal' }),
       ),
     );
+    await waitFor(() => expect(mocks.getCodeSessionState).toHaveBeenCalledWith('c-1'));
+  });
+
+  it('não executa como objetivo quando já existe um objetivo ativo', () => {
+    seed([planApproval()], [], goal({ status: 'active' }));
+    render(<CodeSessionCards conversationId="c-1" />);
+
+    const button = screen.getByRole('button', {
+      name: /Executar como Objetivo/,
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.getByText(/já tem um objetivo ativo/)).toBeTruthy();
   });
 
   it('"Continuar planejando" nega com feedback (default quando vazio)', async () => {

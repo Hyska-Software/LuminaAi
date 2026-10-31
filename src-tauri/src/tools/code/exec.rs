@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 
 use crate::domain::{
     now_ms, ApprovalDetail, ApprovalOption, ApprovalRequest, ApprovalScope, CreateGoalInput,
-    FileChange, FileChangeKind, GoalOrigin, GoalView, RiskClass, TodoItem, TurnKind,
+    FileChange, FileChangeKind, GoalOrigin, GoalView, PermissionMode, RiskClass, TodoItem, TurnKind,
     UpdateGoalInput,
 };
 use crate::harness::code::{goal, observed::ObservationState, session};
@@ -2269,11 +2269,43 @@ fn plan_approval_options() -> Vec<ApprovalOption> {
             scope: None,
         },
         ApprovalOption {
+            id: "approve_goal".into(),
+            label: "Executar como Objetivo".into(),
+            scope: None,
+        },
+        ApprovalOption {
             id: "keep_planning".into(),
             label: "Continuar planejando".into(),
             scope: None,
         },
     ]
+}
+
+/// Título e objetivo do Goal criado pelo gate "Executar como Objetivo".
+///
+/// O plano completo já vive na sessão e entra no contexto volátil da rodada;
+/// repetir seus 20k no objetivo só gastaria contexto. O objetivo referencia o
+/// plano aprovado e a rodada o carrega integralmente.
+fn goal_input_for_approved_plan() -> CreateGoalInput {
+    CreateGoalInput {
+        title: Some("Executar plano aprovado".to_string()),
+        objective: "Executar o plano aprovado nesta sessão até concluí-lo, seguindo \
+                    integralmente as fases, a ordem e os critérios de verificação registrados \
+                    no plano."
+            .to_string(),
+        max_rounds: None,
+        auto_continue: Some(true),
+    }
+}
+
+/// Modo de permissão corrente da conversa (o gate Goal o preserva).
+fn conversation_permission_mode(ctx: &ToolCtx) -> PermissionMode {
+    ctx.db
+        .get_conversation(&ctx.conversation_id)
+        .ok()
+        .flatten()
+        .map(|conversation| conversation.permission_mode)
+        .unwrap_or(PermissionMode::Edit)
 }
 
 /// Presentation canônica do plano (`PLAN.md` D1): **flat**, com o `PlanView`
@@ -2638,7 +2670,14 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
 
     match outcome.decision {
         crate::domain::ApprovalDecision::Approved => {
-            let review_each_edit = outcome.review_each_edit();
+            let execute_as_goal = outcome.execute_as_goal();
+            // `approve_goal` preserva o modo de permissão escolhido pelo
+            // usuário; os dois caminhos antigos o definem explicitamente.
+            let preserved_mode = execute_as_goal.then(|| conversation_permission_mode(ctx));
+            let review_each_edit = match preserved_mode {
+                Some(mode) => mode == PermissionMode::Review,
+                None => outcome.review_each_edit(),
+            };
             // O markdown revisado na aprovação é o plano persistido (D3).
             let approved_markdown = outcome
                 .plan_markdown
@@ -2646,6 +2685,38 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 .map(str::trim)
                 .filter(|markdown| !markdown.is_empty())
                 .unwrap_or(markdown.as_str());
+            // O Goal é criado antes da aprovação: se a sessão já tiver um
+            // objetivo ativo/pausado/bloqueado, o plano continua em revisão e
+            // nada é sobrescrito (`goal::create` devolve GOAL_ALREADY_EXISTS).
+            let goal_created = if execute_as_goal {
+                if ctx.turn_kind != TurnKind::User {
+                    return plan_error(
+                        "GOAL_REQUIRES_USER_TURN",
+                        "um objetivo só pode ser criado a partir de um turno do usuário",
+                        Some(&reviewing),
+                    );
+                }
+                if ctx.workspace.is_none() {
+                    return plan_error(
+                        "GOAL_NO_WORKSPACE",
+                        "abra uma pasta de trabalho nesta sessão antes de executar o plano como objetivo",
+                        Some(&reviewing),
+                    );
+                }
+                match goal::create(
+                    &ctx.db,
+                    &ctx.conversation_id,
+                    &goal_input_for_approved_plan(),
+                    GoalOrigin::User,
+                ) {
+                    Ok(goal) => Some(goal),
+                    Err(error) => {
+                        return plan_error(error.code, error.message, Some(&reviewing));
+                    }
+                }
+            } else {
+                None
+            };
             if let Err(error) = session::approve_plan(
                 &ctx.db,
                 &ctx.conversation_id,
@@ -2653,6 +2724,11 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 Some(approved_markdown),
                 review_each_edit,
             ) {
+                // O objetivo foi criado, mas o plano não foi persistido:
+                // desfaz o objetivo para não deixar execução sem plano.
+                if goal_created.is_some() {
+                    let _ = goal::delete(&ctx.db, &ctx.conversation_id);
+                }
                 return plan_error(
                     "SESSION_LOG_FAILED",
                     format!("não foi possível salvar a aprovação do plano: {error}"),
@@ -2660,39 +2736,59 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 );
             }
             // `approve_review` → modo Revisar (cada escrita pede aprovação);
-            // `approve_run` → Editar (`PLAN.md` D2).
-            let mode = if review_each_edit {
-                crate::domain::PermissionMode::Review
+            // `approve_run` → Editar (`PLAN.md` D2); `approve_goal` preserva.
+            let mode = preserved_mode.unwrap_or(if review_each_edit {
+                PermissionMode::Review
             } else {
-                crate::domain::PermissionMode::Edit
-            };
-            if let Err(error) = ctx
-                .db
-                .set_conversation_permission_mode(&ctx.conversation_id, mode)
-            {
-                return plan_error(
-                    "SESSION_LOG_FAILED",
-                    format!("não foi possível atualizar o modo de permissão: {error}"),
-                    Some(&reviewing),
-                );
+                PermissionMode::Edit
+            });
+            if preserved_mode.is_none() {
+                if let Err(error) = ctx
+                    .db
+                    .set_conversation_permission_mode(&ctx.conversation_id, mode)
+                {
+                    return plan_error(
+                        "SESSION_LOG_FAILED",
+                        format!("não foi possível atualizar o modo de permissão: {error}"),
+                        Some(&reviewing),
+                    );
+                }
             }
             let approved = emit_plan_updated(ctx);
+            if let Some(goal) = goal_created {
+                ctx.emit_event(crate::events::TurnEvent::GoalUpdated { goal });
+            }
             ctx.emit_event(crate::events::TurnEvent::ProfileChanged {
                 profile: CODE_PROFILE.to_string(),
                 permission_mode: mode.as_str().to_string(),
                 plan_mode: false,
             });
-            let next_step = if review_each_edit {
-                "Modo Revisar ativo: cada escrita será aprovada uma a uma."
+            let (content, summary) = if execute_as_goal {
+                (
+                    "Plano aprovado e registrado como objetivo persistente.\n\
+                     O modo de permissão atual foi preservado. Encerre este turno agora, sem \
+                     implementar o plano nem chamar outras ferramentas; a primeira rodada do \
+                     objetivo começará automaticamente e seguirá o plano aprovado.\n"
+                        .to_string(),
+                    "Plano aprovado · objetivo criado",
+                )
             } else {
-                "Modo Editar ativo: você pode alterar os arquivos do workspace."
+                let next_step = if review_each_edit {
+                    "Modo Revisar ativo: cada escrita será aprovada uma a uma."
+                } else {
+                    "Modo Editar ativo: você pode alterar os arquivos do workspace."
+                };
+                (
+                    format!(
+                        "Plano aprovado — continue a implementação seguindo o plano.\n{next_step}\n"
+                    ),
+                    "Plano aprovado",
+                )
             };
             finish(
                 ctx,
-                format!(
-                    "Plano aprovado — continue a implementação seguindo o plano.\n{next_step}\n"
-                ),
-                Some("Plano aprovado".to_string()),
+                content,
+                Some(summary.to_string()),
                 Some(
                     approved
                         .as_ref()
@@ -3410,6 +3506,10 @@ mod tests {
             .expect("plano visível")
     }
 
+    fn current_goal(fixture: &Fixture) -> Option<GoalView> {
+        goal::current(&fixture.db, fixture.conv()).expect("projeção do objetivo")
+    }
+
     #[tokio::test]
     async fn submit_plan_requires_live_plan_mode() {
         let fixture = Fixture::new();
@@ -3509,6 +3609,100 @@ mod tests {
             approved.presentation.expect("presentation")["markdown"],
             "# Plano revisado pelo usuário"
         );
+    }
+
+    #[tokio::test]
+    async fn approve_goal_persists_the_plan_and_creates_a_goal_without_changing_permission() {
+        let fixture = Fixture::new();
+        fixture.set_plan_mode(true);
+        fixture.set_permission_mode(PermissionMode::Review);
+        let ctx = fixture.ctx();
+        let responder = tokio::spawn(answer_next_approval(
+            fixture.approvals.clone(),
+            ApprovalOutcome::approved_plan(Some("approve_goal".to_string()), None),
+        ));
+        let approved = call(
+            &ctx,
+            "submit_plan",
+            json!({ "plan": "# Plano\n\nFase 1 — auth\nFase 2 — testes" }),
+        )
+        .await;
+        responder.await.expect("responder");
+        assert!(!approved.is_error, "{}", approved.content);
+        assert!(approved.content.contains("Encerre este turno"), "{}", approved.content);
+        assert_eq!(approved.presentation.expect("presentation")["state"], "approved");
+
+        // Plano persistido e modo Plano encerrado; permissão preservada.
+        assert_eq!(plan_state(&fixture).state, crate::domain::PlanState::Approved);
+        assert!(!session::plan_mode_active(&fixture.db, fixture.conv()).expect("modo"));
+        assert_eq!(fixture.permission_mode(), PermissionMode::Review);
+
+        // Goal criado com continuidade automática e referência ao plano.
+        let goal = current_goal(&fixture).expect("objetivo criado");
+        assert_eq!(goal.status, crate::domain::GoalStatus::Active);
+        assert!(goal.auto_continue);
+        assert_eq!(goal.title, "Executar plano aprovado");
+        assert!(goal.objective.contains("plano aprovado"), "{}", goal.objective);
+
+        let events = event_types(&fixture.recorder);
+        assert!(events.contains(&"plan_updated".to_string()), "{events:?}");
+        assert!(events.contains(&"goal_updated".to_string()), "{events:?}");
+        assert!(events.contains(&"profile_changed".to_string()), "{events:?}");
+    }
+
+    #[tokio::test]
+    async fn approve_goal_does_not_overwrite_an_existing_goal() {
+        let fixture = Fixture::new();
+        fixture.set_plan_mode(true);
+        let existing = goal::create(
+            &fixture.db,
+            fixture.conv(),
+            &goal_input_for_approved_plan(),
+            GoalOrigin::User,
+        )
+        .expect("objetivo existente");
+        let ctx = fixture.ctx();
+        let responder = tokio::spawn(answer_next_approval(
+            fixture.approvals.clone(),
+            ApprovalOutcome::approved_plan(Some("approve_goal".to_string()), None),
+        ));
+        let outcome = call(
+            &ctx,
+            "submit_plan",
+            json!({ "plan": "# Plano\n\nFase 1 — auth" }),
+        )
+        .await;
+        responder.await.expect("responder");
+
+        assert_eq!(error_code(&outcome), "GOAL_ALREADY_EXISTS");
+        // O plano continua em revisão e o objetivo anterior permanece intacto.
+        assert_eq!(plan_state(&fixture).state, crate::domain::PlanState::Reviewing);
+        let goal = current_goal(&fixture).expect("objetivo existente");
+        assert_eq!(goal.revision, existing.revision);
+        assert_eq!(goal.created_at, existing.created_at);
+    }
+
+    #[tokio::test]
+    async fn approve_goal_requires_a_workspace() {
+        let fixture = Fixture::new();
+        fixture.set_plan_mode(true);
+        let mut ctx = fixture.ctx();
+        ctx.workspace = None;
+        let responder = tokio::spawn(answer_next_approval(
+            fixture.approvals.clone(),
+            ApprovalOutcome::approved_plan(Some("approve_goal".to_string()), None),
+        ));
+        let outcome = call(
+            &ctx,
+            "submit_plan",
+            json!({ "plan": "# Plano\n\nFase 1 — auth" }),
+        )
+        .await;
+        responder.await.expect("responder");
+
+        assert_eq!(error_code(&outcome), "GOAL_NO_WORKSPACE");
+        assert_eq!(plan_state(&fixture).state, crate::domain::PlanState::Reviewing);
+        assert!(current_goal(&fixture).is_none());
     }
 
     #[tokio::test]

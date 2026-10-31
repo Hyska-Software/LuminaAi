@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { PlanView } from '@/lib/types';
-import { MAX_PLAN_CHARS, PlanCard } from './PlanCard';
+import { PlanCard } from './PlanCard';
 
 function makePlan(overrides: Partial<PlanView> = {}): PlanView {
   return {
@@ -20,7 +20,7 @@ const approveReview = (): HTMLElement =>
 afterEach(cleanup);
 
 describe('PlanCard — gate interativo', () => {
-  it('é um alertdialog com título, markdown e as três saídas', () => {
+  it('é um alertdialog com título, markdown e as quatro saídas', () => {
     render(<PlanCard plan={makePlan()} onAction={vi.fn()} />);
 
     const dialog = screen.getByRole('alertdialog', { name: 'Plano proposto' });
@@ -30,7 +30,8 @@ describe('PlanCard — gate interativo', () => {
     expect(approveRun()).toBeTruthy();
     expect(approveReview()).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Continuar planejando' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Editar plano antes de aprovar/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Executar como Objetivo/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Editar plano antes de aprovar/ })).toBeNull();
   });
 
   it('foca o botão primário ao montar o gate', () => {
@@ -47,6 +48,9 @@ describe('PlanCard — gate interativo', () => {
 
     fireEvent.click(approveReview());
     expect(onAction).toHaveBeenLastCalledWith('approve_review');
+
+    fireEvent.click(screen.getByRole('button', { name: /Executar como Objetivo/ }));
+    expect(onAction).toHaveBeenLastCalledWith('approve_goal');
   });
 
   it('"continuar planejando" envia feedback livre (ou vazio)', () => {
@@ -86,48 +90,18 @@ describe('PlanCard — gate interativo', () => {
   });
 });
 
-describe('PlanCard — plano editável antes de aprovar', () => {
-  it('envia o markdown revisado junto da aprovação', () => {
-    const onAction = vi.fn();
-    render(<PlanCard plan={makePlan()} onAction={onAction} />);
+describe('PlanCard — executar como objetivo', () => {
+  it('desabilita o CTA e explica quando já existe objetivo na sessão', () => {
+    const reason =
+      'Esta sessão já tem um objetivo ativo. Conclua ou encerre o objetivo atual antes de executar o plano como objetivo.';
+    render(<PlanCard plan={makePlan()} onAction={vi.fn()} goalBlockedReason={reason} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Editar plano antes de aprovar/ }));
-    const editor = screen.getByLabelText(
-      'Plano revisado (será o plano aprovado e persistido)',
-    ) as HTMLTextAreaElement;
-    expect(editor.getAttribute('maxlength')).toBe(String(MAX_PLAN_CHARS));
-
-    fireEvent.change(editor, { target: { value: '## Plano revisado\n\nPasso único' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Aprovar com este plano' }));
-
-    expect(onAction).toHaveBeenLastCalledWith('approve_run', undefined, '## Plano revisado\n\nPasso único');
-  });
-
-  it('Ctrl+Enter no editor aprova com o texto revisado', () => {
-    const onAction = vi.fn();
-    render(<PlanCard plan={makePlan()} onAction={onAction} />);
-
-    fireEvent.click(screen.getByRole('button', { name: /Editar plano antes de aprovar/ }));
-    const editor = screen.getByLabelText('Plano revisado (será o plano aprovado e persistido)');
-    fireEvent.change(editor, { target: { value: 'Plano novo' } });
-    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true });
-
-    expect(onAction).toHaveBeenLastCalledWith('approve_run', undefined, 'Plano novo');
-  });
-
-  it('bloqueia a aprovação com plano vazio', () => {
-    render(<PlanCard plan={makePlan()} onAction={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole('button', { name: /Editar plano antes de aprovar/ }));
-    fireEvent.change(screen.getByLabelText('Plano revisado (será o plano aprovado e persistido)'), {
-      target: { value: '   ' },
-    });
-
-    expect(screen.getByText('O plano não pode ficar vazio.')).toBeTruthy();
-    expect((approveRun() as HTMLButtonElement).disabled).toBe(true);
-    expect(
-      (screen.getByRole('button', { name: 'Aprovar com este plano' }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    const button = screen.getByRole('button', {
+      name: /Executar como Objetivo/,
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-describedby')).toBeTruthy();
+    expect(screen.getByText(reason)).toBeTruthy();
   });
 });
 
@@ -137,7 +111,12 @@ describe('PlanCard — busy e somente leitura', () => {
     render(<PlanCard plan={makePlan()} onAction={onAction} busy />);
 
     expect(screen.getByRole('alertdialog').getAttribute('aria-busy')).toBe('true');
-    for (const button of [approveRun(), approveReview(), screen.getByRole('button', { name: 'Continuar planejando' })]) {
+    for (const button of [
+      approveRun(),
+      approveReview(),
+      screen.getByRole('button', { name: 'Continuar planejando' }),
+      screen.getByRole('button', { name: /Executar como Objetivo/ }),
+    ]) {
       expect((button as HTMLButtonElement).disabled).toBe(true);
     }
     fireEvent.click(approveRun());
@@ -154,6 +133,7 @@ describe('PlanCard — busy e somente leitura', () => {
 
     expect(screen.queryByRole('button', { name: 'Aprovar e executar' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Continuar planejando' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Executar como Objetivo/ })).toBeNull();
     expect(screen.getByText('Somente leitura')).toBeTruthy();
     expect(screen.getByText('Plano devolvido para revisão')).toBeTruthy();
     expect(screen.getByText('Feedback anterior')).toBeTruthy();

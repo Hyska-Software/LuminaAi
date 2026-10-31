@@ -203,7 +203,7 @@ export const api = {
     options?: {
       scope?: ApprovalScope | null;
       feedback?: string | null;
-      /** Escolha do gate do plano (`approve_run` | `approve_review`). */
+      /** Escolha do gate do plano (`approve_run` | `approve_review` | `approve_goal`). */
       choice?: PlanApprovalChoice | null;
       /** Markdown revisado pelo usuário antes de aprovar o plano. */
       planMarkdown?: string | null;
