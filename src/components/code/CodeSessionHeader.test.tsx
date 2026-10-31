@@ -217,6 +217,26 @@ describe('CodeSessionHeader — cabeçalho da sessão', () => {
     expect(tab('Corrigir o build').getAttribute('aria-controls')).toBe('code-session-panel');
   });
 
+  it('destaca a aba ativa com preenchimento neutro e sem sombra', async () => {
+    const first = render(<CodeSessionHeader />);
+    const newSessionTab = tab('Nova sessão');
+    expect(newSessionTab.className).toContain('bg-surface-active');
+    expect(newSessionTab.className).not.toContain('shadow-sm');
+    first.unmount();
+
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Corrigir o build' })],
+      activeId: 'c-1',
+    });
+
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Corrigir o build').getAttribute('aria-selected')).toBe('true'));
+    const activeShell = tab('Corrigir o build').parentElement;
+    // A sombra sobre uma superfície branca vira um halo no tema claro.
+    expect(activeShell?.className).toContain('bg-surface-active');
+    expect(activeShell?.className).not.toContain('shadow-sm');
+  });
+
   it('mostra badge "Aguardando aprovação" quando há pedido pendente', async () => {
     const pending: ApprovalRequest[] = [
       {

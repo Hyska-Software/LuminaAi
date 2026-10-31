@@ -209,6 +209,9 @@ describe('ModelPickerDialog', () => {
     const goTab = screen.getByRole('tab', { name: 'Go' });
     expect(goTab.getAttribute('aria-selected')).toBe('true');
     expect(goTab.getAttribute('title')).toBe('Chave configurada');
+    // Sem trilho próprio, a aba ativa usa preenchimento em vez de sombra.
+    expect(goTab.className).toContain('data-[state=active]:bg-surface-active');
+    expect(goTab.className).not.toContain('shadow-sm');
     expect(modelCount()).toBe(38);
 
     await user.click(screen.getByRole('tab', { name: 'Zen' }));

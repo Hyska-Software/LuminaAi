@@ -128,6 +128,15 @@ describe('TerminalPanel', () => {
     expect(screen.getByText('Nenhum terminal aberto')).toBeTruthy();
   });
 
+  it('destaca a aba ativa com borda e sem sombra', async () => {
+    render(<TerminalPanel conversationId="conv-1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir terminal' }));
+
+    const selected = await screen.findByRole('tab', { name: 'Terminal 1' });
+    expect(selected.parentElement?.className).toContain('border-border');
+    expect(selected.parentElement?.className).not.toContain('shadow-sm');
+  });
+
   it('fecha uma aba encerrada sem pedir confirmação', async () => {
     render(<TerminalPanel conversationId="conv-1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Abrir terminal' }));

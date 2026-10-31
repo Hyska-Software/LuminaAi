@@ -484,7 +484,7 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
                       value={provider.id}
                       variant="pill"
                       title={providerTabTitle(provider, providerKey, providerAuthStatus)}
-                      className="h-8 gap-1.5 px-3 text-[12.5px]"
+                      className="h-8 gap-1.5 px-3 text-[12.5px] data-[state=active]:bg-surface-active data-[state=active]:shadow-none"
                     >
                       {provider.shortName}
                       <span

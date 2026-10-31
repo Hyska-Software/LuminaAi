@@ -705,6 +705,8 @@ export function CodeSessionHeader() {
       </div>
 
       <div className="flex h-10 shrink-0 items-center gap-1 px-2">
+        {/* Active tabs use a neutral fill instead of a raised surface + shadow:
+            on the white header the shadow reads as a glow in light mode. */}
         <div
           role="tablist"
           aria-label="Sessões abertas"
@@ -720,7 +722,7 @@ export function CodeSessionHeader() {
               tabIndex={0}
               className={cn(
                 'flex h-8 max-w-44 shrink-0 select-none items-center rounded-lg',
-                'bg-surface-raised pl-2.5 pr-2 text-[12px] text-foreground shadow-sm',
+                'bg-surface-active pl-2.5 pr-2 text-[12px] text-foreground',
                 'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
               )}
             >
@@ -736,7 +738,7 @@ export function CodeSessionHeader() {
                   className={cn(
                     'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                     selected
-                      ? 'bg-surface-raised text-foreground shadow-sm'
+                      ? 'bg-surface-active text-foreground'
                       : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
                   )}
                 >
@@ -765,7 +767,7 @@ export function CodeSessionHeader() {
                     onClick={() => closeTab(tab.id)}
                     className={cn(
                       'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                      'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+                      'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                     )}
                   >
@@ -791,7 +793,7 @@ export function CodeSessionHeader() {
                 className={cn(
                   'group flex h-8 max-w-48 shrink-0 items-center rounded-lg transition-colors duration-150',
                   selected
-                    ? 'bg-surface-raised text-foreground shadow-sm'
+                    ? 'bg-surface-active text-foreground'
                     : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
                 )}
               >
@@ -833,7 +835,7 @@ export function CodeSessionHeader() {
                   onClick={() => closeTab(id)}
                   className={cn(
                     'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                    'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+                    'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                   )}
                 >
@@ -856,7 +858,7 @@ export function CodeSessionHeader() {
                 className={cn(
                   'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                   selected
-                    ? 'bg-surface-raised text-foreground shadow-sm'
+                    ? 'bg-surface-active text-foreground'
                     : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
                 )}
               >
@@ -886,7 +888,7 @@ export function CodeSessionHeader() {
                   onClick={() => closeTab(id)}
                   className={cn(
                     'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                    'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+                    'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                   )}
                 >
@@ -901,7 +903,7 @@ export function CodeSessionHeader() {
               className={cn(
                 'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                 codeView === 'plan'
-                  ? 'bg-surface-raised text-foreground shadow-sm'
+                  ? 'bg-surface-active text-foreground'
                   : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
               )}
             >
@@ -931,7 +933,7 @@ export function CodeSessionHeader() {
                 onClick={() => closeTab(CODE_PLAN_TAB_ID)}
                 className={cn(
                   'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                  'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+                  'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                 )}
               >
@@ -945,7 +947,7 @@ export function CodeSessionHeader() {
               className={cn(
                 'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                 codeView === 'goal'
-                  ? 'bg-surface-raised text-foreground shadow-sm'
+                  ? 'bg-surface-active text-foreground'
                   : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
               )}
             >
@@ -975,7 +977,7 @@ export function CodeSessionHeader() {
                 onClick={() => closeTab(CODE_GOAL_TAB_ID)}
                 className={cn(
                   'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                  'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+                  'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                 )}
               >
@@ -989,7 +991,7 @@ export function CodeSessionHeader() {
               className={cn(
                 'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                 codeView === 'diff'
-                  ? 'bg-surface-raised text-foreground shadow-sm'
+                  ? 'bg-surface-active text-foreground'
                   : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
               )}
             >
@@ -1019,7 +1021,7 @@ export function CodeSessionHeader() {
                 onClick={() => closeTab(CODE_DIFF_TAB_ID)}
                 className={cn(
                   'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                  'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+                  'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                 )}
               >
@@ -1033,7 +1035,7 @@ export function CodeSessionHeader() {
               className={cn(
                 'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                 codeView === 'commits'
-                  ? 'bg-surface-raised text-foreground shadow-sm'
+                  ? 'bg-surface-active text-foreground'
                   : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
               )}
             >
@@ -1063,7 +1065,7 @@ export function CodeSessionHeader() {
                 onClick={() => closeTab(CODE_COMMITS_TAB_ID)}
                 className={cn(
                   'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                  'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+                  'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                 )}
               >

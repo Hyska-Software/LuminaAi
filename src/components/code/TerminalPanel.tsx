@@ -186,7 +186,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                 className={cn(
                   'flex h-7 max-w-48 shrink-0 items-center rounded-md border text-[12px]',
                   selected
-                    ? 'border-border bg-background text-foreground shadow-sm'
+                    ? 'border-border bg-background text-foreground'
                     : 'border-transparent text-foreground-muted hover:bg-surface-hover',
                 )}
               >
