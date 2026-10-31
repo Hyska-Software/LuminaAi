@@ -27,14 +27,14 @@ pub static TODO_WRITE_SPEC: ToolSpec = ToolSpec {
 
 pub static SUBMIT_PLAN_SPEC: ToolSpec = ToolSpec {
     name: "submit_plan",
-    description: "Submit an implementation plan for human review while Plan mode is active. The turn pauses until the user approves or asks for changes.",
+    description: "Submit an implementation-ready plan for human review while Plan mode is active. The plan must let another engineer execute it without re-deciding the design. The turn pauses until the user approves or asks for changes.",
     schema: submit_plan_schema,
     parallel: ParallelClass::Exclusive,
     risk: RiskClass::Ask,
     mutating: false,
     requires_workspace: false,
     profiles: &[TurnProfile::Code],
-    guidance: "In Plan mode, use `submit_plan` to present the plan before executing: start with a heading, list files to touch, steps, risks and how to verify. Do not include the full implementation.",
+    guidance: "Use `submit_plan` only in Plan mode, once the plan is implementation-ready. Investigate the repository first; never invent paths. Required: goal, current context with exact files/symbols, in/out scope, changes per file, ordered steps with observable completion criteria, tests/commands with expected results, risks/rollback and an acceptance checklist. Be concise (2-6k chars typical; 20k max, 300 min): no filler, no restating the request, no full implementation or diff; code only for ambiguous interfaces (max 10 lines). On feedback, address every point and resubmit.",
 };
 
 pub static ASK_USER_SPEC: ToolSpec = ToolSpec {
@@ -97,7 +97,7 @@ fn submit_plan_schema() -> Value {
         "properties": {
             "plan": {
                 "type": "string",
-                "description": "Plan in Markdown: context, files to change, steps, risks and verification."
+                "description": "Implementation-ready plan in Markdown, in the response language. Required outline (merge sections only for trivial changes): short title and one-sentence goal; current context with exact files/symbols, constraints and assumptions; in/out scope; changes per file (table: file, symbol/area, change, why); ordered steps that each name files/symbols and an observable completion criterion; tests and verification with commands, cases and expected results; risks, edge cases, compatibility/migration and rollback; acceptance checklist. Be concise: 2-6k chars typical (max 20k, min 300), no filler, no restating the request, no full implementation or diff; code only for ambiguous interfaces (max 10 lines)."
             }
         },
         "required": ["plan"],
@@ -167,5 +167,47 @@ mod tests {
         }
         let schema = (TODO_WRITE_SPEC.schema)();
         assert_eq!(schema["properties"]["todos"]["items"]["properties"]["status"]["enum"][1], "in_progress");
+    }
+
+    #[test]
+    fn submit_plan_contract_requires_an_implementation_ready_plan() {
+        let guidance = SUBMIT_PLAN_SPEC.guidance;
+        for needle in [
+            "implementation-ready",
+            "exact files/symbols",
+            "observable completion criteria",
+            "tests/commands",
+            "risks/rollback",
+            "acceptance checklist",
+            "2-6k",
+            "300 min",
+        ] {
+            assert!(guidance.contains(needle), "missing {needle:?}: {guidance}");
+        }
+        assert!(
+            guidance.chars().count() <= crate::harness::code::prompt::MAX_TOOL_GUIDANCE_CHARS,
+            "guidance acima do cap do prompt: {} chars",
+            guidance.chars().count()
+        );
+        assert!(SUBMIT_PLAN_SPEC.description.contains("implementation-ready"));
+
+        let schema = (SUBMIT_PLAN_SPEC.schema)();
+        let description = schema["properties"]["plan"]["description"]
+            .as_str()
+            .expect("descrição do plano");
+        for needle in [
+            "exact files/symbols",
+            "observable completion criterion",
+            "tests and verification",
+            "risks",
+            "acceptance checklist",
+            "2-6k",
+            "min 300",
+        ] {
+            assert!(
+                description.contains(needle),
+                "plan description sem {needle:?}: {description}"
+            );
+        }
     }
 }

@@ -312,8 +312,22 @@ M  src/app.ts           (staged)
   permissão atual, cria um Goal e deixa a primeira rodada começar no `done`). O gate não edita
   mais o plano; `respond_approval.planMarkdown` continua aceito por compatibilidade e substitui o
   markdown aprovado. Sem canal de revisão (headless/teste) → falha fechada com dica `/plan off`.
-- **Regras de prompt**: plano começa com heading, inclui arquivos a tocar, passos, riscos e como
-  verificar; sem código completo (é plano, não implementação).
+- **Regras de prompt**: antes de submeter, investigue entradas, módulos, testes e docs; confirme o
+  comportamento atual e nunca invente caminhos/símbolos. O plano deve ser **implementável** e usar o
+  idioma da resposta com esta estrutura (mescle seções apenas em mudanças triviais):
+  1. título curto + objetivo em uma frase;
+  2. contexto atual com arquivos/símbolos exatos, restrições e premissas;
+  3. escopo (dentro/fora);
+  4. mudanças por arquivo em tabela (arquivo, símbolo/área, mudança, motivo);
+  5. passos ordenados, cada um com arquivos/símbolos e critério de conclusão observável;
+  6. testes e verificação (casos, comandos e resultado esperado; checagem manual quando couber);
+  7. riscos, casos-limite, compatibilidade/migração e rollback;
+  8. critérios de aceite em checklist.
+
+  Seja conciso: ~2–6 mil caracteres no caso típico (máx. 20 mil), sem repetir o pedido, sem código
+  completo/diff; código só para interfaces ambíguas (≤10 linhas). Plano com menos de **300
+  caracteres** é recusado com `PLAN_TOO_BRIEF` antes de persistir ou pedir aprovação. No feedback,
+  responda a todos os pontos, preserve decisões aceitas e reenvie.
 - **Política**: `Ask` (revisão humana obrigatória, **sem** "sempre permitir"); o timeout da tool é
   o do broker de aprovação (10 min default), não o timeout curto do runtime. **Testes**: fora do
   modo → erro; aprovação → transição + mensagem + mutação liberada no mesmo turno; revisar cada
@@ -499,6 +513,7 @@ pub struct ToolSpec {
 `FS_NOT_FOUND`, `FS_NOT_A_FILE`, `FS_BINARY`, `FS_TOO_LARGE`, `FS_OUTSIDE_WORKSPACE`,
 `FS_NOT_OBSERVED`, `FS_STALE_VERSION`, `FS_NO_WORKSPACE`, `FS_SECRET_PATTERN`,
 `POLICY_DENIED`, `APPROVAL_DENIED`, `APPROVAL_UNAVAILABLE`, `APPROVAL_TIMEOUT`, `PLAN_MODE_ACTIVE`,
+`PLAN_TOO_BRIEF`,
 `COMMAND_TIMEOUT`, `COMMAND_ABORTED`, `JOB_LIMIT`, `GIT_NOT_A_REPO`, `GIT_FAILED`, `SPILL_NOT_FOUND`,
 `TOOL_INVALID_ARGS`, `WORKSPACE_UNREADABLE`.
 

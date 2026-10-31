@@ -171,20 +171,22 @@ fallback genérico).
 O bloco recolhível mostra uma **linha por chamada de tool do harness** (não o card agregado), no
 estilo `Think/Edit/Pwsh`:
 
-- Raciocínio: legenda `Pensou` (ícone `Brain`) seguida do **Markdown completo** do passo do modelo
-  (mesmo contrato de `docs/MARKDOWN.md` §4/§10, na variante compacta `variant="thinking"`: 13px,
-  `foreground-muted`; títulos, listas, tabelas, código com copiar, math e links funcionam). O texto
-  do passo é preservado **bruto** (`agentTrace.buildAgentTrace` não divide por linha em branco nem
-  remove marcadores de lista) e o caret de streaming aparece no último bloco durante a fase de
-  raciocínio.
+- Raciocínio: linha recolhível `Pensou` (ícone `Brain`), **fechada por padrão como as linhas de
+  tool**; expandir revela o **Markdown completo** do passo do modelo (mesmo contrato de
+  `docs/MARKDOWN.md` §4/§10, na variante compacta `variant="thinking"`: 13px, `foreground-muted`;
+  títulos, listas, tabelas, código com copiar, math e links funcionam). O texto do passo é
+  preservado **bruto** (`agentTrace.buildAgentTrace` não divide por linha em branco nem remove
+  marcadores de lista); durante o streaming a linha mostra spinner e o caret aparece no último
+  bloco expandido na fase de raciocínio.
 - Tool: ícone + **verbo** (`Leu`, `Buscou`, `Alterou`/`Criou`, `Executou`, `Atualizou as tarefas`,
   `Plano proposto`…) + **alvo** em mono (path/comando/busca) + status + metadados:
   - escrita/edição: `+N −M` e, ao expandir, **diff com syntax highlight** (`DiffView`);
   - shell/verificações: badge `exit N` (verde=0, vermelho≠0), duração e, ao expandir, a **saída**
     (mono, scroll, copiar); falhas abrem a saída automaticamente;
   - demais tools: saída/resultado sob demanda (região rolável, `tabindex=0`).
-- Toda linha expansível usa `aria-expanded`/`aria-controls`; a linha tem nome acessível
-  (`aria-label`) com o texto completo ("Leu src/app.ts").
+- Toda linha de tool expansível usa `aria-expanded`/`aria-controls`; a linha tem nome acessível
+  (`aria-label`) com o texto completo ("Leu src/app.ts"). A linha de raciocínio também usa
+  `aria-expanded`/`aria-controls` (nome acessível "Pensou").
 - Header do bloco ao concluir: **"Trabalhou por Xs"** no layout Code (o tempo do turno inclui as
   ferramentas, não só o raciocínio); **"Pensou por Xs"** fica no layout Chat. Ao vivo os títulos
   continuam por fase ("Pensando…", "Executando ferramentas…") e turnos sem raciocínio exposto
@@ -237,6 +239,11 @@ Implementação: `AgentSteps` + `ToolCallRow` (chat) + `describeCodeTool` (`src/
   do plano aprovado, sem passar pelo backend. O gate também rola para a viewport e o header mostra o
   badge "Aguardando aprovação".
 - O timeout de revisão é o do broker (default 10 min), não o timeout curto da tool.
+- **Qualidade do plano**: o agente investiga o repositório antes de planejar e o Markdown precisa
+  ser implementável — contexto com arquivos/símbolos exatos, escopo, mudanças por arquivo, passos
+  com critério de conclusão, testes/comandos, riscos/rollback e critérios de aceite. A profundidade
+  acompanha o escopo (2–6 mil caracteres no típico, máx. 20 mil; sem código completo ou repetição).
+  Planos com menos de 300 caracteres são recusados com `PLAN_TOO_BRIEF`.
 
 ### 5.5 Pergunta ao usuário
 

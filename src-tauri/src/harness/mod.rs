@@ -7366,8 +7366,27 @@ mod agent_loop_tests {
                     emit(&sink, ProviderEvent::Usage(usage));
                     match current {
                         0 => {
+                            let plan = "# Plano: criar src/novo.ts\n\n\
+                                **Objetivo:** criar o arquivo novo e validar a escrita.\n\n\
+                                ## Contexto\n\
+                                O workspace está vazio; o fluxo de aprovação já existe em \
+                                `src/novo.ts`.\n\n\
+                                ## Escopo\n\
+                                Dentro: criar o arquivo. Fora: alterar outras tools.\n\n\
+                                ## Mudanças por arquivo\n\
+                                | Arquivo | Símbolo/área | Mudança | Motivo |\n\
+                                | --- | --- | --- | --- |\n\
+                                | `src/novo.ts` | arquivo | criar conteúdo inicial | validar escrita |\n\n\
+                                ## Passos\n\
+                                1. Criar `src/novo.ts` — pronto quando o arquivo existir.\n\n\
+                                ## Testes e verificação\n\
+                                - `cargo test` — turno conclui com o arquivo criado.\n\n\
+                                ## Riscos e rollback\n\
+                                Risco: nenhum relevante; rollback: apagar o arquivo.\n\n\
+                                ## Critérios de aceite\n\
+                                - [ ] `src/novo.ts` existe com o conteúdo esperado.";
                             let arguments = serde_json::json!({
-                                "plan": "# Plano\n1. Criar src/novo.ts"
+                                "plan": plan
                             })
                             .to_string();
                             emit(

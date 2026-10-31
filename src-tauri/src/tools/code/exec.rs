@@ -42,6 +42,10 @@ const MAX_DIFF_CHARS: usize = 4_000;
 const MAX_SEARCH_RESULTS: usize = 200;
 const MAX_LIST_ENTRIES: usize = 400;
 const MAX_LINE_CHARS: usize = 2_000;
+/// Sanity floor for `submit_plan`: a one-line plan cannot guide an
+/// implementation. This is not a quality metric, only a guard against
+/// degenerate submissions; the prompt contract carries the real quality bar.
+const MIN_PLAN_CHARS: usize = 300;
 
 /// Ponto de entrada único das tools de código.
 pub async fn run(ctx: &ToolCtx, exec: ToolExec, args: Value) -> ToolOutcome {
@@ -2745,6 +2749,17 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     if markdown.chars().count() > 20_000 {
         return err("TOOL_INVALID_ARGS", "o plano excede 20 000 caracteres; resuma");
     }
+    if markdown.chars().count() < MIN_PLAN_CHARS {
+        return err(
+            "PLAN_TOO_BRIEF",
+            format!(
+                "o plano tem {} caracteres; detalhe o contexto atual (arquivos/símbolos exatos), \
+                 o escopo, as mudanças por arquivo, os passos com critério de conclusão, os \
+                 testes/comandos, os riscos e os critérios de aceite (mínimo {MIN_PLAN_CHARS})",
+                markdown.chars().count()
+            ),
+        );
+    }
     if ctx.approval.is_none() {
         return err(
             "APPROVAL_UNAVAILABLE",
@@ -2951,7 +2966,7 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             finish(
                 ctx,
                 format!(
-                    "Plano não aprovado: {feedback}\nRevise o plano conforme o feedback e reenvie com submit_plan.\n"
+                    "Plano não aprovado: {feedback}\nRevise o plano conforme o feedback, cobrindo arquivos/símbolos, passos com critério de conclusão, testes/comandos, riscos e critérios de aceite; reenvie com submit_plan.\n"
                 ),
                 Some("Plano revisado".to_string()),
                 Some(planning.as_ref().map(plan_presentation).unwrap_or_else(|| {
@@ -3648,6 +3663,28 @@ mod tests {
             .expect("plano visível")
     }
 
+    fn implementation_plan() -> String {
+        "# Plano de teste\n\n\
+         **Objetivo:** implementar a mudança de teste.\n\n\
+         ## Contexto\n\
+         O comportamento atual está em `src/a.ts`; a mudança preserva o contrato público.\n\n\
+         ## Escopo\n\
+         Dentro: `src/a.ts` e testes. Fora: migrations.\n\n\
+         ## Mudanças por arquivo\n\
+         | Arquivo | Símbolo/área | Mudança | Motivo |\n\
+         | --- | --- | --- | --- |\n\
+         | `src/a.ts` | `run` | validar entrada | evitar erro |\n\n\
+         ## Passos\n\
+         1. Alterar `run` em `src/a.ts` — pronto quando a entrada inválida retorna erro.\n\n\
+         ## Testes e verificação\n\
+         - `cargo test` — caso de entrada inválida verde.\n\n\
+         ## Riscos e rollback\n\
+         Risco: regressão; rollback: reverter `src/a.ts`.\n\n\
+         ## Critérios de aceite\n\
+         - [ ] Entrada inválida retorna erro.\n"
+            .to_string()
+    }
+
     fn current_goal(fixture: &Fixture) -> Option<GoalView> {
         goal::current(&fixture.db, fixture.conv()).expect("projeção do objetivo")
     }
@@ -3656,7 +3693,7 @@ mod tests {
     async fn submit_plan_requires_live_plan_mode() {
         let fixture = Fixture::new();
         let ctx = fixture.ctx();
-        let inactive = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
+        let inactive = call(&ctx, "submit_plan", json!({ "plan": implementation_plan() })).await;
         assert_eq!(error_code(&inactive), "PLAN_MODE_INACTIVE");
         assert!(session::plan_view(&fixture.db, fixture.conv()).expect("plano").is_none());
 
@@ -3666,7 +3703,7 @@ mod tests {
             fixture.approvals.clone(),
             ApprovalOutcome::approved_plan(Some("approve_run".to_string()), None),
         ));
-        let approved = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
+        let approved = call(&ctx, "submit_plan", json!({ "plan": implementation_plan() })).await;
         responder.await.expect("responder");
         assert!(!approved.is_error, "{}", approved.content);
     }
@@ -3680,7 +3717,8 @@ mod tests {
             fixture.approvals.clone(),
             ApprovalOutcome::approved_plan(Some("approve_run".to_string()), None),
         ));
-        let approved = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
+        let plan = implementation_plan();
+        let approved = call(&ctx, "submit_plan", json!({ "plan": &plan })).await;
         responder.await.expect("responder");
         assert!(!approved.is_error, "{}", approved.content);
 
@@ -3689,7 +3727,7 @@ mod tests {
         assert_eq!(presentation["kind"], "plan");
         assert_eq!(presentation["state"], "approved");
         assert!(presentation.get("plan").is_none(), "não deve ser aninhado: {presentation}");
-        assert_eq!(presentation["markdown"], "### Plano\n1. Fazer");
+        assert_eq!(presentation["markdown"].as_str(), Some(plan.trim()));
         assert!(presentation["updatedAt"].is_number());
 
         // Projeção/flags de sessão.
@@ -3714,7 +3752,7 @@ mod tests {
             fixture.approvals.clone(),
             ApprovalOutcome::approved_plan(Some("approve_review".to_string()), None),
         ));
-        let approved = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
+        let approved = call(&ctx, "submit_plan", json!({ "plan": implementation_plan() })).await;
         responder.await.expect("responder");
         assert!(!approved.is_error, "{}", approved.content);
         assert_eq!(fixture.permission_mode(), PermissionMode::Review);
@@ -3743,7 +3781,7 @@ mod tests {
                 Some("# Plano revisado pelo usuário".to_string()),
             ),
         ));
-        let approved = call(&ctx, "submit_plan", json!({ "plan": "### Plano original" })).await;
+        let approved = call(&ctx, "submit_plan", json!({ "plan": implementation_plan() })).await;
         responder.await.expect("responder");
         assert!(!approved.is_error, "{}", approved.content);
         assert_eq!(plan_state(&fixture).markdown.as_deref(), Some("# Plano revisado pelo usuário"));
@@ -3766,7 +3804,7 @@ mod tests {
         let approved = call(
             &ctx,
             "submit_plan",
-            json!({ "plan": "# Plano\n\nFase 1 — auth\nFase 2 — testes" }),
+            json!({ "plan": implementation_plan() }),
         )
         .await;
         responder.await.expect("responder");
@@ -3811,7 +3849,7 @@ mod tests {
         let outcome = call(
             &ctx,
             "submit_plan",
-            json!({ "plan": "# Plano\n\nFase 1 — auth" }),
+            json!({ "plan": implementation_plan() }),
         )
         .await;
         responder.await.expect("responder");
@@ -3837,7 +3875,7 @@ mod tests {
         let outcome = call(
             &ctx,
             "submit_plan",
-            json!({ "plan": "# Plano\n\nFase 1 — auth" }),
+            json!({ "plan": implementation_plan() }),
         )
         .await;
         responder.await.expect("responder");
@@ -3856,15 +3894,21 @@ mod tests {
             fixture.approvals.clone(),
             ApprovalOutcome::denied(Some("faltou contexto".to_string())),
         ));
-        let denied = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
+        let plan = implementation_plan();
+        let denied = call(&ctx, "submit_plan", json!({ "plan": &plan })).await;
         responder.await.expect("responder");
         assert!(!denied.is_error, "{}", denied.content);
         assert!(denied.content.contains("Plano não aprovado"), "{}", denied.content);
         assert!(denied.content.contains("faltou contexto"), "{}", denied.content);
+        assert!(
+            denied.content.contains("critérios de aceite"),
+            "{}",
+            denied.content
+        );
 
         let view = plan_state(&fixture);
         assert_eq!(view.state, crate::domain::PlanState::Planning);
-        assert_eq!(view.markdown.as_deref(), Some("### Plano\n1. Fazer"));
+        assert_eq!(view.markdown.as_deref(), Some(plan.trim()));
         assert_eq!(view.feedback.as_deref(), Some("faltou contexto"));
         // O draft foi persistido ANTES da revisão (B-07) e o modo continua ativo.
         assert!(session::plan_mode_active(&fixture.db, fixture.conv()).expect("modo"));
@@ -3876,12 +3920,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn too_brief_plan_is_rejected_before_persisting_or_asking() {
+        let fixture = Fixture::new();
+        fixture.set_plan_mode(true);
+        let ctx = fixture.ctx();
+        let outcome = call(&ctx, "submit_plan", json!({ "plan": "### Plano\n1. Fazer" })).await;
+
+        assert_eq!(error_code(&outcome), "PLAN_TOO_BRIEF");
+        assert!(
+            outcome.content.contains("arquivos/símbolos"),
+            "{}",
+            outcome.content
+        );
+        let view = plan_state(&fixture);
+        assert_eq!(view.state, crate::domain::PlanState::Planning);
+        assert!(view.markdown.is_none(), "plano curto não pode ser persistido");
+        assert!(!event_types(&fixture.recorder).contains(&"plan_updated".to_string()));
+        assert!(fixture.approvals.pending_requests().is_empty());
+    }
+
+    #[tokio::test]
     async fn cancelled_plan_review_persists_feedback_and_errors() {
         let fixture = Fixture::new();
         fixture.set_plan_mode(true);
         let ctx = fixture.ctx();
         ctx.cancel.cancel();
-        let outcome = call(&ctx, "submit_plan", json!({ "plan": "### Plano" })).await;
+        let outcome = call(&ctx, "submit_plan", json!({ "plan": implementation_plan() })).await;
         assert_eq!(error_code(&outcome), "APPROVAL_CANCELLED");
         let view = plan_state(&fixture);
         assert_eq!(view.state, crate::domain::PlanState::Planning);

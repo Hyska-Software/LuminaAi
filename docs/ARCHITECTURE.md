@@ -513,7 +513,8 @@ O contrato completo (sintaxe suportada, decisões e matriz de testes) está em
   por passo** (sem dividir por linha em branco nem remover marcadores de lista) e
   preserva as diferenças entre layouts (Chat: resumos agrupados de tools e header
   "Pensou por Xs"; Code: uma linha por chamada do harness e header "Trabalhou por
-  Xs"). Contrato em `docs/MARKDOWN.md` §10.
+  Xs"). Cada passo de raciocínio é uma linha `Pensou` recolhível, fechada por
+  padrão como as tools. Contrato em `docs/MARKDOWN.md` §10.
 - **Testes**: `src/components/chat/Markdown.test.tsx` (matriz funcional, incluindo
   a variante `thinking`), `Markdown.security.test.tsx` (vetores XSS/atributos/URLs
   nas duas variantes), `src/lib/__tests__/agentTrace.test.ts` (Markdown bruto por

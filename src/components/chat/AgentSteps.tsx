@@ -135,6 +135,53 @@ function useLiveElapsed(active: boolean, startedAt?: number | null): number | nu
   return elapsed;
 }
 
+interface ReasoningRowProps {
+  text: string;
+  streaming: boolean;
+}
+
+/**
+ * One reasoning block of the agent timeline. Like a tool row, the raw
+ * reasoning is a detail: it starts collapsed and expands on demand, so long
+ * chain-of-thought blocks never dominate the transcript.
+ */
+function ReasoningRow({ text, streaming }: ReasoningRowProps) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li className="min-w-0">
+      <Collapsible.Root open={open} onOpenChange={setOpen}>
+        <div className="flex min-w-0 items-start gap-2.5 rounded-lg px-1.5 py-1 transition-colors hover:bg-surface-hover/60">
+          <Brain
+            aria-hidden
+            className="mt-0.5 size-3.5 shrink-0 text-foreground-subtle"
+          />
+          <Collapsible.Trigger asChild>
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center gap-x-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            >
+              <span className="text-[12px] font-semibold text-foreground">Pensou</span>
+              {streaming ? <Spinner size="xs" className="text-foreground-subtle" /> : null}
+              <ChevronDown
+                aria-hidden
+                className={cn(
+                  'ml-auto size-3.5 shrink-0 text-foreground-subtle transition-transform duration-150',
+                  open && 'rotate-180',
+                )}
+              />
+            </button>
+          </Collapsible.Trigger>
+        </div>
+        <Collapsible.Content>
+          <div className="ml-[26px] mt-1">
+            <Markdown content={text} variant="thinking" streaming={streaming} />
+          </div>
+        </Collapsible.Content>
+      </Collapsible.Root>
+    </li>
+  );
+}
+
 /**
  * The "thinking space" of an assistant turn (DESIGN §6.3): a single
  * collapsible timeline that interleaves the model's reasoning with the steps
@@ -260,30 +307,18 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
           <ol className="flex flex-col gap-1">
             {entries.map((entry, index) => {
               if (entry.kind === 'reasoning') {
-                // O raciocínio do modelo é Markdown (docs/MARKDOWN.md §4) e é
-                // renderizado pela variante compacta/muted do `Markdown`. O
-                // caret de streaming fica só no último bloco, enquanto o
-                // modelo pensa — nunca junto das tools nem da resposta.
+                // Reasoning is Markdown (docs/MARKDOWN.md §4) rendered by the
+                // compact/muted `Markdown` variant. The streaming caret belongs
+                // only to the last block while the model is thinking; the row
+                // itself starts collapsed like a tool row.
                 return (
-                  <li
+                  <ReasoningRow
                     key={`reasoning-${index}`}
-                    className="flex min-w-0 items-start gap-2.5 rounded-lg px-1.5 py-1"
-                  >
-                    <Brain
-                      aria-hidden
-                      className="mt-0.5 size-3.5 shrink-0 text-foreground-subtle"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <span className="mb-0.5 block text-[12px] font-semibold text-foreground">
-                        Pensou
-                      </span>
-                      <Markdown
-                        content={entry.text}
-                        variant="thinking"
-                        streaming={streaming && phase === 'reasoning' && index === lastReasoningIndex}
-                      />
-                    </div>
-                  </li>
+                    text={entry.text}
+                    streaming={
+                      streaming && phase === 'reasoning' && index === lastReasoningIndex
+                    }
+                  />
                 );
               }
 

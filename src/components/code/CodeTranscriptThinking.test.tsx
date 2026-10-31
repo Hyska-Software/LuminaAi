@@ -194,6 +194,12 @@ const thinkingHeader = (): HTMLElement =>
 const chatThinkingHeader = (): HTMLElement =>
   screen.getByRole('button', { name: /Pensou por 4s/ });
 
+/** Expands the outer timeline and the reasoning row (closed by default). */
+async function openThinking(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(thinkingHeader());
+  await user.click(screen.getByRole('button', { name: 'Pensou' }));
+}
+
 /** Itens da lista Markdown do raciocínio (o `getByText` não atravessa o `<code>`). */
 function bulletTexts(root: HTMLElement): string[] {
   return Array.from(root.querySelectorAll('ul li')).map((item) => item.textContent ?? '');
@@ -265,7 +271,7 @@ describe('CodeTranscriptThinking — Thinking em Markdown no layout Code', () =>
     expect(screen.queryByText('Pensou')).toBeNull();
     expect(screen.queryByText('Analisando')).toBeNull();
 
-    await user.click(thinkingHeader());
+    await openThinking(user);
 
     // Markdown de verdade dentro do raciocínio (nada de marcador vazando).
     expect(container.querySelector('strong')?.textContent).toBe('Analisando');
@@ -312,7 +318,7 @@ describe('CodeTranscriptThinking — Thinking em Markdown no layout Code', () =>
     // Controles de sessão que só existem no composer do Code.
     expect(screen.getByRole('button', { name: 'Modo de permissão: Editar' })).toBeTruthy();
 
-    await user.click(thinkingHeader());
+    await openThinking(user);
     expect(screen.getByText('Analisando').tagName).toBe('STRONG');
     expect(screen.getByRole('listitem', { name: 'Leu src/app.ts' })).toBeTruthy();
   });
@@ -331,7 +337,7 @@ describe('CodeTranscriptThinking — Thinking em Markdown no layout Code', () =>
     const { container } = render(<CodeTranscript />);
 
     expect(screen.getByRole('textbox', { name: 'Tarefa para o agente' })).toBeTruthy();
-    await user.click(thinkingHeader());
+    await openThinking(user);
     expect(screen.getByText('Analisando').tagName).toBe('STRONG');
 
     // Mesma instância de ChatView; só o chrome (composer) muda.
@@ -361,7 +367,7 @@ describe('CodeTranscriptThinking — Thinking em Markdown no layout Code', () =>
     seed();
     const { container } = render(<CodeTranscript />);
 
-    await user.click(thinkingHeader());
+    await openThinking(user);
     expect(screen.getByText('Analisando').tagName).toBe('STRONG');
 
     // Sessão nascida no Code não vaza para o Chat: a diferença de chrome é
@@ -380,7 +386,7 @@ describe('CodeTranscriptThinking — Thinking em Markdown no layout Code', () =>
       useUiStore.setState({ layoutMode: 'code' });
     });
     expect(thinkingHeader()).toBeTruthy();
-    await user.click(thinkingHeader());
+    await openThinking(user);
     expect(screen.getByText('Analisando').tagName).toBe('STRONG');
     expect(bulletTexts(container)).toContain('leu src/app.ts');
     expect(screen.getByRole('listitem', { name: 'Leu src/app.ts' })).toBeTruthy();

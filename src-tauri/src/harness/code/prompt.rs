@@ -25,7 +25,7 @@ use super::goal::{GOAL_BLOCKED_STREAK, GOAL_MAX_OBJECTIVE_CHARS};
 
 /// Version of the Code prompt layout (part of the `prompt_snapshots` identity).
 /// Bump whenever the stable prompt text changes.
-pub const PROMPT_VERSION: u32 = 1;
+pub const PROMPT_VERSION: u32 = 2;
 
 /// Orientação de uma ferramenta habilitada no turno (gerada pelo registry).
 #[derive(Debug, Clone, Copy)]
@@ -433,9 +433,13 @@ pub fn build_runtime_context(ctx: &CodeContext, has_todo_write: bool) -> String 
     }
     if ctx.plan_mode {
         out.push_str(
-            "**Plan mode is active**: explore and design, but do not modify files or run \
-             mutating commands. When the plan is ready, submit it with `submit_plan` for user \
-             review.\n\n",
+            "**Plan mode is active**: investigate and design only; do not modify files, run \
+             mutating commands or implement. Read the relevant entry points, modules, tests and \
+             docs before planning, and never invent paths or symbols. When ready, call \
+             `submit_plan` with an implementation-ready plan (goal, exact files/symbols, scope, \
+             per-file changes, ordered steps with done criteria, tests/commands, risks/rollback \
+             and acceptance criteria). Keep it concise and grounded in evidence; on feedback, \
+             address every point and resubmit.\n\n",
         );
     }
     out.push_str("## Workspace state\n\n");
@@ -748,6 +752,32 @@ mod tests {
         assert!(!stable.contains("Autonomous"));
         assert!(!stable.contains("Plan mode is active"));
         assert!(!stable.contains("Corrigir cálculo"));
+    }
+
+    #[test]
+    fn runtime_context_plan_mode_requires_an_implementation_ready_plan() {
+        let mut context = ctx();
+        context.plan_mode = true;
+        let runtime = build_runtime_context(&context, true);
+
+        for needle in [
+            "investigate and design only",
+            "never invent paths or symbols",
+            "implementation-ready plan",
+            "exact files/symbols",
+            "ordered steps with done criteria",
+            "tests/commands",
+            "risks/rollback",
+            "acceptance criteria",
+            "address every point and resubmit",
+        ] {
+            assert!(runtime.contains(needle), "missing {needle:?}: {runtime}");
+        }
+
+        context.plan_mode = false;
+        let outside = build_runtime_context(&context, true);
+        assert!(!outside.contains("implementation-ready plan"), "{outside}");
+        assert!(!outside.contains("never invent paths or symbols"), "{outside}");
     }
 
     #[test]

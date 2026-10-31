@@ -85,6 +85,7 @@ describe('AgentSteps', () => {
     expect(screen.queryByText('Vou pesquisar.')).toBeNull();
 
     await user.click(header);
+    await user.click(screen.getAllByRole('button', { name: 'Pensou' })[0]);
     expect(screen.getByText('Vou pesquisar.')).toBeTruthy();
     expect(screen.getByText('Encontrou 2 páginas web')).toBeTruthy();
     expect(screen.getByText('Leu 1 página')).toBeTruthy();
@@ -111,7 +112,7 @@ describe('AgentSteps', () => {
     expect(openExternalUrl).toHaveBeenCalledWith('https://mit.edu/ia');
   });
 
-  it('streams auto-expanded with a live header and collapses when the answer arrives', () => {
+  it('streams with an auto-expanded timeline while the reasoning row stays collapsed', () => {
     const { rerender } = render(
       <AgentSteps
         streaming
@@ -127,7 +128,10 @@ describe('AgentSteps', () => {
     );
 
     expect(screen.getByRole('button', { name: /Executando ferramentas/ })).toBeTruthy();
-    expect(screen.getByText('Buscando fontes.')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Pensou', expanded: false }),
+    ).toBeTruthy();
+    expect(screen.queryByText('Buscando fontes.')).toBeNull();
 
     rerender(
       <AgentSteps
@@ -294,9 +298,11 @@ describe('AgentSteps — raciocínio recolhido por padrão', () => {
     expect(screen.getByRole('button', { expanded: false })).toBeTruthy();
     expect(screen.queryByText(reasoning)).toBeNull();
 
-    // A manual expansion still works.
+    // A manual expansion still works; the reasoning row has its own toggle.
     await user.click(screen.getByRole('button', { expanded: false }));
     expect(screen.getByRole('button', { expanded: true })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pensou', expanded: false })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Pensou' }));
     expect(screen.getByText(reasoning)).toBeTruthy();
   });
 
@@ -314,6 +320,7 @@ describe('AgentSteps — raciocínio recolhido por padrão', () => {
     );
 
     await user.click(screen.getByRole('button', { name: /Pensando/ }));
+    await user.click(screen.getByRole('button', { name: 'Pensou' }));
     expect(screen.getByText(reasoning)).toBeTruthy();
 
     rerender(
@@ -328,7 +335,7 @@ describe('AgentSteps — raciocínio recolhido por padrão', () => {
     expect(screen.getByText(reasoning)).toBeTruthy();
   });
 
-  it('keeps the auto-open/auto-collapse behavior when the setting is off (default)', () => {
+  it('keeps the outer auto-open/auto-collapse behavior when the setting is off (default)', () => {
     const { rerender } = render(
       <AgentSteps
         streaming
@@ -338,7 +345,11 @@ describe('AgentSteps — raciocínio recolhido por padrão', () => {
       />,
     );
 
-    expect(screen.getByText(reasoning)).toBeTruthy();
+    // The outer timeline opens while streaming, but the reasoning detail
+    // still starts collapsed like a tool row.
+    expect(screen.getByRole('button', { name: /Pensando/, expanded: true })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pensou', expanded: false })).toBeTruthy();
+    expect(screen.queryByText(reasoning)).toBeNull();
 
     rerender(
       <AgentSteps
@@ -567,7 +578,25 @@ describe('AgentSteps — raciocínio em Markdown', () => {
 
   async function expandTimeline(user: ReturnType<typeof userEvent.setup>) {
     await user.click(screen.getByRole('button', { expanded: false }));
+    await user.click(screen.getByRole('button', { name: 'Pensou' }));
   }
+
+  it('recolhe cada bloco de raciocínio por padrão e alterna como uma tool', async () => {
+    const user = userEvent.setup();
+    renderTimeline('Analisando com calma.');
+
+    await user.click(screen.getByRole('button', { expanded: false }));
+
+    const row = screen.getByRole('button', { name: 'Pensou', expanded: false });
+    expect(screen.queryByText('Analisando com calma.')).toBeNull();
+
+    await user.click(row);
+    expect(screen.getByRole('button', { name: 'Pensou', expanded: true })).toBeTruthy();
+    expect(screen.getByText('Analisando com calma.')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Pensou' }));
+    expect(screen.queryByText('Analisando com calma.')).toBeNull();
+  });
 
   it('renderiza blocos, inline, tabela, código e math dentro do Thinking', async () => {
     const user = userEvent.setup();
@@ -679,7 +708,8 @@ describe('AgentSteps — raciocínio em Markdown', () => {
     expect(container.querySelector('strong')).toBeNull();
   });
 
-  it('mostra o caret de streaming só no último bloco de raciocínio', () => {
+  it('mostra o caret de streaming só no último bloco de raciocínio', async () => {
+    const user = userEvent.setup();
     const first = '**Primeiro** raciocínio.';
     const second = '### Segundo\n\n- um\n- dois';
     const { container } = render(
@@ -699,13 +729,18 @@ describe('AgentSteps — raciocínio em Markdown', () => {
       />,
     );
 
+    for (const row of screen.getAllByRole('button', { name: 'Pensou' })) {
+      await user.click(row);
+    }
+
     const blocks = Array.from(container.querySelectorAll<HTMLElement>('.lumina-prose'));
     expect(blocks).toHaveLength(2);
     expect(blocks[0].classList.contains('lumina-prose--streaming')).toBe(false);
     expect(blocks[1].classList.contains('lumina-prose--streaming')).toBe(true);
   });
 
-  it('não mostra caret quando a fase não é raciocínio', () => {
+  it('não mostra caret quando a fase não é raciocínio', async () => {
+    const user = userEvent.setup();
     const { container } = render(
       <AgentSteps
         streaming
@@ -719,6 +754,8 @@ describe('AgentSteps — raciocínio em Markdown', () => {
         })}
       />,
     );
+
+    await user.click(screen.getByRole('button', { name: 'Pensou' }));
 
     expect(container.querySelector('.lumina-prose--streaming')).toBeNull();
     expect(container.querySelector('.lumina-prose')).toBeTruthy();
@@ -741,6 +778,7 @@ describe('AgentSteps — raciocínio em Markdown', () => {
     );
 
     await user.click(screen.getByRole('button', { expanded: false }));
+    await user.click(screen.getByRole('button', { name: 'Pensou' }));
 
     expect(screen.getByText('Encontrou 2 páginas web')).toBeTruthy();
     expect(screen.getByText('Leu 1 página')).toBeTruthy();
@@ -768,6 +806,7 @@ describe('AgentSteps — raciocínio em Markdown', () => {
     );
 
     await user.click(screen.getByRole('button', { expanded: false }));
+    await user.click(screen.getByRole('button', { name: 'Pensou' }));
 
     expect(screen.getByRole('listitem', { name: 'Leu src/app.ts' })).toBeTruthy();
     expect(screen.getByRole('listitem', { name: 'Executou pnpm test' })).toBeTruthy();

@@ -316,14 +316,19 @@ contrato de sintaxe desta §4** — não há dialeto reduzido no Thinking.
   por passo** com o Markdown **bruto** (apenas `trim` nas pontas); não divide por
   linha em branco nem remove marcadores de lista. Mensagens legadas (sem `trace`)
   viram um bloco único de raciocínio + os grupos de tools.
+- **Detalhe sob demanda**: cada bloco de raciocínio é uma linha recolhível própria
+  (`Pensou` + chevron), **fechada por padrão** como as linhas de tool. Expandir
+  renderiza o Markdown daquele passo; recolher volta ao resumo, sem perder o
+  conteúdo do turno.
 - **Segurança**: o raciocínio passa pelo mesmo sanitizador e pela mesma allowlist
   de URLs (`http(s)`, `mailto:`, `#âncora`); nunca há `innerHTML`. Nenhuma
   superfície nova de XSS: os vetores de §6 valem para as duas variantes.
-- **Streaming**: o bloco abre durante o turno e o último bloco de raciocínio
-  recebe o caret (`lumina-prose--streaming`) enquanto a fase é `reasoning`; fence
-  ainda não fechada renderiza como card de código parcial. Com a resposta pronta
-  o bloco recolhe (ou permanece recolhido, com a opção **Raciocínio recolhido por
-  padrão**).
+- **Streaming**: a timeline externa abre durante o turno; a linha de raciocínio
+  continua recolhida por padrão (spinner no header) e, quando expandida, o último
+  bloco recebe o caret (`lumina-prose--streaming`) enquanto a fase é `reasoning`;
+  fence ainda não fechada renderiza como card de código parcial. Com a resposta
+  pronta a timeline recolhe (ou permanece recolhida, com a opção **Raciocínio
+  recolhido por padrão**).
 - **Diferenças de layout preservadas**: Chat mostra tools de web/skills/artefatos
   como resumos agrupados (domínios, páginas, chips de arquivo) e o header agregado
   **"Pensou por Xs"**; Code mostra uma linha por chamada do harness (`ToolCallRow`:
