@@ -2,19 +2,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Bot } from 'lucide-react';
-import type { ConversationDetail, ToolCallRecord } from '@/lib/types';
+import type { ToolCallRecord } from '@/lib/types';
 
-const mocks = vi.hoisted(() => ({ getConversation: vi.fn() }));
+const mocks = vi.hoisted(() => ({ info: vi.fn() }));
+vi.mock('sonner', () => ({ toast: { info: mocks.info, error: vi.fn() } }));
 
-vi.mock('@/lib/api', () => ({ api: { getConversation: mocks.getConversation } }));
-
+import { useUiStore } from '@/lib/store';
 import { ToolCallRow } from './ToolCallRow';
 
 function taskTool(): ToolCallRecord {
   return {
     id: 'task-1',
     name: 'task',
-    arguments: JSON.stringify({ description: 'Revisar o diff', prompt: 'Aponte bugs' }),
+    arguments: JSON.stringify({
+      description: 'Revisar o diff',
+      prompt: 'Aponte bugs',
+    }),
     status: 'done',
     result: 'Achei um bug.',
     summary: 'Subagente review: Revisar o diff',
@@ -32,54 +35,36 @@ function taskTool(): ToolCallRecord {
   };
 }
 
-describe('ToolCallRow subagent transcript', () => {
+describe('ToolCallRow subagent chat tab', () => {
   afterEach(() => {
     cleanup();
-    mocks.getConversation.mockReset();
+    mocks.info.mockReset();
+    useUiStore.setState({
+      codeSubagentTabs: [],
+      codeSubagentTab: null,
+      codeView: 'session',
+    });
   });
 
-  it('opens the retained transcript from the task row', async () => {
-    const detail: ConversationDetail = {
-      conversation: {
-        id: 'child-1',
-        title: 'Subagente: revisar o diff',
-        createdAt: 1,
-        updatedAt: 2,
-        pinned: false,
-        providerId: 'opencode-go',
-        modelId: 'deepseek-v4.1-flash',
-        messageCount: 1,
-        mode: 'code',
-        codeLinked: false,
-        workspaceId: 'ws-1',
-        agentKind: 'lumina',
-        permissionMode: 'read_only',
-        parentConversationId: 'parent-1',
-        subagentTaskCallId: 'task-1',
-        subagentType: 'review',
-      },
-      messages: [
-        {
-          id: 'msg-1',
-          conversationId: 'child-1',
-          role: 'assistant',
-          content: 'Achei um bug.',
-          status: 'complete',
-          toolCalls: [],
-          citations: [],
-          attachments: [],
-          trace: [],
-          createdAt: 2,
-        },
-      ],
-    };
-    mocks.getConversation.mockResolvedValue(detail);
-
+  it('opens the subagent chat tab and warns instead of duplicating it', () => {
     render(<ToolCallRow tool={taskTool()} icon={Bot} />);
+    const button = screen.getByRole('button', { name: /Abrir chat/i });
 
-    fireEvent.click(screen.getByRole('button', { name: /Ver transcrição/i }));
+    fireEvent.click(button);
 
-    expect(await screen.findByText('Subagente: revisar o diff')).toBeTruthy();
-    expect(mocks.getConversation).toHaveBeenCalledWith('child-1');
+    let state = useUiStore.getState();
+    expect(state.codeView).toBe('subagent');
+    expect(state.codeSubagentTabs).toHaveLength(1);
+    expect(state.codeSubagentTab).toMatchObject({
+      conversationId: 'child-1',
+      taskCallId: 'task-1',
+      subagentType: 'review',
+      prompt: 'Aponte bugs',
+    });
+
+    fireEvent.click(button);
+    state = useUiStore.getState();
+    expect(state.codeSubagentTabs).toHaveLength(1);
+    expect(mocks.info).toHaveBeenCalledWith('Este subagente já está aberto em uma aba.');
   });
 });

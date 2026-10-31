@@ -8,6 +8,8 @@ import { ModelSwitchDivider, modelSwitchAt } from './ModelSwitchDivider';
 export interface MessageListProps {
   messages: ChatMessage[];
   streaming: StreamingState | null;
+  /** Hide message-level actions (edit/regenerate/feedback) for audit views. */
+  readOnly?: boolean;
 }
 
 /**
@@ -18,7 +20,7 @@ export interface MessageListProps {
  * response inaugurates a new route, a discreet divider is rendered as a sibling
  * right before it. `MessageItem` keeps owning its own grouping/spacing.
  */
-export function MessageList({ messages, streaming }: MessageListProps) {
+export function MessageList({ messages, streaming, readOnly = false }: MessageListProps) {
   return (
     <div
       role="log"
@@ -36,6 +38,13 @@ export function MessageList({ messages, streaming }: MessageListProps) {
               message={message}
               isStreaming={streaming?.assistantId === message.id}
               isGroupStart={index === 0 || messages[index - 1]?.role !== message.role}
+              readOnly={readOnly}
+              streamPhase={
+                streaming?.assistantId === message.id ? streaming.phase : null
+              }
+              streamStartedAt={
+                streaming?.assistantId === message.id ? streaming.startedAt : null
+              }
             />
           </Fragment>
         );

@@ -156,6 +156,7 @@ pub enum TurnEvent {
         conversation_id: String,
         subagent_type: String,
         description: String,
+        prompt: String,
         provider_id: String,
         model_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]

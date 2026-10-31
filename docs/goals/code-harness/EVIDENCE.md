@@ -139,9 +139,11 @@ Pesquisa (5 documentos em `docs/research/`, ~190 KB): `dsh-harness-map.md` (DSH 
   profundidade, execução de um turno filho real com provider falso, prompt não duplicado,
   session id do pai, uso agregado, erro do provider não mascarado, limpeza em
   drop/cancelamento e tool fora do catálogo recusada. O resumo aparece no bloco “Thinking” com
-  linha ao vivo; o transcript filho é retido e aberto por “Ver transcrição”/seção “Subagentes”.
-  A `presentation` `subagent` persiste id/modelo/effort/steps/usage (sem card separado, conforme
-  `WORKBENCH.md` §5.1).
+  linha ao vivo; o transcript filho é retido e aberto como aba de chat read-only pelo botão
+  “Abrir chat” e pela seção “Subagentes”. Cada subagente tem uma aba própria (`Bot`), com
+  deduplicação por `conversationId`; abrir a mesma conversa novamente só ativa a existente e
+  avisa. A `presentation` `subagent` persiste id/modelo/effort/steps/usage (sem card separado,
+  conforme `WORKBENCH.md` §5.1).
 - **Composer**: `/test`, `/review` e `/init` agora preenchem prompts que citam `run_checks`,
   `task` (revisão delegada) e revisão do AGENTS.md antes de gravar.
 - Docs atualizados (`TOOLS.md` §2.6, `ARCHITECTURE` §8.3, `FILES` §16). Verificação no fecho da
@@ -301,10 +303,10 @@ configuração para MCP/servidores e "Verificações" no painel (backend exposto
   consumo é agregado ao pai, sem dupla contagem). Testes de retenção/cascata, drop, cancelamento,
   falha de workspace, falha do provider e limpeza de `usage_log`.
 - **Roadmap restante entregue**: `TurnEvent::Subagent*` encaminha eventos filtrados do filho para
-  a linha ao vivo; `SubagentTranscriptDialog`/seção “Subagentes” do popover abrem transcripts
-  retidos; `task` aceita `model`/`effort` validados (`SUBAGENT_MODEL_INVALID`/
-  `SUBAGENT_REASONING_*`); `task` é `Safe` com semáforo de 4 e execução paralela de chamadas
-  independentes.
+  a linha ao vivo; cada subagente abre em uma **aba de chat read-only** (`SubagentChatView`,
+  múltiplas abas com deduplicação por `conversationId` e aviso ao tentar duplicar); `task` aceita
+  `model`/`effort` validados (`SUBAGENT_MODEL_INVALID`/`SUBAGENT_REASONING_*`); `task` é `Safe`
+  com semáforo de 4 e execução paralela de chamadas independentes.
 - **Cancelamento**: `run_task` usa `cancel.child_token()`, propaga ao `run_turn` e espera um
   período de graça; o filho não cria token próprio.
 - **Contexto/prompt/cache**: `ParentTurnContext` usa provider/modelo/workspace efetivos; o pedido
@@ -316,5 +318,5 @@ configuração para MCP/servidores e "Verificações" no painel (backend exposto
   `SUBAGENT_INVALID_TYPE`.
 - **Testes**: 18 testes de subagente (`cargo test --lib subagent`), `task_*` (6), allowlist (1),
   retenção/cascata, rota/modelo/effort, eventos ao vivo e transcript na UI; verificação final:
-  `cargo test --lib` 1032 verdes, `pnpm test` 132 arquivos/2425 testes verdes, `pnpm typecheck` e
+  `cargo test --lib` 1032 verdes, `pnpm test` 133 arquivos/2431 testes verdes, `pnpm typecheck` e
   `pnpm build` verdes.

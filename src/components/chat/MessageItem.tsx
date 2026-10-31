@@ -65,9 +65,20 @@ interface MessageItemProps {
   message: ChatMessage;
   isStreaming: boolean;
   isGroupStart: boolean;
+  /** Audit/subagent views hide edit/regenerate/feedback actions. */
+  readOnly?: boolean;
+  /** Streaming phase owned by the caller (global chat or a subagent tab). */
+  streamPhase?: 'starting' | 'reasoning' | 'text' | 'tool' | null;
+  /** Turn start timestamp owned by the caller (used by AgentSteps). */
+  streamStartedAt?: number | null;
 }
 
-const UserMessageItem = memo(function UserMessageItem({ message, isStreaming, isGroupStart }: MessageItemProps) {
+const UserMessageItem = memo(function UserMessageItem({
+  message,
+  isStreaming,
+  isGroupStart,
+  readOnly = false,
+}: MessageItemProps) {
   const { copied, copy } = useCopyFeedback();
   const reduceMotion = useReduceMotion();
   const [editing, setEditing] = useState(false);
@@ -142,31 +153,38 @@ const UserMessageItem = memo(function UserMessageItem({ message, isStreaming, is
           >
             {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
           </IconButton>
-          <IconButton
-            label="Editar mensagem"
-            size="sm"
-            variant="ghost"
-            className="size-8"
-            disabled={isStreaming}
-            onClick={startEditing}
-          >
-            <Pencil className="size-3.5" />
-          </IconButton>
+          {!readOnly ? (
+            <IconButton
+              label="Editar mensagem"
+              size="sm"
+              variant="ghost"
+              className="size-8"
+              disabled={isStreaming}
+              onClick={startEditing}
+            >
+              <Pencil className="size-3.5" />
+            </IconButton>
+          ) : null}
         </div>
       ) : null}
     </motion.div>
   );
 });
 
-const AssistantMessageItem = memo(function AssistantMessageItem({ message, isStreaming, isGroupStart }: MessageItemProps) {
+const AssistantMessageItem = memo(function AssistantMessageItem({
+  message,
+  isStreaming,
+  isGroupStart,
+  readOnly = false,
+  streamPhase = null,
+  streamStartedAt = null,
+}: MessageItemProps) {
   const { copied, copy } = useCopyFeedback();
   const reduceMotion = useReduceMotion();
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
 
-  const phase = useChatStore((state) => (state.streaming?.assistantId === message.id ? state.streaming.phase : null));
-  const startedAt = useChatStore((state) =>
-    state.streaming?.assistantId === message.id ? state.streaming.startedAt : null,
-  );
+  const phase = streamPhase;
+  const startedAt = streamStartedAt;
   const anyStreaming = useChatStore((state) => state.streaming !== null);
   const showTokenUsage = useAppStore((state) => state.settings.showTokenUsage);
   const artifacts = useUiStore((state) => state.artifacts);
@@ -246,16 +264,22 @@ const AssistantMessageItem = memo(function AssistantMessageItem({ message, isStr
                 ) : (
                   <p className="mt-1 text-[12.5px] text-foreground-muted">Tente novamente em instantes.</p>
                 )}
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <Button variant="secondary" size="sm" onClick={regenerate} disabled={anyStreaming}>
-                    Tentar novamente
-                  </Button>
-                  {isKeyError ? (
-                    <Button variant="ghost" size="sm" onClick={() => useUiStore.getState().setSettingsOpen(true)}>
-                      Abrir configurações
+                {!readOnly ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <Button variant="secondary" size="sm" onClick={regenerate} disabled={anyStreaming}>
+                      Tentar novamente
                     </Button>
-                  ) : null}
-                </div>
+                    {isKeyError ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => useUiStore.getState().setSettingsOpen(true)}
+                      >
+                        Abrir configurações
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -295,38 +319,42 @@ const AssistantMessageItem = memo(function AssistantMessageItem({ message, isStr
             >
               {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
             </IconButton>
-            <IconButton
-              label="Regenerar resposta"
-              size="sm"
-              variant="ghost"
-              className="size-8"
-              disabled={anyStreaming}
-              onClick={regenerate}
-            >
-              <RefreshCw className="size-3.5" />
-            </IconButton>
-            <IconButton
-              label="Resposta útil"
-              size="sm"
-              variant="ghost"
-              className="size-8"
-              active={feedback === 'up'}
-              aria-pressed={feedback === 'up'}
-              onClick={() => setFeedback((current) => (current === 'up' ? null : 'up'))}
-            >
-              <ThumbsUp className="size-3.5" />
-            </IconButton>
-            <IconButton
-              label="Resposta não útil"
-              size="sm"
-              variant="ghost"
-              className="size-8"
-              active={feedback === 'down'}
-              aria-pressed={feedback === 'down'}
-              onClick={() => setFeedback((current) => (current === 'down' ? null : 'down'))}
-            >
-              <ThumbsDown className="size-3.5" />
-            </IconButton>
+            {!readOnly ? (
+              <>
+                <IconButton
+                  label="Regenerar resposta"
+                  size="sm"
+                  variant="ghost"
+                  className="size-8"
+                  disabled={anyStreaming}
+                  onClick={regenerate}
+                >
+                  <RefreshCw className="size-3.5" />
+                </IconButton>
+                <IconButton
+                  label="Resposta útil"
+                  size="sm"
+                  variant="ghost"
+                  className="size-8"
+                  active={feedback === 'up'}
+                  aria-pressed={feedback === 'up'}
+                  onClick={() => setFeedback((current) => (current === 'up' ? null : 'up'))}
+                >
+                  <ThumbsUp className="size-3.5" />
+                </IconButton>
+                <IconButton
+                  label="Resposta não útil"
+                  size="sm"
+                  variant="ghost"
+                  className="size-8"
+                  active={feedback === 'down'}
+                  aria-pressed={feedback === 'down'}
+                  onClick={() => setFeedback((current) => (current === 'down' ? null : 'down'))}
+                >
+                  <ThumbsDown className="size-3.5" />
+                </IconButton>
+              </>
+            ) : null}
 
             {model || (showTokenUsage && totalTokens) ? (
               <span aria-hidden className="mx-1 h-3 w-px bg-border" />

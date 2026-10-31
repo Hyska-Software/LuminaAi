@@ -5,11 +5,11 @@ import type { Conversation } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
   listSubagentConversations: vi.fn(),
-  getConversation: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
 
+import { useUiStore } from '@/lib/store';
 import { SubagentList } from './SubagentList';
 
 function child(): Conversation {
@@ -37,36 +37,29 @@ describe('SubagentList', () => {
   afterEach(() => {
     cleanup();
     mocks.listSubagentConversations.mockReset();
-    mocks.getConversation.mockReset();
+    useUiStore.setState({
+      codeSubagentTabs: [],
+      codeSubagentTab: null,
+      codeView: 'session',
+    });
   });
 
-  it('lists retained children and opens the selected transcript', async () => {
+  it('lists retained children and opens the selected chat tab', async () => {
     mocks.listSubagentConversations.mockResolvedValue([child()]);
-    mocks.getConversation.mockResolvedValue({
-      conversation: child(),
-      messages: [
-        {
-          id: 'msg-1',
-          conversationId: 'child-1',
-          role: 'assistant',
-          content: 'Achei um bug.',
-          status: 'complete',
-          toolCalls: [],
-          citations: [],
-          attachments: [],
-          trace: [],
-          createdAt: 2,
-        },
-      ],
-    });
 
     render(<SubagentList conversationId="parent-1" />);
 
     expect(await screen.findByText('Subagentes · 1')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Subagente: revisar o diff/i }));
 
-    expect(await screen.findByText('Achei um bug.')).toBeTruthy();
-    expect(mocks.getConversation).toHaveBeenCalledWith('child-1');
+    const state = useUiStore.getState();
+    expect(state.codeView).toBe('subagent');
+    expect(state.codeSubagentTabs).toHaveLength(1);
+    expect(state.codeSubagentTab).toMatchObject({
+      conversationId: 'child-1',
+      taskCallId: 'task-1',
+      subagentType: 'review',
+    });
   });
 
   it('shows an empty state when the parent has no children', async () => {

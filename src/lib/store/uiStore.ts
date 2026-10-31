@@ -25,10 +25,19 @@ export type LayoutMode = 'chat' | 'code';
  * aba central (WORKBENCH §7.2); `file` mostra a prévia de um arquivo do
  * workspace na mesma faixa de abas (código, imagem ou PDF); `plan` mostra o
  * plano aprovado da sessão em Markdown na mesma faixa (ver `codePlanTab`);
- * `goal` mostra o painel do objetivo persistente (docs/goals/code-goals).
- * Os alvos vivem em `codeDiffTab`/`codeFileTab`/`codePlanTab`.
+ * `goal` mostra o painel do objetivo persistente (docs/goals/code-goals);
+ * `subagent` mostra o chat read-only de um subagente em uma aba própria.
+ * Os alvos vivem em `codeDiffTab`/`codeFileTab`/`codePlanTab`/`codeSubagentTab`.
  */
-export type CodeView = 'session' | 'skills' | 'diff' | 'commits' | 'file' | 'plan' | 'goal';
+export type CodeView =
+  | 'session'
+  | 'skills'
+  | 'diff'
+  | 'commits'
+  | 'file'
+  | 'plan'
+  | 'goal'
+  | 'subagent';
 
 /** Diff aberto como aba central (alvo é volátil; não persiste entre sessões). */
 export interface CodeDiffTab {
@@ -69,6 +78,28 @@ export interface CodePlanTab {
   /** Rótulo curto da aba (default: "Plano"). */
   title?: string;
   updatedAt: number;
+}
+
+/**
+ * Read-only child chat opened as a center tab. The `conversationId` is the
+ * stable identity (same child opened from the task row or the Subagents list
+ * maps to the same tab); `taskCallId` locates the live state while running.
+ */
+export interface CodeSubagentTab {
+  conversationId: string;
+  taskCallId: string;
+  subagentType: string;
+  description: string;
+  providerId?: string | null;
+  modelId?: string | null;
+  effort?: string | null;
+  prompt?: string | null;
+}
+
+/** Stable key for a subagent tab (deduplicates the same child transcript). */
+export function codeSubagentTabKey(tab: CodeSubagentTab): string {
+  const conversation = tab.conversationId.trim();
+  return conversation.length > 0 ? conversation : tab.taskCallId.trim();
 }
 
 /** Tabs of the Code right panel (Arquivos | Alterações). */
@@ -146,6 +177,10 @@ interface UiState {
   codeFileTab: CodeFileTab | null;
   /** Plano aprovado exibido como aba central (`null` = nenhum/aba fechada). */
   codePlanTab: CodePlanTab | null;
+  /** Subagent chats abertos como abas centrais, na ordem de abertura. */
+  codeSubagentTabs: CodeSubagentTab[];
+  /** Aba ativa de subagente (`null` = nenhuma; sempre presente na lista). */
+  codeSubagentTab: CodeSubagentTab | null;
   /** Aba "Objetivo" aberta no centro (volátil, como a do plano). */
   codeGoalOpen: boolean;
   /** Diálogo de criação/edição do objetivo (`null` = fechado). */
@@ -206,6 +241,13 @@ interface UiState {
   openCodePlan: (target: CodePlanTab) => void;
   /** Fecha a aba do plano; se ela era a ativa, volta para a sessão. */
   closeCodePlan: () => void;
+  /**
+   * Opens a subagent chat tab. Returns `exists` (and focuses the existing tab)
+   * when the same child conversation is already open.
+   */
+  openCodeSubagent: (target: CodeSubagentTab) => 'opened' | 'exists';
+  /** Closes one subagent tab (default: the active one). */
+  closeCodeSubagent: (target?: CodeSubagentTab) => void;
   /** Abre a aba central "Objetivo" (`codeView` vira goal). */
   openCodeGoal: () => void;
   /** Fecha a aba do objetivo; se ela era a ativa, volta para a sessão. */
@@ -266,7 +308,10 @@ interface UiState {
 }
 
 /** Aba central aberta no centro (as três abas convivem na faixa de abas). */
-type CentralCodeView = Extract<CodeView, 'diff' | 'file' | 'commits' | 'plan' | 'goal'>;
+type CentralCodeView = Extract<
+  CodeView,
+  'diff' | 'file' | 'commits' | 'plan' | 'goal' | 'subagent'
+>;
 
 /**
  * Fechar uma aba central em **segundo plano** (o usuário está lendo outra aba)
@@ -311,6 +356,8 @@ export const useUiStore = create<UiState>()(
       codeFileTabs: [],
       codeFileTab: null,
       codePlanTab: null,
+      codeSubagentTabs: [],
+      codeSubagentTab: null,
       codeGoalOpen: false,
       goalDialog: null,
       codeFileWrap: false,
@@ -355,7 +402,9 @@ export const useUiStore = create<UiState>()(
                       ? 'plan'
                       : codeView === 'goal'
                         ? 'goal'
-                        : 'session',
+                        : codeView === 'subagent'
+                          ? 'subagent'
+                          : 'session',
         }),
       openCodeDiff: (codeDiffTab) => set({ codeDiffTab, codeView: 'diff' }),
       closeCodeDiff: () =>
@@ -403,6 +452,68 @@ export const useUiStore = create<UiState>()(
         }),
       closeCodePlan: () =>
         set((state) => ({ codePlanTab: null, ...keepCenterViewUnlessActive(state, 'plan') })),
+      openCodeSubagent: (target) => {
+        const key = codeSubagentTabKey(target);
+        if (!key) return 'exists';
+        const existing = get().codeSubagentTabs.find(
+          (tab) => codeSubagentTabKey(tab) === key,
+        );
+        if (existing) {
+          const updated: CodeSubagentTab = {
+            ...existing,
+            ...target,
+            taskCallId: target.taskCallId || existing.taskCallId,
+            subagentType: target.subagentType || existing.subagentType,
+            description: target.description || existing.description,
+            providerId: target.providerId ?? existing.providerId,
+            modelId: target.modelId ?? existing.modelId,
+            effort: target.effort ?? existing.effort,
+            prompt: target.prompt ?? existing.prompt,
+          };
+          set((state) => ({
+            codeSubagentTabs: state.codeSubagentTabs.map((tab) =>
+              codeSubagentTabKey(tab) === key ? updated : tab,
+            ),
+            codeSubagentTab: updated,
+            codeView: 'subagent',
+          }));
+          return 'exists';
+        }
+        set((state) => ({
+          codeSubagentTabs: [...state.codeSubagentTabs, target],
+          codeSubagentTab: target,
+          codeView: 'subagent',
+        }));
+        return 'opened';
+      },
+      closeCodeSubagent: (target) =>
+        set((state) => {
+          const closing = target ?? state.codeSubagentTab;
+          if (!closing) return {};
+          const closingKey = codeSubagentTabKey(closing);
+          const index = state.codeSubagentTabs.findIndex(
+            (tab) => codeSubagentTabKey(tab) === closingKey,
+          );
+          if (index < 0) return {};
+          const remaining = state.codeSubagentTabs.filter(
+            (_, tabIndex) => tabIndex !== index,
+          );
+          const activeKey = state.codeSubagentTab
+            ? codeSubagentTabKey(state.codeSubagentTab)
+            : null;
+          if (activeKey !== closingKey) {
+            return { codeSubagentTabs: remaining };
+          }
+          const neighbor = remaining[Math.min(index, remaining.length - 1)] ?? null;
+          return {
+            codeSubagentTabs: remaining,
+            codeSubagentTab: neighbor,
+            codeView:
+              neighbor === null && state.codeView === 'subagent'
+                ? 'session'
+                : state.codeView,
+          };
+        }),
       openCodeGoal: () => set({ codeGoalOpen: true, codeView: 'goal' }),
       closeCodeGoal: () =>
         set((state) => ({ codeGoalOpen: false, ...keepCenterViewUnlessActive(state, 'goal') })),

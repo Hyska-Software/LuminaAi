@@ -742,6 +742,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
                         conversationId: event.conversationId,
                         subagentType: event.subagentType,
                         description: event.description,
+                        prompt: event.prompt,
                         providerId: event.providerId,
                         modelId: event.modelId,
                         effort: event.effort ?? null,
@@ -750,6 +751,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
                         steps: 0,
                         text: '',
                         reasoning: '',
+                        trace: [],
                         toolCalls: [],
                       },
                     },
@@ -764,11 +766,26 @@ export const useChatStore = create<ChatState>()((set, get) => {
             patchSubagent(event.taskCallId, (current) => ({
               ...current,
               steps: Math.max(current.steps, nested.step),
+              trace:
+                current.trace.length >= nested.step
+                  ? current.trace
+                  : [...current.trace, { toolCalls: 0 }],
             }));
           } else if (nested.type === 'reasoning_delta') {
             patchSubagent(event.taskCallId, (current) => ({
               ...current,
               reasoning: current.reasoning + nested.delta,
+              trace:
+                current.trace.length === 0
+                  ? [{ reasoning: nested.delta, toolCalls: 0 }]
+                  : current.trace.map((step, index) =>
+                      index === current.trace.length - 1
+                        ? {
+                            ...step,
+                            reasoning: `${step.reasoning ?? ''}${nested.delta}`,
+                          }
+                        : step,
+                    ),
             }));
           } else if (nested.type === 'text_delta') {
             patchSubagent(event.taskCallId, (current) => ({
@@ -778,6 +795,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
           } else if (nested.type === 'tool_call_started') {
             patchSubagent(event.taskCallId, (current) => ({
               ...current,
+              trace:
+                current.trace.length === 0
+                  ? [{ toolCalls: 1 }]
+                  : current.trace.map((step, index) =>
+                      index === current.trace.length - 1
+                        ? { ...step, toolCalls: step.toolCalls + 1 }
+                        : step,
+                    ),
               toolCalls: [
                 ...current.toolCalls.filter((tool) => tool.id !== nested.toolCall.id),
                 nested.toolCall,

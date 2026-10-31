@@ -54,6 +54,29 @@ afterEach(() => {
   useChatStore.setState({ streaming: null });
 });
 
+describe('MessageItem — readOnly', () => {
+  it('esconde edição, regeneração e feedback, preservando cópia', () => {
+    const { rerender } = render(
+      <MessageItem message={message()} isStreaming={false} isGroupStart readOnly />,
+    );
+    expect(screen.queryByRole('button', { name: 'Editar mensagem' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Copiar mensagem' })).toBeTruthy();
+
+    const assistant = message({
+      id: 'a-1',
+      role: 'assistant',
+      content: 'Resposta do subagente.',
+    });
+    rerender(
+      <MessageItem message={assistant} isStreaming={false} isGroupStart readOnly />,
+    );
+    expect(screen.queryByRole('button', { name: 'Regenerar resposta' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Resposta útil' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Resposta não útil' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Copiar resposta' })).toBeTruthy();
+  });
+});
+
 describe('MessageItem — origem goal_round', () => {
   it('renderiza um divisor acessível em vez da bolha do usuário', () => {
     renderMessage(goalRoundMessage());

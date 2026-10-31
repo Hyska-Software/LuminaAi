@@ -386,9 +386,12 @@ M  src/app.ts           (staged)
   edição/`ask_user`). O filho usa o `conversation_id` do pai como `x-opencode-session` (F4.3b) e
   seus tokens/custo entram no `usage` do turno pai.
 - **UI**: linha ao vivo no bloco “Thinking” (status, passos, modelo/effort, texto recente) e botão
-  “Ver transcrição” que abre o transcript retido; o popover do composer tem uma seção
-  “Subagentes” com todos os transcripts retidos do pai (inclusive erro/cancelamento). A
-  `presentation` `subagent` persiste
+  “Abrir chat”, que abre o subagente como uma aba de chat read-only no centro do Workbench
+  (Markdown, Thinking, tools; sem Composer, edição/regeneração/feedback nem cards de
+  aprovação/plano). Cada subagente tem sua própria aba, identificada por `Bot`; abrir a mesma
+  conversa de novo não duplica a aba — apenas a ativa e mostra um aviso. O popover do composer
+  tem uma seção “Subagentes” com todos os transcripts retidos do pai (inclusive
+  erro/cancelamento), que também abrem a aba. A `presentation` `subagent` persiste
   `conversationId`/`providerId`/`modelId`/`effort`/`steps`/`durationMs`/`usage`.
 - **Testes**: kinds/parse, catálogo reduzido sem MCP, guarda de profundidade, execução de um turno
   filho real com provider falso, prompt não duplicado, session id do pai, uso agregado, erro do

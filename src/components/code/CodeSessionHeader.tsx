@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
+  Bot,
   Copy,
   ExternalLink,
   FileDiff,
@@ -33,10 +34,12 @@ import { filterConversationsForLayout } from '@/lib/conversations';
 import { goalIsRunning, goalPauseReasonLabel } from '@/lib/goalRunner';
 import {
   codeFileTabKey,
+  codeSubagentTabKey,
   useChatStore,
   useCodeStore,
   useUiStore,
   type CodeFileTab,
+  type CodeSubagentTab,
 } from '@/lib/store';
 import type { Conversation, GoalView, Workspace } from '@/lib/types';
 import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel';
@@ -63,10 +66,31 @@ const CODE_GOAL_TAB_ID = '__code_goal__';
  * DOM (o `\0` interno vira `%00`, então nenhum atributo carrega NUL).
  */
 const CODE_FILE_TAB_PREFIX = '__code_file__:';
+/** Prefix for retained subagent chat tabs (one per child conversation). */
+const CODE_SUBAGENT_TAB_PREFIX = '__code_subagent__:';
+
+const SUBAGENT_TYPE_LABELS: Record<string, string> = {
+  explore: 'exploração',
+  review: 'revisão',
+  general: 'geral',
+};
 
 /** DOM id da aba de um arquivo aberto. */
 function codeFileTabDomId(tab: CodeFileTab): string {
   return `${CODE_FILE_TAB_PREFIX}${encodeURIComponent(codeFileTabKey(tab))}`;
+}
+
+function codeSubagentTabDomId(tab: CodeSubagentTab): string {
+  return `${CODE_SUBAGENT_TAB_PREFIX}${encodeURIComponent(codeSubagentTabKey(tab))}`;
+}
+
+function findCodeSubagentTab(id: string): CodeSubagentTab | null {
+  if (!id.startsWith(CODE_SUBAGENT_TAB_PREFIX)) return null;
+  return (
+    useUiStore
+      .getState()
+      .codeSubagentTabs.find((tab) => codeSubagentTabDomId(tab) === id) ?? null
+  );
 }
 
 /** Localiza a aba de arquivo de um id do DOM (ou `null` se não estiver aberta). */
@@ -306,9 +330,13 @@ export function CodeSessionHeader() {
   const closeCodeCommits = useUiStore((state) => state.closeCodeCommits);
   const codeFileTabs = useUiStore((state) => state.codeFileTabs);
   const codePlanTab = useUiStore((state) => state.codePlanTab);
+  const codeSubagentTabs = useUiStore((state) => state.codeSubagentTabs);
+  const codeSubagentTab = useUiStore((state) => state.codeSubagentTab);
+  const closeCodeSubagent = useUiStore((state) => state.closeCodeSubagent);
   const codeGoalOpen = useUiStore((state) => state.codeGoalOpen);
   const codeFileTab = useUiStore((state) => state.codeFileTab);
   const closeCodeFile = useUiStore((state) => state.closeCodeFile);
+  const liveSubagents = useChatStore((state) => state.streaming?.subagents);
   const viewportWidth = useViewportWidth();
   /** The docked code panel only exists on wide windows (see CodePanel). */
   const canDock = viewportWidth >= SIDE_PANEL_DOCK_MIN_VIEWPORT;
@@ -419,6 +447,11 @@ export function CodeSessionHeader() {
       useUiStore.getState().openCodeGoal();
       return;
     }
+    if (id.startsWith(CODE_SUBAGENT_TAB_PREFIX)) {
+      const subagentTarget = findCodeSubagentTab(id);
+      if (subagentTarget) useUiStore.getState().openCodeSubagent(subagentTarget);
+      return;
+    }
     if (id === NEW_SESSION_ID) return;
     const isActiveConversation = id === activeId;
     // Clicar na aba da conversa que JÁ está ativa é no-op… exceto quando o
@@ -459,6 +492,15 @@ export function CodeSessionHeader() {
     if (id === CODE_GOAL_TAB_ID) {
       useUiStore.getState().closeCodeGoal();
       focusTab(activeId ?? undefined);
+      return;
+    }
+    if (id.startsWith(CODE_SUBAGENT_TAB_PREFIX)) {
+      const subagentTarget = findCodeSubagentTab(id);
+      if (!subagentTarget) return;
+      closeCodeSubagent(subagentTarget);
+      const nextSubagent = useUiStore.getState().codeSubagentTab;
+      if (nextSubagent) focusTab(codeSubagentTabDomId(nextSubagent));
+      else focusTab(activeId ?? undefined);
       return;
     }
     const index = tabs.findIndex((tab) => tab.id === id);
@@ -733,6 +775,73 @@ export function CodeSessionHeader() {
               );
             })
           )}
+          {codeSubagentTabs.map((subagentTab) => {
+            const id = codeSubagentTabDomId(subagentTab);
+            const selected =
+              codeView === 'subagent' &&
+              codeSubagentTab !== null &&
+              codeSubagentTabKey(codeSubagentTab) ===
+                codeSubagentTabKey(subagentTab);
+            const live = liveSubagents?.[subagentTab.taskCallId];
+            const label = `Subagente ${subagentTab.description}`;
+            return (
+              <div
+                key={id}
+                role="presentation"
+                className={cn(
+                  'group flex h-8 max-w-48 shrink-0 items-center rounded-lg transition-colors duration-150',
+                  selected
+                    ? 'bg-surface-raised text-foreground shadow-sm'
+                    : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                )}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-label={label}
+                  aria-selected={selected}
+                  aria-controls="code-subagent-panel"
+                  title={label}
+                  tabIndex={selected ? 0 : -1}
+                  ref={addTabRef(id)}
+                  onClick={() => selectTab(id)}
+                  onKeyDown={(event) => handleTabKeyDown(event, id)}
+                  className={cn(
+                    'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                    'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                  )}
+                >
+                  <Bot
+                    aria-hidden
+                    className={cn(
+                      'size-3.5 shrink-0',
+                      live?.status === 'running' ? 'text-accent' : 'text-foreground-subtle',
+                    )}
+                    strokeWidth={1.75}
+                  />
+                  <span className="truncate">
+                    {SUBAGENT_TYPE_LABELS[subagentTab.subagentType] ??
+                      subagentTab.subagentType}{' '}
+                    · {subagentTab.description}
+                  </span>
+                  {live?.status === 'running' ? <Spinner size="xs" /> : null}
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Fechar ${label}`}
+                  tabIndex={-1}
+                  onClick={() => closeTab(id)}
+                  className={cn(
+                    'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                    'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                  )}
+                >
+                  <X aria-hidden className="size-3.5" />
+                </button>
+              </div>
+            );
+          })}
           {codeFileTabs.map((fileTab) => {
             const id = codeFileTabDomId(fileTab);
             const name = codeFileTabName(fileTab);

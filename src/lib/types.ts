@@ -701,6 +701,7 @@ export interface SubagentLiveState {
   conversationId: string;
   subagentType: string;
   description: string;
+  prompt: string;
   providerId: string;
   modelId: string;
   effort?: string | null;
@@ -709,6 +710,7 @@ export interface SubagentLiveState {
   steps: number;
   text: string;
   reasoning: string;
+  trace: TraceStep[];
   toolCalls: ToolCallRecord[];
   usage?: UsageInfo;
   durationMs?: number;
@@ -963,6 +965,7 @@ export type TurnEvent =
       conversationId: string;
       subagentType: string;
       description: string;
+      prompt: string;
       providerId: string;
       modelId: string;
       effort?: string | null;

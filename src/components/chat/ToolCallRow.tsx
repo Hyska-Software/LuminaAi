@@ -9,10 +9,9 @@ import {
 import { toast } from 'sonner';
 
 import { DiffView } from '@/components/code/DiffView';
-import { SubagentTranscriptDialog } from '@/components/agent/SubagentTranscriptDialog';
 import { Spinner } from '@/components/ui';
 import { describeCodeTool, type CodeToolLabel } from '@/lib/agentTrace';
-import { useChatStore } from '@/lib/store/chatStore';
+import { useChatStore, useUiStore, type CodeSubagentTab } from '@/lib/store';
 import type { ToolCallRecord } from '@/lib/types';
 import { cn, copyText, formatDuration } from '@/lib/utils';
 
@@ -49,6 +48,15 @@ function resultBody(result: string | null | undefined): string {
 
 function fileChangeOf(tool: ToolCallRecord) {
   return tool.presentation?.kind === 'file_change' ? tool.presentation : null;
+}
+
+function taskPrompt(tool: ToolCallRecord): string | null {
+  try {
+    const parsed = JSON.parse(tool.arguments) as { prompt?: unknown };
+    return typeof parsed.prompt === 'string' ? parsed.prompt : null;
+  } catch {
+    return null;
+  }
 }
 
 function durationMs(tool: ToolCallRecord): number | null {
@@ -134,7 +142,26 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
     tool.presentation?.kind === 'subagent' ? tool.presentation : null;
   const subagentConversationId =
     liveSubagent?.conversationId ?? subagentPresentation?.conversationId ?? null;
-  const [transcriptOpen, setTranscriptOpen] = useState(false);
+
+  const openSubagentChat = () => {
+    if (!subagentConversationId) return;
+    const target: CodeSubagentTab = {
+      conversationId: subagentConversationId,
+      taskCallId: liveSubagent?.taskCallId ?? tool.id,
+      subagentType:
+        liveSubagent?.subagentType ?? subagentPresentation?.subagentType ?? 'explore',
+      description:
+        liveSubagent?.description ?? subagentPresentation?.description ?? 'Subagente',
+      providerId: liveSubagent?.providerId ?? subagentPresentation?.providerId ?? null,
+      modelId: liveSubagent?.modelId ?? subagentPresentation?.modelId ?? null,
+      effort: liveSubagent?.effort ?? subagentPresentation?.effort ?? null,
+      prompt: liveSubagent?.prompt ?? taskPrompt(tool),
+    };
+    const result = useUiStore.getState().openCodeSubagent(target);
+    if (result === 'exists') {
+      toast.info('Este subagente já está aberto em uma aba.');
+    }
+  };
 
   const header = (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -256,10 +283,10 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
           {subagentConversationId ? (
             <button
               type="button"
-              onClick={() => setTranscriptOpen(true)}
+              onClick={openSubagentChat}
               className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
-              Ver transcrição
+              Abrir chat
             </button>
           ) : null}
         </div>
@@ -279,12 +306,6 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
           )}
         </div>
       ) : null}
-
-      <SubagentTranscriptDialog
-        conversationId={subagentConversationId}
-        open={transcriptOpen}
-        onOpenChange={setTranscriptOpen}
-      />
     </li>
   );
 }

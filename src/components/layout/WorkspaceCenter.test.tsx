@@ -54,6 +54,12 @@ vi.mock('@/components/code', () => ({
   ),
 }));
 
+vi.mock('@/components/agent/SubagentChatView', () => ({
+  SubagentChatView: ({ target }: { target: { description: string } }) => (
+    <div data-testid="subagent-chat-view">{target.description}</div>
+  ),
+}));
+
 vi.mock('@/components/skills', () => ({
   SkillsView: ({ onBack, backLabel }: { onBack?: () => void; backLabel?: string }) => (
     <div data-testid="skills-view">
@@ -80,6 +86,8 @@ beforeEach(() => {
     codeCommitsTab: null,
     codeFileTab: null,
     codePlanTab: null,
+    codeSubagentTabs: [],
+    codeSubagentTab: null,
     codeGoalOpen: false,
     goalDialog: null,
   });
@@ -273,7 +281,36 @@ describe('WorkspaceCenter — aba central de arquivo', () => {
   });
 });
 
-describe('WorkspaceCenter — aba central de objetivo', () => {
+describe('WorkspaceCenter - aba central de subagente', () => {
+  it('mostra o chat do subagente no centro mantendo header e chat montados', () => {
+    useUiStore.setState({
+      layoutMode: 'code',
+      codeView: 'subagent',
+      codeSubagentTabs: [
+        {
+          conversationId: 'child-1',
+          taskCallId: 'task-1',
+          subagentType: 'review',
+          description: 'Revisar o diff',
+        },
+      ],
+      codeSubagentTab: {
+        conversationId: 'child-1',
+        taskCallId: 'task-1',
+        subagentType: 'review',
+        description: 'Revisar o diff',
+      },
+    });
+
+    render(<WorkspaceCenter />);
+
+    expect(screen.getByTestId('subagent-chat-view').textContent).toBe('Revisar o diff');
+    expect(screen.getByTestId('code-session-header')).toBeTruthy();
+    expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
+  });
+});
+
+describe('WorkspaceCenter - aba central de objetivo', () => {
   it('mostra o GoalPanel no centro com header e chat montados/ocultos', () => {
     useUiStore.setState({ layoutMode: 'code', codeView: 'goal', codeGoalOpen: true });
     useChatStore.setState({ activeId: 'c-1' });

@@ -155,7 +155,7 @@ operacionais ficam concentrados no popover do composer (`CodeSessionControls`):
 | Jobs em segundo plano (status/comando/tempo/parar) | mesma popover, seção "Trabalhos em segundo plano", com contador de jobs no pill (§7.4) |
 | Alterações de arquivos (diff, `+N −M`, reverter) | painel Alterações + fecho do turno (§5.1, §7.2) |
 | Aprovação e pergunta ao usuário | cards inline (§5.3/§5.5), pois bloqueiam o turno |
-| `ask_user` respondido, subagente e saídas longas | apenas no resumo do "Thinking"/resultados, sem card extra. Subagente tem linha ao vivo (`status`, passos, modelo/effort, texto recente) e botão “Ver transcrição”; o popover do composer lista os transcripts retidos (inclusive erro/cancelamento). A `presentation` guarda `conversationId`/`steps`/`durationMs`/`usage` |
+| `ask_user` respondido, subagente e saídas longas | apenas no resumo do "Thinking"/resultados, sem card extra. Subagente tem linha ao vivo (`status`, passos, modelo/effort, texto recente) e botão “Abrir chat”, que abre uma aba de chat read-only (uma por subagente; abrir a mesma conversa duas vezes só ativa a aba existente e mostra um aviso). O popover do composer lista os transcripts retidos (inclusive erro/cancelamento). A `presentation` guarda `conversationId`/`steps`/`durationMs`/`usage` |
 
 `ToolCallRecord.presentation` continua sendo persistido (auditoria/replay e consumidores futuros),
 mas não é mais montado no chat. `ToolPresentationCard` permanece como biblioteca disponível, sem uso

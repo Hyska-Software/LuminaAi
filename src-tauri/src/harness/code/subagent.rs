@@ -393,6 +393,7 @@ fn emit_started(
             conversation_id: conversation_id.to_string(),
             subagent_type: request.kind.as_str().to_string(),
             description: request.description.clone(),
+            prompt: request.prompt.clone(),
             provider_id: provider_id.to_string(),
             model_id: model_id.to_string(),
             effort: effort.map(str::to_string),

@@ -165,6 +165,8 @@ beforeEach(() => {
     codeFileTab: null,
     codeFileTabs: [],
     codePlanTab: null,
+    codeSubagentTabs: [],
+    codeSubagentTab: null,
     codeGoalOpen: false,
     goalDialog: null,
     codePanelOpen: true,
@@ -732,7 +734,51 @@ describe('CodeSessionHeader — aba de histórico de commits', () => {
   });
 });
 
-describe('CodeSessionHeader — aba do plano', () => {
+describe('CodeSessionHeader - abas de subagente', () => {
+  beforeEach(() => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Sessão aberta' })],
+      activeId: 'c-1',
+    });
+  });
+
+  it('mostra múltiplas abas de subagente, ativa e fecha cada uma', async () => {
+    render(<CodeSessionHeader />);
+    await waitFor(() => expect(tab('Sessão aberta')).toBeTruthy());
+
+    act(() => {
+      useUiStore.getState().openCodeSubagent({
+        conversationId: 'child-1',
+        taskCallId: 'task-1',
+        subagentType: 'explore',
+        description: 'Mapear o módulo',
+      });
+      useUiStore.getState().openCodeSubagent({
+        conversationId: 'child-2',
+        taskCallId: 'task-2',
+        subagentType: 'review',
+        description: 'Revisar o diff',
+      });
+    });
+
+    expect(useUiStore.getState().codeSubagentTabs).toHaveLength(2);
+    const first = await screen.findByRole('tab', { name: 'Subagente Mapear o módulo' });
+    const second = await screen.findByRole('tab', { name: 'Subagente Revisar o diff' });
+    expect(first.getAttribute('aria-selected')).toBe('false');
+    expect(second.getAttribute('aria-selected')).toBe('true');
+
+    fireEvent.click(first);
+    expect(useUiStore.getState().codeView).toBe('subagent');
+    expect(first.getAttribute('aria-selected')).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar Subagente Mapear o módulo' }));
+    expect(useUiStore.getState().codeSubagentTabs).toHaveLength(1);
+    expect(useUiStore.getState().codeSubagentTab?.conversationId).toBe('child-2');
+    expect(screen.queryByRole('tab', { name: 'Subagente Mapear o módulo' })).toBeNull();
+  });
+});
+
+describe('CodeSessionHeader - aba do plano', () => {
   beforeEach(() => {
     useChatStore.setState({
       conversations: [conversation({ id: 'c-1', title: 'Sessão aberta' })],

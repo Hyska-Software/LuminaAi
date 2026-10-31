@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Bot } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Spinner } from '@/components/ui';
 import { api } from '@/lib/api';
+import { useUiStore } from '@/lib/store';
 import type { Conversation } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { SubagentTranscriptDialog } from './SubagentTranscriptDialog';
 
 export interface SubagentListProps {
   conversationId: string;
@@ -25,7 +26,6 @@ const SUBAGENT_LABELS: Record<string, string> = {
 export function SubagentList({ conversationId, className }: SubagentListProps) {
   const [items, setItems] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,7 +71,21 @@ export function SubagentList({ conversationId, className }: SubagentListProps) {
           <li key={item.id}>
             <button
               type="button"
-              onClick={() => setSelected(item.id)}
+              onClick={() => {
+                const result = useUiStore.getState().openCodeSubagent({
+                  conversationId: item.id,
+                  taskCallId: item.subagentTaskCallId ?? '',
+                  subagentType: item.subagentType ?? 'general',
+                  description: item.title.replace(/^Subagente:\s*/, ''),
+                  providerId: item.providerId,
+                  modelId: item.modelId,
+                  effort: null,
+                  prompt: null,
+                });
+                if (result === 'exists') {
+                  toast.info('Este subagente já está aberto em uma aba.');
+                }
+              }}
               className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-2 py-1.5 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
               <Bot aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
@@ -90,13 +104,6 @@ export function SubagentList({ conversationId, className }: SubagentListProps) {
           </li>
         ))}
       </ul>
-      <SubagentTranscriptDialog
-        conversationId={selected}
-        open={selected !== null}
-        onOpenChange={(open) => {
-          if (!open) setSelected(null);
-        }}
-      />
     </div>
   );
 }

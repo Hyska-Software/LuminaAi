@@ -1,4 +1,5 @@
 import { ChatView } from '@/components/chat/ChatView';
+import { SubagentChatView } from '@/components/agent/SubagentChatView';
 import {
   CodeCommitHistoryView,
   CodeDiffView,
@@ -33,6 +34,7 @@ export function WorkspaceCenter() {
   const codeFileTab = useUiStore((state) => state.codeFileTab);
   const codePlanTab = useUiStore((state) => state.codePlanTab);
   const codeCommitsTab = useUiStore((state) => state.codeCommitsTab);
+  const codeSubagentTab = useUiStore((state) => state.codeSubagentTab);
   const selectCodeCommit = useUiStore((state) => state.selectCodeCommit);
   const activeView = useUiStore((state) => state.activeView);
   const setActiveView = useUiStore((state) => state.setActiveView);
@@ -50,9 +52,25 @@ export function WorkspaceCenter() {
   const showPlan = isCode && codeView === 'plan' && codePlanTab !== null;
   const showGoal = isCode && codeView === 'goal' && activeId !== null;
   const showCommits = isCode && codeView === 'commits' && codeCommitsTab !== null;
+  const showSubagent = isCode && codeView === 'subagent' && codeSubagentTab !== null;
   const showChat =
-    !showSkills && !showLibrary && !showDiff && !showCommits && !showFile && !showPlan && !showGoal;
-  const showHeader = isCode && (showChat || showDiff || showCommits || showFile || showPlan || showGoal);
+    !showSkills &&
+    !showLibrary &&
+    !showDiff &&
+    !showCommits &&
+    !showFile &&
+    !showPlan &&
+    !showGoal &&
+    !showSubagent;
+  const showHeader =
+    isCode &&
+    (showChat ||
+      showDiff ||
+      showCommits ||
+      showFile ||
+      showPlan ||
+      showGoal ||
+      showSubagent);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -77,6 +95,17 @@ export function WorkspaceCenter() {
       >
         <ChatView welcome={isCode ? <CodeWelcomeScreen /> : undefined} />
       </div>
+
+      {showSubagent && codeSubagentTab ? (
+        <div
+          id="code-subagent-panel"
+          role="region"
+          aria-label={`Subagente ${codeSubagentTab.description}`}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <SubagentChatView target={codeSubagentTab} />
+        </div>
+      ) : null}
 
       {showCommits && codeCommitsTab ? (
         <div

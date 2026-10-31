@@ -1796,6 +1796,7 @@ describe('chatStore — rodadas do objetivo (Goal)', () => {
           conversationId: 'child-1',
           subagentType: 'explore',
           description: 'Mapear src',
+          prompt: 'Mapeie src e responda',
           providerId: 'opencode-go',
           modelId: 'deepseek-v4.1-flash',
           effort: 'high',
@@ -1854,9 +1855,12 @@ describe('chatStore — rodadas do objetivo (Goal)', () => {
       conversationId: 'child-1',
       status: 'running',
       steps: 2,
+      prompt: 'Mapeie src e responda',
       text: 'Achei src/app.ts',
       effort: 'high',
     });
+    expect(live?.trace.length).toBe(1);
+    expect(live?.trace[0]).toMatchObject({ toolCalls: 1 });
     expect(live?.toolCalls[0]).toMatchObject({ name: 'read_file', status: 'running' });
     expect(useChatStore.getState().streaming).toBeNull();
   });

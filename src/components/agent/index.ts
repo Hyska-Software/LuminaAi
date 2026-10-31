@@ -52,10 +52,10 @@ export type { CacheDiagnosticsProps, CacheHitChipProps } from './CacheHitChip';
 
 export { CacheDiagnosticsDialog } from './CacheDiagnosticsDialog';
 export type { CacheDiagnosticsDialogProps } from './CacheDiagnosticsDialog';
+export { SubagentChatView } from './SubagentChatView';
+export type { SubagentChatViewProps } from './SubagentChatView';
 export { SubagentList } from './SubagentList';
 export type { SubagentListProps } from './SubagentList';
-export { SubagentTranscriptDialog } from './SubagentTranscriptDialog';
-export type { SubagentTranscriptDialogProps } from './SubagentTranscriptDialog';
 export { CACHE_DIAGNOSTICS_EVENT, requestCacheDiagnostics } from './cacheDiagnosticsRequest';
 export {
   buildCacheDiagnostics,
