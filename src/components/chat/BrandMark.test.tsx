@@ -21,7 +21,7 @@ describe('BrandMark', () => {
     expect(img.getAttribute('aria-hidden')).toBe('true');
     expect(img.getAttribute('draggable')).toBe('false');
     expect(img.style.height).toBe('24px');
-    // Largura automática: o SVG carrega a proporção da arte (1164×1058).
+    // Largura automática: o SVG carrega a proporção da arte (1150×1086).
     expect(img.style.width).toBe('auto');
   });
 

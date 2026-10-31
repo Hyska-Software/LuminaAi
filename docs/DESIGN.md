@@ -2,7 +2,7 @@
 
 ## 1. Direção
 
-Lumina é um chat de IA **calmo, preciso e premium**, inspirado na hierarquia do ChatGPT e na contenção visual do Claude, com identidade própria: a marca Lumina — símbolo violeta `#6446FB` com spark vazado sobre tile grafite-claro `#EBEBEB` — usada apenas em momentos de marca (logo, avatar do assistente, splash, Sobre).
+Lumina é um chat de IA **calmo, preciso e premium**, inspirado na hierarquia do ChatGPT e na contenção visual do Claude, com identidade própria: a marca Lumina — mascote violeta `#5E34FB` com focinho lilás sobre tile grafite-claro `#EBEBEB` — usada apenas em momentos de marca (logo, avatar do assistente, splash, Sobre).
 
 Princípios:
 - **Conteúdo primeiro**: a conversa ocupa o centro, sem molduras pesadas. Superfícies neutras, bordas de 1px, sombras suaves.
@@ -16,9 +16,9 @@ Princípios:
 | Token | Valor |
 | --- | --- |
 | Nome | Lumina |
-| Símbolo | dois balões estilizados formando um "L" com um spark de 4 pontas vazado, em `#6446FB` |
+| Símbolo | mascote roedor estilizado em violeta `#5E34FB`, com orelhas arredondadas, olho escuro, focinho lilás `#EADFFC` e detalhes claros |
 | Ícone | o mesmo símbolo sobre tile grafite-claro `#EBEBEB` (cantos arredondados, bordas transparentes) |
-| Arquivos | `assets/Logo Lumina.png`, `assets/LogoLuminaSemFundo.png`, `assets/LogoLuminaSVG.svg` (originais); vetores usados pelo app em `public/brand/lumina-tile.svg` e `public/brand/lumina-mark.svg` |
+| Arquivos | `assets/Lumina_Logo.svg` (original); vetores usados pelo app em `public/brand/lumina-tile.svg` e `public/brand/lumina-mark.svg`; `app-icon.png` (1024×1024) gera `src-tauri/icons` com `pnpm tauri icon app-icon.png` |
 | Uso | tile → ícones do app (instalador, taskbar, janela) e favicon; marca sem fundo → titlebar, avatar do assistente, boas-vindas, splash e Sobre |
 | Voz | português brasileiro, direta, sem excesso de exclamações; termos técnicos em inglês quando consagrados |
 

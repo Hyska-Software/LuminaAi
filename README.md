@@ -88,7 +88,7 @@ cargo test --lib tools::fetch_url::tests::live -- --ignored --nocapture
 ```
 data/catalog.json        catálogo de modelos (gerado)
 scripts/                 geração do catálogo e sondagens dos provedores
-assets/                  logos oficiais; `pnpm tauri icon app-icon.png` regenera src-tauri/icons
+assets/                  logo oficial (`Lumina_Logo.svg`); `pnpm tauri icon app-icon.png` regenera src-tauri/icons
 public/brand/            vetores da marca usados na UI e no favicon
 src/                     renderer React (componentes, stores, genui)
 src-tauri/src/           core Rust (providers, harness, tools, documents, db)
