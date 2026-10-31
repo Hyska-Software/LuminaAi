@@ -113,10 +113,16 @@ pub struct ToolCtx {
     /// Tipo do turno que executa a tool (`goal` distingue criação/edição em
     /// turno humano de progresso/conclusão/bloqueio em rodada).
     pub turn_kind: crate::domain::TurnKind,
-    /// Runner de subagentes (	ask; None em testes).
-    /// Servidores MCP (tools dinâmicas `mcp__servidor__tool`).
+    /// MCP servers (dynamic `mcp__server__tool` tools). `None` in a read-only
+    /// subagent and in tests that do not exercise MCP.
     pub mcp: Option<Arc<crate::mcp::McpManager>>,
+    /// Subagent runner (`task`; `None` in tests and in the subagent itself).
     pub subagent: Option<Arc<dyn crate::harness::code::subagent::SubagentRunner>>,
+    /// Effective turn catalog (wire definitions + enabled MCP). This is the
+    /// execution boundary: calls outside it are refused.
+    pub enabled_tools: Arc<std::collections::HashSet<String>>,
+    /// Remaining delegation budget for the turn (`task`).
+    pub subagent_budget: Arc<std::sync::atomic::AtomicU32>,
     /// Raízes de skills externas para `list_skills`/`read_skill`.
     pub skills_roots: Vec<crate::tools::skills::ExternalSkillRoot>,
 }
@@ -126,6 +132,26 @@ impl ToolCtx {
     /// devem falhar com `FS_NO_WORKSPACE`).
     pub fn workspace_root(&self) -> Option<&std::path::Path> {
         self.workspace.as_ref().map(|workspace| workspace.root.as_path())
+    }
+
+    /// Was this tool sent to the model in the current turn? The catalog is the
+    /// execution boundary (not just the prompt): hallucinated calls are refused.
+    pub fn is_tool_enabled(&self, name: &str) -> bool {
+        self.enabled_tools.contains(name)
+    }
+
+    /// Consumes one unit of the turn's subagent budget.
+    ///
+    /// Returns `false` when the cap was already reached. The counter is per
+    /// turn (shared by calls using the same `ToolCtx`), not per session.
+    pub fn try_consume_subagent_budget(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        let limit = crate::harness::code::subagent::MAX_DELEGATIONS_PER_TURN;
+        self.subagent_budget
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+                (used < limit).then_some(used.saturating_add(1))
+            })
+            .is_ok()
     }
 
     /// Emite um evento do turno (no-op quando o contexto é de teste).
@@ -786,6 +812,13 @@ mod tests {
             turn_kind: crate::domain::TurnKind::User,
             mcp: None,
             subagent: None,
+            enabled_tools: Arc::new(
+                code_spec_refs()
+                    .into_iter()
+                    .map(|spec| spec.name.to_string())
+                    .collect(),
+            ),
+            subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             skills_roots: Vec::new(),
         }
     }

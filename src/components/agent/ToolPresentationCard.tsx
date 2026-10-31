@@ -362,12 +362,27 @@ function PresentationContent({ presentation, className }: ToolPresentationCardPr
       const description = nonEmptyString(value.description);
       if (!type || !description) return <DegradedPresentation kind={kind} />;
       const label = SUBAGENT_LABELS[type] ?? type;
+      const steps = typeof value.steps === 'number' ? value.steps : null;
+      const durationMs = typeof value.durationMs === 'number' ? value.durationMs : null;
+      const usage = asRecord(value.usage);
+      const totalTokens =
+        usage && typeof usage.totalTokens === 'number' ? usage.totalTokens : null;
+      const meta = [
+        steps != null ? `${steps} ${steps === 1 ? 'passo' : 'passos'}` : null,
+        durationMs != null ? `${(durationMs / 1000).toFixed(1)} s` : null,
+        totalTokens != null ? `${totalTokens} tokens` : null,
+      ].filter(Boolean);
       return (
         <div
           className={cn('rounded-lg border border-border bg-surface px-3 py-2 text-[12px]', className)}
         >
           <p className="font-medium text-foreground">Subagente de {label}</p>
           <p className="mt-0.5 text-foreground-muted">{description}</p>
+          {meta.length > 0 ? (
+            <p className="mt-1 text-[11px] tabular-nums text-foreground-subtle">
+              {meta.join(' · ')}
+            </p>
+          ) : null}
         </div>
       );
     }

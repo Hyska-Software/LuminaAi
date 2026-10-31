@@ -1155,21 +1155,27 @@ fn code_tool_definitions_with_mcp(
     mcp_tools: &[crate::mcp::McpToolInfo],
 ) -> Vec<crate::providers::ToolDefinition> {
     let mut definitions = code_tool_definitions(ctx, settings, delegation_depth);
-    // Tools de servidores MCP entram após as estáticas (nome wire) e o catálogo
-    // é canonicalizado para o replay deserializar igual.
-    for tool in mcp_tools {
-        definitions.push(crate::providers::ToolDefinition {
-            name: tool.wire_name.clone(),
-            description: format!("[{}] {}", tool.server, tool.description),
-            parameters: tool.input_schema.clone(),
-        });
+    // MCP server tools come after the static ones (wire name) and the catalog
+    // is canonicalized so replay deserializes identically. Subagents are
+    // read-only: they ignore MCP even if the caller passes a list.
+    if delegation_depth == 0 {
+        for tool in mcp_tools {
+            definitions.push(crate::providers::ToolDefinition {
+                name: tool.wire_name.clone(),
+                description: format!("[{}] {}", tool.server, tool.description),
+                parameters: tool.input_schema.clone(),
+            });
+        }
     }
     cache::snapshot::canonical_tools(&definitions)
 }
 
 /// Seção de system prompt com as tools MCP (parte do snapshot congelado).
-fn mcp_tools_prompt_section(mcp_tools: &[crate::mcp::McpToolInfo]) -> String {
-    if mcp_tools.is_empty() {
+fn mcp_tools_prompt_section(
+    mcp_tools: &[crate::mcp::McpToolInfo],
+    delegation_depth: u32,
+) -> String {
+    if mcp_tools.is_empty() || delegation_depth > 0 {
         return String::new();
     }
     let mut section = String::from("\n# MCP server tools\n\n");
@@ -1586,13 +1592,19 @@ pub async fn run_turn(
         TurnProfile::Code => {
             let budget = settings.code_max_steps.clamp(1, MAX_STEPS_LIMIT);
             if options.delegation_depth > 0 {
-                budget.min(24)
+                budget.min(code::subagent::SUBAGENT_MAX_STEPS)
             } else {
                 budget
             }
         }
         TurnProfile::Chat => options.max_steps.clamp(1, MAX_STEPS_LIMIT),
     };
+    // Gateway session/cache affinity: subagents use the stable parent
+    // conversation id (F4.3b); normal turns use their own id.
+    let wire_session_id = options
+        .wire_session_id
+        .clone()
+        .unwrap_or_else(|| payload.conversation_id.clone());
 
     /* ---------------------------------------------------------------- */
     /* 3. Persist the user message (or reuse it when regenerating) and   */
@@ -1767,6 +1779,7 @@ pub async fn run_turn(
     };
     if let Some(context) = code_context.as_mut() {
         context.goal_request = payload.goal_request;
+        context.subagent = options.delegation_depth > 0;
     }
     // O evento inicial do perfil Code carrega o estado **real** da sessão
     // (B-05: o modo Plano era enviado como `false` fixo e o chip dessincronizava
@@ -1791,16 +1804,18 @@ pub async fn run_turn(
     } else {
         Vec::new()
     };
-    // Servidores MCP: na primeira vez que uma sessão Code roda com servidores
-    // configurados, conecta e descobre as tools (os turnos seguintes usam o cache).
-    if profile == TurnProfile::Code {
+    // MCP servers: the first time a Code session runs with configured servers,
+    // connect and discover tools (later turns use the cache). Subagents are
+    // read-only: they neither connect MCP nor receive its tools.
+    let subagent_turn = options.delegation_depth > 0;
+    if profile == TurnProfile::Code && !subagent_turn {
         if let Some(mcp) = deps.mcp.as_ref() {
             if mcp.has_servers() && mcp.cached_tools().is_empty() {
                 mcp.refresh_tools().await;
             }
         }
     }
-    let mcp_tools = if profile == TurnProfile::Code {
+    let mcp_tools = if profile == TurnProfile::Code && !subagent_turn {
         deps.mcp
             .as_ref()
             .map(|mcp| mcp.cached_tools())
@@ -1842,7 +1857,8 @@ pub async fn run_turn(
             _ => Vec::new(),
         };
     // Seção MCP do system prompt (faz parte do snapshot congelado).
-    let mcp_prompt_section = mcp_tools_prompt_section(&mcp_tools);
+    let mcp_prompt_section =
+        mcp_tools_prompt_section(&mcp_tools, options.delegation_depth);
     let code_snapshot = match (profile, code_context.as_ref()) {
         (TurnProfile::Code, Some(code_ctx)) => Some(code_prompt_snapshot(
             &deps.db,
@@ -1927,36 +1943,97 @@ pub async fn run_turn(
         data_dir: data_dir.clone(),
         skills_roots: skills_roots.clone(),
     };
+    // Usage accumulated by subagents in this turn: child cost/tokens are added
+    // to the parent `TurnResult.usage` (the child has its own conversation and
+    // cache tracker).
+    let subagent_usage = Arc::new(parking_lot::Mutex::new(UsageInfo::default()));
     // Contexto de execução das tools do perfil Code (aprovação, observação,
     // eventos, regras e modo Plano). O Chat continua usando `ToolRuntime`.
     let code_tool_ctx = match (profile, code_context.as_ref()) {
-        (TurnProfile::Code, Some(code_ctx)) => Some(crate::tools::registry::ToolCtx {
-            db: deps.db.clone(),
-            http: deps.search_http.clone(),
-            conversation_id: payload.conversation_id.clone(),
-            message_id: assistant_message.id.clone(),
-            tool_call_id: String::new(),
-            turn_id: tool_turn_id.clone(),
-            workspace: code_ctx.workspace_handle(),
-            settings: settings.clone(),
-            cancel: cancel.clone(),
-            data_dir: data_dir.clone(),
-            approval: deps.approvals.clone(),
-            observed: deps.observed.clone(),
-            emit: Some(on_event.clone()),
-            rules: code_rules.clone(),
-            jobs: deps.jobs.clone(),
-            questions: deps.questions.clone(),
-            turn_kind: payload.turn_kind,
-            mcp: deps.mcp.clone(),
-            skills_roots: skills_roots.clone(),
-            subagent: Some(code::subagent::runner(
-                &deps,
-                &settings,
-                &conversation,
-                options.delegation_depth,
-            )),
-        }),
+        (TurnProfile::Code, Some(code_ctx)) => {
+            let subagent_turn = options.delegation_depth > 0;
+            let enabled_tools = Arc::new(
+                tool_definitions
+                    .iter()
+                    .map(|tool| tool.name.clone())
+                    .collect::<HashSet<String>>(),
+            );
+            let rules = if subagent_turn {
+                // The child is read-only: denials still apply, but
+                // "always allow" rules cannot bypass ReadOnly.
+                code_rules
+                    .iter()
+                    .filter(|rule| {
+                        rule.decision == crate::domain::ApprovalDecision::Denied
+                    })
+                    .cloned()
+                    .collect()
+            } else {
+                code_rules.clone()
+            };
+            let parent_turn = code::subagent::ParentTurnContext {
+                conversation_id: payload.conversation_id.clone(),
+                provider_id: provider.id.clone(),
+                model_id: model.id.clone(),
+                workspace_id: code_ctx
+                    .workspace
+                    .as_ref()
+                    .map(|workspace| workspace.id.clone())
+                    .or_else(|| conversation.workspace_id.clone()),
+            };
+            Some(crate::tools::registry::ToolCtx {
+                db: deps.db.clone(),
+                http: deps.search_http.clone(),
+                conversation_id: payload.conversation_id.clone(),
+                message_id: assistant_message.id.clone(),
+                tool_call_id: String::new(),
+                turn_id: tool_turn_id.clone(),
+                workspace: code_ctx.workspace_handle(),
+                settings: settings.clone(),
+                cancel: cancel.clone(),
+                data_dir: data_dir.clone(),
+                // A subagent has no approval/question/job/MCP channel: if an
+                // interactive tool is hallucinated, it fails closed immediately.
+                approval: if subagent_turn {
+                    None
+                } else {
+                    deps.approvals.clone()
+                },
+                observed: deps.observed.clone(),
+                emit: Some(on_event.clone()),
+                rules,
+                jobs: if subagent_turn {
+                    None
+                } else {
+                    deps.jobs.clone()
+                },
+                questions: if subagent_turn {
+                    None
+                } else {
+                    deps.questions.clone()
+                },
+                turn_kind: payload.turn_kind,
+                mcp: if subagent_turn {
+                    None
+                } else {
+                    deps.mcp.clone()
+                },
+                skills_roots: skills_roots.clone(),
+                enabled_tools,
+                subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                subagent: if subagent_turn {
+                    None
+                } else {
+                    Some(code::subagent::runner(
+                        &deps,
+                        &settings,
+                        parent_turn,
+                        options.delegation_depth,
+                        subagent_usage.clone(),
+                    ))
+                },
+            })
+        }
         _ => None,
     };
 
@@ -2021,7 +2098,7 @@ pub async fn run_turn(
     let mut chat_compacted = false;
     if profile == TurnProfile::Chat && settings.auto_compact {
         let mut summary_template = CompletionRequest {
-            config: provider_config(&provider, &model, &credential, &payload.conversation_id),
+            config: provider_config(&provider, &model, &credential, &wire_session_id),
             protocols: protocols.clone(),
             history: history.clone(),
             system_prompt: system_prompt.clone(),
@@ -2116,7 +2193,7 @@ pub async fn run_turn(
         // aperta (resumo por chamada auxiliar; falha não derruba o turno).
         if profile == TurnProfile::Code && settings.auto_compact {
             let mut summary_template = CompletionRequest {
-                config: provider_config(&provider, &model, &credential, &payload.conversation_id),
+                config: provider_config(&provider, &model, &credential, &wire_session_id),
                 protocols: protocols.clone(),
                 history: history.clone(),
                 system_prompt: system_prompt.clone(),
@@ -2235,7 +2312,7 @@ pub async fn run_turn(
         let mut auth_retried = false;
         let outcome = loop {
             let mut request = CompletionRequest {
-                config: provider_config(&provider, &model, &credential, &payload.conversation_id),
+                config: provider_config(&provider, &model, &credential, &wire_session_id),
                 protocols: protocols.clone(),
                 history: history.clone(),
                 system_prompt: step_system_prompt.clone(),
@@ -2554,7 +2631,7 @@ pub async fn run_turn(
         let mut forced_auth_retried = false;
         let outcome = loop {
             let mut forced_request = CompletionRequest {
-                config: provider_config(&provider, &model, &credential, &payload.conversation_id),
+                config: provider_config(&provider, &model, &credential, &wire_session_id),
                 protocols: protocols.clone(),
                 history: forced_history.clone(),
                 system_prompt: forced_system_prompt.clone(),
@@ -2718,6 +2795,12 @@ pub async fn run_turn(
         }
     }
 
+    // Subagent usage from this turn: merged before the `Usage`/`TurnResult`
+    // events so the user sees the real cost of the parent turn.
+    {
+        let child_usage = subagent_usage.lock();
+        merge_usage(&mut total_usage, &child_usage);
+    }
     let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     total_usage.duration_ms = Some(duration_ms);
     if total_usage.total_tokens.is_none() {
@@ -3716,7 +3799,7 @@ fn supports_images(model: &ModelInfo) -> bool {
             .any(|modality| modality == "image")
 }
 
-fn merge_usage(target: &mut UsageInfo, source: &UsageInfo) {
+pub(crate) fn merge_usage(target: &mut UsageInfo, source: &UsageInfo) {
     target.input_tokens = add_tokens(target.input_tokens, source.input_tokens);
     target.output_tokens = add_tokens(target.output_tokens, source.output_tokens);
     target.reasoning_tokens = add_tokens(target.reasoning_tokens, source.reasoning_tokens);
@@ -11149,5 +11232,37 @@ mod agent_loop_tests {
         assert!(!subagent.contains(&"goal"), "subagente não recebe `goal`");
         assert!(!subagent.contains(&"todo_write"));
         assert!(subagent.contains(&"read_file"));
+    }
+
+    #[test]
+    fn subagent_catalog_and_prompt_exclude_mcp() {
+        let mut context = code::context::CodeTurnContext::default();
+        context.root = Some(PathBuf::from("C:/workspace"));
+        let settings = Settings::default();
+        let mcp_tool = crate::mcp::McpToolInfo {
+            server: "fake".to_string(),
+            name: "echo".to_string(),
+            wire_name: "mcp__fake__echo".to_string(),
+            description: "Echo".to_string(),
+            input_schema: serde_json::json!({ "type": "object" }),
+        };
+        let top_level = code_tool_definitions_with_mcp(
+            &context,
+            &settings,
+            0,
+            std::slice::from_ref(&mcp_tool),
+        );
+        assert!(top_level.iter().any(|tool| tool.name == "mcp__fake__echo"));
+        let subagent = code_tool_definitions_with_mcp(
+            &context,
+            &settings,
+            1,
+            std::slice::from_ref(&mcp_tool),
+        );
+        assert!(!subagent.iter().any(|tool| tool.name == "mcp__fake__echo"));
+        assert!(!mcp_tools_prompt_section(std::slice::from_ref(&mcp_tool), 1)
+            .contains("mcp__fake__echo"));
+        assert!(mcp_tools_prompt_section(std::slice::from_ref(&mcp_tool), 0)
+            .contains("mcp__fake__echo"));
     }
 }

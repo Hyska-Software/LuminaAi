@@ -129,13 +129,17 @@ Pesquisa (5 documentos em `docs/research/`, ~190 KB): `dsh-harness-map.md` (DSH 
   spill, exit code), com `check` opcional e erros `NO_CHECKS`/`CHECK_NOT_FOUND`. Catálogo Code passou
   a 19 tools (23 com web/skills reaproveitadas); testes cobrem ausência de checks, modo Plano e execução real (pulado sem shell).
 - **`task` (subagente)**: delegação para um agente filho **somente leitura** (conversa efêmera no
-  mesmo workspace, permissão `read_only`, catálogo reduzido a leitura, 24 passos, eventos
-  descartados, conversa apagada ao final, profundidade máxima 1 com guarda `DELEGATION_DEPTH`).
-  `TurnOptions.delegation_depth` filtra o catálogo do filho e encurta o orçamento; o prompt do
-  filho recebe instruções extras via `system_prompt_override` (agora suportado no perfil Code).
-  Testes: kinds/instruções, catálogo reduzido, guarda de profundidade e um turno filho real com
-  provider falso (verifica o texto final e a exclusão da conversa efêmera). Card de apresentação
-  “Subagente …” na timeline.
+  mesmo workspace/provider/modelo do pai, permissão `read_only`, catálogo reduzido a leitura sem
+  MCP, 24 passos, eventos descartados, conversa apagada em **qualquer** desfecho por guarda RAII,
+  profundidade máxima 1 com guarda `DELEGATION_DEPTH`). O catálogo efetivo (`enabled_tools`) é a
+  fronteira de execução: tools alucinadas/fora do turno retornam `TOOL_NOT_ENABLED`. O prompt do
+  filho recebe o pedido uma vez no user message e só as instruções constantes do tipo no
+  `system_prompt_override`; o `x-opencode-session` é o id da conversa pai (F4.3b) e o uso do
+  filho entra no `TurnResult.usage` do pai. Testes: kinds/parse, catálogo reduzido, guarda de
+  profundidade, execução de um turno filho real com provider falso, prompt não duplicado,
+  session id do pai, uso agregado, erro do provider não mascarado, limpeza em
+  drop/cancelamento e tool fora do catálogo recusada. O resumo aparece no bloco “Thinking”; a
+  presentation `subagent` é persistida (sem card separado, conforme `WORKBENCH.md` §5.1).
 - **Composer**: `/test`, `/review` e `/init` agora preenchem prompts que citam `run_checks`,
   `task` (revisão delegada) e revisão do AGENTS.md antes de gravar.
 - Docs atualizados (`TOOLS.md` §2.6, `ARCHITECTURE` §8.3, `FILES` §16). Verificação no fecho da
@@ -280,3 +284,27 @@ configuração para MCP/servidores e "Verificações" no painel (backend exposto
   (2.153 verdes; o único flaky é `ModelPill.test.tsx`, área de modelos e sem relação com esta
   feature — passa isolado 33/33; as 114 demais suítes fecharam verdes); `pnpm build` verde.
   Sem mudanças em Rust.
+## 23. Hardening dos subagentes (2026-10-30)
+
+- **Fronteira de execução**: `ToolCtx.enabled_tools` carrega o catálogo efetivo do turno;
+  `harness/code/tools.rs` recusa `TOOL_NOT_ENABLED` antes de parsear/despachar. Cobre tools
+  alucinadas, shell desabilitado, ausência de workspace e subagente.
+- **MCP**: subagentes não recebem tools MCP no catálogo, no prompt nem no `ToolCtx`; `run_turn`
+  não faz refresh MCP quando `delegation_depth > 0`; `run_mcp` falha fechado. Teste
+  `subagent_catalog_and_prompt_exclude_mcp`.
+- **Ciclo de vida**: `EphemeralConversation` (Drop) apaga a conversa do filho em
+  sucesso/erro/timeout/cancelamento/drop, remove `spill/<child>` e cancela aprovações/perguntas
+  pendentes. `Db::delete_conversation` também remove `usage_log` da conversa (sem linha órfã do
+  filho nem dupla contagem no billing). Testes de drop, cancelamento, falha de workspace, falha
+  do provider e limpeza de `usage_log`.
+- **Cancelamento**: `run_task` usa `cancel.child_token()`, propaga ao `run_turn` e espera um
+  período de graça; o filho não cria token próprio.
+- **Contexto/prompt/cache**: `ParentTurnContext` usa provider/modelo/workspace efetivos; o pedido
+  do pai vai uma vez no user message; `TurnOptions.wire_session_id` = id da conversa pai (F4.3b);
+  prompt-base read-only sem edição/`ask_user`.
+- **Uso**: `SubagentOutcome` leva `usage`/`steps`/`durationMs`; o turno pai agrega tokens/custo e a
+  presentation `subagent` os persiste.
+- **Guardrails**: máximo 4 delegações por turno (`SUBAGENT_LIMIT`); `subagent_type` inválido →
+  `SUBAGENT_INVALID_TYPE`.
+- **Testes**: 14 testes de subagente (`cargo test --lib subagent`) + `task_*` (4) + allowlist (1)
+  + prompt; verificação final registrada no fecho.

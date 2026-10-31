@@ -228,13 +228,21 @@ describe('ToolPresentationCard — tarefas, job, changes e subagente', () => {
     expect(screen.getByText('0 arquivos alterados')).toBeTruthy();
   });
 
-  it('traduz o tipo do subagente', () => {
+  it('translates the subagent type and shows steps/duration/tokens', () => {
     render(
       <ToolPresentationCard
-        presentation={{ kind: 'subagent', subagentType: 'review', description: 'Revisar o diff' }}
+        presentation={{
+          kind: 'subagent',
+          subagentType: 'review',
+          description: 'Revisar o diff',
+          steps: 3,
+          durationMs: 12_500,
+          usage: { totalTokens: 1_200 },
+        }}
       />,
     );
     expect(screen.getByText('Subagente de revisão')).toBeTruthy();
+    expect(screen.getByText('3 passos · 12.5 s · 1200 tokens')).toBeTruthy();
   });
 
   it('não renderiza apresentações informativas desconhecidas', () => {

@@ -1595,6 +1595,11 @@ async fn bridge_chat_tool(ctx: &ToolCtx, name: &str, args: &Value) -> ToolOutcom
 
 /// `task`: delega exploração/revisão a um subagente somente leitura.
 async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    use crate::harness::code::subagent::{
+        SubagentKind, SubagentRequest, MAX_DELEGATIONS_PER_TURN, SUBAGENT_CANCEL_GRACE_SECS,
+        SUBAGENT_TIMEOUT_SECS,
+    };
+
     let Some(runner) = ctx.subagent.clone() else {
         return err(
             "SUBAGENT_UNAVAILABLE",
@@ -1612,41 +1617,104 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Ok(value) => value,
         Err(outcome) => return outcome,
     };
-    let kind = crate::harness::code::subagent::SubagentKind::from_str(
-        opt_str(args, "subagent_type").as_deref().unwrap_or("explore"),
-    );
-    let request = crate::harness::code::subagent::SubagentRequest {
-        parent_conversation_id: ctx.conversation_id.clone(),
-        workspace_id: None,
-        provider_id: String::new(),
-        model_id: String::new(),
+    let kind = match opt_str(args, "subagent_type") {
+        None => SubagentKind::Explore,
+        Some(value) => match SubagentKind::parse(&value) {
+            Some(kind) => kind,
+            None => {
+                return err(
+                    "SUBAGENT_INVALID_TYPE",
+                    format!(
+                        "subagent_type inválido: `{value}` (use explore, review ou general)"
+                    ),
+                )
+            }
+        },
+    };
+    if !ctx.try_consume_subagent_budget() {
+        return err(
+            "SUBAGENT_LIMIT",
+            format!(
+                "limite de {MAX_DELEGATIONS_PER_TURN} delegações por turno atingido"
+            ),
+        );
+    }
+    let request = SubagentRequest {
         description: description.clone(),
         prompt,
         kind,
-        depth: 0,
     };
-    let text = tokio::select! {
-        _ = ctx.cancel.cancelled() => return err("SUBAGENT_CANCELLED", "o turno foi cancelado"),
+    let child_cancel = ctx.cancel.child_token();
+    let run = runner.run(request, child_cancel.clone());
+    tokio::pin!(run);
+    let outcome = tokio::select! {
+        _ = ctx.cancel.cancelled() => {
+            child_cancel.cancel();
+            let _ = tokio::time::timeout(
+                Duration::from_secs(SUBAGENT_CANCEL_GRACE_SECS),
+                &mut run,
+            )
+            .await;
+            return err("SUBAGENT_CANCELLED", "o turno foi cancelado");
+        }
         result = tokio::time::timeout(
-            std::time::Duration::from_secs(15 * 60),
-            runner.run(request),
+            Duration::from_secs(SUBAGENT_TIMEOUT_SECS),
+            &mut run,
         ) => match result {
-            Ok(Ok(text)) => text,
-            Ok(Err(error)) => return err("SUBAGENT_FAILED", format!("{error:#}")),
-            Err(_) => return err("SUBAGENT_TIMEOUT", "o subagente excedeu 15 minutos"),
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(error)) => {
+                if ctx.cancel.is_cancelled() {
+                    return err("SUBAGENT_CANCELLED", "o turno foi cancelado");
+                }
+                return err("SUBAGENT_FAILED", format!("{error:#}"));
+            }
+            Err(_) => {
+                child_cancel.cancel();
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(SUBAGENT_CANCEL_GRACE_SECS),
+                    &mut run,
+                )
+                .await;
+                return err(
+                    "SUBAGENT_TIMEOUT",
+                    format!(
+                        "o subagente excedeu {} minutos",
+                        SUBAGENT_TIMEOUT_SECS / 60
+                    ),
+                );
+            }
         },
     };
+    let text = outcome.text;
     let short: String = description.chars().take(60).collect();
-    let summary = format!("Subagente {}: {}", kind.as_str(), short);
-    let (inline, _spill) = spill_text(ctx, &format!("Subagente ({}) concluiu:\n\n{text}", kind.as_str()));
+    let summary = format!(
+        "Subagente {}: {} · {} passos · {} ms",
+        kind.as_str(),
+        short,
+        outcome.steps,
+        outcome.duration_ms
+    );
+    let (inline, _spill) = spill_text(
+        ctx,
+        &format!(
+            "Subagente ({}) concluiu:\n\n{text}",
+            kind.as_str()
+        ),
+    );
+    let mut presentation = serde_json::json!({
+        "kind": "subagent",
+        "description": description,
+        "subagentType": kind.as_str(),
+        "steps": outcome.steps,
+        "durationMs": outcome.duration_ms,
+    });
+    if let Some(usage) = outcome.usage {
+        presentation["usage"] = serde_json::to_value(usage).unwrap_or(Value::Null);
+    }
     ToolOutcome {
         content: inline,
         summary: Some(summary),
-        presentation: Some(serde_json::json!({
-            "kind": "subagent",
-            "description": description,
-            "subagentType": kind.as_str(),
-        })),
+        presentation: Some(presentation),
         ..Default::default()
     }
 }
@@ -3013,6 +3081,13 @@ mod tests {
                 questions: None,
                 mcp: None,
                 subagent: None,
+                enabled_tools: Arc::new(
+                    crate::tools::registry::code_spec_refs()
+                        .into_iter()
+                        .map(|spec| spec.name.to_string())
+                        .collect(),
+                ),
+                subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
                 skills_roots: Vec::new(),
             }
         }
@@ -3946,8 +4021,24 @@ mod tests {
             fn run(
                 &self,
                 request: crate::harness::code::subagent::SubagentRequest,
-            ) -> futures_util::future::BoxFuture<'static, anyhow::Result<String>> {
-                Box::pin(async move { Ok(format!("resumo de `{}`", request.description)) })
+                _cancel: tokio_util::sync::CancellationToken,
+            ) -> futures_util::future::BoxFuture<
+                'static,
+                anyhow::Result<crate::harness::code::subagent::SubagentOutcome>,
+            > {
+                Box::pin(async move {
+                    Ok(crate::harness::code::subagent::SubagentOutcome {
+                        text: format!("resumo de `{}`", request.description),
+                        usage: Some(crate::domain::UsageInfo {
+                            input_tokens: Some(10),
+                            output_tokens: Some(5),
+                            total_tokens: Some(15),
+                            ..Default::default()
+                        }),
+                        steps: 2,
+                        duration_ms: 5,
+                    })
+                })
             }
         }
         let fixture = Fixture::new();
@@ -3968,6 +4059,102 @@ mod tests {
         let presentation = outcome.presentation.expect("presentation");
         assert_eq!(presentation["kind"], "subagent");
         assert_eq!(presentation["subagentType"], "explore");
+        assert_eq!(presentation["steps"], 2);
+        assert_eq!(presentation["durationMs"], 5);
+        assert_eq!(presentation["usage"]["totalTokens"], 15);
+    }
+
+    #[tokio::test]
+    async fn task_enforces_the_per_turn_delegation_budget() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.subagent = Some(std::sync::Arc::new(NoopRunner));
+        for _ in 0..crate::harness::code::subagent::MAX_DELEGATIONS_PER_TURN {
+            let outcome = call(
+                &ctx,
+                "task",
+                json!({ "description": "Explorar", "prompt": "Mapeie src/" }),
+            )
+            .await;
+            assert!(!outcome.is_error, "{}", outcome.content);
+        }
+        let outcome = call(
+            &ctx,
+            "task",
+            json!({ "description": "Explorar", "prompt": "Mapeie src/" }),
+        )
+        .await;
+        assert_eq!(error_code(&outcome), "SUBAGENT_LIMIT");
+    }
+
+    #[tokio::test]
+    async fn task_cancelled_by_the_parent_returns_immediately() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.subagent = Some(std::sync::Arc::new(PendingRunner));
+        ctx.cancel.cancel();
+        let outcome = call(
+            &ctx,
+            "task",
+            json!({ "description": "Explorar", "prompt": "Mapeie src/" }),
+        )
+        .await;
+        assert_eq!(error_code(&outcome), "SUBAGENT_CANCELLED");
+    }
+
+    struct PendingRunner;
+
+    impl crate::harness::code::subagent::SubagentRunner for PendingRunner {
+        fn run(
+            &self,
+            _request: crate::harness::code::subagent::SubagentRequest,
+            _cancel: tokio_util::sync::CancellationToken,
+        ) -> futures_util::future::BoxFuture<
+            'static,
+            anyhow::Result<crate::harness::code::subagent::SubagentOutcome>,
+        > {
+            Box::pin(std::future::pending())
+        }
+    }
+
+    #[tokio::test]
+    async fn task_rejects_unknown_subagent_type() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.subagent = Some(std::sync::Arc::new(NoopRunner));
+        let outcome = call(
+            &ctx,
+            "task",
+            json!({
+                "description": "Explorar",
+                "prompt": "Mapeie src/",
+                "subagent_type": "revisor-typo"
+            }),
+        )
+        .await;
+        assert_eq!(error_code(&outcome), "SUBAGENT_INVALID_TYPE");
+    }
+
+    struct NoopRunner;
+
+    impl crate::harness::code::subagent::SubagentRunner for NoopRunner {
+        fn run(
+            &self,
+            _request: crate::harness::code::subagent::SubagentRequest,
+            _cancel: tokio_util::sync::CancellationToken,
+        ) -> futures_util::future::BoxFuture<
+            'static,
+            anyhow::Result<crate::harness::code::subagent::SubagentOutcome>,
+        > {
+            Box::pin(async move {
+                Ok(crate::harness::code::subagent::SubagentOutcome {
+                    text: "ok".to_string(),
+                    usage: None,
+                    steps: 1,
+                    duration_ms: 1,
+                })
+            })
+        }
     }
     #[tokio::test]
     async fn ask_user_without_a_channel_is_an_actionable_error() {

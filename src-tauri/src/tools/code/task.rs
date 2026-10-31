@@ -12,14 +12,14 @@ use crate::tools::registry::{ParallelClass, ToolSpec};
 
 pub static TASK_SPEC: ToolSpec = ToolSpec {
     name: "task",
-    description: "Delegate an exploration or review to a read-only subagent and return its summary. The child sees the same workspace but cannot edit files or run commands. Maximum one level of delegation.",
+    description: "Delegate an exploration or review to a read-only subagent and return its summary. The child sees the same workspace but cannot edit files, run shell commands or use MCP; it can read/search and inspect git. Maximum one level of delegation.",
     schema: task_schema,
     parallel: ParallelClass::Exclusive,
     risk: RiskClass::Read,
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `task` when you need to explore/review a large area without polluting your context (e.g. `subagent_type: \"explore\"` to map files, `\"review\"` to review the diff). The child is read-only and cannot run commands; for changes, use your own tools. Do not delegate trivial tasks.",
+    guidance: "Use `task` when you need to explore/review a large area without polluting your context (e.g. `subagent_type: \"explore\"` to map files, `\"review\"` to review the diff). The child is read-only: no edits, shell, MCP, user questions or nested delegation; for changes, use your own tools. Do not delegate trivial tasks.",
 };
 
 pub fn definition() -> ToolDefinition {

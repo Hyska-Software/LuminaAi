@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAgentTrace,
   countTraceTools,
+  describeCodeTool,
   hasTraceReasoning,
   type AgentTraceEntry,
   type ToolGroup,
@@ -81,6 +82,40 @@ describe('buildAgentTrace', () => {
     expect(groups[1].name).toBe('fetch_url');
     expect(groups[1].label).toBe('Leu 2 páginas');
     expect(groups[1].pages.map((page) => page.title)).toEqual(['MIT — IA', 'USP — IA']);
+  });
+
+  it('normalizes the subagent type (default explore and general in pt-BR)', () => {
+    const explore = describeCodeTool(
+      tool({
+        name: 'task',
+        arguments: JSON.stringify({ description: 'Mapear src', prompt: 'Liste os arquivos' }),
+      }),
+    );
+    expect(explore.verb).toBe('Delegou exploração a um subagente');
+
+    const general = describeCodeTool(
+      tool({
+        name: 'task',
+        arguments: JSON.stringify({
+          description: 'Investigar',
+          prompt: 'Resuma',
+          subagent_type: 'general',
+        }),
+      }),
+    );
+    expect(general.verb).toBe('Delegou geral a um subagente');
+
+    const review = describeCodeTool(
+      tool({
+        name: 'task',
+        arguments: JSON.stringify({
+          description: 'Revisar',
+          prompt: 'Aponte bugs',
+          subagent_type: 'review',
+        }),
+      }),
+    );
+    expect(review.verb).toBe('Delegou revisão a um subagente');
   });
 
   it('keeps adjacent calls of the same tool in one row and separates different tools', () => {

@@ -59,6 +59,9 @@ pub struct CodeTurnContext {
     pub turn_kind: TurnKind,
     /// O usuário pediu um objetivo pelo `/goal` neste turno (ver `TurnPayload`).
     pub goal_request: bool,
+    /// Read-only subagent turn (`delegation_depth > 0`): switches the base
+    /// prompt to an investigator identity without editing/`ask_user` sections.
+    pub subagent: bool,
 }
 
 impl CodeTurnContext {
@@ -84,6 +87,7 @@ impl CodeTurnContext {
             goal: self.goal.clone(),
             turn_kind: self.turn_kind,
             goal_request: self.goal_request,
+            subagent: self.subagent,
         }
     }
 

@@ -361,17 +361,29 @@ M  src/app.ts           (staged)
 { "description": "Explorar o módulo de pagamentos", "prompt": "Liste os arquivos…", "subagent_type": "explore" }
 ```
 
-- Cria uma conversa **efêmera** com o mesmo workspace e permissão `read_only`, roda o perfil Code
-  com orçamento curto (24 passos) e catálogo reduzido a leitura (`read_file`, `list_dir`,
-  `search_*`, `read_tool_output`, `git_status/diff/log`); devolve o resumo final e apaga a conversa.
-- `subagent_type`: `explore` (mapear/responder), `review` (criticar o diff) ou `general`.
+- Cria uma conversa **efêmera** com o workspace/provider/modelo efetivos do pai e permissão
+  `read_only`, roda o perfil Code com orçamento curto (24 passos) e catálogo reduzido a leitura
+  (`read_file`, `list_dir`, `search_*`, `read_tool_output`, `git_status/diff/log`); devolve o
+  resumo final e apaga a conversa **em qualquer desfecho** (sucesso, erro, timeout ou
+  cancelamento, inclusive quando o future é dropado).
+- `subagent_type`: `explore` (mapear/responder), `review` (criticar o diff) ou `general`; valor
+  desconhecido → `SUBAGENT_INVALID_TYPE`; omitido → `explore`.
 - Profundidade máxima **1**: o filho não recebe `task` e o runner recusa aninhamento
-  (`DELEGATION_DEPTH`). O filho não pode editar nem rodar comandos (política `read_only`).
-- **Política**: `Read` no pai (a delegação em si não muta); eventos do filho são descartados (o card
-  do pai mostra o resumo). Timeout de 15 min; cancelamento do pai aborta o filho.
-- **UI**: card de apresentação “Subagente explore/review: descrição”.
-- **Testes**: kinds/parse, catálogo reduzido, guarda de profundidade, execução de um turno filho
-  real com provider falso (conversa efêmera apagada), runner inexistente/sem workspace.
+  (`DELEGATION_DEPTH`). O filho não pode editar, rodar shell, usar MCP, perguntar ao usuário ou
+  delegar; a política `read_only` e o catálogo efetivo (`enabled_tools`) são defesa em
+  profundidade.
+- **Política**: `Read` no pai (a delegação em si não muta); eventos do filho são descartados (o
+  resumo aparece no “Thinking”/resultado da tool). Timeout de 15 min; cancelamento do pai propaga
+  o token ao filho e espera a limpeza (período de graça). Cada turno tem no máximo 4 delegações.
+- **Prompt/cache**: o pedido do pai vai **uma vez** na mensagem de usuário; o
+  `system_prompt_override` contém só as instruções constantes do tipo (prompt-base read-only, sem
+  edição/`ask_user`). O filho usa o `conversation_id` do pai como `x-opencode-session` (F4.3b) e
+  seus tokens/custo entram no `usage` do turno pai.
+- **UI**: resumo/label no bloco “Thinking”; a `presentation` `subagent` é persistida com
+  `steps`/`durationMs`/`usage` (sem card separado no transcript, conforme `WORKBENCH.md` §5.1).
+- **Testes**: kinds/parse, catálogo reduzido sem MCP, guarda de profundidade, execução de um turno
+  filho real com provider falso, prompt não duplicado, session id do pai, uso agregado, erro do
+  provider não mascarado, limpeza em drop/cancelamento/timeout e tool fora do catálogo recusada.
 
 #### Servidores MCP (`mcp__<servidor>__<tool>`)
 

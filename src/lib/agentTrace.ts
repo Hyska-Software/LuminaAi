@@ -686,6 +686,19 @@ function askCodeGroup(
   return harnessGroup('ask_user', tools, status, errors, label);
 }
 
+/** pt-BR label for the subagent kind; `task` without a type uses `explore`. */
+function subagentKindLabel(type: string | null | undefined): string {
+  switch (type) {
+    case 'review':
+      return 'revisão';
+    case 'general':
+      return 'geral';
+    case 'explore':
+    default:
+      return 'exploração';
+  }
+}
+
 function subagentCodeGroup(
   tools: ToolCallRecord[],
   status: ToolGroupStatus,
@@ -695,15 +708,13 @@ function subagentCodeGroup(
     tools
       .map((tool) => codeArg(tool, 'subagent_type'))
       .find(Boolean) ?? null;
-  const kind = type ? (type === 'review' ? 'revisão' : type === 'explore' ? 'exploração' : type) : null;
+  const kind = subagentKindLabel(type);
   const label =
     status === 'running'
       ? 'Delegando a um subagente…'
       : status === 'error'
         ? 'O subagente falhou'
-        : kind
-          ? `Delegou ${kind} a um subagente`
-          : 'Delegou a um subagente';
+        : `Delegou ${kind} a um subagente`;
   return harnessGroup('task', tools, status, errors, label);
 }
 
@@ -838,10 +849,9 @@ export function describeCodeTool(tool: ToolCallRecord): CodeToolLabel {
             : 'Perguntou ao usuário',
       );
     case 'task': {
-      const type = codeArg(tool, 'subagent_type');
-      const kind = type === 'review' ? 'revisão' : type === 'explore' ? 'exploração' : type;
+      const kind = subagentKindLabel(codeArg(tool, 'subagent_type'));
       return make(
-        failed ? 'O subagente falhou' : kind ? `Delegou ${kind} a um subagente` : 'Delegou a um subagente',
+        failed ? 'O subagente falhou' : `Delegou ${kind} a um subagente`,
       );
     }
     case 'job_list':

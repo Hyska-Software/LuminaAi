@@ -1862,6 +1862,9 @@ impl Db {
         Ok(())
     }
 
+    /// Deletes the conversation and all associated records (messages, artifacts,
+    /// code harness, prompt cache and `usage_log`). Orphan Library attachments
+    /// are preserved by product decision.
     pub fn delete_conversation(&self, id: &str) -> anyhow::Result<()> {
         let conn = self.conn.lock();
         let artifact_paths: Vec<(String, String)> = {
@@ -1896,6 +1899,9 @@ impl Db {
             tx.execute("DELETE FROM prompt_snapshots WHERE conversation_id = ?1", [id])?;
             tx.execute("DELETE FROM cache_state WHERE conversation_id = ?1", [id])?;
             tx.execute("DELETE FROM cache_samples WHERE conversation_id = ?1", [id])?;
+            // Turn billing/usage (including subagent usage aggregated into the
+            // parent; an ephemeral conversation must not leave orphan rows).
+            tx.execute("DELETE FROM usage_log WHERE conversation_id = ?1", [id])?;
             tx.execute("DELETE FROM conversations WHERE id = ?1", [id])?;
             tx.commit()?;
         }
@@ -5436,6 +5442,19 @@ mod tests {
             decision: ApprovalDecision::Approved,
         })
         .expect("regra do workspace");
+        db.record_usage(
+            &conversation.id,
+            "msg-1",
+            "opencode-go",
+            "deepseek-v4.1-flash",
+            &crate::domain::UsageInfo {
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                total_tokens: Some(15),
+                ..Default::default()
+            },
+        )
+        .expect("uso do turno");
 
         db.delete_conversation(&conversation.id)
             .expect("excluir sessão");
@@ -5461,6 +5480,16 @@ mod tests {
                 .is_some(),
             "apagar a sessão não apaga o workspace"
         );
+        let usage_rows: i64 = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT COUNT(*) FROM usage_log WHERE conversation_id = ?1",
+                [&conversation.id],
+                |row| row.get(0),
+            )
+            .expect("contar usage_log");
+        assert_eq!(usage_rows, 0, "uso da conversa efêmera não pode ficar órfão");
     }
 
     #[test]

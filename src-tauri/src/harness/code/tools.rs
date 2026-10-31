@@ -52,6 +52,24 @@ fn default_timeout_ms(name: &str) -> Option<u64> {
 /// registry estático; elas são executadas pelo mesmo caminho (aprovação,
 /// timeout) através de [`crate::tools::code::exec::run_mcp`].
 pub async fn execute(ctx: &ToolCtx, call: &ToolCallRecord) -> ToolOutcome {
+    // The turn catalog is the execution boundary. Without this check, a
+    // hallucinated tool (or one filtered out by workspace/shell/depth) would be
+    // dispatched by the static registry — in a subagent that would open
+    // `ask_user`, plan, `goal` and MCP in a turn whose events are discarded.
+    if !ctx.is_tool_enabled(&call.name) {
+        let known = call.name.starts_with("mcp__") || ToolExec::for_tool(&call.name).is_some();
+        return if known {
+            ToolOutcome::error(format!(
+                "TOOL_NOT_ENABLED: a ferramenta `{}` não está habilitada neste turno",
+                call.name
+            ))
+        } else {
+            ToolOutcome::error(format!(
+                "TOOL_UNKNOWN: ferramenta desconhecida: {}",
+                call.name
+            ))
+        };
+    }
     let args = match parse_arguments(&call.arguments) {
         Ok(args) => args,
         Err(outcome) => return outcome,
@@ -169,6 +187,24 @@ mod tests {
         assert!(outcome.content.contains("TOOL_UNKNOWN"));
     }
 
+    #[tokio::test]
+    async fn tool_outside_the_turn_catalog_is_rejected_before_execution() {
+        let mut ctx = test_ctx();
+        ctx.enabled_tools = std::sync::Arc::new(
+            ["read_file".to_string()].into_iter().collect(),
+        );
+        for name in ["write_file", "ask_user", "mcp__fake__echo", "task"] {
+            let call = ToolCallRecord::running(format!("call-{name}"), name);
+            let outcome = execute(&ctx, &call).await;
+            assert!(outcome.is_error, "{name} deveria falhar");
+            assert!(
+                outcome.content.contains("TOOL_NOT_ENABLED"),
+                "{name}: {}",
+                outcome.content
+            );
+        }
+    }
+
     fn test_ctx() -> ToolCtx {
         ToolCtx {
             db: std::sync::Arc::new(crate::db::Db::open_in_memory().expect("db")),
@@ -188,6 +224,13 @@ mod tests {
             turn_kind: crate::domain::TurnKind::User,
             mcp: None,
             subagent: None,
+            enabled_tools: std::sync::Arc::new(
+                crate::tools::registry::code_spec_refs()
+                    .into_iter()
+                    .map(|spec| spec.name.to_string())
+                    .collect(),
+            ),
+            subagent_budget: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             skills_roots: Vec::new(),
             emit: None,
             rules: Vec::new(),

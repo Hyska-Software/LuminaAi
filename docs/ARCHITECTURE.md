@@ -391,8 +391,10 @@ Mesmo loop do Chat, com `TurnPayload.profile = "code"` (só em sessão do Code).
 estruturadas com opções e texto livre, respondidas pelo card da timeline via
 `respond_question`), `goal` (progresso/conclusão/bloqueio do objetivo da sessão —
 `docs/goals/code-goals/PLAN.md`), `run_checks` (verificação detectada do projeto), `task`
-(subagente somente leitura, profundidade 1) e tools dinâmicas de servidores **MCP**
-(mcp__servidor__tool, stdio\nJSON-RPC, aprovação sempre explícita; config <app-data>/mcp.json).
+(subagente somente leitura, profundidade 1, sem MCP/escrita/shell, catálogo efetivo como
+fronteira de execução, limpeza RAII e session id do pai para cache) e tools dinâmicas de
+servidores **MCP** (mcp__servidor__tool, stdio
+JSON-RPC, aprovação sempre explícita; config <app-data>/mcp.json; indisponíveis em subagentes).
    O modelo **não** recebe commit/push.
 4. **Política e aprovação** (`policy/`): modos `read_only`/`review`/`edit`/`autonomous` + overlay Plano
    + regras persistidas. Novas sessões nascem no modo padrão configurado (Autônomo de fábrica). Toda

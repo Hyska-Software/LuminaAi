@@ -632,7 +632,7 @@ pub async fn summarize_manual_for_conversation(
         .unwrap_or_default();
     let tool_definitions =
         code_tool_definitions_with_mcp(&ctx, settings, options.delegation_depth, &mcp_tools);
-    let mcp_prompt_section = mcp_tools_prompt_section(&mcp_tools);
+    let mcp_prompt_section = mcp_tools_prompt_section(&mcp_tools, options.delegation_depth);
     let snapshot = code_prompt_snapshot(
         &deps.db,
         conversation,

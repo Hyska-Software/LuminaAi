@@ -2,6 +2,8 @@
 
 > Leia `docs/ARCHITECTURE.md` (visão técnica), `docs/FILES.md` (arquivos, execução de código e skills), `docs/DESIGN.md` (UI/UX), `docs/GENUI.md` (UI generativa/interativa do agente) e `docs/MODELS.md` (provedores/raciocínio) antes de implementar.
 
+# COMENTARIOS E ANOTAÇÕES DEVEM SER SEMPRE EM INGLES, O CÓDIGO TAMBEM DEVE SER SEMPRE EM INGLES PARA CONSISTENCIA COM O PADRÃO DA INDUSTRIA
+
 ## Comandos
 
 ```bash

@@ -503,7 +503,14 @@ export type ToolPresentation =
   | ({ kind: 'goal' } & GoalView)
   | { kind: 'job'; job: JobView }
   | { kind: 'answers'; answers: AskUserAnswer[]; skipped: boolean }
-  | { kind: 'subagent'; description: string; subagentType: string }
+  | {
+      kind: 'subagent';
+      description: string;
+      subagentType: string;
+      steps?: number;
+      durationMs?: number;
+      usage?: UsageInfo;
+    }
   | { kind: 'output'; lines?: number | null; spillId?: string | null }
   | { kind: 'terminal'; sessionId: string; title: string };
 

@@ -601,6 +601,12 @@ pub struct TurnOptions {
     /// Subagentes nao recebem a tool `task` (max. 1 nivel).
     #[serde(default)]
     pub delegation_depth: u32,
+    /// Stable id sent as `x-opencode-session` for gateway affinity/cache.
+    /// Internal field: never accepted from the renderer; the subagent runner
+    /// fills it with the parent conversation id. `None` uses the turn's
+    /// `conversation_id`.
+    #[serde(skip)]
+    pub wire_session_id: Option<String>,
 }
 
 impl Default for TurnOptions {
@@ -614,6 +620,7 @@ impl Default for TurnOptions {
             system_prompt_override: None,
             regenerate: false,
             delegation_depth: 0,
+            wire_session_id: None,
         }
     }
 }
@@ -2016,6 +2023,16 @@ pub fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wire_session_id_is_internal_and_never_accepted_from_ipc() {
+        let options: TurnOptions =
+            serde_json::from_str("{}").expect("TurnOptions com defaults");
+        assert_eq!(options.wire_session_id, None);
+        let json = serde_json::to_string(&options).expect("serialize TurnOptions");
+        assert!(!json.contains("wireSessionId"), "{json}");
+        assert!(!json.contains("wire_session_id"), "{json}");
+    }
 
     /// Auth-status DTOs are renderer-facing: they may carry account labels and
     /// masked ids, but never any credential material.
