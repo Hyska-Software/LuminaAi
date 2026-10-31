@@ -163,7 +163,11 @@ pub fn rename_conversation(
 
 #[tauri::command]
 pub fn delete_conversation(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state.db.delete_conversation(&id).map_err(to_error)
+    let result = state.db.delete_conversation(&id).map_err(to_error);
+    if result.is_ok() {
+        state.terminals.close_conversation(&id);
+    }
+    result
 }
 
 #[tauri::command]

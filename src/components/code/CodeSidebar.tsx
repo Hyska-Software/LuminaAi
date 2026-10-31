@@ -54,6 +54,7 @@ import type { Conversation, Workspace } from '@/lib/types';
 import { cn, copyText, modKey } from '@/lib/utils';
 import { useIsCompact } from '@/components/layout/hooks';
 import { AddChatSessionDialog } from './AddChatSessionDialog';
+import { terminalManager } from './terminalManager';
 import { NO_WORKSPACE_KEY, useWorkspaces } from './useWorkspaces';
 
 export interface CodeSidebarProps {
@@ -696,6 +697,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
       toast.error('Não foi possível remover a sessão do Code');
       return;
     }
+    await terminalManager.closeConversation(conversation.id);
     toast.success('Sessão removida do Code', {
       description: 'Ela continua disponível no Chat.',
     });
@@ -707,6 +709,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
     setDeleteSessionBusy(true);
     try {
       await useChatStore.getState().deleteConversation(target.id);
+      await terminalManager.closeConversation(target.id);
       setDeleteSessionTarget(null);
     } finally {
       setDeleteSessionBusy(false);

@@ -692,7 +692,7 @@ code:       get_code_session_state, set_permission_mode, set_plan_mode, respond_
 git:        git_status, git_diff, git_stage, git_unstage, git_discard, git_commit,
             git_branches, git_switch_branch, git_log, suggest_commit_message
 jobs:       list_jobs, get_job_output, kill_job
-terminal:   open_terminal, write_terminal, resize_terminal, close_terminal  (Channel<TerminalEvent>)
+terminal:   open_terminal, write_terminal, resize_terminal, kill_terminal, close_terminal  (Channel<TerminalEvent>)
 ```
 
 Todos `Result<T, String>`, camelCase, registrados em `lib.rs`, com testes de contrato (serialize

@@ -345,8 +345,12 @@ helper/SSH. PR continua fora do escopo desta fase.
 ### 7.3 Terminal (v1.1)
 
 - Aba com abas de terminal (múltiplos), botão novo terminal (`+`), cwd = workspace, shell do usuário.
-- Renderização `@xterm/xterm` + fit; scrollback 5.000 linhas; tema pelos tokens do app.
-- Ações: novo, fechar, limpar, matar processo; aviso "rodando" no header.
+  As abas/processos sobrevivem a trocar entre Arquivos/Alterações, recolher o painel e redimensionar
+  a janela; cada conversa tem o seu próprio conjunto de terminais.
+- Renderização `@xterm/xterm` + fit; scrollback 5.000 linhas; tema pelos tokens do app (inclusive a
+  paleta ANSI clara/escura).
+- Ações: novo, fechar, limpar, matar processo; aviso de estado (Rodando/Encerrado) no rodapé. Ao encerrar, a aba mostra
+  o exit code e oferece reiniciar; fechar a aba encerra a árvore de processos.
 - Terminal é do **usuário**, não do agente (agente tem `run_command`/jobs) — quando o agente usa o
   mesmo processo, o card de job abre no painel.
 

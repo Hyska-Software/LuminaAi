@@ -1,0 +1,95 @@
+/**
+ * xterm theme derived from the Lumina design tokens.
+ *
+ * xterm needs concrete color strings (its renderer does not resolve CSS
+ * variables for all surfaces), so the values are read from the tokens on
+ * `:root` whenever the theme changes. The ANSI palette lives in
+ * `src/styles/globals.css` as `--terminal-ansi-*`.
+ */
+import type { ITheme } from '@xterm/xterm';
+
+const FALLBACK_THEME: ITheme = {
+  background: '#17171a',
+  foreground: '#ececf1',
+  cursor: '#8b7bff',
+  cursorAccent: '#17171a',
+  selectionBackground: '#8b7bff44',
+  black: '#3a3a44',
+  red: '#f07171',
+  green: '#6bd98a',
+  yellow: '#e5c07b',
+  blue: '#7aa2f7',
+  magenta: '#c792ea',
+  cyan: '#6fd6d6',
+  white: '#c7c7d1',
+  brightBlack: '#6f6f7a',
+  brightRed: '#ff8a8a',
+  brightGreen: '#8ff0a4',
+  brightYellow: '#ffd580',
+  brightBlue: '#9ab8ff',
+  brightMagenta: '#e0aaff',
+  brightCyan: '#9bf0f0',
+  brightWhite: '#ffffff',
+};
+
+const FONT_FALLBACK =
+  "'JetBrains Mono Variable', ui-monospace, 'Cascadia Code', 'Fira Code', monospace";
+
+function readToken(name: string, fallback: string): string {
+  if (typeof document === 'undefined') return fallback;
+  const value = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+/** Builds an xterm theme from the current app tokens (light or dark). */
+export function buildTerminalTheme(): ITheme {
+  return {
+    background: readToken('--background', FALLBACK_THEME.background ?? '#17171a'),
+    foreground: readToken('--foreground', FALLBACK_THEME.foreground ?? '#ececf1'),
+    cursor: readToken('--accent', '#8b7bff'),
+    cursorAccent: readToken('--background', '#17171a'),
+    selectionBackground: readToken('--terminal-selection', '#8b7bff44'),
+    black: readToken('--terminal-ansi-black', FALLBACK_THEME.black ?? '#3a3a44'),
+    red: readToken('--terminal-ansi-red', FALLBACK_THEME.red ?? '#f07171'),
+    green: readToken('--terminal-ansi-green', FALLBACK_THEME.green ?? '#6bd98a'),
+    yellow: readToken('--terminal-ansi-yellow', FALLBACK_THEME.yellow ?? '#e5c07b'),
+    blue: readToken('--terminal-ansi-blue', FALLBACK_THEME.blue ?? '#7aa2f7'),
+    magenta: readToken('--terminal-ansi-magenta', FALLBACK_THEME.magenta ?? '#c792ea'),
+    cyan: readToken('--terminal-ansi-cyan', FALLBACK_THEME.cyan ?? '#6fd6d6'),
+    white: readToken('--terminal-ansi-white', FALLBACK_THEME.white ?? '#c7c7d1'),
+    brightBlack: readToken(
+      '--terminal-ansi-bright-black',
+      FALLBACK_THEME.brightBlack ?? '#6f6f7a',
+    ),
+    brightRed: readToken('--terminal-ansi-bright-red', FALLBACK_THEME.brightRed ?? '#ff8a8a'),
+    brightGreen: readToken(
+      '--terminal-ansi-bright-green',
+      FALLBACK_THEME.brightGreen ?? '#8ff0a4',
+    ),
+    brightYellow: readToken(
+      '--terminal-ansi-bright-yellow',
+      FALLBACK_THEME.brightYellow ?? '#ffd580',
+    ),
+    brightBlue: readToken('--terminal-ansi-bright-blue', FALLBACK_THEME.brightBlue ?? '#9ab8ff'),
+    brightMagenta: readToken(
+      '--terminal-ansi-bright-magenta',
+      FALLBACK_THEME.brightMagenta ?? '#e0aaff',
+    ),
+    brightCyan: readToken('--terminal-ansi-bright-cyan', FALLBACK_THEME.brightCyan ?? '#9bf0f0'),
+    brightWhite: readToken(
+      '--terminal-ansi-bright-white',
+      FALLBACK_THEME.brightWhite ?? '#ffffff',
+    ),
+  };
+}
+
+/** Monospace stack shared with the rest of the code surfaces. */
+export function terminalFontFamily(): string {
+  return readToken('--font-mono', FONT_FALLBACK);
+}
+
+/** Cursor blink and the running indicator should respect reduced motion. */
+export function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}

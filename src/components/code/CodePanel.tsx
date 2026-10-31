@@ -24,7 +24,7 @@ import {
   type CodePanelTab,
 } from '@/lib/store';
 import { resolveSidePanelLayout, useViewportWidth } from '@/lib/sidePanel';
-import type { FileChange, WorkspaceFileEntry } from '@/lib/types';
+import type { WorkspaceFileEntry } from '@/lib/types';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ChangesPanel } from './ChangesPanel';
@@ -199,16 +199,10 @@ export function CodePanel() {
     if (activeId) void refreshSession(activeId);
   }, [panel, activeId, refreshSession]);
 
-  const sessionChanges: FileChange[] | null = useMemo(() => {
-    if (!sessionChangeFiles || sessionChangeFiles.length === 0) return null;
-    return sessionChangeFiles.map((file) => ({
-      path: file.path,
-      kind: file.kind,
-      added: file.added ?? 0,
-      removed: file.removed ?? 0,
-      diff: null,
-    }));
-  }, [sessionChangeFiles]);
+  /* The summary from the backend already carries `origin`/`staged` per file;
+     keeping it intact lets the panel distinguish git-only rows from session
+     edits (and use the real ± counters). */
+  const sessionChanges = sessionChangeFiles;
 
   /* All hooks above run unconditionally; visibility is decided afterwards. */
   if (!open || !layout.canDock) return null;
@@ -258,6 +252,9 @@ export function CodePanel() {
   };
 
   const branch = panel.gitStatus?.branch ?? workspace?.git?.branch ?? null;
+  // Icon-only tabs below this width keep the three labels + actions from
+  // colliding at the minimum docked panel width (360–430px).
+  const compactTabs = layout.width < 430;
 
   return (
     <aside
@@ -289,6 +286,8 @@ export function CodePanel() {
                 }}
                 onClick={() => setTab(entry.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, entry.id)}
+                aria-label={entry.label}
+                title={entry.label}
                 className={cn(
                   'flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium',
                   'transition-colors duration-150',
@@ -296,10 +295,11 @@ export function CodePanel() {
                   selected
                     ? 'bg-surface-hover text-foreground'
                     : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                  compactTabs && 'px-2',
                 )}
               >
                 <Icon aria-hidden className="size-3.5" strokeWidth={1.75} />
-                {entry.label}
+                {compactTabs ? null : entry.label}
               </button>
             );
           })}

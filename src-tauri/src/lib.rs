@@ -32,7 +32,7 @@ mod workspace;
 use tauri::Manager;
 
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         // Must be the first plugin: a second instance focuses the existing
         // window instead of racing the rotating OAuth refresh token and the
         // secrets file.
@@ -161,9 +161,20 @@ pub fn run() {
             commands::terminal::open_terminal,
             commands::terminal::write_terminal,
             commands::terminal::resize_terminal,
+            commands::terminal::kill_terminal,
             commands::terminal::close_terminal,
             commands::terminal::list_terminals,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Lumina");
+        .build(tauri::generate_context!())
+        .expect("error while building Lumina");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            // PTYs use ConPTY and have no OS-level job object: kill the process
+            // trees explicitly so no `npm run dev`/build survives the app.
+            if let Some(state) = app_handle.try_state::<state::AppState>() {
+                state.terminals.close_all();
+            }
+        }
+    });
 }

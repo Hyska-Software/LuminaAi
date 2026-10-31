@@ -87,6 +87,29 @@ describe('buildChangeRows', () => {
     expect(created?.origin).toBe('session');
     expect(created?.status).toBe('A');
   });
+
+  it('uses git-origin summary entries for counters without marking them as agent edits', () => {
+    const rows = buildChangeRows(status(), [
+      {
+        path: 'src/a.ts',
+        kind: 'modified',
+        added: 7,
+        removed: 2,
+        origin: 'git',
+        staged: true,
+      },
+      { path: 'novo.ts', kind: 'created', added: 3, removed: 0, origin: 'git' },
+    ]);
+    const a = rows.find((row) => row.path === 'src/a.ts');
+    expect(a?.origin).toBe('git');
+    expect(a?.group).toBe('staged');
+    expect(a?.added).toBe(7);
+    expect(a?.removed).toBe(2);
+    const novo = rows.find((row) => row.path === 'novo.ts');
+    expect(novo?.origin).toBe('git');
+    expect(novo?.group).toBe('untracked');
+    expect(novo?.added).toBe(3);
+  });
 });
 
 describe('ChangesPanel', () => {
@@ -103,6 +126,26 @@ describe('ChangesPanel', () => {
     expect(b.textContent).toContain('+4');
     expect(b.textContent).toContain('−1');
     expect(rowButton('src/a.ts').textContent).not.toContain('agente');
+  });
+
+  it('shows git-only counters without the agent badge', () => {
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status()}
+        sessionChanges={[
+          { path: 'src/a.ts', kind: 'modified', added: 7, removed: 2, origin: 'git', staged: true },
+          { path: 'novo.ts', kind: 'created', added: 5, removed: 0, origin: 'git' },
+        ]}
+      />,
+    );
+    const a = rowButton('src/a.ts');
+    expect(a.textContent).not.toContain('agente');
+    expect(a.textContent).toContain('+7');
+    expect(a.textContent).toContain('−2');
+    const novo = rowButton('novo.ts');
+    expect(novo.textContent).not.toContain('agente');
+    expect(novo.textContent).toContain('+5');
   });
 
   it('marks each file row with the real file-type icon', () => {

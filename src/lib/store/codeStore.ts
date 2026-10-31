@@ -119,6 +119,28 @@ function mergeChange(summary: ChangesSummary | null, change: FileChange): Change
 }
 
 /**
+ * `workspace_changes` is the **turn** summary (journal of the turn that just
+ * ended), not the whole panel state. Merging keeps the git-only rows and the
+ * earlier session edits that came from the last snapshot — replacing would
+ * drop their ± counters until the next manual refresh.
+ */
+function mergeSummary(
+  current: ChangesSummary | null,
+  incoming: ChangesSummary,
+): ChangesSummary {
+  if (!current || current.files.length === 0) return incoming;
+  const files = new Map(current.files.map((file) => [file.path, file]));
+  for (const file of incoming.files) files.set(file.path, file);
+  const list = [...files.values()];
+  return {
+    turnId: incoming.turnId ?? current.turnId ?? null,
+    files: list,
+    added: list.reduce((total, file) => total + (file.added ?? 0), 0),
+    removed: list.reduce((total, file) => total + (file.removed ?? 0), 0),
+  };
+}
+
+/**
  * Reducer puro dos eventos de código. Eventos do Chat são ignorados (o
  * `chatStore` continua dono deles).
  */
@@ -196,7 +218,7 @@ export function applyCodeEvent(state: CodeSessionUi, event: TurnEvent): CodeSess
           : state.context,
       };
     case 'workspace_changes':
-      return { ...state, changes: event.summary };
+      return { ...state, changes: mergeSummary(state.changes, event.summary) };
     case 'file_changed':
       return { ...state, changes: mergeChange(state.changes, event.change) };
     case 'job_updated':

@@ -1,232 +1,412 @@
 /**
- * Terminal PTY do layout Code (F7; `WORKBENCH.md` §7.3).
+ * Terminal tab of the Code right panel (WORKBENCH §7.3).
  *
- * O backend (ConPTY no Windows) transmite a saída por um `Channel<TerminalEvent>`;
- * o xterm.js renderiza e manda a digitação de volta por `write_terminal`. É o
- * terminal do **usuário** — o agente tem `run_command`/jobs próprios.
+ * This component is intentionally a thin view: `terminalManager` owns the PTY
+ * sessions, xterm instances and IPC channels so switching to Arquivos/
+ * Alterações, collapsing the panel or changing the session never leaks a
+ * process. The view attaches the hosts of the active conversation and renders
+ * the tabs/status/actions.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Terminal as XTerm } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import '@xterm/xterm/css/xterm.css';
-import { Plus, RotateCcw, X } from 'lucide-react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
+import { CircleStop, Eraser, Plus, RotateCcw, SquareTerminal, X } from 'lucide-react';
 
-import { IconButton, Spinner, Tooltip } from '@/components/ui';
-import { api } from '@/lib/api';
-import type { TerminalInfo } from '@/lib/types';
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  IconButton,
+  Spinner,
+  Tooltip,
+} from '@/components/ui';
+import type { TerminalTabInfo } from './terminalManager';
+import { terminalManager } from './terminalManager';
 import { cn } from '@/lib/utils';
-
-interface TerminalInstance {
-  id: string;
-  term: XTerm;
-  dispose: () => void;
-}
 
 interface TerminalPanelProps {
   conversationId: string;
   className?: string;
 }
 
+function tabDisplayName(tab: TerminalTabInfo): string {
+  if (tab.running) return tab.title;
+  return `${tab.title} (encerrado)`;
+}
+
 /** Aba "Terminal" do painel direito: abas de terminais, xterm e foco. */
 export function TerminalPanel({ conversationId, className }: TerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const instances = useRef(new Map<string, TerminalInstance>());
-  const [tabs, setTabs] = useState<TerminalInfo[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const selectTab = useCallback((id: string) => {
-    setActiveId(id);
-    instances.current.get(id)?.term.focus();
-  }, []);
-
-  const closeTerminal = useCallback((id: string) => {
-    instances.current.get(id)?.dispose();
-    instances.current.delete(id);
-    void api.closeTerminal(id).catch(() => undefined);
-    setTabs((current) => {
-      const next = current.filter((tab) => tab.id !== id);
-      setActiveId((active) => (active === id ? (next[0]?.id ?? null) : active));
-      return next;
-    });
-  }, []);
-
-  const openTerminal = useCallback(async () => {
-    const container = containerRef.current;
-    if (!container) return;
-    setLoading(true);
-    setError(null);
-    // O xterm é criado antes do PTY para que os primeiros bytes já tenham
-    // onde ser escritos; o tamanho inicial é ajustado via FitAddon.
-    const term = new XTerm({
-      cursorBlink: true,
-      fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-      fontSize: 12,
-      scrollback: 5_000,
-      allowProposedApi: true,
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    const host = document.createElement('div');
-    host.className = 'h-full w-full';
-    container.appendChild(host);
-    try {
-      term.open(host);
-      try {
-        fit.fit();
-      } catch {
-        // Sem dimensões no primeiro paint: o ResizeObserver corrige.
-      }
-      const info = await api.openTerminal(
-        conversationId,
-        term.cols || 100,
-        term.rows || 24,
-        (event) => {
-          if (event.type === 'data') term.write(event.data);
-          else term.write('\r\n\x1b[90m[processo finalizado]\x1b[0m\r\n');
-        },
-      );
-      const input = term.onData((data) => {
-        void api.writeTerminal(info.id, data).catch((writeError: unknown) => {
-          term.write(`\r\n\x1b[31m${String(writeError)}\x1b[0m\r\n`);
-        });
-      });
-      const resize = () => {
-        try {
-          fit.fit();
-        } catch {
-          return;
-        }
-        void api.resizeTerminal(info.id, term.cols, term.rows).catch(() => undefined);
-      };
-      const observer = new ResizeObserver(resize);
-      observer.observe(host);
-      instances.current.set(info.id, {
-        id: info.id,
-        term,
-        dispose: () => {
-          observer.disconnect();
-          input.dispose();
-          term.dispose();
-          host.remove();
-        },
-      });
-      setTabs((current) => [...current, info]);
-      setActiveId(info.id);
-      requestAnimationFrame(() => {
-        resize();
-        term.focus();
-      });
-    } catch (openError) {
-      term.dispose();
-      host.remove();
-      setError(String(openError));
-    } finally {
-      setLoading(false);
-    }
-  }, [conversationId]);
-
-  useEffect(
-    () => () => {
-      for (const instance of instances.current.values()) instance.dispose();
-      instances.current.clear();
-    },
-    [],
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const emptyCtaRef = useRef<HTMLButtonElement | null>(null);
+  const previousTabs = useRef({ conversationId, count: 0 });
+  const [pendingClose, setPendingClose] = useState<{
+    conversationId: string;
+    tab: TerminalTabInfo;
+  } | null>(null);
+  const snapshot = useSyncExternalStore(
+    terminalManager.subscribe,
+    () => terminalManager.getSnapshot(conversationId),
+    () => terminalManager.getSnapshot(conversationId),
   );
 
+  const { tabs, activeId, loading, error, limit } = snapshot;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
+  const atLimit = tabs.length >= limit;
+  const blocked = atLimit;
+
+  useEffect(() => {
+    setPendingClose(null);
+  }, [conversationId]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    // Focus the terminal when the user explicitly opened the Terminal tab;
+    // switching sessions from the sidebar must keep focus where it was.
+    const activeElement = document.activeElement;
+    const focusTerminal =
+      activeElement instanceof HTMLElement && activeElement.id === 'code-panel-tab-terminal';
+    terminalManager.attach(conversationId, container, { focus: focusTerminal });
+    return () => terminalManager.detach(conversationId, container);
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (typeof MutationObserver === 'undefined') return;
+    const observer = new MutationObserver(() => terminalManager.applyTheme());
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fonts = document.fonts;
+    if (fonts) {
+      void fonts.ready
+        .then(() => {
+          if (!cancelled) terminalManager.refitAll();
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /* Keep the active tab visible when the tab strip overflows (4 tabs in a
+     narrow panel). */
+  useEffect(() => {
+    if (!activeId) return;
+    const node = tabRefs.current.get(activeId);
+    if (node && typeof node.scrollIntoView === 'function') {
+      node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  }, [activeId, tabs.length]);
+
+  /* Closing the last tab should not drop focus on <body>. */
+  useEffect(() => {
+    const previous = previousTabs.current;
+    if (previous.conversationId === conversationId && previous.count > 0 && tabs.length === 0) {
+      emptyCtaRef.current?.focus();
+    }
+    previousTabs.current = { conversationId, count: tabs.length };
+  }, [conversationId, tabs.length]);
+
+  const selectTab = (id: string, focusTerminal = true) => {
+    terminalManager.activate(conversationId, id, { focusTerminal });
+  };
+
+  const requestClose = (tab: TerminalTabInfo) => {
+    if (tab.running) {
+      setPendingClose({ conversationId, tab });
+      return;
+    }
+    void terminalManager.close(conversationId, tab.id);
+  };
+
+  const confirmClose = () => {
+    if (!pendingClose) return;
+    const { conversationId: targetConversation, tab } = pendingClose;
+    setPendingClose(null);
+    void terminalManager.close(targetConversation, tab.id);
+  };
+
+  const handleTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, id: string) => {
+    const index = tabs.findIndex((tab) => tab.id === id);
+    if (index < 0) return;
+    let nextIndex: number;
+    switch (event.key) {
+      case 'ArrowRight':
+        nextIndex = (index + 1) % tabs.length;
+        break;
+      case 'ArrowLeft':
+        nextIndex = (index - 1 + tabs.length) % tabs.length;
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = tabs.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    const next = tabs[nextIndex];
+    if (!next) return;
+    selectTab(next.id, false);
+    tabRefs.current.get(next.id)?.focus();
+  };
 
   return (
-    <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
+    <div className={cn('flex min-h-0 flex-1 flex-col bg-surface-raised', className)}>
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <div
           role="tablist"
           aria-label="Terminais abertos"
-          className="flex min-w-0 flex-1 gap-1 overflow-x-auto"
+          className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
         >
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              role="presentation"
-              className={cn(
-                'flex h-7 max-w-40 shrink-0 items-center rounded-md border text-[12px]',
-                activeId === tab.id
-                  ? 'border-border bg-surface-raised text-foreground shadow-sm'
-                  : 'border-transparent text-foreground-muted hover:bg-surface-hover',
-              )}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeId === tab.id}
-                onClick={() => selectTab(tab.id)}
-                className="h-full min-w-0 flex-1 truncate pl-2 text-left"
+          {tabs.map((tab) => {
+            const selected = activeId === tab.id;
+            return (
+              <div
+                key={tab.id}
+                role="presentation"
+                className={cn(
+                  'flex h-7 max-w-48 shrink-0 items-center rounded-md border text-[12px]',
+                  selected
+                    ? 'border-border bg-background text-foreground shadow-sm'
+                    : 'border-transparent text-foreground-muted hover:bg-surface-hover',
+                )}
               >
-                {tab.title}
-              </button>
-              <button
-                type="button"
-                aria-label={`Fechar ${tab.title}`}
-                onClick={() => closeTerminal(tab.id)}
-                className="mr-0.5 flex size-5 items-center justify-center rounded text-foreground-subtle hover:text-foreground"
-              >
-                <X aria-hidden className="size-3" />
-              </button>
-            </div>
-          ))}
+                <button
+                  ref={(node) => {
+                    if (node) tabRefs.current.set(tab.id, node);
+                    else tabRefs.current.delete(tab.id);
+                  }}
+                  type="button"
+                  role="tab"
+                  id={`terminal-tab-${tab.id}`}
+                  aria-selected={selected}
+                  aria-controls="terminal-output"
+                  tabIndex={selected ? 0 : -1}
+                  title={tab.cwd ? `${tabDisplayName(tab)} — ${tab.cwd}` : tabDisplayName(tab)}
+                  onClick={() => selectTab(tab.id)}
+                  onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
+                  className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-md pl-2 pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  <SquareTerminal
+                    aria-hidden
+                    className={cn(
+                      'size-3.5 shrink-0',
+                      tab.running ? 'text-foreground-subtle' : 'text-warning',
+                    )}
+                    strokeWidth={1.75}
+                  />
+                  <span className="min-w-0 truncate">{tab.title}</span>
+                  {!tab.running ? (
+                    <span
+                      aria-hidden
+                      className="ml-0.5 inline-flex size-1.5 shrink-0 rounded-full bg-warning"
+                    />
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Fechar ${tab.title}`}
+                  title="Fechar aba e encerrar o shell"
+                  onClick={() => requestClose(tab)}
+                  className="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-foreground-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  <X aria-hidden className="size-3.5" />
+                </button>
+              </div>
+            );
+          })}
         </div>
-        <Tooltip content="Novo terminal" side="bottom">
-          <IconButton
-            label="Novo terminal"
-            size="sm"
-            onClick={() => void openTerminal()}
-            disabled={loading}
+
+        <div className="flex shrink-0 items-center gap-0.5">
+          {active ? (
+            <>
+              <Tooltip content="Limpar terminal" side="bottom">
+                <IconButton
+                  label="Limpar terminal"
+                  size="sm"
+                  onClick={() => terminalManager.clear(conversationId, active.id)}
+                >
+                  <Eraser aria-hidden className="size-3.5" strokeWidth={1.75} />
+                </IconButton>
+              </Tooltip>
+              {active.running ? (
+                <Tooltip content="Matar processo" side="bottom">
+                  <IconButton
+                    label="Matar processo"
+                    size="sm"
+                    disabled={active.killing}
+                    onClick={() => void terminalManager.kill(conversationId, active.id)}
+                  >
+                    {active.killing ? (
+                      <Spinner size="xs" />
+                    ) : (
+                      <CircleStop aria-hidden className="size-4" strokeWidth={1.75} />
+                    )}
+                  </IconButton>
+                </Tooltip>
+              ) : (
+                <Tooltip content="Reiniciar terminal" side="bottom">
+                  <IconButton
+                    label="Reiniciar terminal"
+                    size="sm"
+                    disabled={loading}
+                    onClick={() => void terminalManager.restart(conversationId, active.id)}
+                  >
+                    <RotateCcw aria-hidden className="size-3.5" strokeWidth={1.75} />
+                  </IconButton>
+                </Tooltip>
+              )}
+              <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
+            </>
+          ) : null}
+          <Tooltip
+            content={atLimit ? 'Limite de 4 terminais. Feche uma aba para abrir outro.' : 'Novo terminal'}
+            side="bottom"
           >
-            {loading ? <Spinner size="xs" /> : <Plus className="size-4" />}
-          </IconButton>
-        </Tooltip>
+            <span className="inline-flex">
+              <IconButton
+                label="Novo terminal"
+                size="sm"
+                loading={loading}
+                disabled={blocked}
+                onClick={() => void terminalManager.open(conversationId)}
+              >
+                <Plus aria-hidden className="size-4" strokeWidth={1.75} />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </div>
       </div>
 
       {error ? (
-        <div role="alert" className="border-b border-border px-3 py-2 text-[12px] text-danger">
-          {error}
-          <button
-            type="button"
-            onClick={() => void openTerminal()}
-            className="ml-2 inline-flex items-center gap-1 text-accent underline-offset-2 hover:underline"
-          >
-            <RotateCcw aria-hidden className="size-3" /> Tentar novamente
-          </button>
+        <div
+          role="alert"
+          title={error.detail}
+          className="flex shrink-0 items-center gap-2 border-b border-border bg-danger-soft/40 px-3 py-2 text-[12px] text-danger"
+        >
+          <span className="min-w-0 flex-1">{error.message}</span>
+          {error.canRetry ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 shrink-0 px-2 text-[11px]"
+              leftIcon={<RotateCcw aria-hidden className="size-3" strokeWidth={1.75} />}
+              onClick={() => void terminalManager.open(conversationId)}
+            >
+              Tentar novamente
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
-      <div className="relative min-h-0 flex-1 bg-background">
-        <div ref={containerRef} className="h-full w-full" />
-        {tabs.length === 0 ? (
+      <div
+        role="tabpanel"
+        id="terminal-output"
+        aria-labelledby={active ? `terminal-tab-${active.id}` : undefined}
+        aria-busy={loading || undefined}
+        className="relative min-h-0 flex-1 overflow-hidden bg-background"
+      >
+        <div ref={containerRef} className="absolute inset-0" />
+        {tabs.length === 0 && !loading ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
             <p className="text-[13px] font-medium text-foreground">Nenhum terminal aberto</p>
             <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">
               O terminal roda no diretório do workspace. O agente usa os próprios comandos e jobs.
             </p>
-            <button
-              type="button"
-              onClick={() => void openTerminal()}
-              className="mt-1 rounded-lg border border-border bg-surface-raised px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-surface-hover"
+            <Button
+              ref={emptyCtaRef}
+              variant="secondary"
+              size="sm"
+              className="mt-1"
+              disabled={loading || blocked}
+              onClick={() => void terminalManager.open(conversationId)}
             >
               Abrir terminal
-            </button>
+            </Button>
+          </div>
+        ) : null}
+        {loading && tabs.length === 0 ? (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/85 px-6 text-center">
+            <Spinner size="sm" />
+            <p className="text-[12px] text-foreground-muted">Conectando ao shell…</p>
           </div>
         ) : null}
       </div>
-      {active ? (
-        <div className="flex h-6 shrink-0 items-center justify-between border-t border-border px-3 text-[11px] text-foreground-subtle">
-          <span className="truncate">{active.cwd || active.title}</span>
-          <span className="tabular-nums">
-            {active.cols}×{active.rows}
+
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex h-6 shrink-0 items-center gap-3 border-t border-border px-3 text-[11px] text-foreground-muted"
+      >
+        <span className="min-w-0 flex-1 truncate" title={active?.cwd || undefined}>
+          {active ? active.cwd || active.title : 'Nenhum terminal ativo'}
+        </span>
+        <span className="ml-auto flex shrink-0 items-center gap-2 tabular-nums">
+          {active ? (
+            active.running ? (
+              <span className="inline-flex items-center gap-1">
+                <span
+                  aria-hidden
+                  className={cn(
+                    'size-1.5 rounded-full bg-success',
+                    !active.killing && 'motion-safe:animate-pulse',
+                  )}
+                />
+                {active.killing ? 'Encerrando…' : `Rodando · ${active.cols}×${active.rows}`}
+              </span>
+            ) : (
+              <span className="text-warning">
+                Encerrado{active.exitCode !== null ? ` (${active.exitCode})` : ''}
+              </span>
+            )
+          ) : null}
+          <span className="text-foreground-muted">
+            {tabs.length}/{limit}
           </span>
-        </div>
-      ) : null}
+        </span>
+      </div>
+
+      <Dialog
+        open={pendingClose !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingClose(null);
+        }}
+      >
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>Fechar terminal?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription className="px-6 pb-4">
+            {pendingClose
+              ? `${pendingClose.tab.title} e os processos iniciados nele serão encerrados.`
+              : ''}
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setPendingClose(null)}>
+              Cancelar
+            </Button>
+            <Button variant="danger" size="sm" onClick={confirmClose}>
+              Fechar terminal
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

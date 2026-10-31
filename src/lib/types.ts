@@ -470,6 +470,7 @@ export interface TerminalInfo {
   cols: number;
   rows: number;
   running: boolean;
+  exitCode: number | null;
 }
 
 export type TerminalEvent =

@@ -185,6 +185,21 @@ async fn collect_changes(
         let root = PathBuf::from(&workspace.path);
         let status = crate::workspace::git::detect(&root).await;
         if status.is_repo {
+            // Real per-file counters (`+N −M`). `git diff` on the index only
+            // covers staged work; the working-tree diff covers the rest. Sum
+            // both when a path appears in each (mixed staged/unstaged edits).
+            let mut stats = crate::workspace::git::diff_stats(&root, true)
+                .await
+                .unwrap_or_default();
+            for (path, stat) in crate::workspace::git::diff_stats(&root, false)
+                .await
+                .unwrap_or_default()
+            {
+                let entry = stats.entry(path).or_default();
+                entry.added = entry.added.saturating_add(stat.added);
+                entry.removed = entry.removed.saturating_add(stat.removed);
+            }
+
             for file in &status.staged {
                 let entry = files.entry(file.path.clone()).or_insert_with(|| FileChangeSummary {
                     path: file.path.clone(),
@@ -200,6 +215,10 @@ async fn collect_changes(
                 } else {
                     "git".to_string()
                 });
+                if let Some(stat) = stats.get(&file.path) {
+                    entry.added = stat.added;
+                    entry.removed = stat.removed;
+                }
             }
             for file in &status.unstaged {
                 let entry = files.entry(file.path.clone()).or_insert_with(|| FileChangeSummary {
@@ -215,16 +234,34 @@ async fn collect_changes(
                 } else if entry.origin.as_deref() == Some("session") {
                     entry.origin = Some("both".to_string());
                 }
+                if let Some(stat) = stats.get(&file.path) {
+                    entry.added = stat.added;
+                    entry.removed = stat.removed;
+                }
             }
             for path in &status.untracked {
-                files.entry(path.clone()).or_insert_with(|| FileChangeSummary {
-                    path: path.clone(),
-                    kind: FileChangeKind::Created,
-                    added: 0,
-                    removed: 0,
-                    origin: Some("git".to_string()),
-                    staged: false,
-                });
+                // New file: `git diff` ignores it, so count the content lines
+                // instead (same rule as the synthetic diff patch used by the tab).
+                let stat = crate::workspace::git::untracked_stats(&root, path);
+                if let Some(entry) = files.get_mut(path) {
+                    if entry.origin.as_deref() == Some("session") {
+                        entry.origin = Some("both".to_string());
+                    }
+                    entry.added = stat.added;
+                    entry.removed = stat.removed;
+                } else {
+                    files.insert(
+                        path.clone(),
+                        FileChangeSummary {
+                            path: path.clone(),
+                            kind: FileChangeKind::Created,
+                            added: stat.added,
+                            removed: stat.removed,
+                            origin: Some("git".to_string()),
+                            staged: false,
+                        },
+                    );
+                }
             }
         }
     }

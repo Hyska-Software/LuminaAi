@@ -40,6 +40,24 @@
   --assistant-bubble: transparent;
   --code-bg: #f7f7f8;
   --shadow-color: 220 20% 20%;
+  /* Terminal ANSI palette (light): readable on the app background. */
+  --terminal-selection: #6b4eff33;
+  --terminal-ansi-black: #383a42;
+  --terminal-ansi-red: #c81e1e;
+  --terminal-ansi-green: #186a3b;
+  --terminal-ansi-yellow: #7a4f01;
+  --terminal-ansi-blue: #1f4fbf;
+  --terminal-ansi-magenta: #8b2f92;
+  --terminal-ansi-cyan: #0e6b74;
+  --terminal-ansi-white: #5c5f66;
+  --terminal-ansi-bright-black: #6b6f76;
+  --terminal-ansi-bright-red: #d33a3a;
+  --terminal-ansi-bright-green: #1f8a4c;
+  --terminal-ansi-bright-yellow: #8f5f00;
+  --terminal-ansi-bright-blue: #2f63d9;
+  --terminal-ansi-bright-magenta: #a13aa8;
+  --terminal-ansi-bright-cyan: #147f8c;
+  --terminal-ansi-bright-white: #0e0e11;
 }
 
 .dark {
@@ -74,6 +92,24 @@
   --assistant-bubble: transparent;
   --code-bg: #1c1c20;
   --shadow-color: 240 30% 2%;
+  /* Terminal ANSI palette (dark): readable on the app background. */
+  --terminal-selection: #8b7bff44;
+  --terminal-ansi-black: #3a3a44;
+  --terminal-ansi-red: #f07171;
+  --terminal-ansi-green: #6bd98a;
+  --terminal-ansi-yellow: #e5c07b;
+  --terminal-ansi-blue: #7aa2f7;
+  --terminal-ansi-magenta: #c792ea;
+  --terminal-ansi-cyan: #6fd6d6;
+  --terminal-ansi-white: #c7c7d1;
+  --terminal-ansi-bright-black: #6f6f7a;
+  --terminal-ansi-bright-red: #ff8a8a;
+  --terminal-ansi-bright-green: #8ff0a4;
+  --terminal-ansi-bright-yellow: #ffd580;
+  --terminal-ansi-bright-blue: #9ab8ff;
+  --terminal-ansi-bright-magenta: #e0aaff;
+  --terminal-ansi-bright-cyan: #9bf0f0;
+  --terminal-ansi-bright-white: #ffffff;
 }
 
 @theme inline {

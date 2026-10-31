@@ -230,9 +230,16 @@ pub async fn rename_workspace(
 /// Remove o workspace do Lumina. **Não** apaga a pasta do usuário.
 #[tauri::command]
 pub async fn remove_workspace(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let conversations = state
+        .db
+        .list_conversations_for_workspace(&id)
+        .map_err(map_err)?;
     let removed = state.db.delete_workspace(&id).map_err(map_err)?;
     if !removed {
         return Err(format!("workspace não encontrado: {id}"));
+    }
+    for conversation in conversations {
+        state.terminals.close_conversation(&conversation.id);
     }
     Ok(())
 }

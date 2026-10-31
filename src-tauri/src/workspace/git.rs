@@ -7,6 +7,7 @@
 
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -176,6 +177,102 @@ pub async fn diff(
         text.push_str("\n[diff truncado pelo limite de saída]\n");
     }
     Ok(text)
+}
+
+/// Added/removed lines for one file in the working tree (or the index when
+/// `staged`), as shown by the `+N −M` counters of the Changes panel.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GitLineStat {
+    pub added: u32,
+    pub removed: u32,
+}
+
+/// Per-file stats of the current diff (`git diff --numstat -z`).
+///
+/// Renames/copies are keyed by the **new path** (the same one
+/// `status --porcelain=v2` exposes); binaries map to `0/0`.
+pub async fn diff_stats(
+    root: &Path,
+    staged: bool,
+) -> Result<HashMap<String, GitLineStat>, ExecError> {
+    let mut args: Vec<&str> = vec!["diff", "--numstat", "-z", "--no-color", "--no-ext-diff"];
+    if staged {
+        args.push("--cached");
+    }
+    let output = run_git_checked(root, &args, DIFF_CAP).await?;
+    Ok(parse_numstat_z(&output.stdout))
+}
+
+/// Parses `git diff --numstat -z`.
+///
+/// Normal record: `added\tremoved\tpath\0`. Rename/copy: `added\tremoved\t\0`
+/// followed by `old_path\0new_path\0`. `-` (binary) becomes `0`.
+fn parse_numstat_z(raw: &str) -> HashMap<String, GitLineStat> {
+    let tokens: Vec<&str> = raw.split('\0').collect();
+    let mut stats = HashMap::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = tokens[index];
+        index += 1;
+        if token.is_empty() {
+            continue;
+        }
+        let mut fields = token.splitn(3, '\t');
+        let Some(added) = fields.next() else { continue };
+        let Some(removed) = fields.next() else {
+            continue;
+        };
+        let Some(path) = fields.next() else { continue };
+        let stat = GitLineStat {
+            added: parse_numstat_count(added),
+            removed: parse_numstat_count(removed),
+        };
+        if path.is_empty() {
+            // Rename/copy: both paths come in separate tokens.
+            let Some(_old_path) = tokens.get(index) else {
+                break;
+            };
+            index += 1;
+            let Some(new_path) = tokens.get(index) else {
+                break;
+            };
+            index += 1;
+            if !new_path.is_empty() {
+                stats.insert((*new_path).to_string(), stat);
+            }
+        } else {
+            stats.insert(path.to_string(), stat);
+        }
+    }
+    stats
+}
+
+fn parse_numstat_count(raw: &str) -> u32 {
+    raw.trim().parse().unwrap_or(0)
+}
+
+/// Added lines of an **untracked** file (`git diff` ignores it). Reads at most
+/// [`TEXT_CAP`] bytes; binary/large files degrade to `0/0`, mirroring the
+/// synthetic `untracked_diff` patch.
+pub fn untracked_stats(root: &Path, relative: &str) -> GitLineStat {
+    let full = root.join(relative);
+    let Ok(metadata) = std::fs::metadata(&full) else {
+        return GitLineStat::default();
+    };
+    if !metadata.is_file() || metadata.len() > TEXT_CAP as u64 {
+        return GitLineStat::default();
+    }
+    let Ok(bytes) = std::fs::read(&full) else {
+        return GitLineStat::default();
+    };
+    if bytes.iter().take(8_000).any(|byte| *byte == 0) {
+        return GitLineStat::default();
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    GitLineStat {
+        added: u32::try_from(text.lines().count()).unwrap_or(u32::MAX),
+        removed: 0,
+    }
 }
 
 /// Últimos commits (mais novo primeiro).
@@ -1116,6 +1213,111 @@ mod tests {
 
         fs::write(temp.path().join("grande.txt"), "x".repeat(64)).expect("escrever");
         assert!(untracked_diff(temp.path(), "grande.txt", 16).is_err());
+    }
+
+    #[test]
+    fn parses_numstat_z_with_renames_and_binaries() {
+        let raw = concat!(
+            "2\t1\ta.txt\0",
+            "1\t0\t\0antes.txt\0depois.txt\0",
+            "0\t3\tremovido.txt\0",
+            "-\t-\tbin.dat\0",
+        );
+        let stats = parse_numstat_z(raw);
+        assert_eq!(
+            stats.get("a.txt"),
+            Some(&GitLineStat {
+                added: 2,
+                removed: 1
+            })
+        );
+        assert_eq!(
+            stats.get("depois.txt"),
+            Some(&GitLineStat {
+                added: 1,
+                removed: 0
+            })
+        );
+        assert_eq!(
+            stats.get("removido.txt"),
+            Some(&GitLineStat {
+                added: 0,
+                removed: 3
+            })
+        );
+        assert_eq!(stats.get("bin.dat"), Some(&GitLineStat::default()));
+        assert!(!stats.contains_key("antes.txt"));
+    }
+
+    #[test]
+    fn untracked_stats_count_lines_and_skip_binaries() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::write(temp.path().join("novo.txt"), "linha1\nlinha2\n").expect("escrever");
+        assert_eq!(
+            untracked_stats(temp.path(), "novo.txt"),
+            GitLineStat {
+                added: 2,
+                removed: 0
+            }
+        );
+
+        fs::write(temp.path().join("sem-newline.txt"), "unica").expect("escrever");
+        assert_eq!(
+            untracked_stats(temp.path(), "sem-newline.txt"),
+            GitLineStat {
+                added: 1,
+                removed: 0
+            }
+        );
+
+        fs::write(temp.path().join("bin.dat"), [0u8, 1, 2]).expect("escrever");
+        assert_eq!(
+            untracked_stats(temp.path(), "bin.dat"),
+            GitLineStat::default()
+        );
+        assert_eq!(
+            untracked_stats(temp.path(), "ausente.txt"),
+            GitLineStat::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn diff_stats_reads_working_tree_and_index() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        fs::write(temp.path().join("a.txt"), "linha1\nlinha2\n").expect("modificar a");
+        fs::write(temp.path().join("novo.txt"), "ola\nmundo\n").expect("criar novo");
+
+        let unstaged = diff_stats(temp.path(), false)
+            .await
+            .expect("stats unstaged");
+        assert_eq!(
+            unstaged.get("a.txt"),
+            Some(&GitLineStat {
+                added: 1,
+                removed: 0
+            })
+        );
+        assert!(!unstaged.contains_key("novo.txt"), "untracked fica de fora");
+
+        stage_all(temp.path()).await.expect("stage all");
+        let staged = diff_stats(temp.path(), true).await.expect("stats staged");
+        assert_eq!(
+            staged.get("a.txt"),
+            Some(&GitLineStat {
+                added: 1,
+                removed: 0
+            })
+        );
+        assert_eq!(
+            staged.get("novo.txt"),
+            Some(&GitLineStat {
+                added: 2,
+                removed: 0
+            })
+        );
     }
 
     #[tokio::test]

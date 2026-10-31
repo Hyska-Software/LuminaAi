@@ -278,6 +278,7 @@ export const api = {
   resizeTerminal: (id: string, cols: number, rows: number) =>
     invoke<void>('resize_terminal', { id, cols, rows }),
   closeTerminal: (id: string) => invoke<boolean>('close_terminal', { id }),
+  killTerminal: (id: string) => invoke<void>('kill_terminal', { id }),
   listTerminals: (conversationId: string) =>
     invoke<TerminalInfo[]>('list_terminals', { conversationId }),
 

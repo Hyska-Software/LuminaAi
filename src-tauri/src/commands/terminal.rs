@@ -49,6 +49,12 @@ pub async fn resize_terminal(
     state.terminals.resize(&id, cols, rows).map_err(map_err)
 }
 
+/// Encerra o processo (árvore) mantendo a aba aberta para mostrar o exit code.
+#[tauri::command]
+pub async fn kill_terminal(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.terminals.kill(&id).map_err(map_err)
+}
+
 #[tauri::command]
 pub async fn close_terminal(state: State<'_, AppState>, id: String) -> Result<bool, String> {
     Ok(state.terminals.close(&id))

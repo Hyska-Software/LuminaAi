@@ -284,6 +284,17 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
     expect(screen.queryByText(/lumina · main/)).toBeNull();
   });
 
+  it('usa abas só com ícone quando o painel está na largura mínima', () => {
+    setViewport(1120);
+
+    render(<CodePanel />);
+
+    const arquivos = screen.getByRole('tab', { name: 'Arquivos' });
+    expect(arquivos.getAttribute('aria-label')).toBe('Arquivos');
+    expect(screen.queryByText('Arquivos')).toBeNull();
+    expect(requiredPanel().style.width).toBe('368px');
+  });
+
   it('respeita o estado persistido e navega com as setas do teclado', () => {
     useUiStore.setState({ codePanelTab: 'files' });
     render(<CodePanel />);

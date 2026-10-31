@@ -24,13 +24,19 @@ import {
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import type { FileChange, FileChangeKind, WorkspaceGitStatus } from '@/lib/types';
+import type { FileChange, FileChangeKind, FileChangeSummary, WorkspaceGitStatus } from '@/lib/types';
 import { CommitBar } from './CommitBar';
 import { DiffView } from './DiffView';
 import { FileIcon } from './FileIcon';
 
 export type ChangeGroup = 'staged' | 'unstaged' | 'untracked' | 'session';
 export type ChangeOrigin = 'session' | 'git' | 'both';
+
+/**
+ * Input accepted by the panel: the backend summary (`FileChangeSummary`, with
+ * `origin`/`staged`) plus an optional diff already known from the journal/tool.
+ */
+export type ChangeInput = FileChangeSummary & Pick<FileChange, 'diff'>;
 
 /** One file row of the changes list. */
 export interface ChangeRow {
@@ -54,8 +60,8 @@ export interface ChangesPanelProps {
   gitStatus?: WorkspaceGitStatus | null;
   gitLoading?: boolean;
   gitError?: string | null;
-  /** Files touched by the current session (journal). */
-  sessionChanges?: FileChange[] | null;
+  /** Files touched by the current session (journal) plus git working tree entries. */
+  sessionChanges?: ChangeInput[] | null;
   sessionLoading?: boolean;
   sessionError?: string | null;
   /** Called after stage/unstage/revert/commit so the container reloads the data. */
@@ -109,7 +115,7 @@ function describeError(error: unknown, fallback: string): string {
 /** Merges git status and session journal into a unique, ordered row list. */
 export function buildChangeRows(
   gitStatus: WorkspaceGitStatus | null | undefined,
-  sessionChanges: FileChange[] | null | undefined,
+  sessionChanges: ChangeInput[] | null | undefined,
 ): ChangeRow[] {
   const rows = new Map<string, ChangeRow>();
 
@@ -152,7 +158,39 @@ export function buildChangeRows(
   }
 
   for (const change of sessionChanges ?? []) {
-    upsert({
+    const origin = change.origin ?? 'session';
+    const existing = rows.get(change.path);
+
+    // A git-only entry came from the backend summary (which already carries the
+    // real counters): just complete the status row without marking it as an
+    // agent edit or overriding its group/stage state.
+    if (origin === 'git') {
+      if (existing) {
+        if (change.added !== undefined) existing.added = change.added;
+        if (change.removed !== undefined) existing.removed = change.removed;
+        continue;
+      }
+      rows.set(change.path, {
+        path: change.path,
+        status: KIND_STATUS[change.kind] ?? 'M',
+        group: change.staged ? 'staged' : 'unstaged',
+        origin: 'git',
+        staged: Boolean(change.staged),
+        added: change.added,
+        removed: change.removed,
+      });
+      continue;
+    }
+
+    if (existing) {
+      existing.origin = existing.origin === 'git' ? 'both' : existing.origin;
+      if (change.added !== undefined) existing.added = change.added;
+      if (change.removed !== undefined) existing.removed = change.removed;
+      if (change.diff != null) existing.knownDiff = change.diff;
+      continue;
+    }
+
+    rows.set(change.path, {
       path: change.path,
       status: KIND_STATUS[change.kind] ?? 'M',
       group: 'session',

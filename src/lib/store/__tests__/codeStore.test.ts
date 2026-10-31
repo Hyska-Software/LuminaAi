@@ -89,7 +89,7 @@ describe('codeStore reducer', () => {
     expect(state.planMode).toBe(false);
   });
 
-  it('accumulates file changes and replaces them on the turn summary', () => {
+  it('accumulates file changes and merges the turn summary without dropping git rows', () => {
     let state = emptyCodeSession('conv-1');
     const change = (path: string, added: number, removed: number): FileChange => ({
       path,
@@ -99,14 +99,34 @@ describe('codeStore reducer', () => {
     });
     state = applyCodeEvent(state, { type: 'file_changed', change: change('a.ts', 3, 1) });
     state = applyCodeEvent(state, { type: 'file_changed', change: change('b.ts', 2, 0) });
-    expect(state.changes?.files).toHaveLength(2);
-    expect(state.changes?.added).toBe(5);
-    expect(state.changes?.removed).toBe(1);
+    state.changes = {
+      ...state.changes!,
+      files: [
+        ...state.changes!.files,
+        { path: 'git.ts', kind: 'modified', added: 9, removed: 4, origin: 'git' },
+      ],
+      added: 14,
+      removed: 5,
+    };
     state = applyCodeEvent(state, {
       type: 'workspace_changes',
-      summary: { turnId: 't1', files: [], added: 0, removed: 0 },
+      summary: {
+        turnId: 't1',
+        files: [{ path: 'a.ts', kind: 'modified', added: 4, removed: 2, origin: 'session' }],
+        added: 4,
+        removed: 2,
+      },
     });
-    expect(state.changes?.files).toHaveLength(0);
+    expect(state.changes?.files).toHaveLength(3);
+    expect(state.changes?.files.find((file) => file.path === 'a.ts')?.added).toBe(4);
+    expect(state.changes?.files.find((file) => file.path === 'git.ts')?.added).toBe(9);
+    expect(state.changes?.added).toBe(15);
+    expect(state.changes?.removed).toBe(6);
+    state = applyCodeEvent(state, {
+      type: 'workspace_changes',
+      summary: { turnId: 't2', files: [], added: 0, removed: 0 },
+    });
+    expect(state.changes?.files).toHaveLength(3);
   });
 
   it('updates context, compaction and jobs', () => {

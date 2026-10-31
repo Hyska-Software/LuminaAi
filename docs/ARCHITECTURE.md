@@ -749,7 +749,7 @@ list_jobs, get_job_output, kill_job,
 git_status, git_diff, git_stage, git_unstage, git_discard, git_commit,
 git_branches, git_switch_branch, git_log, suggest_commit_message,
 -- terminal PTY
-open_terminal, write_terminal, resize_terminal, close_terminal, list_terminals
+open_terminal, write_terminal, resize_terminal, kill_terminal, close_terminal, list_terminals
 ```
 
 O login ChatGPT é **em duas fases**: `openai_login_start` devolve
