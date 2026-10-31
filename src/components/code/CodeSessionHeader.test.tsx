@@ -346,8 +346,44 @@ describe('CodeSessionHeader — cabeçalho da sessão', () => {
 
     await waitFor(() => expect(mocks.createConversation).toHaveBeenCalledTimes(1));
     expect(mocks.createConversation.mock.calls[0]?.[3]).toBe('code');
+    // Sem workspace atual, a sessão nasce sem vínculo (nada de workspace falso).
+    expect(mocks.setConversationWorkspace).not.toHaveBeenCalled();
     await waitFor(() => expect(useChatStore.getState().activeId).toBe('c-new'));
     await waitFor(() => expect(tab('Nova conversa').getAttribute('aria-selected')).toBe('true'));
+  });
+
+  it('+ cria a nova sessão no mesmo workspace da sessão ativa', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    mocks.listConversations.mockResolvedValue([
+      conversation({ id: 'c-new', title: 'Nova conversa', workspaceId: 'ws-1' }),
+    ]);
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Corrigir o build', workspaceId: 'ws-1' })],
+      activeId: 'c-1',
+    });
+
+    render(<CodeSessionHeader />);
+    fireEvent.click(screen.getByRole('button', { name: 'Nova sessão' }));
+
+    await waitFor(() =>
+      expect(mocks.setConversationWorkspace).toHaveBeenCalledWith('c-new', 'ws-1'),
+    );
+    await waitFor(() => expect(useChatStore.getState().activeId).toBe('c-new'));
+    expect(useUiStore.getState().activeWorkspaceId).toBe('ws-1');
+    expect(useUiStore.getState().openSessionsByWorkspace['ws-1']).toContain('c-new');
+  });
+
+  it('+ sem sessão ativa cria no workspace selecionado na sidebar', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useUiStore.setState({ activeWorkspaceId: 'ws-1' });
+
+    render(<CodeSessionHeader />);
+    fireEvent.click(screen.getByRole('button', { name: 'Nova sessão' }));
+
+    await waitFor(() =>
+      expect(mocks.setConversationWorkspace).toHaveBeenCalledWith('c-new', 'ws-1'),
+    );
+    expect(useUiStore.getState().openSessionsByWorkspace['ws-1']).toContain('c-new');
   });
 });
 

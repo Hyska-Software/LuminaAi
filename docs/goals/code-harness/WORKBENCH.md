@@ -87,8 +87,9 @@ O sidebar nunca lista sessões de outro workspace fora do grupo dele.
   (`aria-pressed`). Os controles de **modo de permissão** e **Plano** não ficam mais no cabeçalho:
   vivem no composer (§6).
 - **Linha 2 (36 px)**: abas das sessões abertas no Code (`role="tablist"`), `+` nova sessão, `X`
-  fechar (mínimo: fecha aba, não apaga sessão). Estado persistido por workspace (localStorage via
-  `uiStore`) — resolve a limitação conhecida da fase 1.
+  fechar (mínimo: fecha aba, não apaga sessão). O `+` cria a sessão **no mesmo workspace da sessão
+  ativa** (sem sessão ativa, no workspace selecionado na sidebar; sem nenhum, sem workspace). Estado
+  persistido por workspace (localStorage via `uiStore`) — resolve a limitação conhecida da fase 1.
 - **Status da sessão** (ponto colorido na aba): `Trabalhando` (pulsante), `Aguardando aprovação`
   (âmbar), `Pronta para revisar` (verde), `Erro` (vermelho), `Concluída`.
 - Se a sessão não tem workspace: chip "Sem workspace" com CTA "Abrir pasta" (não é beco sem saída).

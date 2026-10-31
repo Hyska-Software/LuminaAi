@@ -349,7 +349,8 @@ export function CodeSessionHeader() {
   /** The docked code panel only exists on wide windows (see CodePanel). */
   const canDock = viewportWidth >= SIDE_PANEL_DOCK_MIN_VIEWPORT;
 
-  const { workspaces, pendingTrust, refreshContext, resolveTrust, cancelTrust } = useWorkspaces();
+  const { workspaces, pendingTrust, refreshContext, resolveTrust, cancelTrust, startSession } =
+    useWorkspaces();
 
   const [trustBusy, setTrustBusy] = useState(false);
 
@@ -548,7 +549,15 @@ export function CodeSessionHeader() {
 
   const createSession = () => {
     useUiStore.getState().setCodeView('session');
-    void useChatStore.getState().startNewConversation('code');
+    /* The "+" opens the new session next to the active one, so it inherits the
+       active session's workspace instead of starting detached. With no active
+       session (welcome state), the workspace selected in the sidebar is the
+       project the user is looking at. */
+    const workspaceId = activeConversation
+      ? (activeConversation.workspaceId ?? null)
+      : useUiStore.getState().activeWorkspaceId;
+    if (workspaceId) useUiStore.getState().setActiveWorkspace(workspaceId);
+    void startSession(workspaceId);
   };
 
   const handleTabKeyDown = (event: ReactKeyboardEvent<HTMLElement>, id: string) => {
