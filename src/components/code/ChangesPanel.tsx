@@ -194,6 +194,7 @@ export function ChangesPanel({
   const conflicted = (gitStatus?.conflicted.length ?? 0) > 0;
 
   const [busyPath, setBusyPath] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<'stage' | 'unstage' | null>(null);
   const [confirmRow, setConfirmRow] = useState<ChangeRow | null>(null);
   const [reverting, setReverting] = useState(false);
 
@@ -205,6 +206,12 @@ export function ChangesPanel({
 
   const stagedPaths = useMemo(
     () => rows.filter((row) => row.group === 'staged').map((row) => row.path),
+    [rows],
+  );
+  /* Conflitos ficam fora do "Preparar tudo": `git add -A` os marcaria como
+     resolvidos sem o usuário revisar o conteúdo. */
+  const stageablePaths = useMemo(
+    () => rows.filter((row) => !row.staged && row.status !== 'U').map((row) => row.path),
     [rows],
   );
   const totals = useMemo(
@@ -269,7 +276,7 @@ export function ChangesPanel({
   };
 
   const mutate = async (row: ChangeRow, action: 'stage' | 'unstage') => {
-    if (!workspaceId || busyPath) return;
+    if (!workspaceId || busyPath || bulkBusy) return;
     setBusyPath(row.path);
     try {
       if (action === 'stage') await api.gitStage(workspaceId, [row.path]);
@@ -279,6 +286,36 @@ export function ChangesPanel({
       toast.error(describeError(error, 'Não foi possível atualizar o stage'));
     } finally {
       setBusyPath(null);
+    }
+  };
+
+  const mutateAll = async (action: 'stage' | 'unstage') => {
+    if (!workspaceId || bulkBusy || busyPath) return;
+    if (action === 'stage' && conflicted) return;
+    const count = action === 'stage' ? stageablePaths.length : stagedPaths.length;
+    if (count === 0) return;
+    setBulkBusy(action);
+    try {
+      if (action === 'stage') await api.gitStageAll(workspaceId);
+      else await api.gitUnstageAll(workspaceId);
+      const noun = count === 1 ? 'arquivo' : 'arquivos';
+      toast.success(
+        action === 'stage'
+          ? `${count} ${noun} ${count === 1 ? 'preparado' : 'preparados'}`
+          : `${count} ${noun} ${count === 1 ? 'removido do stage' : 'removidos do stage'}`,
+      );
+      onRefresh?.();
+    } catch (error) {
+      toast.error(
+        describeError(
+          error,
+          action === 'stage'
+            ? 'Não foi possível preparar os arquivos'
+            : 'Não foi possível desmarcar os arquivos',
+        ),
+      );
+    } finally {
+      setBulkBusy(null);
     }
   };
 
@@ -381,6 +418,45 @@ export function ChangesPanel({
           </div>
         ) : null}
 
+        {isRepo && rows.length > 0 ? (
+          <div className="flex items-center gap-1.5 border-b border-border px-3 py-1.5">
+            <span className="min-w-0 flex-1 truncate text-[11px] text-foreground-subtle">
+              {rows.length} {rows.length === 1 ? 'arquivo' : 'arquivos'}
+            </span>
+            {stagedPaths.length > 0 ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 shrink-0 px-2 text-[11px]"
+                loading={bulkBusy === 'unstage'}
+                disabled={bulkBusy !== null || busyPath !== null}
+                leftIcon={<Minus aria-hidden className="size-3.5" strokeWidth={2} />}
+                onClick={() => void mutateAll('unstage')}
+              >
+                Desmarcar tudo
+              </Button>
+            ) : null}
+            {stageablePaths.length > 0 ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 shrink-0 px-2 text-[11px]"
+                loading={bulkBusy === 'stage'}
+                disabled={bulkBusy !== null || busyPath !== null || conflicted}
+                title={
+                  conflicted
+                    ? 'Resolva os conflitos de merge antes de preparar tudo'
+                    : 'Adiciona todas as alterações ao stage'
+                }
+                leftIcon={<Plus aria-hidden className="size-3.5" strokeWidth={2} />}
+                onClick={() => void mutateAll('stage')}
+              >
+                Preparar tudo
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
         {loading && rows.length === 0 ? (
           <div aria-hidden className="space-y-1.5 p-2">
             {[0, 1, 2, 3].map((row) => (
@@ -464,7 +540,7 @@ export function ChangesPanel({
                               <IconButton
                                 label={`Remover ${row.path} do stage`}
                                 size="sm"
-                                disabled={busyPath === row.path}
+                                disabled={busyPath === row.path || bulkBusy !== null}
                                 onClick={() => void mutate(row, 'unstage')}
                               >
                                 <Minus aria-hidden className="size-3.5" strokeWidth={2} />
@@ -473,7 +549,7 @@ export function ChangesPanel({
                               <IconButton
                                 label={`Preparar ${row.path}`}
                                 size="sm"
-                                disabled={busyPath === row.path || !isRepo}
+                                disabled={busyPath === row.path || bulkBusy !== null || !isRepo}
                                 onClick={() => void mutate(row, 'stage')}
                               >
                                 <Plus aria-hidden className="size-3.5" strokeWidth={2} />
@@ -482,7 +558,7 @@ export function ChangesPanel({
                             <IconButton
                               label={`Reverter ${row.path}`}
                               size="sm"
-                              disabled={busyPath === row.path}
+                              disabled={busyPath === row.path || bulkBusy !== null}
                               onClick={() => setConfirmRow(row)}
                             >
                               <Undo2 aria-hidden className="size-3.5" strokeWidth={1.75} />

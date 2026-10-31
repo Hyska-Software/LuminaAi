@@ -15,6 +15,8 @@ use tokio_util::sync::CancellationToken;
 use super::exec::{self, ExecError, ExecOutput, ExecRequest};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Network operations (fetch/pull/push) need more slack than local commands.
+const NETWORK_TIMEOUT: Duration = Duration::from_secs(180);
 const STATUS_CAP: usize = 4 * 1024 * 1024;
 const DIFF_CAP: usize = 4 * 1024 * 1024;
 const TEXT_CAP: usize = 1024 * 1024;
@@ -251,6 +253,142 @@ pub async fn commit(root: &Path, message: &str) -> Result<(), ExecError> {
     }
     run_git_checked(root, &["commit", "-m", message], TEXT_CAP).await?;
     Ok(())
+}
+
+/// `git restore --staged -- :/` (desfaz todo o staging, mantém o working tree).
+///
+/// Usa o pathspec `:/` (raiz do repositório) em vez de listar caminhos: assim
+/// renames/cópias preparados são desfeitos por completo, sem deixar a remoção
+/// do caminho antigo presa no índice.
+pub async fn unstage_all(root: &Path) -> Result<(), ExecError> {
+    run_git_checked(root, &["restore", "--staged", "--", ":/"], TEXT_CAP).await?;
+    Ok(())
+}
+
+/* ------------------------------------------------------------------ */
+/* Rede: fetch / pull / push (ações explícitas do usuário)             */
+/* ------------------------------------------------------------------ */
+
+/// Requisição de rede: sem prompt de terminal (o app não tem TTY interativo),
+/// sem editor aberto por merge e com timeout maior.
+fn network_request(root: &Path, args: &[&str]) -> ExecRequest {
+    let mut full_args: Vec<String> = vec![
+        "-C".to_string(),
+        root.to_string_lossy().into_owned(),
+        "-c".to_string(),
+        "core.quotepath=false".to_string(),
+    ];
+    full_args.extend(args.iter().map(|arg| (*arg).to_string()));
+    ExecRequest {
+        program: "git".to_string(),
+        args: full_args,
+        cwd: root.to_path_buf(),
+        env: exec::sanitized_env(&[
+            ("LC_ALL", "C"),
+            ("LANG", "C"),
+            ("GIT_TERMINAL_PROMPT", "0"),
+            ("GIT_EDITOR", ":"),
+            ("GIT_SEQUENCE_EDITOR", ":"),
+            ("GIT_MERGE_AUTOEDIT", "no"),
+        ]),
+        timeout: NETWORK_TIMEOUT,
+        cancel: CancellationToken::new(),
+        max_output_bytes: TEXT_CAP,
+    }
+}
+
+async fn run_git_network(root: &Path, args: &[&str]) -> Result<ExecOutput, ExecError> {
+    let output = exec::run(network_request(root, args), None).await?;
+    if output.timed_out {
+        return Err(ExecError::failed(
+            "git demorou demais para responder (operação de rede)",
+            None,
+        ));
+    }
+    if output.cancelled {
+        return Err(ExecError::failed("git cancelado", None));
+    }
+    if output.exit_code != Some(0) {
+        let detail = if output.stderr.trim().is_empty() {
+            output.stdout.trim()
+        } else {
+            output.stderr.trim()
+        };
+        return Err(ExecError::failed(
+            format!("git {}: {}", args.first().copied().unwrap_or("?"), detail),
+            output.exit_code,
+        ));
+    }
+    Ok(output)
+}
+
+/// Explica falhas de autenticação comuns, que sem um terminal parecem opacas.
+fn with_network_hint(mut error: ExecError) -> ExecError {
+    let lower = error.message.to_lowercase();
+    if lower.contains("terminal prompts disabled")
+        || lower.contains("could not read username")
+        || lower.contains("authentication failed")
+    {
+        error.message.push_str(
+            " — configure um credential helper do git (ou use uma URL SSH) para autenticar",
+        );
+    }
+    error
+}
+
+/// Branch atual; `None` em HEAD destacado.
+async fn current_branch(root: &Path) -> Option<String> {
+    let output = run_git_capture(root, &["symbolic-ref", "--short", "-q", "HEAD"], TEXT_CAP)
+        .await
+        .ok()?;
+    let branch = output.stdout.trim();
+    if branch.is_empty() {
+        None
+    } else {
+        Some(branch.to_string())
+    }
+}
+
+/// `git fetch --all --prune`: atualiza as referências remotas sem tocar no
+/// working tree. Repositório sem remoto é um no-op (exit 0).
+pub async fn fetch(root: &Path) -> Result<(), ExecError> {
+    run_git_network(root, &["fetch", "--all", "--prune"])
+        .await
+        .map_err(with_network_hint)?;
+    Ok(())
+}
+
+/// `git pull --no-edit`: respeita a configuração do usuário (merge/rebase) e
+/// nunca abre editor para a mensagem do merge.
+pub async fn pull(root: &Path) -> Result<(), ExecError> {
+    run_git_network(root, &["pull", "--no-edit"])
+        .await
+        .map_err(with_network_hint)?;
+    Ok(())
+}
+
+/// `git push`. Quando a branch ainda não tem upstream, publica em `origin` com
+/// `--set-upstream` — o caso mais comum do primeiro push de uma branch nova.
+pub async fn push(root: &Path) -> Result<(), ExecError> {
+    match run_git_network(root, &["push"]).await {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            let lower = error.message.to_lowercase();
+            let missing_upstream = lower.contains("has no upstream branch")
+                || lower.contains("no upstream branch")
+                || lower.contains("no configured push destination");
+            if !missing_upstream {
+                return Err(with_network_hint(error));
+            }
+            let Some(branch) = current_branch(root).await else {
+                return Err(with_network_hint(error));
+            };
+            run_git_network(root, &["push", "--set-upstream", "origin", &branch])
+                .await
+                .map_err(with_network_hint)?;
+            Ok(())
+        }
+    }
 }
 
 /// Branches locais (`git for-each-ref refs/heads`), em ordem alfabética.
@@ -695,6 +833,22 @@ mod tests {
         matches!(command.output(), Ok(out) if out.status.success())
     }
 
+    fn git_stdout(dir: &Path, args: &[&str]) -> Option<String> {
+        let mut command = Command::new("git");
+        command.args(args).current_dir(dir);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+        match command.output() {
+            Ok(out) if out.status.success() => {
+                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            }
+            _ => None,
+        }
+    }
+
     /// Cria repo com um commit inicial. `None` quando git não está disponível.
     fn setup_repo(dir: &Path) -> Option<()> {
         if !git_available() {
@@ -809,6 +963,112 @@ mod tests {
         assert!(status.staged.iter().any(|file| file.path == "b.txt"));
         assert!(status.unstaged.is_empty(), "unstaged: {:?}", status.unstaged);
         assert!(status.untracked.is_empty(), "untracked: {:?}", status.untracked);
+    }
+
+    #[tokio::test]
+    async fn unstage_all_clears_the_index_including_renames() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        assert!(run_git(temp.path(), &["mv", "a.txt", "renomeado.txt"]));
+        let status = detect(temp.path()).await;
+        assert!(status.staged.iter().any(|file| file.path == "renomeado.txt"));
+
+        unstage_all(temp.path()).await.expect("unstage all");
+
+        let status = detect(temp.path()).await;
+        assert!(status.staged.is_empty(), "staged: {:?}", status.staged);
+        assert!(
+            status.untracked.iter().any(|path| path == "renomeado.txt"),
+            "untracked: {:?}",
+            status.untracked
+        );
+        assert!(
+            status.unstaged.iter().any(|file| file.path == "a.txt" && file.status == "D"),
+            "unstaged: {:?}",
+            status.unstaged
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_without_remote_is_a_noop() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        fetch(temp.path()).await.expect("fetch sem remoto");
+    }
+
+    #[tokio::test]
+    async fn push_publishes_a_branch_without_upstream() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("work");
+        fs::create_dir_all(&root).expect("criar work");
+        if setup_repo(&root).is_none() {
+            return;
+        }
+        let Some(branch) = git_stdout(&root, &["symbolic-ref", "--short", "HEAD"]) else {
+            return;
+        };
+        let origin = temp.path().join("origin.git");
+        assert!(run_git(
+            temp.path(),
+            &["init", "--bare", origin.to_string_lossy().as_ref()]
+        ));
+        assert!(run_git(&root, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]));
+
+        push(&root).await.expect("push com upstream automático");
+
+        assert_eq!(
+            git_stdout(&root, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+                .as_deref(),
+            Some(format!("origin/{branch}").as_str())
+        );
+        assert!(
+            git_stdout(&origin, &["rev-parse", "--verify", &format!("refs/heads/{branch}")]).is_some(),
+            "origin deveria ter a branch {branch}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_and_pull_bring_remote_commits_into_the_working_tree() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("work");
+        fs::create_dir_all(&root).expect("criar work");
+        if setup_repo(&root).is_none() {
+            return;
+        }
+        let Some(branch) = git_stdout(&root, &["symbolic-ref", "--short", "HEAD"]) else {
+            return;
+        };
+        let origin = temp.path().join("origin.git");
+        let origin_str = origin.to_string_lossy().to_string();
+        assert!(run_git(temp.path(), &["init", "--bare", origin_str.as_str()]));
+        assert!(run_git(
+            &origin,
+            &["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")]
+        ));
+        assert!(run_git(&root, &["remote", "add", "origin", origin_str.as_str()]));
+        assert!(run_git(&root, &["push", "-u", "origin", branch.as_str()]));
+
+        let other = temp.path().join("other");
+        assert!(run_git(
+            temp.path(),
+            &["clone", origin_str.as_str(), other.to_string_lossy().as_ref()]
+        ));
+        assert!(run_git(&other, &["config", "user.email", "outro@lumina.local"]));
+        assert!(run_git(&other, &["config", "user.name", "Outro"]));
+        fs::write(other.join("a.txt"), "linha1\nremoto\n").expect("modificar a");
+        assert!(run_git(&other, &["commit", "-am", "alteração remota"]));
+        assert!(run_git(&other, &["push"]));
+
+        fetch(&root).await.expect("fetch");
+        pull(&root).await.expect("pull");
+
+        let content = fs::read_to_string(root.join("a.txt")).expect("ler a.txt");
+        assert!(content.contains("remoto"), "conteúdo: {content}");
+        assert_eq!(log(&root, 10).await.expect("log").len(), 2);
     }
 
     #[tokio::test]

@@ -283,12 +283,19 @@ export const api = {
 
   /* -------- git (painel) -------- */
   gitStatus: (workspaceId: string) => invoke<WorkspaceGitStatus>('git_status', { workspaceId }),
+  gitFetch: (workspaceId: string) => invoke<WorkspaceGitStatus>('git_fetch', { workspaceId }),
+  gitPull: (workspaceId: string) => invoke<WorkspaceGitStatus>('git_pull', { workspaceId }),
+  gitPush: (workspaceId: string) => invoke<WorkspaceGitStatus>('git_push', { workspaceId }),
   gitDiff: (workspaceId: string, paths: string[], staged = false) =>
     invoke<string>('git_diff', { workspaceId, paths, staged }),
   gitStage: (workspaceId: string, paths: string[]) =>
     invoke<WorkspaceGitStatus>('git_stage', { workspaceId, paths }),
+  gitStageAll: (workspaceId: string) =>
+    invoke<WorkspaceGitStatus>('git_stage_all', { workspaceId }),
   gitUnstage: (workspaceId: string, paths: string[]) =>
     invoke<WorkspaceGitStatus>('git_unstage', { workspaceId, paths }),
+  gitUnstageAll: (workspaceId: string) =>
+    invoke<WorkspaceGitStatus>('git_unstage_all', { workspaceId }),
   gitDiscard: (workspaceId: string, paths: string[]) =>
     invoke<WorkspaceGitStatus>('git_discard', { workspaceId, paths }),
   gitCommit: (workspaceId: string, message: string, paths?: string[]) =>

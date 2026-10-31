@@ -6,7 +6,9 @@ import type { FileChange, WorkspaceGitStatus } from '@/lib/types';
 const mocks = vi.hoisted(() => ({
   getFileDiff: vi.fn(),
   gitStage: vi.fn(),
+  gitStageAll: vi.fn(),
   gitUnstage: vi.fn(),
+  gitUnstageAll: vi.fn(),
   gitDiscard: vi.fn(),
   revertFile: vi.fn(),
   gitLog: vi.fn(),
@@ -51,7 +53,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getFileDiff.mockResolvedValue('@@ -1 +1 @@\n-a\n+b');
   mocks.gitStage.mockResolvedValue(status());
+  mocks.gitStageAll.mockResolvedValue(status());
   mocks.gitUnstage.mockResolvedValue(status());
+  mocks.gitUnstageAll.mockResolvedValue(status());
   mocks.gitDiscard.mockResolvedValue(status());
   mocks.revertFile.mockResolvedValue(true);
   mocks.gitLog.mockResolvedValue([]);
@@ -184,6 +188,58 @@ describe('ChangesPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Remover src/a.ts do stage' }));
     await waitFor(() => expect(mocks.gitUnstage).toHaveBeenCalledWith('ws-1', ['src/a.ts']));
+  });
+
+  it('prepares everything at once and reports the count', async () => {
+    const onRefresh = vi.fn();
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status()}
+        sessionChanges={sessionChanges}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preparar tudo' }));
+
+    await waitFor(() => expect(mocks.gitStageAll).toHaveBeenCalledWith('ws-1'));
+    expect(onRefresh).toHaveBeenCalled();
+    // Um arquivo já preparado + dois pendentes = 2 arquivos preparados.
+    expect(toastMocks.success).toHaveBeenCalledWith('2 arquivos preparados');
+  });
+
+  it('removes every prepared file from the index at once', async () => {
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status({ staged: [{ path: 'src/a.ts', status: 'M' }] })}
+        sessionChanges={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Desmarcar tudo' }));
+
+    await waitFor(() => expect(mocks.gitUnstageAll).toHaveBeenCalledWith('ws-1'));
+    expect(toastMocks.success).toHaveBeenCalledWith('1 arquivo removido do stage');
+  });
+
+  it('does not offer "preparar tudo" while merge conflicts are pending', () => {
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status({
+          conflicted: ['src/c.ts'],
+          staged: [],
+          unstaged: [],
+          untracked: [],
+        })}
+        sessionChanges={[]}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Preparar tudo' })).toBeNull();
+    expect(screen.getByText('Conflitos de merge — resolva antes de commitar.')).toBeTruthy();
   });
 
   it('reverts a git file through the confirmation dialog', async () => {

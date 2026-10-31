@@ -1208,7 +1208,9 @@ Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested
   recusam quando o arquivo mudou por fora (`FS_STALE_VERSION`).
 - Arquivo **novo (untracked)** aparece na aba Alterações com badge `A` e diff próprio mesmo sem staging: `get_file_diff` monta o patch "new file" a partir do conteúdo (binário vira `Binary files … differ`; sem newline final recebe o marcador) — nunca altera o índice só para mostrar o diff.`n- Git: `status --porcelain=v2 -z`, `diff --no-color --no-ext-diff`, `log`, `stage`,
   `unstage`, `discard` (`git restore`), `commit` (mensagem obrigatória, sugestão de IA
-  opcional) e `switch`. Commit/push nunca são tools do modelo.
+  opcional), `switch`, `stage_all`/`unstage_all` (ações em lote do painel) e
+  `fetch`/`pull`/`push` (rede, timeout maior, sem prompt de terminal; push cria o upstream
+  em `origin` quando falta). Commit/push nunca são tools do modelo.
 
 ### 16.4 Contexto
 

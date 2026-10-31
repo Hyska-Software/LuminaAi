@@ -29,6 +29,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ChangesPanel } from './ChangesPanel';
 import { FileTree } from './FileTree';
+import { GitActionsMenu } from './GitActionsMenu';
 import { TerminalPanel } from './TerminalPanel';
 import { useWorkspacePanel } from './useWorkspacePanel';
 import { useWorkspaces } from './useWorkspaces';
@@ -328,27 +329,34 @@ export function CodePanel() {
                 já têm o próprio contexto no cabeçalho/título). */}
             <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border px-3 text-[12px] text-foreground-muted">
               <GitBranch aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-              <span className="truncate">
+              <span className="min-w-0 flex-1 truncate">
                 {workspace ? workspace.name : 'Sem workspace'}
                 {branch ? ` · ${branch}` : ''}
               </span>
               {workspaceId && panel.gitStatus?.isRepo ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto h-6 shrink-0 px-2 text-[11px]"
-                  leftIcon={<History className="size-3.5" strokeWidth={1.75} />}
-                  onClick={() => openCodeCommits(workspaceId)}
-                  aria-label="Ver histórico de commits"
-                >
-                  Histórico
-                </Button>
-              ) : null}
-              {panel.gitStatus?.isRepo ? (
-                <span className={cn('shrink-0 text-[11px] tabular-nums', !workspaceId && 'ml-auto')}>
-                  {panel.gitStatus.ahead ? `↑${panel.gitStatus.ahead}` : ''}
-                  {panel.gitStatus.behind ? ` ↓${panel.gitStatus.behind}` : ''}
-                </span>
+                <>
+                  <span className="shrink-0 text-[11px] tabular-nums">
+                    {panel.gitStatus.ahead ? `↑${panel.gitStatus.ahead}` : ''}
+                    {panel.gitStatus.behind ? ` ↓${panel.gitStatus.behind}` : ''}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 shrink-0 px-2 text-[11px]"
+                    leftIcon={<History className="size-3.5" strokeWidth={1.75} />}
+                    onClick={() => openCodeCommits(workspaceId)}
+                    aria-label="Ver histórico de commits"
+                  >
+                    Histórico
+                  </Button>
+                  <GitActionsMenu
+                    workspaceId={workspaceId}
+                    isRepo={panel.gitStatus.isRepo}
+                    ahead={panel.gitStatus.ahead ?? 0}
+                    behind={panel.gitStatus.behind ?? 0}
+                    onRefresh={refreshAll}
+                  />
+                </>
               ) : null}
             </div>
             {workspaceId ? (

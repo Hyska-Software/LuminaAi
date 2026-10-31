@@ -319,7 +319,10 @@ Duas origens, com origem marcada por arquivo:
 Agrupamentos: `Staged` / `Não staged` / `Novos` (`Untracked`); modo de visualização "somente
 sessão" × "todos" (default todos, com a origem como badge). Cada linha: ícone, caminho relativo,
 `+N −M`, badge `agente` quando aplicável, ações no hover (reverter arquivo, stage/unstage).
-Clique abre o **diff**:
+Acima da lista, a barra de ações em lote (**Preparar tudo** / **Desmarcar tudo**) usa
+`git_stage_all` (`git add -A`) e `git_unstage_all` (`git restore --staged -- :/`); com conflitos de
+merge, "Preparar tudo" fica bloqueado para não marcar conflitos como resolvidos. Clique abre o
+**diff**:
 
 - unificado (default) com números de linha, contexto 3, cabeçalhos de hunk, cores de adição/remoção;
 - toggle lado-a-lado; "abrir arquivo"; "copiar patch"; "reverter hunk"? (não na v1 — ver §16);
@@ -330,7 +333,14 @@ Rodapé: **barra de commit** — alvo (tudo/staged/seleção), `+N −M`, campo 
 nada selecionado; tooltip explica), e **Commits recentes** colapsável (hash curto, mensagem, autor,
 tempo; clique mostra o commit no painel). **Tudo** roda `git add -A` antes do commit, incluindo
 arquivos modificados, novos e deletados; **Preparados** usa o índice existente; **Seleção** prepara
-apenas os caminhos marcados. Push/PR ficam para depois (badge "em breve" não — apenas não existem).
+apenas os caminhos marcados.
+
+A barra workspace · branch tem o menu **Git** com **fetch**, **pull** e **push** (ações explícitas
+do usuário, nunca tools do modelo): fetch é `git fetch --all --prune`; pull é `git pull --no-edit`
+(respeita a configuração do usuário e nunca abre editor); push publica a branch em `origin` com
+`--set-upstream` quando ainda não existe upstream. Os contadores `↑N`/`↓N` aparecem no menu e o
+status é recarregado após cada operação; falhas de autenticação orientam configurar credential
+helper/SSH. PR continua fora do escopo desta fase.
 
 ### 7.3 Terminal (v1.1)
 
@@ -507,7 +517,8 @@ Microcopy-chave:
 | `CodeSidebar` | workspaces (agrupamento, expansão, menu, remover sem apagar pasta), sessões por status, abrir pasta, empty state |
 | `CodeSessionHeader` | título, chip workspace (branch/sujo/ahead), medidor, toggle painel, abas persistidas (os controles de permissão/Plano vivem no composer) |
 | `FileTree` | expandir/colapsar, filtro, badges git, virtualização, seleção, teclado, estado grande/vazio |
-| `ChangesPanel` | agrupamentos, origem, contadores, diff, reverter arquivo/turno (com confirmação), commit desabilitado/habilitado |
+| `ChangesPanel` | agrupamentos, origem, contadores, diff, reverter arquivo/turno (com confirmação), preparar/desmarcar tudo, conflitos bloqueiam o stage em lote, commit desabilitado/habilitado |
+| `GitActionsMenu` | fetch/pull/push via api, estados de loading/erro, contadores ↑/↓, atualizar status, fora de repo desabilitado |
 | `DiffView` | unificado, linhas, hunks, binário, grande, lado-a-lado, a11y |
 | `CommitBar` | mensagem, sugestão IA, seleção, estados de erro |
 | `ApprovalCard` | render por tipo (comando/path/segredo), aprovar/negar/motivo/escopo, teclado, aria-live, resolução |

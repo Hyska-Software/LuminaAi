@@ -106,6 +106,36 @@ pub async fn git_status(
 }
 
 #[tauri::command]
+pub async fn git_fetch(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<WorkspaceGitStatus, String> {
+    let root = workspace_path(&state, &workspace_id)?;
+    crate::workspace::git::fetch(&root).await.map_err(map_err)?;
+    status_of(&state, &workspace_id).await
+}
+
+#[tauri::command]
+pub async fn git_pull(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<WorkspaceGitStatus, String> {
+    let root = workspace_path(&state, &workspace_id)?;
+    crate::workspace::git::pull(&root).await.map_err(map_err)?;
+    status_of(&state, &workspace_id).await
+}
+
+#[tauri::command]
+pub async fn git_push(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<WorkspaceGitStatus, String> {
+    let root = workspace_path(&state, &workspace_id)?;
+    crate::workspace::git::push(&root).await.map_err(map_err)?;
+    status_of(&state, &workspace_id).await
+}
+
+#[tauri::command]
 pub async fn git_diff(
     state: State<'_, AppState>,
     workspace_id: String,
@@ -152,6 +182,33 @@ pub async fn git_unstage(
     }
     let root = workspace_path(&state, &workspace_id)?;
     crate::workspace::git::unstage(&root, &paths)
+        .await
+        .map_err(map_err)?;
+    status_of(&state, &workspace_id).await
+}
+
+/// Stage every pending change (`git add -A`). The UI only offers this when the
+/// repository has no merge conflicts, so conflicts are never auto-resolved.
+#[tauri::command]
+pub async fn git_stage_all(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<WorkspaceGitStatus, String> {
+    let root = workspace_path(&state, &workspace_id)?;
+    crate::workspace::git::stage_all(&root)
+        .await
+        .map_err(map_err)?;
+    status_of(&state, &workspace_id).await
+}
+
+/// Clears the whole index (`git restore --staged -- :/`).
+#[tauri::command]
+pub async fn git_unstage_all(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<WorkspaceGitStatus, String> {
+    let root = workspace_path(&state, &workspace_id)?;
+    crate::workspace::git::unstage_all(&root)
         .await
         .map_err(map_err)?;
     status_of(&state, &workspace_id).await

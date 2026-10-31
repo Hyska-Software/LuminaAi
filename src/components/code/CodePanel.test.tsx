@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 vi.mock('@/lib/api', () => ({
   api: {
     listWorkspaces: vi.fn(),
     listWorkspaceFiles: vi.fn(),
     gitStatus: vi.fn(),
+    gitFetch: vi.fn(),
+    gitPull: vi.fn(),
+    gitPush: vi.fn(),
     gitLog: vi.fn(),
     readWorkspaceFile: vi.fn(),
     getFileDiff: vi.fn(),
@@ -408,6 +412,39 @@ describe('CodePanel — histórico de commits', () => {
 
     await screen.findByRole('tab', { name: 'Alterações' });
     expect(screen.queryByRole('button', { name: 'Ver histórico de commits' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Ações do git' })).toBeNull();
+  });
+
+  it('oferece fetch, pull e push na barra da aba Alterações', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-1', workspaceId: 'ws-1' })],
+      activeId: 'conv-1',
+    });
+    apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    const repoStatus = {
+      isRepo: true,
+      root: 'C:/projetos/lumina',
+      branch: 'main',
+      staged: [],
+      unstaged: [],
+      untracked: [],
+      conflicted: [],
+      ahead: 2,
+      behind: 1,
+    };
+    apiMock.gitStatus.mockResolvedValue(repoStatus);
+    apiMock.gitPush.mockResolvedValue(repoStatus);
+
+    render(<CodePanel />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Ações do git' }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: /Buscar \(fetch\)/ })).toBeTruthy();
+    expect(within(menu).getByRole('menuitem', { name: /Puxar \(pull\)/ })).toBeTruthy();
+
+    await user.click(within(menu).getByRole('menuitem', { name: /Enviar \(push\)/ }));
+    await waitFor(() => expect(apiMock.gitPush).toHaveBeenCalledWith('ws-1'));
   });
 });
 describe('CodePanel — árvore lazy', () => {
