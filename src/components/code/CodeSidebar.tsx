@@ -124,7 +124,10 @@ interface SessionRowProps {
   onDelete: () => void;
 }
 
-/** One real Code session row; the dot mirrors the Paseo status dot. */
+/**
+ * One real Code session row. Only the active session shows the status dot;
+ * inactive rows keep an invisible spacer so titles stay aligned.
+ */
 function SessionRow({
   conversation,
   active,
@@ -157,10 +160,7 @@ function SessionRow({
         ) : null}
         <span
           aria-hidden
-          className={cn(
-            'size-1.5 shrink-0 rounded-full',
-            active ? 'bg-accent' : 'bg-foreground-subtle',
-          )}
+          className={cn('size-1.5 shrink-0 rounded-full', active && 'bg-accent')}
         />
         <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
         {shared ? (

@@ -381,6 +381,27 @@ describe('CodeSidebar — Workspaces reais', () => {
     expect(screen.getByRole('button', { name: 'Corrigir o build' })).toBeTruthy();
   });
 
+  it('mostra a bolinha apenas na sessão ativa', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useChatStore.setState({
+      conversations: [
+        conversation({ id: 'c-1', title: 'Sessão ativa', workspaceId: 'ws-1' }),
+        conversation({ id: 'c-2', title: 'Sessão inativa', workspaceId: 'ws-1' }),
+      ],
+      activeId: 'c-1',
+    });
+    renderSidebar();
+
+    const active = await screen.findByRole('button', { name: 'Sessão ativa' });
+    const inactive = screen.getByRole('button', { name: 'Sessão inativa' });
+    const dot = (row: HTMLElement) =>
+      row.querySelector('span[aria-hidden="true"].rounded-full');
+
+    expect(dot(active)?.className).toContain('bg-accent');
+    expect(dot(inactive)?.className ?? '').not.toContain('bg-accent');
+    expect(dot(inactive)?.className ?? '').not.toContain('bg-foreground-subtle');
+  });
+
   it('destaca o workspace ativo e marca pasta não confiável como Leitura', async () => {
     mocks.listWorkspaces.mockResolvedValue([workspace({ trusted: false })]);
     useUiStore.setState({ activeWorkspaceId: 'ws-1' });
