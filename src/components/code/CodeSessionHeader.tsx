@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import {
   Bot,
   Copy,
@@ -47,6 +54,7 @@ import { cn, copyText } from '@/lib/utils';
 import { WorkspaceTrustDialog } from './WorkspaceTrustDialog';
 import { CodeContextMeterChip } from './CodeAgentWidgets';
 import { FileIcon } from './FileIcon';
+import { useHorizontalWheelScroll } from './useHorizontalWheelScroll';
 import { NO_WORKSPACE_KEY, openFolder, useWorkspaces } from './useWorkspaces';
 
 /** Synthetic tab shown when the Code layout has no active conversation. */
@@ -359,6 +367,8 @@ export function CodeSessionHeader() {
     else tabRefs.current.delete(id);
   };
   const plusRef = useRef<HTMLButtonElement | null>(null);
+  const tabStripRef = useRef<HTMLDivElement | null>(null);
+  useHorizontalWheelScroll(tabStripRef);
 
   /** Restores keyboard focus after closing a tab (R3 do EVIDENCE da fase 1). */
   const focusTab = (id: string | undefined) => {
@@ -522,6 +532,19 @@ export function CodeSessionHeader() {
       focusTab(undefined);
     }
   };
+
+  /**
+   * Middle-click closes a tab (same gesture as browser tabs). The strip
+   * suppresses the WebView2 autoscroll on mouse down; the close runs on
+   * auxclick, after the button is released.
+   */
+  const middleClickClose = (id: string) => ({
+    onAuxClick: (event: ReactMouseEvent<HTMLElement>) => {
+      if (event.button !== 1) return;
+      event.preventDefault();
+      closeTab(id);
+    },
+  });
 
   const createSession = () => {
     useUiStore.getState().setCodeView('session');
@@ -708,9 +731,14 @@ export function CodeSessionHeader() {
         {/* Active tabs use a neutral fill instead of a raised surface + shadow:
             on the white header the shadow reads as a glow in light mode. */}
         <div
+          ref={tabStripRef}
           role="tablist"
           aria-label="Sessões abertas"
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-0.5"
+          onMouseDown={(event) => {
+            // Suppress WebView2 autoscroll on middle click.
+            if (event.button === 1) event.preventDefault();
+          }}
+          className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-0.5"
         >
           {showNewSessionTab ? (
             <div
@@ -735,6 +763,7 @@ export function CodeSessionHeader() {
                 <div
                   key={tab.id}
                   role="presentation"
+                  {...middleClickClose(tab.id)}
                   className={cn(
                     'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                     selected
@@ -790,6 +819,7 @@ export function CodeSessionHeader() {
               <div
                 key={id}
                 role="presentation"
+                {...middleClickClose(id)}
                 className={cn(
                   'group flex h-8 max-w-48 shrink-0 items-center rounded-lg transition-colors duration-150',
                   selected
@@ -855,6 +885,7 @@ export function CodeSessionHeader() {
               <div
                 key={id}
                 role="presentation"
+                {...middleClickClose(id)}
                 className={cn(
                   'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                   selected
@@ -900,6 +931,7 @@ export function CodeSessionHeader() {
           {codePlanTab ? (
             <div
               role="presentation"
+              {...middleClickClose(CODE_PLAN_TAB_ID)}
               className={cn(
                 'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                 codeView === 'plan'
@@ -944,6 +976,7 @@ export function CodeSessionHeader() {
           {codeGoalOpen ? (
             <div
               role="presentation"
+              {...middleClickClose(CODE_GOAL_TAB_ID)}
               className={cn(
                 'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                 codeView === 'goal'
@@ -988,6 +1021,7 @@ export function CodeSessionHeader() {
           {codeDiffTab ? (
             <div
               role="presentation"
+              {...middleClickClose(CODE_DIFF_TAB_ID)}
               className={cn(
                 'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                 codeView === 'diff'
@@ -1032,6 +1066,7 @@ export function CodeSessionHeader() {
           {codeCommitsTab ? (
             <div
               role="presentation"
+              {...middleClickClose(CODE_COMMITS_TAB_ID)}
               className={cn(
                 'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
                 codeView === 'commits'

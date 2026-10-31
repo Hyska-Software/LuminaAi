@@ -151,6 +151,21 @@ describe('TerminalPanel', () => {
     expect(apiMock.closeTerminal).toHaveBeenCalledWith('term-1');
   });
 
+  it('fecha a aba com o botão do meio do mouse', async () => {
+    render(<TerminalPanel conversationId="conv-1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir terminal' }));
+
+    const terminalTab = await screen.findByRole('tab', { name: 'Terminal 1' });
+    fireEvent.mouseDown(terminalTab, { button: 1 });
+    fireEvent(
+      terminalTab,
+      new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }),
+    );
+
+    await waitFor(() => expect(apiMock.closeTerminal).toHaveBeenCalledWith('term-1'));
+    expect(screen.queryByRole('tab', { name: 'Terminal 1' })).toBeNull();
+  });
+
   it('mostra apenas o host ativo e troca com a aba', async () => {
     render(<TerminalPanel conversationId="conv-1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Abrir terminal' }));

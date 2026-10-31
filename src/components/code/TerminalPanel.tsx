@@ -26,6 +26,7 @@ import {
 } from '@/components/ui';
 import type { TerminalTabInfo } from './terminalManager';
 import { terminalManager } from './terminalManager';
+import { useHorizontalWheelScroll } from './useHorizontalWheelScroll';
 import { cn } from '@/lib/utils';
 
 interface TerminalPanelProps {
@@ -45,6 +46,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const emptyCtaRef = useRef<HTMLButtonElement | null>(null);
   const previousTabs = useRef({ conversationId, count: 0 });
+  useHorizontalWheelScroll(tabStripRef);
   const snapshot = useSyncExternalStore(
     terminalManager.subscribe,
     () => terminalManager.getSnapshot(conversationId),
@@ -100,28 +102,6 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
     }
   }, [activeId, tabs.length]);
 
-  /* A vertical wheel scrolls the horizontal strip: otherwise the tabs that
-     overflow a narrow panel are only reachable with a trackpad or Shift+wheel.
-     The native listener is non-passive so it can stop the parent from scrolling. */
-  useEffect(() => {
-    const strip = tabStripRef.current;
-    if (!strip) return;
-    const onWheel = (event: WheelEvent) => {
-      if (strip.scrollWidth <= strip.clientWidth) return;
-      // Trackpad gestures already carry deltaX; a mouse wheel only has deltaY.
-      const delta =
-        Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-      if (delta === 0) return;
-      const maxScroll = strip.scrollWidth - strip.clientWidth;
-      const next = Math.min(maxScroll, Math.max(0, strip.scrollLeft + delta));
-      if (next === strip.scrollLeft) return;
-      event.preventDefault();
-      strip.scrollLeft = next;
-    };
-    strip.addEventListener('wheel', onWheel, { passive: false });
-    return () => strip.removeEventListener('wheel', onWheel);
-  }, []);
-
   /* Closing the last tab should not drop focus on <body>. */
   useEffect(() => {
     const previous = previousTabs.current;
@@ -173,6 +153,10 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
           ref={tabStripRef}
           role="tablist"
           aria-label="Terminais abertos"
+          onMouseDown={(event) => {
+            // Suppress WebView2 autoscroll on middle click.
+            if (event.button === 1) event.preventDefault();
+          }}
           className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
         >
           {tabs.map((tab) => {
@@ -181,6 +165,11 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
               <div
                 key={tab.id}
                 role="presentation"
+                onAuxClick={(event) => {
+                  if (event.button !== 1) return;
+                  event.preventDefault();
+                  closeTab(tab);
+                }}
                 className={cn(
                   'flex h-7 max-w-40 shrink-0 items-center rounded-lg text-[12px] transition-colors duration-150',
                   selected

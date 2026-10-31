@@ -237,6 +237,40 @@ describe('CodeSessionHeader — cabeçalho da sessão', () => {
     expect(activeShell?.className).not.toContain('shadow-sm');
   });
 
+  it('rola as abas com a roda do mouse e esconde a barra de rolagem', async () => {
+    useChatStore.setState({
+      conversations: [
+        conversation({ id: 'c-1', title: 'Primeira sessão' }),
+        conversation({ id: 'c-2', title: 'Segunda sessão' }),
+        conversation({ id: 'c-3', title: 'Terceira sessão' }),
+      ],
+      activeId: 'c-1',
+    });
+    render(<CodeSessionHeader />);
+
+    act(() => {
+      useChatStore.setState({ activeId: 'c-2' });
+    });
+    await waitFor(() => expect(tab('Segunda sessão')).toBeTruthy());
+    act(() => {
+      useChatStore.setState({ activeId: 'c-3' });
+    });
+    await waitFor(() => expect(tab('Terceira sessão')).toBeTruthy());
+
+    const strip = screen.getByRole('tablist', { name: 'Sessões abertas' });
+    expect(strip.className).toContain('scrollbar-none');
+    // jsdom has no layout: declare an overflowing strip and scroll from the start.
+    Object.defineProperty(strip, 'scrollWidth', { configurable: true, value: 900 });
+    Object.defineProperty(strip, 'clientWidth', { configurable: true, value: 300 });
+    strip.scrollLeft = 0;
+
+    fireEvent.wheel(strip, { deltaY: 120 });
+    expect(strip.scrollLeft).toBe(120);
+
+    fireEvent.wheel(strip, { deltaY: 5000 });
+    expect(strip.scrollLeft).toBe(600);
+  });
+
   it('mostra badge "Aguardando aprovação" quando há pedido pendente', async () => {
     const pending: ApprovalRequest[] = [
       {
@@ -489,6 +523,25 @@ describe('CodeSessionHeader — fechar abas', () => {
     expect(tab('Nova sessão').getAttribute('aria-selected')).toBe('true');
     // A conversa não é apagada do histórico: só deixa de estar ativa.
     expect(useChatStore.getState().conversations).toHaveLength(1);
+  });
+
+  it('fecha a aba ativa com o botão do meio do mouse', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Única sessão' })],
+      activeId: 'c-1',
+    });
+    render(<CodeSessionHeader />);
+
+    const activeTab = await screen.findByRole('tab', { name: 'Única sessão' });
+    fireEvent.mouseDown(activeTab, { button: 1 });
+    fireEvent(
+      activeTab,
+      new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }),
+    );
+
+    await waitFor(() => expect(useChatStore.getState().activeId).toBeNull());
+    expect(screen.queryByRole('tab', { name: 'Única sessão' })).toBeNull();
+    expect(tab('Nova sessão').getAttribute('aria-selected')).toBe('true');
   });
 
   it('restaura o foco na aba vizinha ao fechar a aba ativa (teclado)', async () => {
