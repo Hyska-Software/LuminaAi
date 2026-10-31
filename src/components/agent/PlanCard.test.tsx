@@ -151,6 +151,19 @@ describe('PlanCard — busy e somente leitura', () => {
       'true',
     );
   });
+
+  it('scrollable={false} mostra o plano inteiro sem rolagem aninhada (popover)', () => {
+    const long = `## Plano\n\n${'Linha de plano. '.repeat(200)}`;
+    const { container } = render(
+      <PlanCard plan={makePlan({ markdown: long })} readOnly scrollable={false} />,
+    );
+
+    // No internal cap: the host (popover) owns the only scroll surface.
+    expect(container.querySelector('.overflow-y-auto')).toBeNull();
+    expect(container.querySelector('.overscroll-contain')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Ver plano completo' })).toBeNull();
+    expect(container.textContent).toContain('Linha de plano.');
+  });
 });
 
 describe('PlanCard — estados sem ação', () => {

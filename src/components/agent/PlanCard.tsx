@@ -33,6 +33,12 @@ export interface PlanCardProps {
    * bloqueado). O botão fica desabilitado e o motivo é anunciado pelo card.
    */
   goalBlockedReason?: string | null;
+  /**
+   * `true` (default) caps the Markdown body with its own scroll in the
+   * transcript. `false` renders the full body and lets the host own the only
+   * scroll surface (composer popover), avoiding nested wheel traps.
+   */
+  scrollable?: boolean;
   className?: string;
 }
 
@@ -54,6 +60,7 @@ export function PlanCard({
   onViewPlan,
   busy = false,
   goalBlockedReason = null,
+  scrollable = true,
   className,
 }: PlanCardProps) {
   const titleId = useId();
@@ -187,8 +194,12 @@ export function PlanCard({
         {expanded && markdown ? (
           <div
             id={contentId}
-            tabIndex={0}
-            className="max-h-72 overflow-y-auto overscroll-contain border-t border-border pt-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            tabIndex={scrollable ? 0 : undefined}
+            className={cn(
+              'border-t border-border pt-2',
+              scrollable &&
+                'max-h-72 overflow-y-auto overscroll-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+            )}
           >
             <PlanMarkdown markdown={markdown} />
           </div>
@@ -246,10 +257,11 @@ export function PlanCard({
       <div id={contentId} className="min-w-0">
         {markdown ? (
           <div
-            tabIndex={0}
+            tabIndex={scrollable ? 0 : undefined}
             className={cn(
-              'overflow-y-auto overscroll-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-              interactive ? 'max-h-80' : expanded ? 'max-h-72' : 'max-h-32',
+              scrollable &&
+                'overflow-y-auto overscroll-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+              scrollable && (interactive ? 'max-h-80' : expanded ? 'max-h-72' : 'max-h-32'),
             )}
           >
             <PlanMarkdown markdown={markdown} />
@@ -259,7 +271,7 @@ export function PlanCard({
             {planning ? 'O plano ainda está sendo preparado.' : 'O plano ainda não tem conteúdo.'}
           </p>
         )}
-        {!interactive && long ? (
+        {!interactive && long && scrollable ? (
           <Button
             size="sm"
             variant="ghost"

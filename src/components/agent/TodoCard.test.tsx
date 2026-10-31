@@ -29,6 +29,18 @@ describe('TodoCard', () => {
     expect(list.textContent).toContain('Pendente');
   });
 
+  it('sem rolagem interna deixa o host controlar o scroll (popover)', () => {
+    render(<TodoCard todos={TODOS} scrollable={false} />);
+
+    const list = screen.getByRole('list', { name: 'Lista de tarefas' });
+    expect(list.getAttribute('tabindex')).toBeNull();
+    expect(list.className).not.toContain('max-h-64');
+    expect(list.className).not.toContain('overflow-y-auto');
+    expect(list.className).not.toContain('overscroll-contain');
+    // Content and accessibility stay unchanged.
+    expect(screen.getAllByRole('listitem')).toHaveLength(3);
+  });
+
   it('expõe o progresso na barra acessível', () => {
     render(<TodoCard todos={TODOS} />);
     const progress = screen.getByRole('progressbar');

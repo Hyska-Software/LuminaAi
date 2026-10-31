@@ -6,6 +6,12 @@ import { cn } from '@/lib/utils';
 export interface TodoCardProps {
   todos: TodoItem[];
   className?: string;
+  /**
+   * `true` (default) gives the list its own max-height/scroll so a long list
+   * never pushes the transcript (F-09). `false` lets the host own the only
+   * scroll surface (the composer popover), avoiding nested wheel traps.
+   */
+  scrollable?: boolean;
 }
 
 const STATUS_META: Record<TodoStatus, { label: string; Icon: typeof Circle; color: string }> = {
@@ -17,10 +23,11 @@ const STATUS_META: Record<TodoStatus, { label: string; Icon: typeof Circle; colo
 /**
  * Lista compacta de tarefas do agente (WORKBENCH §5.2). O status nunca é
  * transmitido só por cor: cada item tem um rótulo textual para leitores de tela.
- * A lista tem altura máxima e rolagem própria (`tabIndex=0`) para que 50 itens
- * não empurrem o transcript (F-09).
+ * By default the list has a max-height and its own scroll (`tabIndex=0`) so 50
+ * items never push the transcript (F-09); `scrollable={false}` disables that
+ * when the host already provides the single scroll surface.
  */
-export function TodoCard({ todos, className }: TodoCardProps) {
+export function TodoCard({ todos, className, scrollable = true }: TodoCardProps) {
   if (todos.length === 0) return null;
 
   const total = todos.length;
@@ -51,8 +58,12 @@ export function TodoCard({ todos, className }: TodoCardProps) {
 
       <ul
         aria-label="Lista de tarefas"
-        tabIndex={0}
-        className="flex max-h-64 flex-col gap-1.5 overflow-y-auto overscroll-contain pr-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        tabIndex={scrollable ? 0 : undefined}
+        className={cn(
+          'flex flex-col gap-1.5',
+          scrollable &&
+            'max-h-64 overflow-y-auto overscroll-contain pr-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+        )}
       >
         {todos.map((todo, index) => {
           const meta = STATUS_META[todo.status] ?? STATUS_META.pending;

@@ -249,6 +249,7 @@ export function CodeSessionControls({
               <PlanCard
                 plan={plan}
                 readOnly
+                scrollable={false}
                 onViewPlan={(view) => {
                   const markdown = view.markdown?.trim();
                   if (!markdown) return;
@@ -269,7 +270,7 @@ export function CodeSessionControls({
               </p>
             )}
             {todos.length > 0 ? (
-              <TodoCard todos={todos} />
+              <TodoCard todos={todos} scrollable={false} />
             ) : (
               <p className="px-1 text-[12px] leading-relaxed text-foreground-muted">
                 Nenhuma tarefa registrada.

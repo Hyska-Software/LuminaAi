@@ -157,6 +157,10 @@ operacionais ficam concentrados no popover do composer (`CodeSessionControls`):
 | Aprovação e pergunta ao usuário | cards inline (§5.3/§5.5), pois bloqueiam o turno |
 | `ask_user` respondido, subagente e saídas longas | apenas no resumo do "Thinking"/resultados, sem card extra. Subagente tem linha ao vivo (`status`, passos, modelo/effort, texto recente) e botão “Abrir chat”, que abre uma aba de chat read-only (uma por subagente; abrir a mesma conversa duas vezes só ativa a aba existente e mostra um aviso). O popover do composer lista os transcripts retidos (inclusive erro/cancelamento). A `presentation` guarda `conversationId`/`steps`/`durationMs`/`usage` |
 
+O popover "Plano e tarefas" tem **um único contêiner de rolagem**: `PlanCard` e `TodoCard`
+entram com `scrollable={false}` ali, para que o wheel sobre o plano ou sobre a lista de tarefas
+continue rolando o painel inteiro (sem áreas internas com `overscroll-contain` prendendo o scroll).
+
 `ToolCallRecord.presentation` continua sendo persistido (auditoria/replay e consumidores futuros),
 mas não é mais montado no chat. `ToolPresentationCard` permanece como biblioteca disponível, sem uso
 no transcript. Ícones/labels do "Thinking" no mapa de `src/lib/agentTrace.ts` (tools novas +

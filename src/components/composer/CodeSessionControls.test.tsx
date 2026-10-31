@@ -291,6 +291,34 @@ describe('CodeSessionControls — popover de plano e tarefas', () => {
     expect(screen.queryByRole('button', { name: 'Aprovar e executar' })).toBeNull();
   });
 
+  it('usa uma única superfície de rolagem no popover (sem scroll aninhado)', async () => {
+    seedSession({
+      plan: {
+        state: 'reviewing',
+        markdown: `## Passo 1\n\n${'Detalhe do passo. '.repeat(200)}`,
+        feedback: '',
+        updatedAt: 1,
+      },
+      todos: Array.from({ length: 8 }, (_, index) => ({
+        content: `Tarefa ${index + 1}`,
+        status: 'completed' as const,
+      })),
+    });
+    render(<CodeSessionControls conversationId="c-1" />);
+
+    fireEvent.click(planTasksTrigger());
+
+    const scrollArea = (await screen.findByText('Plano · Aguardando aprovação')).closest(
+      '.overflow-y-auto',
+    );
+    expect(scrollArea).toBeTruthy();
+    // The plan and the task list do not create their own scroll areas: the
+    // wheel over them keeps scrolling the whole panel.
+    expect(scrollArea!.querySelector('.overflow-y-auto')).toBeNull();
+    const list = screen.getByRole('list', { name: 'Lista de tarefas' });
+    expect(list.getAttribute('tabindex')).toBeNull();
+  });
+
   it('mostra estados vazios quando não há plano, tarefas nem jobs', async () => {
     seedSession();
     render(<CodeSessionControls conversationId="c-1" />);
