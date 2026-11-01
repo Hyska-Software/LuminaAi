@@ -125,11 +125,17 @@ function commandSpec(command, args) {
 function run(command, args, options = {}) {
   log(`\n$ ${[command, ...args].join(' ')}`);
   const spec = commandSpec(command, args);
+  const env = { ...process.env };
+  // GitHub injects missing secrets as empty strings. Tauri treats a defined
+  // APPLE_CERTIFICATE as "import this p12" and fails on the empty value, so
+  // remove empty credential variables before invoking the bundler.
+  for (const key of options.unset ?? []) delete env[key];
+  Object.assign(env, options.env ?? {});
   const result = spawnSync(spec.file, spec.args, {
     cwd: options.cwd ?? root,
     stdio: 'inherit',
     shell: spec.shell,
-    env: { ...process.env, ...(options.env ?? {}) },
+    env,
     timeout: options.timeout,
   });
   if (result.error) fail(`${command} falhou: ${result.error.message}`);
@@ -226,8 +232,8 @@ function verifyTests() {
   run('cargo', ['test', '--lib'], { cwd: path.join(root, 'src-tauri') });
 }
 
-function tauriBuild(extra, env = {}) {
-  run('pnpm', ['tauri', 'build', ...extra], { env });
+function tauriBuild(extra, env = {}, unset = []) {
+  run('pnpm', ['tauri', 'build', ...extra], { env, unset });
 }
 
 function buildWindows() {
@@ -274,6 +280,18 @@ function buildWindows() {
 
 function buildMacos() {
   const env = {};
+  const unset = [];
+  const credentialKeys = [
+    'APPLE_CERTIFICATE',
+    'APPLE_CERTIFICATE_PASSWORD',
+    'APPLE_SIGNING_IDENTITY',
+    'APPLE_API_ISSUER',
+    'APPLE_API_KEY',
+    'APPLE_API_KEY_PATH',
+  ];
+  for (const key of credentialKeys) {
+    if (!process.env[key]) unset.push(key);
+  }
   if (!values['no-sign'] && !process.env.APPLE_SIGNING_IDENTITY && !process.env.APPLE_CERTIFICATE) {
     env.APPLE_SIGNING_IDENTITY = '-';
     log(
@@ -282,7 +300,7 @@ function buildMacos() {
   }
   const extra = ['--bundles', 'app,dmg'];
   if (arch === 'universal') extra.push('--target', 'universal-apple-darwin');
-  tauriBuild(extra, env);
+  tauriBuild(extra, env, unset);
 
   const label = platformLabel('darwin', arch);
   const directory = cleanPlatformOut(label);

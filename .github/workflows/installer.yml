@@ -101,6 +101,59 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
 
+      - name: Smoke test Windows setup
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem release/*/windows-*/*.exe | Select-Object -First 1).FullName
+          $dir = Join-Path $env:RUNNER_TEMP 'lumina-smoke'
+          if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+          Start-Process -FilePath $setup -ArgumentList @('--setup','--silent','--scope','user','--dir',$dir,'--no-desktop','--no-start-menu','--no-launch') -Wait
+          if (-not (Test-Path (Join-Path $dir 'Lumina.exe'))) { throw 'Lumina.exe não foi instalado' }
+          if (-not (Test-Path (Join-Path $dir '.lumina-install'))) { throw 'marcador de instalação ausente' }
+          Start-Process -FilePath $setup -ArgumentList @('--uninstall','--silent') -Wait
+          for ($i = 0; $i -lt 40 -and (Test-Path $dir); $i++) { Start-Sleep -Milliseconds 250 }
+          if (Test-Path $dir) { throw 'a pasta de instalação não foi removida' }
+
+      - name: Smoke test macOS DMG
+        if: matrix.platform == 'macos'
+        run: |
+          set -euo pipefail
+          dmg=$(ls release/*/macos-*/*.dmg | head -n 1)
+          mount=$(mktemp -d)
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount"
+          test -d "$mount/Lumina.app"
+          codesign --verify --deep --strict "$mount/Lumina.app"
+          sudo ditto "$mount/Lumina.app" /Applications/Lumina.app
+          test -d /Applications/Lumina.app
+          sudo rm -rf /Applications/Lumina.app
+          hdiutil detach "$mount"
+
+      - name: Smoke test Linux packages
+        if: matrix.platform == 'linux'
+        run: |
+          set -euo pipefail
+          deb=$(ls release/*/linux-*/*.deb | head -n 1)
+          debname=$(dpkg-deb -f "$deb" Package)
+          sudo dpkg -i "$deb"
+          test -x /usr/bin/lumina
+          test -n "$(find /usr/share/applications -maxdepth 1 -iname '*lumina*.desktop' -print -quit)"
+          sudo dpkg -r "$debname"
+          ! test -e /usr/bin/lumina
+
+          appimage=$(ls release/*/linux-*/*.AppImage | head -n 1)
+          "$appimage" --appimage-extract >/dev/null
+          test -x squashfs-root/AppRun
+          rm -rf squashfs-root
+
+          rpm=$(ls release/*/linux-*/*.rpm | head -n 1)
+          rpmname=$(rpm -qp --qf '%{NAME}' "$rpm")
+          rpm -qpl "$rpm" | grep -q '/usr/bin/lumina'
+          sudo rpm -i --nodeps "$rpm"
+          test -x /usr/bin/lumina
+          sudo rpm -e "$rpmname"
+          ! test -e /usr/bin/lumina
+
       - uses: actions/upload-artifact@v4
         with:
           name: lumina-${{ matrix.platform }}-${{ github.run_id }}
