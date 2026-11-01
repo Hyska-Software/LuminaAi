@@ -79,8 +79,17 @@ jobs:
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Renderer and installer tests
+        run: |
+          pnpm typecheck
+          pnpm test
+          pnpm test:installer
+
+      # The Rust suite has pre-existing platform-specific assumptions on macOS
+      # (e.g. /var vs /private/var). Artifact generation must not mask those;
+      # they are tracked separately. Windows keeps the full suite locally.
       - name: Build installer
-        run: pnpm installer --platform ${{ matrix.platform }} ${{ matrix.args }} --ci --require-clean --channel ${{ inputs.channel || 'stable' }}
+        run: pnpm installer --platform ${{ matrix.platform }} ${{ matrix.args }} --ci --require-clean --skip-tests --channel ${{ inputs.channel || 'stable' }}
         env:
           # Optional. Add these secrets when the certificates are available.
           LUMINA_WINDOWS_CERT_THUMBPRINT: ${{ secrets.LUMINA_WINDOWS_CERT_THUMBPRINT }}
