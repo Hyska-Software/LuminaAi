@@ -85,10 +85,12 @@ Windows; `.dmg` no macOS; `.deb`/`.rpm`/`.AppImage` no Linux, com
 remoção opcional dos dados; macOS e Linux usam os formatos nativos. Detalhes,
 flags e assinatura: [`docs/INSTALLER.md`](docs/INSTALLER.md).
 
-Release de produção: tags `v<versão>` ou `workflow_dispatch` em
-`.github/workflows/installer.yml`. A release usa a versão do `package.json`:
-uma versão maior cria uma release nova; a mesma versão atualiza os assets da
-release existente; uma versão menor falha.
+Release de produção: um push na `main` com uma versão nova no `package.json`
+dispara `.github/workflows/installer.yml` automaticamente. O workflow compila
+Windows/macOS/Linux, cria a tag `v<versão>` e publica a release. Push sem bump
+de versão não compila nada (a mesma versão é ignorada); uma versão menor falha.
+Também é possível rodar manualmente em **Actions → Release** (input `draft`,
+útil para republicar a mesma versão).
 
 O app instalado consulta automaticamente essas releases (ao abrir e uma vez por
 dia) e mostra um aviso na barra de título quando há uma versão estável mais

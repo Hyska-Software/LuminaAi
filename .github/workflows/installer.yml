@@ -1,15 +1,15 @@
 name: Release
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       draft:
         description: Create the GitHub release as a draft
         type: boolean
         default: false
-  push:
-    tags:
-      - 'v*'
 
 permissions:
   contents: write
@@ -25,12 +25,19 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      should_release: ${{ steps.version.outputs.should_release }}
+      reason: ${{ steps.version.outputs.reason }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Check version sources
+        run: >-
+          node --input-type=module -e
+          "import('./scripts/installer/shared.mjs').then(({ assertVersionsInSync }) => console.log('Versão sincronizada:', assertVersionsInSync(process.cwd())))"
 
       - name: Resolve app version
         id: version
@@ -44,30 +51,53 @@ jobs:
             echo "Versão inválida em package.json: $VERSION" >&2
             exit 1
           fi
-          if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
-            echo "A tag $GITHUB_REF_NAME não corresponde à versão do app (v$VERSION)." >&2
-            echo "Atualize a versão do app com 'pnpm version:set' e crie a tag correta." >&2
-            exit 1
-          fi
 
-          LATEST=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // empty' 2>/dev/null || true)
+          LATEST=$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty' 2>/dev/null || true)
+          LATEST_VERSION=""
           if [[ "$LATEST" == v* ]]; then
             LATEST_VERSION=${LATEST#v}
+          fi
+
+          SHOULD_RELEASE=true
+          REASON="versão nova"
+          if [[ -n "$LATEST_VERSION" ]]; then
             HIGHEST=$(printf '%s\n%s\n' "$LATEST_VERSION" "$VERSION" | sort -V | tail -n 1)
             if [[ "$HIGHEST" != "$VERSION" ]]; then
               echo "A versão do app ($VERSION) é menor que a release mais recente ($LATEST_VERSION)." >&2
-              echo "Atualize a versão do app antes de publicar." >&2
+              echo "Atualize a versão do app e envie novamente para a main." >&2
               exit 1
+            fi
+            if [[ "$GITHUB_EVENT_NAME" == "push" && "$LATEST_VERSION" == "$VERSION" ]]; then
+              SHOULD_RELEASE=false
+              REASON="a versão $VERSION já foi publicada"
             fi
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Release v$VERSION"
+          echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Release v$VERSION"
+            echo
+            if [[ "$SHOULD_RELEASE" == "true" ]]; then
+              echo "A release será publicada."
+            else
+              echo "Nada a publicar: $REASON."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$SHOULD_RELEASE" == "true" ]]; then
+            echo "Release v$VERSION"
+          else
+            echo "Sem release: $REASON"
+          fi
 
   build:
     name: ${{ matrix.platform }}
     needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -142,6 +172,7 @@ jobs:
   release:
     name: GitHub Release
     needs: [prepare, build]
+    if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}
@@ -183,6 +214,7 @@ jobs:
               extra+=(--draft)
             fi
             gh release create "$TAG" "${files[@]}" \
+              --target "$GITHUB_SHA" \
               --title "Lumina $TAG" \
               --generate-notes \
               "${extra[@]}"

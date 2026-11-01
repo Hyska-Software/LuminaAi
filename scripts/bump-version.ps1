@@ -256,3 +256,4 @@ if ($versions.Count -eq 1) {
     Write-Host "Atenção: as fontes ficaram divergentes: $($versions -join ', ')" -ForegroundColor Yellow
 }
 Write-Host 'Revise com: git diff' -ForegroundColor DarkGray
+Write-Host 'Para publicar: commit + push para a main (o workflow cria a tag e a release).' -ForegroundColor DarkGray

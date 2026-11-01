@@ -189,9 +189,10 @@ Sobre e o wizard do instalador leem a versão compilada, então um build futuro 
 usa a nova versão. O teste `scripts/installer/__tests__/shared.test.mjs` cobre a
 divergência entre as cinco fontes.
 
-O script não faz commit nem tag. Para publicar, revise com `git diff`, faça o
-commit da versão e crie a tag `v<versão>` — o build de release exige árvore
-limpa (`--require-clean`).
+O script não faz commit. Revise com `git diff`, faça o commit e envie para a
+`main`; o workflow cria a tag `v<versão>` e publica a release automaticamente
+quando a versão é nova. Se a versão for a mesma da última release, nada é
+compilado. O build de release exige árvore limpa (`--require-clean`).
 
 ### 3.2 Assinatura
 
@@ -271,9 +272,18 @@ reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumina"
 
 O workflow de produção é `.github/workflows/installer.yml` (`Release`) e roda:
 
-- **tag `v*`** — publica a release; a tag precisa coincidir com a versão do app;
+- **push na `main`** — se a versão do `package.json` for maior que a última
+  release publicada, compila as três plataformas e cria a tag `v<versão>` e a
+  release automaticamente. Se a versão for a mesma, o workflow termina sem
+  compilar nada (push de documentação/código sem bump); se for menor, falha.
 - **workflow_dispatch** — cria/atualiza a release da versão atual; o input
-  `draft` permite testar sem publicar.
+  `draft` permite gerar um rascunho. É o caminho para republicar a mesma versão
+  (atualizar assets com `--clobber`).
+
+A tag é criada pelo próprio workflow apontando para o commit que disparou o run
+(`gh release create --target "$GITHUB_SHA"`); não é preciso criar/pushar tag
+manualmente. Rascunhos e prereleases não entram no cálculo da “última release”
+(`gh release list --exclude-drafts`).
 
 Cada job roda a plataforma nativa (não há cross-build):
 
@@ -299,18 +309,20 @@ plataformas). A release recebe os cinco instaladores + `release.json` +
 
 ### Regra de versão
 
-A fonte é `package.json` (sincronizado com `Cargo.toml` e `tauri.conf.json`):
+A fonte é `package.json` (sincronizado com `Cargo.toml`, `tauri.conf.json`,
+`appVersion.ts` e `Cargo.lock` pelo bump local):
 
 | Situação | Ação |
 | --- | --- |
-| versão do app **maior** que a última release | cria uma release nova |
-| versão do app **igual** à release existente | atualiza os assets (`--clobber`) e publica/edita |
+| versão do app **maior** que a última release | push na `main` compila e cria a release/tag automaticamente |
+| versão do app **igual** à release existente | push na `main`: nenhum build (skip); `workflow_dispatch`: atualiza os assets |
 | versão do app **menor** que a última release | falha antes do build |
-| tag `vX` diferente da versão do app | falha antes do build |
+| fontes de versão divergentes | falha no job `Version` antes do build |
 
-`DRAFT=true` mantém/cria a release como rascunho; `DRAFT=false` publica.
-O workflow roda na `main` e precisa de `contents: write` (`GITHUB_TOKEN`).
-Certificados continuam opcionais via secrets; sem eles o build é unsigned/ad-hoc.
+`DRAFT=true` (somente `workflow_dispatch`) mantém/cria a release como rascunho;
+push na `main` publica. O workflow precisa de `contents: write`
+(`GITHUB_TOKEN`). Certificados continuam opcionais via secrets; sem eles o build
+é unsigned/ad-hoc.
 
 ## 8. Troubleshooting
 
