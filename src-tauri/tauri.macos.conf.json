@@ -6,7 +6,6 @@
     "category": "Utility",
     "publisher": "Lumina",
     "copyright": "© 2026 Lumina",
-    "licenseFile": "../LICENSE",
     "macOS": {
       "minimumSystemVersion": "11.0",
       "hardenedRuntime": true,

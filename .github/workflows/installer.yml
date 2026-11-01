@@ -121,7 +121,7 @@ jobs:
           set -euo pipefail
           dmg=$(ls release/*/macos-*/*.dmg | head -n 1)
           mount=$(mktemp -d)
-          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount"
+          hdiutil attach "$dmg" -noverify -noautoopen -nobrowse -readonly -mountpoint "$mount"
           test -d "$mount/Lumina.app"
           codesign --verify --deep --strict "$mount/Lumina.app"
           sudo ditto "$mount/Lumina.app" /Applications/Lumina.app
