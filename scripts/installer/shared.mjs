@@ -33,19 +33,39 @@ export function readVersionState(root) {
   const tauri = readJson(path.join(root, 'src-tauri/tauri.conf.json'));
   const cargo = readFileSync(path.join(root, 'src-tauri/Cargo.toml'), 'utf8');
   const cargoVersion = cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? null;
+
+  const uiPath = path.join(root, 'src/lib/appVersion.ts');
+  const ui = existsSync(uiPath) ? readFileSync(uiPath, 'utf8') : '';
+  const uiVersion = ui.match(/APP_VERSION_FALLBACK\s*=\s*'([^']+)'/)?.[1] ?? null;
+
+  const lockPath = path.join(root, 'src-tauri/Cargo.lock');
+  const lock = existsSync(lockPath) ? readFileSync(lockPath, 'utf8') : '';
+  const lockVersion =
+    lock.match(
+      /\[\[package\]\]\r?\nname = "lumina"\r?\nversion = "([^"]+)"/,
+    )?.[1] ?? null;
+
   return {
     packageVersion: packageJson.version,
     tauriVersion: tauri.version,
     cargoVersion,
+    uiVersion,
+    lockVersion,
   };
 }
 
 export function assertVersionsInSync(root) {
   const state = readVersionState(root);
-  const versions = [state.packageVersion, state.tauriVersion, state.cargoVersion];
+  const versions = [
+    state.packageVersion,
+    state.tauriVersion,
+    state.cargoVersion,
+    state.uiVersion,
+    state.lockVersion,
+  ];
   if (versions.some((value) => !value)) {
     throw new Error(
-      `Versão ausente: package.json=${state.packageVersion ?? '?'}, tauri.conf.json=${state.tauriVersion ?? '?'}, Cargo.toml=${state.cargoVersion ?? '?'}`,
+      `Versão ausente: package.json=${state.packageVersion ?? '?'}, tauri.conf.json=${state.tauriVersion ?? '?'}, Cargo.toml=${state.cargoVersion ?? '?'}, appVersion.ts=${state.uiVersion ?? '?'}, Cargo.lock=${state.lockVersion ?? '?'}`,
     );
   }
   if (!VERSION_PATTERN.test(versions[0])) {
@@ -53,7 +73,7 @@ export function assertVersionsInSync(root) {
   }
   if (new Set(versions).size !== 1) {
     throw new Error(
-      `Versões divergentes: package.json=${versions[0]}, tauri.conf.json=${versions[1]}, Cargo.toml=${versions[2]}. Rode "pnpm version:set ${versions[0]}" após revisar.`,
+      `Versões divergentes: package.json=${versions[0]}, tauri.conf.json=${versions[1]}, Cargo.toml=${versions[2]}, appVersion.ts=${versions[3]}, Cargo.lock=${versions[4]}. Rode "pnpm version:set ${versions[0]}" após revisar.`,
     );
   }
   return versions[0];

@@ -14,6 +14,7 @@ import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import { resolveHotkey, type HotkeyCommand } from '@/lib/hotkeys';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { SplashScreen } from '@/components/SplashScreen';
+import { useUpdateCheck } from '@/components/layout/useUpdateCheck';
 
 /** Ensures bootstrap runs once even under React StrictMode double-effects. */
 let bootstrapPromise: Promise<void> | null = null;
@@ -121,6 +122,10 @@ export default function App() {
   useEffect(() => {
     applyFontScale(fontScale);
   }, [fontScale]);
+
+  // Automatic update checks (hydrate the cached release immediately, check
+  // once the bootstrap is done and then once per day while the app is open).
+  useUpdateCheck(ready);
 
   // Chat and Code have separate session lists; switching layouts restores each
   // layout's own active session instead of leaking the other one.

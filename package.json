@@ -17,9 +17,10 @@
     "installer:dry": "node scripts/build-installer.mjs --dry-run",
     "version:set": "node scripts/set-version.mjs",
     "catalog": "node scripts/build-catalog.mjs",
+    "brand": "node scripts/build-brand.mjs",
     "verify:models": "node scripts/verify-models.mjs",
     "test": "vitest run",
-    "test:installer": "node --test scripts/installer/__tests__/shared.test.mjs scripts/installer/__tests__/config.test.mjs scripts/installer/__tests__/release.test.mjs",
+    "test:installer": "node --test scripts/installer/__tests__/shared.test.mjs scripts/installer/__tests__/config.test.mjs scripts/installer/__tests__/release.test.mjs scripts/installer/__tests__/version.test.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

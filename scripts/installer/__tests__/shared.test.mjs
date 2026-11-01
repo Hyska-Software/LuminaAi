@@ -37,10 +37,11 @@ test('maps hosts and artifact labels', () => {
   );
 });
 
-test('requires all three version sources to match', () => {
+test('requires all version sources to match', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'lumina-version-'));
   writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '0.2.0' }));
-  mkdirSync(path.join(root, 'src-tauri'));
+  mkdirSync(path.join(root, 'src-tauri'), { recursive: true });
+  mkdirSync(path.join(root, 'src/lib'), { recursive: true });
   writeFileSync(
     path.join(root, 'src-tauri/tauri.conf.json'),
     JSON.stringify({ version: '0.2.0' }),
@@ -48,6 +49,14 @@ test('requires all three version sources to match', () => {
   writeFileSync(
     path.join(root, 'src-tauri/Cargo.toml'),
     '[package]\nname = "lumina"\nversion = "0.2.0"\n',
+  );
+  writeFileSync(
+    path.join(root, 'src/lib/appVersion.ts'),
+    "export const APP_VERSION_FALLBACK = '0.2.0';\n",
+  );
+  writeFileSync(
+    path.join(root, 'src-tauri/Cargo.lock'),
+    '[[package]]\nname = "lumina"\nversion = "0.2.0"\n',
   );
   assert.equal(assertVersionsInSync(root), '0.2.0');
 

@@ -7,6 +7,7 @@ import { cn, modKey } from '@/lib/utils';
 import { BrandMark } from '@/components/chat/BrandMark';
 import { LayoutModeSwitch } from './LayoutModeSwitch';
 import { PlanUsageChip } from './PlanUsageChip';
+import { UpdateChip } from './UpdateChip';
 
 /** Resolves the Tauri window lazily so the renderer also boots outside Tauri. */
 function appWindow(): ReturnType<typeof getCurrentWindow> | null {
@@ -132,6 +133,8 @@ export function TitleBar() {
             Lumina
           </span>
         </div>
+
+        <UpdateChip />
 
         <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
       </div>

@@ -13,6 +13,7 @@ pnpm test                    # Vitest (TDD do renderer)
 pnpm build                   # build do renderer (Vite)
 pnpm app:dev                 # Tauri dev (janela + HMR)
 pnpm app:build               # binário + instalador
+.\scripts\bump-version.ps1    # bump interativo local de versão (sem build)
 cd src-tauri && cargo check  # backend
 cd src-tauri && cargo test --lib   # testes Rust (TDD)
 cd src-tauri && cargo build  # binário de debug
@@ -35,6 +36,7 @@ Observação: `cargo` usa um target dir compartilhado. Se aparecer `Blocking wai
 | Code workbench | `src/components/code/**` | ui-code |
 | Cards do agente (harness) | `src/components/agent/**` | ui-agent |
 | UI sistemas | `src/components/ui/**`, `src/components/models/**`, `src/components/settings/**`, `src/components/artifacts/**`, `src/components/skills/**`, `src/components/genui/**`, `src/components/palette/**` | ui-systems |
+| Atualizações | `src-tauri/src/update/**`, `src-tauri/src/commands/update.rs`, `src/lib/store/updateStore.ts` | Lead |
 
 **Never edite arquivos de outra área.** Se precisar de uma mudança de contrato, envie uma mensagem ao Lead com a assinatura exata desejada.
 

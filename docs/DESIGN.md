@@ -2,7 +2,7 @@
 
 ## 1. Direção
 
-Lumina é um chat de IA **calmo, preciso e premium**, inspirado na hierarquia do ChatGPT e na contenção visual do Claude, com identidade própria: a marca Lumina — mascote violeta `#5E34FB` com focinho lilás sobre tile grafite-claro `#EBEBEB` — usada apenas em momentos de marca (logo, avatar do assistente, splash, Sobre).
+Lumina é um chat de IA **calmo, preciso e premium**, inspirado na hierarquia do ChatGPT e na contenção visual do Claude, com identidade própria: a marca Lumina — mascote roedor violeta `#5E34FB` com focinho lilás `#EADFFC` — usada apenas em momentos de marca (logo, avatar do assistente, splash, Sobre). Nos ícones do Windows e Linux o símbolo aparece sobre fundo transparente; o tile grafite-claro `#EBEBEB` fica reservado ao favicon, à UI do instalador e ao ícone do macOS.
 
 Princípios:
 - **Conteúdo primeiro**: a conversa ocupa o centro, sem molduras pesadas. Superfícies neutras, bordas de 1px, sombras suaves.
@@ -16,10 +16,10 @@ Princípios:
 | Token | Valor |
 | --- | --- |
 | Nome | Lumina |
-| Símbolo | mascote roedor estilizado em violeta `#5E34FB`, com orelhas arredondadas, olho escuro, focinho lilás `#EADFFC` e detalhes claros |
-| Ícone | o mesmo símbolo sobre tile grafite-claro `#EBEBEB` (cantos arredondados, bordas transparentes) |
-| Arquivos | `assets/Lumina_Logo.svg` (original); vetores usados pelo app em `public/brand/lumina-tile.svg` e `public/brand/lumina-mark.svg`; `app-icon.png` (1024×1024) gera `src-tauri/icons` com `pnpm tauri icon app-icon.png` |
-| Uso | tile → ícones do app (instalador, taskbar, janela) e favicon; marca sem fundo → titlebar, avatar do assistente, boas-vindas, splash e Sobre |
+| Símbolo | mascote roedor estilizado em violeta `#5E34FB`, com orelhas arredondadas, olho escuro, focinho lilás `#EADFFC` com nariz em Y e pata lilás sobre a barriga |
+| Ícone | Windows/Linux: o símbolo recortado sobre **fundo transparente**, com ~7% de respiro nas laterais; macOS, favicon e instalador: o mesmo símbolo sobre tile grafite-claro `#EBEBEB` (cantos arredondados, bordas transparentes) |
+| Arquivos | `assets/Lumina_Logo.svg` (original); vetores usados pelo app em `public/brand/lumina-tile.svg` e `public/brand/lumina-mark.svg`; `assets/app-icon.svg` (master quadrado transparente) gera `app-icon.png` (1024×1024) e `src-tauri/icons` com `pnpm brand` |
+| Uso | tile → favicon, UI do instalador e ícone do macOS; marca sem fundo → titlebar, avatar do assistente, boas-vindas, splash, Sobre e ícones do Windows/Linux |
 | Voz | português brasileiro, direta, sem excesso de exclamações; termos técnicos em inglês quando consagrados |
 
 ## 3. Paleta (tokens em `src/styles/globals.css`)
@@ -68,6 +68,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 
 - **Chrome contínuo**: topbar e sidebar formam uma única superfície (`bg-surface`), sem linhas divisórias entre si. O chat é um painel `bg-background` com **apenas o canto superior esquerdo arredondado** (`rounded-tl-lg`), encostado nas duas áreas — a divisão é feita só pelo contraste de superfície, sem `border` de 1px. O canto acompanha a borda da sidebar ao abrir/fechar/redimensionar e os painéis laterais à direita não mudam.
 - **TitleBar**: 56px, `decorations: false`, `bg-surface` sem borda inferior; arrastável (`data-tauri-drag-region`); controles nativos custom (minimizar/maximizar/fechar) com hover `surface-hover` e fechar em vermelho. Quando a conta conectada está usando o plano ChatGPT, o chrome mostra o indicador **Plano ChatGPT · Gerenciar uso** à direita (antes da busca) — é account-level, por isso vive na topbar e não no composer; sem plano ativo ele não aparece.
+- **Atualização disponível**: quando há uma release estável mais nova, a title bar mostra um **pill de 28px** (`UpdateChip`) logo depois da marca, antes do espaço arrastável e do seletor central: ícone `ArrowUpCircle` + `v<versão> disponível` (accent-soft, texto accent; abaixo de 1024px só o ícone) + chevron. Ele é o aviso persistente e também o feedback: `Baixando 42%` com uma barra de 2px na base, `Verificando…`, `Instalar vX` (success-soft) e `Falha na atualização` (danger-soft). Clicar abre um popover de 360px com **Novidades** (texto puro, rolável, link para o GitHub), plataforma/tamanho/SHA-256, progresso em bytes/velocidade com Cancelar, “Download verificado”, **Instalar agora** / **Abrir pasta**, “Agora não” e “Ignorar esta versão”. O botão some quando não há atualização, quando a versão foi ignorada ou durante a checagem automática silenciosa; a checagem manual mostra `Verificando…`. A instalação nunca é silenciosa: no Windows abre o wizard do instalador existente, no macOS abre o DMG e no Linux abre o pacote/AppImage. O mesmo estado e as mesmas ações aparecem em **Configurações → Sobre → Atualizações**.
 - **Sidebar**: 272px (padrão), `bg-surface` (sem borda divisória à direita), colapsável (⌘/Ctrl+B) e **redimensionável** arrastando a borda direita (220–480px, largura persistida; duplo clique restaura 272px; foco no divisor + ←/→ movem 16px, Home/End vão aos limites). Contém: botão "Novo chat" (pill com borda), item **"Biblioteca"** (abre a página de arquivos no lugar do chat; sempre visível), item **"Skills"** logo **abaixo** de Biblioteca (abre a view de gestão no lugar do chat; oculto quando o painel é desativado nas configurações), busca, lista agrupada (Fixadas, Hoje, Ontem, 7 dias, 30 dias, Mais antigas), rodapé com atalho de configurações e versão.
 - **Chat**: painel `bg-background` (`rounded-tl-lg`) que recebe a coluna central `max-w-3xl` (768px), padding 24px, espaçamento entre mensagens 28px.
 - **Composer**: sticky no rodapé com gradiente de fade; container `rounded-3xl`, borda 1px, fundo `surface-raised`, sombra sutil; cresce até 10 linhas.
@@ -233,6 +234,7 @@ Com `reduceMotion` (config ou media query), remover transformações e shimmer; 
 - Artifact panel: no modo sobreposto ocupa até `92vw` em telas pequenas (sheet); o modo fixo só entra em janelas ≥1120px.
 - Painel lateral direito: largura máxima é re-clampada em tempo real (modo sobreposto ≤ `92vw`; modo fixo ≤ janela − sidebar − 480px de chat). Abaixo de 1120px de janela o modo fixo degrada automaticamente para sobreposto (a preferência fica salva e volta a valer quando a janela cresce); a alça de redimensionamento usa esse limite dinâmico e a janela pode ser redimensionada com o painel aberto sem overflow.
 - Modo Code: sidebar vira o mesmo drawer abaixo de 1024px; o painel Arquivos/Alterações só é renderizado a partir de 1120px (o botão do cabeçalho fica desabilitado com dica "Aumente a janela…" e a conversa mantém ≥480px). O seletor Chat/Code fica sempre visível entre a marca e as ações globais. Como o seletor ocupa o centro da title bar, o indicador **Plano ChatGPT** só aparece em janelas ≥1280px (abaixo disso ele é omitido para não comprimir a busca/controles de janela; o mesmo estado continua em Configurações › Provedores).
+- Chip de atualização: texto completo a partir de 1024px; abaixo disso fica só o ícone + chevron (o `aria-label`/tooltip mantém a versão e a etapa). O popover de 360px usa `collisionPadding` para não sair da janela em telas de 900px.
 
 ## 14. Microcopy (pt-BR)
 

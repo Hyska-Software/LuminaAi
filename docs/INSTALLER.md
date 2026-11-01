@@ -126,8 +126,9 @@ pnpm installer --platform windows --require-clean
 O script:
 
 1. Exige Node 20+, pnpm e cargo.
-2. Valida que `package.json`, `src-tauri/Cargo.toml` e
-   `src-tauri/tauri.conf.json` têm a mesma versão.
+2. Valida que `package.json`, `src-tauri/Cargo.toml`,
+   `src-tauri/tauri.conf.json`, `src/lib/appVersion.ts` e
+   `src-tauri/Cargo.lock` têm a mesma versão.
 3. Registra commit/branch e marca `dirty` no manifesto. `--require-clean` falha
    se houver alterações não commitadas (use no CI de release); `--allow-dirty`
    apenas silencia o aviso em builds locais.
@@ -153,13 +154,44 @@ O script **não** apaga `src-tauri/target`; limpa apenas a pasta da plataforma e
 
 ### 3.1 Versão
 
-```bash
-pnpm version:set 0.2.0
+Bump local interativo (Windows/PowerShell), **sem build**:
+
+```powershell
+.\scripts\bump-version.ps1                 # menu: patch/minor/major/personalizada
+.\scripts\bump-version.ps1 -Minor          # atalho
+.\scripts\bump-version.ps1 0.2.0           # versão explícita
+.\scripts\bump-version.ps1 0.2.0 -WhatIf   # prévia, não escreve
 ```
 
-Atualiza os três arquivos. A versão do app no `app_info`, no `User-Agent` e no
-prompt vem de `CARGO_PKG_VERSION`; por isso a sincronia é obrigatória. O teste
-`scripts/installer/__tests__/shared.test.mjs` cobre a divergência.
+O script mostra as cinco fontes, permite escolher/rebaixar a versão (com
+confirmação), aplica em todos os arquivos e verifica o resultado. Ele **não**
+compila, não roda testes e não gera instalador.
+
+O equivalente cross-platform é:
+
+```bash
+pnpm version:set 0.2.0
+pnpm version:set --bump minor
+```
+
+Arquivos mantidos em sincronia:
+
+| Arquivo | Uso |
+| --- | --- |
+| `package.json` | workflow de release e nomes dos artefatos |
+| `src-tauri/Cargo.toml` | `CARGO_PKG_VERSION` (`app_info`, updater, wizard e `DisplayVersion`) |
+| `src-tauri/tauri.conf.json` | metadados do bundle |
+| `src/lib/appVersion.ts` | fallback da versão na interface |
+| `src-tauri/Cargo.lock` | registro do pacote `lumina` |
+
+Todas as plataformas usam a mesma versão; não há versão por app. A sidebar, o
+Sobre e o wizard do instalador leem a versão compilada, então um build futuro já
+usa a nova versão. O teste `scripts/installer/__tests__/shared.test.mjs` cobre a
+divergência entre as cinco fontes.
+
+O script não faz commit nem tag. Para publicar, revise com `git diff`, faça o
+commit da versão e crie a tag `v<versão>` — o build de release exige árvore
+limpa (`--require-clean`).
 
 ### 3.2 Assinatura
 
@@ -220,7 +252,10 @@ Cobertura específica:
   tamanho humanizado. Instalação/desinstalação reais são verificadas por um
   smoke test silencioso em diretório/registro isolados, sem UI automation.
 - `scripts/installer/__tests__/shared.test.mjs`: semver, nomes de artefatos,
-  manifesto/checksums e sincronia de versão.
+  manifesto/checksums e sincronia das cinco fontes de versão.
+- `scripts/installer/__tests__/version.test.mjs`: bump patch/minor/major,
+  versão personalizada, dry-run, downgrade explícito, fontes divergentes e
+  falha sem escrita parcial.
 
 Smoke test manual no Windows:
 
@@ -290,9 +325,130 @@ Certificados continuam opcionais via secrets; sem eles o build é unsigned/ad-ho
 | Linux não abre em distro antiga | Build foi feito em glibc mais nova; use Ubuntu 22.04 como baseline. |
 | AppImage não abre | Falta FUSE ou WebKitGTK; use `--appimage-extract-and-run` ou o `.deb`. |
 
-## 9. Fora de escopo (por enquanto)
+## 9. Atualização no app
 
-- Auto-update/`tauri-plugin-updater` (o manifesto já registra versão/SHA).
+O Lumina consulta as releases publicadas em `Hyska-Software/LuminaAi` e avisa o
+usuário quando há uma versão estável mais nova. **Verificar é automático;
+baixar e instalar são sempre decisões explícitas.**
+
+### 9.1 Fonte
+
+1. `https://github.com/Hyska-Software/LuminaAi/releases/latest/download/release.json`
+   — apelido do GitHub para a release estável mais recente. É a fonte primária:
+   não passa pelo limite de 60 req/h da API e já traz `version`, tamanho e
+   SHA-256 de cada artefato.
+2. `/repos/.../releases/latest` — fallback para releases antigas sem
+   `release.json`; usa o `digest` do asset (ou descarta o artefato sem hash).
+3. `/repos/.../releases/tags/v<versão>` — só para as **notas**, carregadas
+   quando o popover abre. Falha de notas não impede o download.
+
+Rascunhos e prereleases nunca são oferecidos. Se o repositório ainda não tem
+release, o estado é “tudo atualizado” (sem toast de erro).
+
+### 9.2 Cadência
+
+- Ao abrir o app (a primeira checagem da sessão roda sempre) e depois uma vez
+  por dia enquanto ele fica aberto; voltar o foco na janela aproveita a mesma
+  janela de 24h.
+- Manual em **Configurações → Sobre → Atualizações → Verificar agora**.
+- O aviso aparece uma vez por versão (toast) e permanece como chip na title bar
+  até instalar ou **Ignorar esta versão**. Uma versão mais nova supera o
+  “ignorar”.
+- Falha na checagem automática é silenciosa: o último resultado continua no chip
+  marcado como “sem conexão” e a tela de Configurações mostra o erro com
+  “Verificar agora”. Falha manual mostra toast + erro inline.
+
+### 9.3 UI
+
+- **Title bar** (`src/components/layout/UpdateChip.tsx`): pill de 28px logo
+  depois da marca. Estados: disponível (accent), baixando (percentual + barra
+  de 2px), verificando, pronto (success), erro (danger). Abaixo de `lg` mostra
+  só o ícone. Some quando não há atualização ou a versão foi ignorada.
+- **Popover** (`UpdatePanel.tsx`): notas, plataforma/tamanho/SHA-256, download
+  com progresso em bytes e velocidade, verificação, “Instalar agora”,
+  “Abrir pasta”, cancelar e “Agora não”/“Ignorar esta versão”.
+- **Configurações → Sobre → Atualizações** (`UpdateSection.tsx`): versão atual,
+  switch de checagem automática, status, verificação manual, ações e link para
+  a release. As duas superfícies compartilham o mesmo estado
+  (`src/lib/store/updateStore.ts`) e as mesmas ações.
+
+### 9.4 Download e verificação
+
+- Grava em `<app-data>/updates/<versão>/<nome>.partial`, com progresso
+  incremental (~120ms) via `Channel<UpdateEvent>` e cancelamento.
+- Confere `Content-Length` e o tamanho declarado, com teto de 1,5 GB.
+- Calcula SHA-256 durante o stream; em divergência remove o parcial e nunca
+  promove o arquivo.
+- Só renomeia para o nome final (atômico) depois da verificação.
+- Antes de executar, **recalcula o SHA-256**; um arquivo modificado no disco é
+  recusado. Versões antigas baixadas são limpas; parciais de uma sessão
+  encerrada também.
+
+### 9.5 Instalação por plataforma
+
+| Plataforma | Arquivo | Ação |
+| --- | --- | --- |
+| Windows | `Lumina-Setup-<v>-windows-x64.exe` | Abre o wizard existente; ele detecta a instalação, pula escopo/pasta, fecha o app e preserva os dados |
+| macOS | `Lumina-<v>-macos-universal.dmg` | Abre o DMG; arrastar para Aplicativos |
+| Linux | `.AppImage` (preferido), `.deb`, `.rpm` | Abre o pacote no sistema ou revela o AppImage na pasta |
+
+A instalação não é silenciosa na v1. Assinatura/Authenticode continuam sendo o
+que remove o aviso do SmartScreen/Gatekeeper (§3.2).
+
+### 9.6 Preferências e cache
+
+`<app-data>/updates.json` (escrita atômica, schema versionado):
+
+```json
+{
+  "schemaVersion": 1,
+  "preferences": {
+    "autoCheck": true,
+    "lastCheckAt": 1767225600000,
+    "skippedVersion": null,
+    "notifiedVersion": "0.2.0"
+  },
+  "cached": { "latestVersion": "0.2.0", "asset": { "…": "…" } }
+}
+```
+
+O `cached` permite o chip aparecer na hora ao abrir e continuar visível offline.
+Notas não são persistidas. Arquivo ausente/corrompido volta aos defaults
+(`autoCheck: true`) sem bloquear o app.
+
+### 9.7 Teste local do feed
+
+Em builds **debug** é possível apontar o feed para um servidor local:
+
+```powershell
+$env:LUMINA_UPDATE_BASE_URL = "http://127.0.0.1:8787"
+```
+
+O servidor deve responder `/releases/latest/download/release.json` e
+`/releases/download/v<versão>/<artefato>`. A variável é ignorada em builds de
+release. Os testes puros de seleção de artefato, versão, hashes e download
+usam um servidor TCP efêmero, sem depender da rede.
+
+### 9.8 Testes
+
+```bash
+cd src-tauri && cargo test --lib update
+pnpm test
+```
+
+Cobertura: comparação SemVer (incluindo prerelease), parse/validação do
+`release.json` e do fallback da API, seleção por plataforma/arquitetura,
+allow-list de URLs, SHA-256 e parcial, detecção de download pronto, skip,
+cache local e os estados do chip/popover/Configurações. O teste
+`update::feed::tests::fetches_the_live_release_feed` é `#[ignore]` e consulta o
+GitHub real sob demanda.
+
+## 10. Fora de escopo (por enquanto)
+
+- `tauri-plugin-updater` (o app usa o próprio manifesto e o instalador Lumina).
+- Delta updates, instalação silenciosa em segundo plano e canal beta.
+- Substituição automática do `.app` no macOS e do AppImage em execução.
 - Instalador customizado em macOS/Linux.
-- Assinatura de repositório Linux (APT/RPM).
-- Instalação por linha de comando em macOS/Linux (os pacotes nativos cobrem).
+- Assinatura de repositório Linux (APT/RPM) e instalação por linha de comando
+  em macOS/Linux.
+

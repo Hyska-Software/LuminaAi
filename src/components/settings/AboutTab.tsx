@@ -2,16 +2,17 @@ import { ExternalLink } from 'lucide-react';
 import { BrandMark } from '@/components/chat/BrandMark';
 import { catalog, CATALOG_GENERATED_AT } from '@/lib/catalog';
 import { openExternal } from '@/lib/genui/open-external';
+import { APP_VERSION_FALLBACK } from '@/lib/appVersion';
 import { useAppStore } from '@/lib/store';
 import { Badge, Button } from '@/components/ui';
 import { SettingRow, SettingsSection } from './shared';
+import { UpdateSection } from './UpdateSection';
 
 const OPENCODE_URL = 'https://opencode.ai';
 const CONSOLE_URL = 'https://opencode.ai/console';
 const CHATGPT_URL = 'https://chatgpt.com';
 const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
-/** Repository URL is filled once the public project page exists. */
-const REPOSITORY_URL: string | null = null;
+const REPOSITORY_URL = 'https://github.com/Hyska-Software/LuminaAi';
 
 function formatGeneratedAt(value: string): string {
   const date = new Date(value);
@@ -37,7 +38,7 @@ export function AboutTab() {
             <p className="text-[11px] text-foreground-muted">Tauri 2 · React 19 · Tailwind CSS 4</p>
           </div>
           <Badge tone="accent" size="md">
-            v{appInfo?.version ?? '0.1.0'}
+            v{appInfo?.version ?? APP_VERSION_FALLBACK}
           </Badge>
         </div>
 
@@ -57,6 +58,8 @@ export function AboutTab() {
           <span className="text-xs text-foreground-muted">SQLite + arquivos locais</span>
         </SettingRow>
       </SettingsSection>
+
+      <UpdateSection />
 
       <SettingsSection title="Links" description="Abre no navegador padrão, nunca dentro do app.">
         <SettingRow label="OpenCode" description="Site oficial dos provedores Go e Zen.">
@@ -102,16 +105,14 @@ export function AboutTab() {
             Gerenciar uso
           </Button>
         </SettingRow>
-        <SettingRow
-          label="Repositório"
-          description={
-            REPOSITORY_URL
-              ? 'Código-fonte do projeto.'
-              : 'Ainda não publicado — o link será adicionado quando o projeto for aberto.'
-          }
-        >
-          <Button size="sm" variant="ghost" disabled title="Repositório ainda não publicado">
-            Em breve
+        <SettingRow label="Repositório" description="Código-fonte, releases e novidades do projeto.">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void openExternal(REPOSITORY_URL)}
+            rightIcon={<ExternalLink className="size-3.5" />}
+          >
+            Abrir GitHub
           </Button>
         </SettingRow>
       </SettingsSection>

@@ -1,4 +1,16 @@
 export { useAppStore, MAX_STEPS_DEFAULT, MAX_STEPS_LIMIT } from './appStore';
+export {
+  useUpdateStore,
+  initialUpdateState,
+  UPDATE_CHECK_INTERVAL_MS,
+} from './updateStore';
+export type {
+  UpdatePhase,
+  UpdateErrorScope,
+  UpdateProgress,
+  UpdateUiState,
+  UpdateStore,
+} from './updateStore';
 export { useCodeStore, emptyCodeSession, applyCodeEvent, isCodeEvent } from './codeStore';
 export type { CodeSessionUi } from './codeStore';
 export {

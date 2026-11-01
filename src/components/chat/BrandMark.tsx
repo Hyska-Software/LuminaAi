@@ -7,8 +7,9 @@ export interface BrandMarkProps {
   size?: number;
   /**
    * `mark` — símbolo oficial sem fundo, para uso inline (titlebar, avatar,
-   * boas-vindas, splash, Sobre). `tile` — ícone oficial completo, com o tile
-   * grafite-claro, para contextos que representam o app (ícones do SO, favicon).
+   * boas-vindas, splash, Sobre) e para os ícones do Windows/Linux. `tile` —
+   * ícone com o tile grafite-claro, para o favicon, a UI do instalador e o
+   * ícone do macOS.
    */
   variant?: BrandMarkVariant;
   className?: string;
@@ -24,7 +25,7 @@ const SOURCES: Record<BrandMarkVariant, string> = {
 /**
  * Marca oficial da Lumina (DESIGN §2).
  *
- * Os vetores vivem em `public/brand/` e derivam dos assets originais:
+ * Os vetores vivem em `public/brand/` e derivam do asset original:
  * `lumina-mark.svg` é o símbolo sem fundo (recortado à arte) e
  * `lumina-tile.svg` é o ícone completo com o tile grafite-claro. Renderizar
  * como `<img>` mantém a arte fora do bundle JS e nítida em qualquer tamanho.

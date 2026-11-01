@@ -729,6 +729,12 @@ rename_artifact, set_artifact_favorite, get_artifact_thumbnail,
 get_artifact_content, get_artifact_preview,
 save_artifact, open_artifact, delete_artifact, get_code_environment,
 open_skills_dir, get_skills, set_skill_enabled, delete_skill, get_skill_content,
+-- atualizações (v1.12)
+update_status, check_for_update (force), get_update_notes (version),
+download_update (version, Channel<UpdateEvent>), cancel_update_download,
+install_update (version), reveal_update (version),
+set_update_preferences (autoCheck), skip_update_version (version?),
+mark_update_notified (version),
 run_turn, cancel_turn,
 -- harness de código (v1.9): workspace
 pick_workspace_folder, add_workspace, list_workspaces, get_workspace_context,
@@ -789,6 +795,13 @@ encerra. `refresh_provider_models` devolve o `CatalogView` mesclado
   interpretador e as permissões do usuário (não é sandbox de SO), em workspace
   dedicado, com timeout, cancelamento, teto de saída/arquivos e ambiente sem
   segredos. Riscos e mitigações: `docs/FILES.md` §8.
+- **Atualizações**: feed e artefatos só são aceitos sob o prefixo de release do
+  repositório oficial (`https://github.com/Hyska-Software/LuminaAi/releases/`;
+  HTTP só em `127.0.0.1` para fixtures de debug), nomes de arquivo são
+  validados contra path traversal, o download é limitado a 1,5 GB e o SHA-256
+  do `release.json` é conferido durante o stream e **de novo antes de
+  executar**. Nenhum binário fora de `<app-data>/updates/<versão>/` é executado
+  e a instalação nunca acontece sem uma ação explícita do usuário.
 - Scripts de skills e código do agente nunca recebem as API keys do app.
 
 ## 14. Build
@@ -805,6 +818,17 @@ O instalador é gerado por `scripts/build-installer.mjs` (versão única, build
 recente, testes, checksums e manifesto). No Windows o próprio binário roda em
 modo setup com UI React; macOS usa DMG e Linux usa `.deb`/`.rpm`/`.AppImage`.
 Contrato completo: `docs/INSTALLER.md`.
+
+**Atualizações no app** (`src-tauri/src/update/**`): a checagem lê o
+`release.json` da release estável mais recente via
+`/releases/latest/download/release.json` (sem rate limit; fallback para a API do
+GitHub), compara SemVer e guarda o resultado em `<app-data>/updates.json`. O
+renderer agenda a checagem ao abrir e a cada 24h (`useUpdateCheck`), mostra o
+chip na title bar e o popover com notas/progresso. O download vai para
+`<app-data>/updates/<versão>/`, com SHA-256 conferido durante o stream e de novo
+antes de instalar. No Windows a instalação abre o wizard Lumina existente; não
+há execução silenciosa. Contrato e matriz por plataforma: `docs/INSTALLER.md`
+§9.
 
 ## 15. Verificação (TDD)
 

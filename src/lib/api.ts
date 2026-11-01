@@ -42,7 +42,11 @@ import type {
   TurnEvent,
   TurnPayload,
   TurnResult,
+  UpdateDownloadResult,
+  UpdateEvent,
   UpdateGoalInput,
+  UpdateNotes,
+  UpdateStatus,
   Workspace,
   WorkspaceCommitDetail,
   WorkspaceContext,
@@ -65,6 +69,27 @@ export const api = {
   resetAppData: () => invoke<void>('reset_app_data'),
   getCodeEnvironment: () => invoke<CodeEnvironmentStatus>('get_code_environment'),
   openSkillsDir: () => invoke<void>('open_skills_dir'),
+
+  /* -------- atualizações -------- */
+  updateStatus: () => invoke<UpdateStatus>('update_status'),
+  checkForUpdate: (force = false) =>
+    invoke<UpdateStatus>('check_for_update', { force }),
+  getUpdateNotes: (version: string) =>
+    invoke<UpdateNotes>('get_update_notes', { version }),
+  downloadUpdate: (version: string, onEvent: (event: UpdateEvent) => void) => {
+    const channel = new Channel<UpdateEvent>();
+    channel.onmessage = onEvent;
+    return invoke<UpdateDownloadResult>('download_update', { version, onEvent: channel });
+  },
+  cancelUpdateDownload: () => invoke<void>('cancel_update_download'),
+  installUpdate: (version: string) => invoke<void>('install_update', { version }),
+  revealUpdate: (version: string) => invoke<void>('reveal_update', { version }),
+  setUpdatePreferences: (autoCheck: boolean) =>
+    invoke<UpdateStatus>('set_update_preferences', { autoCheck }),
+  skipUpdateVersion: (version: string | null) =>
+    invoke<UpdateStatus>('skip_update_version', { version }),
+  markUpdateNotified: (version: string) =>
+    invoke<void>('mark_update_notified', { version }),
 
   /* -------- skills (gestão) -------- */
   getSkills: () => invoke<SkillSummary[]>('get_skills'),

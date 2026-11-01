@@ -29,6 +29,7 @@ mod providers;
 mod state;
 mod terminal;
 mod tools;
+mod update;
 mod workspace;
 
 use tauri::Manager;
@@ -63,6 +64,9 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             let state = crate::state::AppState::init(app.handle())
                 .expect("failed to initialize Lumina state");
             app.manage(state);
+            let data_dir = crate::config::data_dir(app.handle())
+                .expect("failed to resolve the app data directory");
+            app.manage(crate::update::UpdateState::new(data_dir));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -99,6 +103,17 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::settings::validate_provider,
             commands::settings::get_code_environment,
             commands::settings::open_skills_dir,
+            /* -------- atualizações -------- */
+            commands::update::update_status,
+            commands::update::check_for_update,
+            commands::update::get_update_notes,
+            commands::update::download_update,
+            commands::update::cancel_update_download,
+            commands::update::install_update,
+            commands::update::reveal_update,
+            commands::update::set_update_preferences,
+            commands::update::skip_update_version,
+            commands::update::mark_update_notified,
             commands::skills::get_skills,
             commands::skills::set_skill_enabled,
             commands::skills::delete_skill,

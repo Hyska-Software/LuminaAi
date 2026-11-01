@@ -13,4 +13,5 @@ pub mod settings;
 pub mod skills;
 pub mod terminal;
 pub mod turn;
+pub mod update;
 pub mod workspace;

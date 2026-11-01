@@ -557,6 +557,31 @@ chat (não é modal) — listar, ativar/desativar e excluir skills do usuário, 
 Chat (ui-core): ícones e rótulos no timeline para `run_code`,
 `list_skills`, `read_skill` (ex.: “Executando código…”, “Leu skill office-docx”).
 
+Atualizações (v1.12, `docs/INSTALLER.md` §9):
+
+- **Backend** (`src-tauri/src/update/**`, Lead): `feed.rs` (release.json +
+  fallback da API + seleção de artefato + notas), `version.rs` (SemVer),
+  `store.rs` (`updates.json`), `download.rs` (stream, SHA-256, parcial,
+  cancelamento) e `install.rs` (wizard/DMG/pacote/AppImage). IPC em
+  `src-tauri/src/commands/update.rs`; estado gerenciado no `lib.rs`.
+- **Renderer** (Lead): `src/lib/store/updateStore.ts` (fases
+  `idle|checking|available|downloading|verifying|ready|installing|error|up-to-date`),
+  `src/components/layout/UpdateChip.tsx` (pill da title bar),
+  `src/components/layout/UpdatePanel.tsx` (popover + ações compartilhadas),
+  `src/components/layout/useUpdateCheck.ts` (start + 24h + foco) e
+  `src/components/settings/UpdateSection.tsx` (Configurações → Sobre). Contratos
+  em `types.ts`/`api.ts`.
+- **Preferências**: `updates.json` no app-data (`autoCheck`, `lastCheckAt`,
+  `skippedVersion`, `notifiedVersion`, cache do último release). Não usa
+  `tauri-plugin-updater`.
+
+Versão: `scripts/bump-version.ps1` é o menu interativo local (sem build) e
+`scripts/set-version.mjs` é o CLI cross-platform. Os dois usam
+`scripts/installer/version.mjs` para manter na mesma versão `package.json`,
+`src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `src/lib/appVersion.ts` e
+`src-tauri/Cargo.lock`. A UI e o instalador leem a versão compilada, então um
+build futuro já usa o novo valor.
+
 ## 11. Testes (matriz TDD)
 
 ### Rust (`cargo test --lib`)
@@ -577,6 +602,7 @@ Chat (ui-core): ícones e rótulos no timeline para `run_code`,
 | `harness` (v1.7) | loops com provedor falso pedindo `read_artifact` provam: página de >24k sem corte, DOCX real extraído e artefato **de outra conversa** entrando no histórico enviado ao modelo |
 | `db` (v1.5) | round-trip `Audio`/`Video`/`Archive` (string ↔ enum) e fallback desconhecido→`Binary` |
 | `config` | normalização dos novos campos (clamp timeout, trim paths, defaults) |
+| `update` (v1.12) | SemVer (prerelease/build, fallback numérico); parse/validação do `release.json` e do fallback da API (draft/prerelease ignorados); seleção por plataforma/arquitetura (Windows/macOS/Linux, SHA-256 e nomes seguros); allow-list de URLs; `updates.json` (defaults, corrupção, round-trip, skip); download real em servidor TCP local (progresso, SHA-256, parcial removido, tamanho divergente, cancelamento); verificação antes de instalar/revelar |
 
 Teste de integração (em `tools::code_exec`): gera `relatorio.docx` com o script
 embutido da skill, depois `documents::preview::docx_html` lê o resultado —
@@ -612,12 +638,14 @@ prova o ciclo criação→preview sem UI.
 | `kinds.test.ts` (v1.5) | meta/ícone/label de audio/video/archive; `artifactLanguage` por extensão/nome sem `language` |
 | `ArtifactPreview.test.tsx` (v1.5) | roteamento de markdown/json/code/csv/image/svg/audio/video/archive/binary e fallbacks |
 | `lib/highlight` | grammars extras registradas (bash/java/ruby/toml/csharp…), `normalizeLanguage` e `languageLabel` |
+| `updateStore`/`UpdateChip`/`UpdateSection` (v1.12) | hidratação do cache, checagem devida/não devida, toast uma vez por versão, stale/erro mantém o release visível, progresso/verificação/cancelamento, falha de download com retry, instalação só com arquivo pronto, skip/unskip, switch otimista com rollback, notas sob demanda; chip disponível/baixando/pronto, popover, “Agora não”, “Ignorar esta versão” e a seção de Configurações |
 
 ### Comandos de verificação (critérios de pronto)
 
 ```bash
 pnpm typecheck && pnpm test && pnpm build
 cd src-tauri && cargo check && cargo test --lib
+pnpm test:installer   # scripts de build + bump de versão
 ```
 
 E2E manual (sem GUI): script de verificação roda os 4 helpers embutidos com o

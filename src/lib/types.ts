@@ -1277,6 +1277,85 @@ export interface AppInfo {
   dataDir: string;
 }
 
+/* ------------------------------------------------------------------ */
+/* Atualizações (GitHub release feed + instalador)                     */
+/* ------------------------------------------------------------------ */
+
+export type UpdateAssetKind = 'setup' | 'dmg' | 'appimage' | 'deb' | 'rpm';
+
+/** Release artifact selected for the current platform. */
+export interface UpdateAsset {
+  name: string;
+  size: number;
+  sha256: string;
+  downloadUrl: string;
+  /** Ex.: "Windows x64", "macOS (universal)", "Linux x64 · AppImage". */
+  platformLabel: string;
+  kind: UpdateAssetKind;
+}
+
+export interface UpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  available: boolean;
+  releaseName: string;
+  releasedAt?: string | null;
+  htmlUrl: string;
+  /** `null` quando a release não tem instalador para esta plataforma. */
+  asset?: UpdateAsset | null;
+  checkedAt: number;
+  /** Resultado em cache exibido após uma falha de verificação. */
+  stale?: boolean;
+}
+
+export interface UpdatePreferences {
+  /** Verifica ao abrir e uma vez por dia. */
+  autoCheck: boolean;
+  lastCheckAt?: number | null;
+  /** Versão ignorada pelo usuário; uma versão mais nova volta a aparecer. */
+  skippedVersion?: string | null;
+  /** Última versão que já gerou um aviso (toast). */
+  notifiedVersion?: string | null;
+}
+
+export interface DownloadedUpdate {
+  version: string;
+  path: string;
+  size: number;
+  sha256: string;
+}
+
+export interface UpdateStatus {
+  currentVersion: string;
+  preferences: UpdatePreferences;
+  info?: UpdateInfo | null;
+  download?: DownloadedUpdate | null;
+}
+
+export interface UpdateNotes {
+  notes?: string | null;
+  releasedAt?: string | null;
+  htmlUrl: string;
+}
+
+export interface UpdateDownloadResult {
+  cancelled: boolean;
+  download?: DownloadedUpdate | null;
+}
+
+export type UpdateEvent =
+  | { kind: 'started'; name: string; total: number }
+  | {
+      kind: 'progress';
+      received: number;
+      total: number;
+      percent: number;
+      bytesPerSec: number;
+    }
+  | { kind: 'verifying' }
+  | { kind: 'done'; download: DownloadedUpdate }
+  | { kind: 'cancelled' };
+
 export interface ProviderValidation {
   providerId: string;
   ok: boolean;

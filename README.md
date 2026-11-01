@@ -50,6 +50,27 @@ pnpm install
 pnpm app:dev        # Tauri + Vite com HMR
 ```
 
+Versão local (interativo, sem build) — todas as plataformas usam a mesma
+versão:
+
+```powershell
+.\scripts\bump-version.ps1          # menu patch/minor/major/personalizada
+.\scripts\bump-version.ps1 -Minor   # atalho
+```
+
+Atualiza `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`,
+`src/lib/appVersion.ts` e `src-tauri/Cargo.lock`. O equivalente cross-platform é
+`pnpm version:set 0.2.0`.
+
+Vetores e ícones da marca (a partir de `assets/Lumina_Logo.svg`):
+
+```bash
+pnpm brand
+```
+
+Regera `public/brand/*.svg`, o master `app-icon.png`, `src-tauri/icons` com fundo
+transparente no Windows/Linux e o `icon.icns` do macOS com o tile grafite-claro.
+
 Build de produção e instalador (script único, sempre com a build mais recente):
 
 ```bash
@@ -68,6 +89,13 @@ Release de produção: tags `v<versão>` ou `workflow_dispatch` em
 `.github/workflows/installer.yml`. A release usa a versão do `package.json`:
 uma versão maior cria uma release nova; a mesma versão atualiza os assets da
 release existente; uma versão menor falha.
+
+O app instalado consulta automaticamente essas releases (ao abrir e uma vez por
+dia) e mostra um aviso na barra de título quando há uma versão estável mais
+nova. O download é verificado por SHA-256 e a instalação usa o instalador da
+plataforma, sempre com confirmação — no Windows, o wizard do Lumina. A
+verificação manual fica em **Configurações → Sobre → Atualizações**. Detalhes:
+[`docs/INSTALLER.md`](docs/INSTALLER.md) §9.
 
 Somente o executável (sem instalador):
 
@@ -101,8 +129,8 @@ cargo test --lib tools::fetch_url::tests::live -- --ignored --nocapture
 ```
 data/catalog.json        catálogo de modelos (gerado)
 scripts/                 geração do catálogo e sondagens dos provedores
-assets/                  logo oficial (`Lumina_Logo.svg`); `pnpm tauri icon app-icon.png` regenera src-tauri/icons
-public/brand/            vetores da marca usados na UI e no favicon
+assets/                  logo oficial (`Lumina_Logo.svg`) e masters do ícone (`app-icon.svg`/`app-icon.png`); `pnpm brand` regenera vetores e src-tauri/icons
+public/brand/            vetores da marca usados na UI, no favicon e no instalador
 src/                     renderer React (componentes, stores, genui)
 src-tauri/src/           core Rust (providers, harness, tools, documents, db)
 src-tauri/skills/        skills embutidas (SKILL.md + scripts stdlib)
