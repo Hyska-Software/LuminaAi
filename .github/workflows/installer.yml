@@ -11,6 +11,18 @@ on:
         type: choice
         options: [stable, beta]
         default: stable
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/installer.yml'
+      - 'installer.html'
+      - 'installer/**'
+      - 'scripts/**'
+      - 'src/installer/**'
+      - 'src-tauri/src/installer/**'
+      - 'src-tauri/tauri.*.conf.json'
+      - 'src-tauri/Cargo.toml'
+      - 'package.json'
 
 concurrency:
   group: installer-${{ github.ref }}
@@ -68,7 +80,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build installer
-        run: pnpm installer --platform ${{ matrix.platform }} ${{ matrix.args }} --ci --require-clean --channel ${{ inputs.channel }}
+        run: pnpm installer --platform ${{ matrix.platform }} ${{ matrix.args }} --ci --require-clean --channel ${{ inputs.channel || 'stable' }}
         env:
           # Optional. Add these secrets when the certificates are available.
           LUMINA_WINDOWS_CERT_THUMBPRINT: ${{ secrets.LUMINA_WINDOWS_CERT_THUMBPRINT }}
