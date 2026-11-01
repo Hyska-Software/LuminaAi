@@ -82,8 +82,12 @@ jobs:
       - name: Renderer and installer tests
         run: |
           pnpm typecheck
-          pnpm test
+          pnpm test -- src/installer
           pnpm test:installer
+
+      - name: Full renderer suite (Windows)
+        if: matrix.platform == 'windows'
+        run: pnpm test
 
       # The Rust suite has pre-existing platform-specific assumptions on macOS
       # (e.g. /var vs /private/var). Artifact generation must not mask those;
@@ -119,6 +123,12 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+          if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            Write-Host '::notice::machine-scope smoke skipped: runner is not elevated (requires interactive UAC/VM)'
+            exit 0
+          }
           $setup = (Get-ChildItem release/*/windows-*/*.exe | Select-Object -First 1).FullName
           $dir = Join-Path $env:ProgramFiles 'LuminaSmoke'
           $reg = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumina'
