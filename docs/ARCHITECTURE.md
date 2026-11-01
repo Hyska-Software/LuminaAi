@@ -326,10 +326,11 @@ Fatos descobertos por sondagem (ver `docs/MODELS.md`):
 | `list_skills` / `read_skill` | lista as skills locais (embutidas + usuário) e carrega instruções/scripts de uma skill | JSON com descrição, `baseDir` e arquivos |
 | `list_artifacts` | lista/pesquisa a biblioteca de artefatos **do usuário (todas as conversas)** por nome, título da conversa e conteúdo textual (sem acentos), com filtro de tipo, limite, trechos com número de linha e a conversa de origem de cada arquivo | JSON compacto (id, nome, tipo, tamanho, data, `conversationTitle`/`currentConversation` e trechos) |
 | `read_artifact` | carrega o conteúdo de **qualquer artefato do usuário (de qualquer conversa)** como contexto: texto raw, texto extraído de PDF/DOCX/XLSX/PPTX, metadados/estrutura de imagem/ZIP/mídia/binário; paginação por caracteres e conversa de origem no cabeçalho | texto com cabeçalho, faixa e próximo `offset` |
-| `validate_ui` | valida um bloco ` ```ui ` (JSON declarativo) contra o contrato: normaliza, valida e roda o lint de design | `{ ok, errors, warnings, normalized }` |
+| `validate_ui` | valida um bloco ` ```ui ` (JSON declarativo) contra o contrato: normaliza, valida e roda o lint de design; disponível no Chat e no Code (exceto no subagente read-only) | `{ ok, errors, warnings, normalized }` |
 
 `validate_ui`, `list_skills` e `read_skill` estão sempre disponíveis e não contam
-no orçamento de ferramentas de dados. `list_artifacts` e `read_artifact` também
+no orçamento de ferramentas de dados (no Code, `validate_ui` também fica fora do
+orçamento e não exige workspace). `list_artifacts` e `read_artifact` também
 estão sempre disponíveis (leitura local e somente leitura), mas **contam** no
 orçamento de 6 chamadas de ferramentas de dados; a biblioteca é **do usuário**:
 `list_artifacts` lista todas as conversas (mais recentes primeiro, com título da
@@ -383,8 +384,10 @@ Mesmo loop do Chat, com `TurnPayload.profile = "code"` (só em sessão do Code).
    sessão (plano/tarefas/contexto) projetado de `code_events`.
 2. **Prompt próprio** (`harness/code/prompt.rs`): identidade de agente de código, ambiente,
    política de permissões, orientações das tools (geradas do registry — fonte única),
-   regras de edição/verificação, projeto e formato de resposta.
-3. **Tools do perfil** (`tools/registry.rs` + `tools/code/*`): 24 tools (20 de código + web/skills —
+   regras de edição/verificação, projeto, formato de resposta e **UI generativa** (notas do
+   Code + a seção gerada de `data/genui-contract.json`).
+3. **Tools do perfil** (`tools/registry.rs` + `tools/code/*`): 25 tools — 20 de código + web/skills
+   + `validate_ui`:
    `read_file`, `list_dir`, `search_files`, `search_text`, `read_tool_output`,
    `write_file`, `edit_file`, `run_command`, `job_list`/`job_output`/`job_kill`,
    `git_status`/`git_diff`/`git_log`, `todo_write`, `submit_plan`, `ask_user` (perguntas
@@ -393,7 +396,8 @@ estruturadas com opções e texto livre, respondidas pelo card da timeline via
 `docs/goals/code-goals/PLAN.md`), `run_checks` (verificação detectada do projeto), `task`
 (subagente somente leitura, profundidade 1, sem MCP/escrita/shell, catálogo efetivo como
 fronteira de execução, transcript filho retido/oculto com cascata no pai, eventos ao vivo,
-modelo/effort por delegação, paralelismo limitado, limpeza RAII e session id do pai para cache)
+modelo/effort por delegação, paralelismo limitado, limpeza RAII e session id do pai para cache),
+`validate_ui` (validação local de blocos `ui`; sempre disponível, exceto no subagente)
 e tools dinâmicas de servidores **MCP** (mcp__servidor__tool, stdio JSON-RPC, aprovação sempre
 explícita; config <app-data>/mcp.json; indisponíveis em subagentes).
    O modelo **não** recebe commit/push.
@@ -525,6 +529,11 @@ O contrato completo (sintaxe suportada, decisões e matriz de testes) está em
 
 O agente emite blocos cercados com a linguagem `ui` contendo **um objeto JSON declarativo**. A interface normaliza o JSON e desenha somente componentes da whitelist — **nunca** `eval`, HTML ou JavaScript arbitrário.
 
+O mesmo contrato vale no **Chat e no Code**: o transcript do Code usa o mesmo
+renderer e o perfil `code` recebe a seção gerada do contrato + notas específicas
+(não duplicar o fecho de arquivos/diff, decisões bloqueantes via `ask_user`,
+nada de `ui` dentro do plano).
+
 ````
 ```ui
 { "version": 2, "components": [
@@ -547,7 +556,8 @@ seguir. Ele é consumido pelos três lados, sem listas duplicadas:
 | Consumidor | Uso |
 | --- | --- |
 | `src-tauri/src/tools/genui` | normalizador + validador + lint + ferramenta `validate_ui` |
-| `src-tauri/src/harness/prompt.rs` | gera o system prompt (catálogo, regras, limites, exemplo) |
+| `src-tauri/src/harness/prompt.rs` | gera a seção do system prompt do Chat (catálogo, regras, limites, exemplo) |
+| `src-tauri/src/harness/code/prompt.rs` | notas do Code + a mesma seção gerada no system prompt do perfil `code` |
 | `src/lib/genui` + `src/components/genui` | normalização/validação defensiva final e renderer |
 
 ### Pipeline
@@ -574,8 +584,9 @@ seguir. Ele é consumido pelos três lados, sem listas duplicadas:
 
 ### Autovalidação durante a execução
 
-A ferramenta **`validate_ui(block)`** (sempre disponível, não conta no orçamento
-de ferramentas de dados) recebe o JSON candidato e devolve
+A ferramenta **`validate_ui(block)`** (sempre disponível nos dois perfis; no Code,
+exceto no subagente read-only; não conta no orçamento de ferramentas de dados)
+recebe o JSON candidato e devolve
 `{ ok, summary, errors, warnings, normalized }`. O system prompt instrui o
 agente a validar o bloco e emitir só depois de `ok: true` (orientação de até 2
 validações por resposta; não há contador imposto pelo harness), corrigindo os
@@ -599,8 +610,9 @@ texto).
 `cargo test` **e** `pnpm test`: para todos os casos válidos a árvore normalizada
 inteira e os códigos de erro/aviso são idênticos nos dois lados (casos com erro
 comparam os códigos e a ausência de spec). O renderer valida de novo (defesa em
-profundidade), os exemplos de `docs/GENUI.md` são validados por teste e o prompt é gerado a partir
-do contrato — nenhuma documentação de UI pode divergir do validador.
+profundidade), os exemplos de `docs/GENUI.md` são validados por teste e os
+prompts do Chat e do Code são gerados a partir do contrato — nenhuma
+documentação de UI pode divergir do validador.
 
 Fenced blocks extras com rendering especial: `mermaid` (diagramas), `chart`
 (JSON de dados → SVG), `html`/`svg` (preview em iframe sandbox), `ui`.
@@ -834,8 +846,8 @@ há execução silenciosa. Contrato e matriz por plataforma: `docs/INSTALLER.md`
 
 A verificação é feita por testes automatizados — unitários e de integração — e por build:
 
-1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo), a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`, incluindo a opção de raciocínio recolhido por padrão), o **renderer de Markdown** (matriz CommonMark/GFM, math, notas de rodapé, alertas, HTML sanitizado e vetores de segurança), as **prévias de artefatos** (PDF via pdf.js mockado, DOCX/XLSX/PPTX por JSON/HTML, imagem e fallback binário; e, na v1.5, imagem com zoom/transparência/TIFF-convertido, áudio/vídeo, ZIP, hexdump, Markdown renderizado, árvore JSON, CSV/TSV com delimitador detectado e código com syntax highlight via Prism estendido — `src/lib/highlight`), a **UI de artefatos** (cards compactos, lista e modos lista↔prévia do painel, botão "+" do chat), a **página Biblioteca** (grade/lista, busca, filtros, ordenação, upload, favoritos, rename/exclusão e prévia) e a **detecção/reconciliação de artefatos no store** (eventos filtrados pela conversa ativa, sync autoritativo ao fim do turno/ao reabrir, ordem canônica e proteção contra respostas fora de ordem) e as **fontes/citações** (chips até 8, painel lateral de fontes da conversa, dedupe por URL e abertura no navegador).
-2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui`, o system prompt gerado do contrato, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), **prévias DOCX→HTML/XLSX/PPTX**, **prévias v1.5 de imagem (TIFF→PNG real), ZIP (fixtures e truncamento) e binário (hexdump de 4096 bytes)**, SQLite (conversas/mensagens/anexos/artefatos/usage/`trace` + migração de bancos antigos, incluindo os kinds `audio`/`video`/`archive` e, na v1.8, a migração de `artifacts` com `conversation_id` nulo e `favorite`), settings/segredos, exportação, **execução de código (interpretador, timeout, cancelamento, coleta de artefatos, sem interpretador)**, **skills embutidas/usuário (frontmatter, precedência, scripts→preview)** e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor, cancelamento e o trace por passo — incluindo as tools
+1. **Renderer**: `pnpm test` (Vitest + jsdom) cobre utilitários, catálogo/raciocínio, o **núcleo da UI generativa** (contrato, normalização, lint, fixtures de paridade Rust↔TS, ações interativas, exemplos da documentação, render do bloco `ui` no transcript do Code e a linha `Validou a interface`), sanitização de SVG, parser CSV, o reducer de streaming do `chatStore` (eventos → mensagens → finalização, erro, regeneração, cancelamento, trace ao vivo), a timeline do espaço de pensamento (trace → passos, fallback de mensagens legadas, grupos de ferramentas e componente `AgentSteps`, incluindo a opção de raciocínio recolhido por padrão), o **renderer de Markdown** (matriz CommonMark/GFM, math, notas de rodapé, alertas, HTML sanitizado e vetores de segurança), as **prévias de artefatos** (PDF via pdf.js mockado, DOCX/XLSX/PPTX por JSON/HTML, imagem e fallback binário; e, na v1.5, imagem com zoom/transparência/TIFF-convertido, áudio/vídeo, ZIP, hexdump, Markdown renderizado, árvore JSON, CSV/TSV com delimitador detectado e código com syntax highlight via Prism estendido — `src/lib/highlight`), a **UI de artefatos** (cards compactos, lista e modos lista↔prévia do painel, botão "+" do chat), a **página Biblioteca** (grade/lista, busca, filtros, ordenação, upload, favoritos, rename/exclusão e prévia) e a **detecção/reconciliação de artefatos no store** (eventos filtrados pela conversa ativa, sync autoritativo ao fim do turno/ao reabrir, ordem canônica e proteção contra respostas fora de ordem) e as **fontes/citações** (chips até 8, painel lateral de fontes da conversa, dedupe por URL e abertura no navegador).
+2. **Backend**: `cd src-tauri && cargo test --lib` cobre parser SSE, mapeamento de raciocínio por protocolo, **o pipeline/validador/lint da UI generativa em paridade com os mesmos fixtures do renderer**, a ferramenta `validate_ui` (Chat e Code), os prompts gerados do contrato (Chat e Code), o turno Code que valida e emite um bloco `ui`, parsers de busca, extração de texto de PDF/DOCX/XLSX/PPTX/imagem (fixtures reais em `src/documents/testdata`), **prévias DOCX→HTML/XLSX/PPTX**, **prévias v1.5 de imagem (TIFF→PNG real), ZIP (fixtures e truncamento) e binário (hexdump de 4096 bytes)**, SQLite (conversas/mensagens/anexos/artefatos/usage/`trace` + migração de bancos antigos, incluindo os kinds `audio`/`video`/`archive` e, na v1.8, a migração de `artifacts` com `conversation_id` nulo e `favorite`), settings/segredos, exportação, **execução de código (interpretador, timeout, cancelamento, coleta de artefatos, sem interpretador)**, **skills embutidas/usuário (frontmatter, precedência, scripts→preview)** e o **loop do harness** com um provedor falso injetado (`ProviderStreamer`): descarte de narração intermediária, execução de ferramentas no último passo, resposta final forçada, erro do provedor, cancelamento e o trace por passo — incluindo as tools
 `list_artifacts`/`read_artifact` (busca/leitura com fixtures reais, biblioteca
 global entre conversas — artefatos de outras conversas são listados/lidos com
 `conversationTitle`/`currentConversation` — e o teste de loop que prova que o
@@ -876,3 +888,4 @@ estável), a tool `goal` (limites, presentation, ausência em subagente), os com
 | 22 | **Journal de arquivos por hash** (checkpoint por turno) + commit só pelo usuário | auto-commit a cada edição (Aider) / snapshot completo do workspace | reversibilidade sem poluir o histórico do git e com custo proporcional aos arquivos tocados; o commit continua sendo uma decisão humana no painel (HARNESS.md §7.4/§9) |
 | 23 | **Compromisso de docs/evidência**: toda fase do harness entra com testes e `EVIDENCE.md` atualizado | implementar sem registrar decisões | o repo usa TDD e evidência por objetivo; o harness mexe em dinheiro/arquivos do usuário, então cada incremento precisa de prova executável |
 | 24 | **Objetivo persiste em `code_events`** (`goal/state` + rodadas), rodada = turno normal com `turnKind=goal_round`, driver de rodadas no renderer e `messages.origin` aditivo | tabela `goals` própria, segundo loop de agente, round driver process-wide (DSH) | mantém a projeção única/append-only já usada por plano/tarefas, reaproveita streaming/aprovações/replay/journal (sem daemon nem transporte paralelo), preserva o prefix cache (estado só no runtime context) e torna a rodada automática honesta no transcript; retomada após reinício é sempre decisão do usuário (docs/goals/code-goals/PLAN.md §4) |
+| 25 | **UI generativa também no perfil Code** (mesmo contrato + `validate_ui` no catálogo; notas específicas no prompt) | manter GenUI só no Chat | o renderer já é compartilhado e o agente de código produz evidência estruturada (checks, métricas, comparação, achados); o custo é uma tool a mais no catálogo e uma seção gerada no snapshot congelado, com testes de catálogo/prompt/execução/render (docs/GENUI.md) |

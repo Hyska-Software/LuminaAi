@@ -534,13 +534,17 @@ pub struct ContextStats { pub used: u32, pub window: u32, pub output_cap: u32, p
 | regras de edição/verificação | 1,2k |
 | projeto (AGENTS.md + manifests + comandos + árvore resumida + git resumo) | 3–5k |
 | formato de resposta/citações | 0,6k |
-| **total** | **~10–13k tokens** |
+| UI generativa (notas do Code + seção gerada do contrato) | 2–3k |
+| **total** | **~12–16k tokens** |
 
 - Prefixo estável primeiro (identidade/ambiente/política/tools) em um **snapshot persistido por
   sessão** (`prompt_snapshots`); nada que muda em um turno normal entra no system prompt. O volátil
   (árvore/estado/plano/modo) vira `surface_item` na **última mensagem** do request, nunca no fim do
   system prompt: o system prompt precede o histórico nos 4 protocolos e qualquer mudança nele
   invalida todas as mensagens. Detalhes: `docs/goals/prompt-cache/PLAN.md` §4.2–§4.4.
+- A seção de **UI generativa** é gerada de `data/genui-contract.json` (catálogo/regras/limites/
+  exemplos) e entra no snapshot congelado; o Code adiciona só as notas de uso. Mudou o texto?
+  Bump de `harness::code::prompt::PROMPT_VERSION`.
 - Árvore resumida: até 120 entradas / 2 níveis; se maior, agrupar (`src/ (412 arquivos, 18 dirs)`).
 - `AGENTS.md`: procurar do workspace root até o diretório de trabalho (se aninhado), concatenar com
   marcador de origem, cap 8 KB total; suportar também `.lumina/instructions.md` (opcional).
@@ -765,7 +769,7 @@ resume o acoplamento com o harness).
   objetivo, tarefas, última nota, bloqueio e as 4 regras de autonomia. Turno humano usa o texto
   "Session objective (context; follow the user's message)"; rodada usa o texto de continuação.
 - O system prompt/tools **não** carregam estado do objetivo (teste byte-a-byte entre passos e entre
-  rodadas); a tool `goal` entra no catálogo Code (24 tools) e o subagente não a recebe.
+  rodadas); a tool `goal` entra no catálogo Code (25 tools) e o subagente não a recebe.
 
 ### 15.4 Driver e eventos
 

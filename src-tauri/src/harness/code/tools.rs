@@ -36,6 +36,7 @@ fn default_timeout_ms(name: &str) -> Option<u64> {
         "read_file" | "list_dir" | "search_files" | "search_text" | "read_tool_output"
         | "git_status" | "git_diff" | "git_log" => Some(30_000),
         "write_file" | "edit_file" => Some(30_000),
+        "validate_ui" => Some(10_000),
         "todo_write" => Some(60_000),
         // `submit_plan` e `ask_user` pausam para revisão humana: o timeout é o do
         // broker (`settings.approval_timeout_secs`), nunca um teto curto do
@@ -175,6 +176,20 @@ mod tests {
         // Ferramentas rápidas continuam protegidas.
         assert_eq!(default_timeout_ms("todo_write"), Some(60_000));
         assert_eq!(default_timeout_ms("write_file"), Some(30_000));
+        assert_eq!(default_timeout_ms("validate_ui"), Some(10_000));
+    }
+
+    #[tokio::test]
+    async fn validate_ui_is_dispatched_through_the_code_executor() {
+        let ctx = test_ctx();
+        let mut call = ToolCallRecord::running("call-validate", "validate_ui");
+        call.arguments = serde_json::json!({
+            "block": "{\"components\":[{\"type\":\"card\",\"props\":{\"title\":\"Resumo\"}}]}"
+        })
+        .to_string();
+        let outcome = execute(&ctx, &call).await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("\"ok\":true"), "{}", outcome.content);
     }
 
     #[tokio::test]

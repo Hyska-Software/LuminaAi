@@ -367,3 +367,36 @@ describe('MessageList — divisor de troca de modelo no meio da conversa', () =>
     expect(screen.queryByText('Resposta legada.')).toBeTruthy();
   });
 });
+
+describe('MessageList — UI generativa no layout Code', () => {
+  const block = [
+    '```ui',
+    JSON.stringify({
+      components: [
+        {
+          type: 'card',
+          props: { title: 'Verificação do turno' },
+          children: [
+            { type: 'stat', props: { label: 'Testes', value: '42/42' } },
+          ],
+        },
+      ],
+    }),
+    '```',
+  ].join('\n');
+
+  it('renderiza o bloco ui no transcript do Code', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    const assistant = assistantMessage({
+      content: `Resumo do turno.\n\n${block}`,
+      toolCalls: [],
+    });
+
+    render(<MessageList messages={[userMessage(), assistant]} streaming={null} />);
+
+    expect(document.querySelector('.lumina-genui')).toBeTruthy();
+    expect(screen.getByText('Verificação do turno')).toBeTruthy();
+    expect(screen.getByText('Testes')).toBeTruthy();
+    expect(screen.queryByText(/ui\.invalid-json/)).toBeNull();
+  });
+});

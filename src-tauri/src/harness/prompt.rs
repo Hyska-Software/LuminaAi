@@ -440,7 +440,27 @@ The interface renders **full GFM** and the extensions below. Use the simplest re
 }
 
 /// Seção de UI generativa inteiramente derivada do contrato v2.
-fn generative_ui_section(contract: &Contract) -> String {
+///
+/// O Chat usa [`generative_ui_section`]; o perfil Code usa
+/// [`generative_ui_section_with_budget`] para não citar o orçamento de 6
+/// chamadas de dados nem a seção de Markdown (que só existem no Chat).
+pub(crate) fn generative_ui_section(contract: &Contract) -> String {
+    generative_ui_section_with(
+        contract,
+        "6-call data-tool budget",
+        Some("Markdown formatting"),
+    )
+}
+
+pub(crate) fn generative_ui_section_with_budget(contract: &Contract, budget: &str) -> String {
+    generative_ui_section_with(contract, budget, None)
+}
+
+fn generative_ui_section_with(
+    contract: &Contract,
+    budget: &str,
+    markdown_section: Option<&str>,
+) -> String {
     let limits = &contract.limits;
     let categories = contract.categories();
     let mut section = String::with_capacity(8_000);
@@ -456,9 +476,12 @@ fn generative_ui_section(contract: &Contract) -> String {
         "- When the response benefits from being an interface: real data the user will compare, \
          scan, or act on. In that case the block replaces the Markdown table/chart and can offer \
          clickable actions.\n\
-         - A small, static comparison without action stays in a Markdown table (see **Markdown \
-         formatting**); do not repeat the same data in both formats.\n",
+         - A small, static comparison without action stays in a Markdown table",
     );
+    if let Some(name) = markdown_section {
+        section.push_str(&format!(" (see **{name}**)"));
+    }
+    section.push_str("; do not repeat the same data in both formats.\n");
     section.push_str(&format!(
         "- Contract catalog: {} components in {} categories — {}. Use only components and props \
          documented below.\n",
@@ -601,14 +624,14 @@ fn generative_ui_section(contract: &Contract) -> String {
     ));
 
     section.push_str("## Self-check\n");
-    section.push_str(
+    section.push_str(&format!(
         "- Before answering, call `validate_ui` with the block's complete JSON and fix all errors; \
          resolve the design warnings when possible.\n\
-         - `validate_ui` does not count toward the 6-call data-tool budget; ideally at most 2 times \
+         - `validate_ui` does not count toward the {budget}; ideally at most 2 times \
          per response.\n\
          - Only emit the block after `validate_ui` returns `ok: true` with complete JSON — the block \
          does not render when there are errors.\n\n",
-    );
+    ));
 
     section
 }
@@ -1049,6 +1072,8 @@ mod tests {
         let prompt = default_prompt();
         assert!(prompt.contains("## When to use"));
         assert!(prompt.contains("## When not to use"));
+        // A referência à seção de Markdown só existe no prompt do Chat.
+        assert!(prompt.contains("(see **Markdown formatting**)"));
         // A lista de categorias/tipos é derivada do contrato.
         for category in contract::contract().categories() {
             assert!(prompt.contains(&format!("`{category}`")));

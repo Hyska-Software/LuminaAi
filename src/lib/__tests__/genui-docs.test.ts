@@ -66,8 +66,8 @@ describe('docs/GENUI.md', () => {
     expect(doc).toContain('validate_ui');
   });
 
-  it('o exemplo "Ruim" (§12.6) realmente é inválido pelo motivo documentado', () => {
-    const section = doc.slice(doc.indexOf('### 12.6 Ruim'));
+  it('o exemplo "Ruim" (§12.7) realmente é inválido pelo motivo documentado', () => {
+    const section = doc.slice(doc.indexOf('### 12.7 Ruim'));
     const match = /```json\r?\n([\s\S]*?)```/.exec(section);
     expect(match).not.toBeNull();
     const result = parseGenUI(match?.[1] ?? '');

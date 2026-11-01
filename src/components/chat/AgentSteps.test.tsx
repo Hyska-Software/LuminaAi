@@ -814,6 +814,35 @@ describe('AgentSteps — raciocínio em Markdown', () => {
     expect(screen.getByText('ler').tagName).toBe('STRONG');
   });
 
+  it('mostra a validação de UI como linha do layout Code', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    const user = userEvent.setup();
+    const reasoning = 'Vou validar a interface antes de emitir.';
+    render(
+      <AgentSteps
+        streaming={false}
+        phase={null}
+        message={message({
+          reasoning,
+          toolCalls: [
+            tool({
+              name: 'validate_ui',
+              result: '{"ok":true,"summary":"UI válida"}',
+            }),
+          ],
+          trace: [{ reasoning, toolCalls: 1 }],
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { expanded: false }));
+    await user.click(screen.getByRole('button', { name: 'Pensou' }));
+
+    expect(
+      screen.getByRole('listitem', { name: 'Validou a interface' }),
+    ).toBeTruthy();
+  });
+
   it('neutraliza HTML e URLs perigosas no raciocínio', async () => {
     const user = userEvent.setup();
     const { container } = renderTimeline(

@@ -868,6 +868,10 @@ export function describeCodeTool(tool: ToolCallRecord): CodeToolLabel {
       return make(failed ? 'O histórico do git falhou' : 'Consultou o histórico do git');
     case 'read_tool_output':
       return make(failed ? 'Não foi possível ler a saída completa' : 'Leu a saída completa de uma ferramenta');
+    case 'validate_ui':
+      return make(
+        failed ? 'A validação da interface falhou' : 'Validou a interface',
+      );
     default:
       return make(
         failed

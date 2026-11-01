@@ -7123,6 +7123,12 @@ mod agent_loop_tests {
         assert!(requests[0].system_prompt.contains("# Permission policy"));
         assert!(requests[0].system_prompt.contains("# Workspace"));
         assert!(requests[0].system_prompt.contains("demo"));
+        assert!(requests[0]
+            .system_prompt
+            .contains("# Generative UI in this Code session"));
+        assert!(requests[0]
+            .system_prompt
+            .contains("# Generative UI (`ui` blocks)"));
         let tool_names: Vec<&str> = requests[0]
             .tools
             .iter()
@@ -7131,8 +7137,12 @@ mod agent_loop_tests {
         assert!(tool_names.contains(&"read_file"));
         assert!(tool_names.contains(&"edit_file"));
         assert!(
-            !tool_names.contains(&"validate_ui"),
-            "tools do Chat não entram no Code"
+            tool_names.contains(&"validate_ui"),
+            "o perfil Code valida blocos `ui` com `validate_ui`"
+        );
+        assert!(
+            !tool_names.contains(&"create_file") && !tool_names.contains(&"run_code"),
+            "tools mutantes do Chat não entram no Code"
         );
 
         // A tool leu o arquivo e o resultado chegou ao modelo no 2º passo.
@@ -7188,6 +7198,117 @@ mod agent_loop_tests {
         assert_eq!(context.compacted, 0);
 
         let _ = workspace_dir;
+    }
+
+    /// Generative UI no perfil Code: `validate_ui` entra no wire, executa pelo
+    /// registry e o bloco `ui` da resposta final é persistido no transcript.
+    #[tokio::test]
+    async fn code_profile_validates_and_emits_a_generative_ui_block() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation_with_mode(
+                "Sessão de código",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa code");
+
+        let block = crate::tools::genui::contract::EXAMPLE_JSON.to_string();
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            let block = block.clone();
+            Arc::new(move |request, sink| {
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let block = block.clone();
+                Box::pin(async move {
+                    if current == 0 {
+                        let arguments = serde_json::json!({ "block": block }).to_string();
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallStart {
+                                index: 0,
+                                id: "call-ui".to_string(),
+                                name: "validate_ui".to_string(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallArgsDelta {
+                                index: 0,
+                                delta: arguments.clone(),
+                            },
+                        );
+                        emit(
+                            &sink,
+                            ProviderEvent::ToolCallDone {
+                                index: 0,
+                                arguments,
+                            },
+                        );
+                        emit(&sink, ProviderEvent::Done);
+                    } else {
+                        text_stream(
+                            &sink,
+                            &format!("Resumo do turno.\n\n```ui\n{block}\n```"),
+                        );
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let (channel, _events) = channel();
+        let mut payload = payload(&conversation, 4);
+        payload.profile = TurnProfile::Code;
+        payload.content = "Resuma a verificação em uma UI.".to_string();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            payload,
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno code com GenUI");
+
+        let requests = requests.lock().expect("requests").clone();
+        assert_eq!(requests.len(), 2, "um request por passo do loop");
+        assert!(requests[0]
+            .tools
+            .iter()
+            .any(|tool| tool.name == "validate_ui"));
+        let tool_message = requests[1]
+            .history
+            .iter()
+            .rev()
+            .find(|message| message.role == HistoryRole::Tool)
+            .expect("resultado da validação no histórico");
+        assert_eq!(tool_message.tool_name.as_deref(), Some("validate_ui"));
+        assert!(
+            tool_message.text.contains("\"ok\":true"),
+            "{}",
+            tool_message.text
+        );
+        assert_eq!(result.assistant_message.tool_calls.len(), 1);
+        assert_eq!(result.assistant_message.tool_calls[0].name, "validate_ui");
+        assert_eq!(
+            result.assistant_message.tool_calls[0].status,
+            ToolCallStatus::Done
+        );
+        assert!(result.assistant_message.content.contains("```ui"));
+        assert!(result
+            .assistant_message
+            .content
+            .contains("\"Receita do trimestre\""));
     }
 
     /// Medidor **em tempo real**: um turno Code com provider falso que reporta
@@ -11239,7 +11360,7 @@ mod agent_loop_tests {
     }
 
     /// Subagente (somente leitura) não recebe a tool `goal`; o turno de topo
-    /// recebe (24 tools no catálogo Code).
+    /// recebe (25 tools no catálogo Code, incluindo `validate_ui`).
     #[test]
     fn subagent_catalog_excludes_the_goal_tool() {
         let mut context = code::context::CodeTurnContext::default();
@@ -11250,13 +11371,18 @@ mod agent_loop_tests {
             .map(|spec| spec.name)
             .collect();
         assert!(top_level.contains(&"goal"));
-        assert_eq!(top_level.len(), 24, "catálogo Code: 24 tools");
+        assert!(top_level.contains(&"validate_ui"));
+        assert_eq!(top_level.len(), 25, "catálogo Code: 25 tools");
         let subagent: Vec<&str> = code_enabled_specs(&context, &settings, 1)
             .iter()
             .map(|spec| spec.name)
             .collect();
         assert!(!subagent.contains(&"goal"), "subagente não recebe `goal`");
         assert!(!subagent.contains(&"todo_write"));
+        assert!(
+            !subagent.contains(&"validate_ui"),
+            "subagente não emite UI generativa"
+        );
         assert!(subagent.contains(&"read_file"));
     }
 

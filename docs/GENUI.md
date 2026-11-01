@@ -1,4 +1,4 @@
-# Lumina — UI generativa (interfaces que o agente cria no chat)
+# Lumina — UI generativa (interfaces que o agente cria no chat e no Code)
 
 > Documento normativo do sistema de **UI generativa/interativa** do Lumina.
 > Fonte única de verdade em código: **`data/genui-contract.json`** (componentes,
@@ -6,7 +6,8 @@
 > explica o contrato em linguagem de produto; se os dois divergirem, o contrato
 > vence e o doc precisa ser corrigido (`pnpm test` valida os exemplos daqui).
 >
-> Consumidores do contrato: **system prompt** (`src-tauri/src/harness/prompt.rs`),
+> Consumidores do contrato: **system prompt** (`src-tauri/src/harness/prompt.rs`
+> no Chat e `src-tauri/src/harness/code/prompt.rs` no Code),
 > **validador/ferramenta do agente** (`src-tauri/src/tools/genui`), **renderer**
 > (`src/lib/genui`, `src/components/genui`) e **fixtures de paridade**
 > (`data/genui-fixtures.json`).
@@ -19,6 +20,12 @@ desenha somente componentes da whitelist — **nunca** `eval`, HTML ou JS
 arbitrário. É a forma de o agente entregar dados estruturados (métricas,
 comparações, tabelas, etapas) e **próximos passos clicáveis** (`actions`), em vez
 de despejar tudo em Markdown.
+
+O mesmo contrato vale nos **dois layouts**: no Chat e no Code. O perfil `code`
+recebe a seção gerada do contrato no system prompt e a ferramenta `validate_ui`
+(sempre disponível; exceto no subagente read-only), com orientações específicas
+para não duplicar o fecho de arquivos/diff e para tratar decisões bloqueantes
+com `ask_user`.
 
 ````markdown
 ```ui
@@ -88,6 +95,10 @@ O bloco é renderizado inline no fluxo da mensagem, com espaço próprio
 | Alternar visões do mesmo assunto | `tabs` (2–4 abas) |
 | Texto corrido, explicação, lista simples, código | **Markdown normal** |
 | Entrega longa (documento, CSV, HTML) | ferramenta `create_file` (artefato) |
+| Resumo de verificação de um turno do Code (testes/lint/build) | `card` + `grid` de `stat`/`checklist` (+ `actions`) |
+| Comparar abordagens/bibliotecas antes de implementar | `table` ou `chart` + `actions` |
+| Decisão que bloqueia a implementação | `ask_user` (card de pergunta) — **não** `choices` |
+| Plano de implementação | `submit_plan` (Markdown no card de plano) — **nunca** `ui` dentro do plano |
 | Pergunta simples do usuário | só texto (sem UI) |
 
 ## 4. Estrutura e gramática de layout
@@ -321,15 +332,18 @@ legadas são **normalizadas** (`ui.legacy-shape`). O bloco só degrada quando h�
 1. **Contrato único** (`data/genui-contract.json`): prompt, validador Rust,
    renderer TS e fixtures leem o mesmo arquivo. Não existe lista de tipos ou
    regra duplicada à mão.
-2. **Prompt gerado do contrato**: o system prompt monta o catálogo, as regras e
-   os limites a partir do JSON — impossível o prompt documentar algo que o
-   validador recusa (teste em `prompt.rs` verifica cada tipo e cada regra).
+2. **Prompt gerado do contrato**: os system prompts do Chat e do Code montam o
+   catálogo, as regras e os limites a partir do JSON — impossível o prompt
+   documentar algo que o validador recusa (testes em `harness/prompt.rs` e
+   `harness/code/prompt.rs` verificam cada tipo e cada regra).
 3. **Autovalidação durante a execução** — ferramenta `validate_ui(block)`: o
    agente envia o JSON candidato e recebe `{ ok, errors, warnings, normalized }`
    com `code`, `path`, mensagem e dica. O fluxo é rascunhar → validar → corrigir
    → emitir: o bloco só deve ser emitido depois de `ok: true`. A orientação do
    prompt é usar **idealmente até 2 validações** por resposta — não há contador
    imposto pelo harness. O campo `normalized` pode ser usado como JSON final.
+   A ferramenta está disponível nos dois perfis (no Code, exceto no subagente
+   read-only).
 4. **Normalização determinística antes da validação**: coerções seguras e
    formas legadas são resolvidas igualmente nos dois lados, então um bloco
    aceitável não degrada por detalhe cosmético.
@@ -348,7 +362,8 @@ legadas são **normalizadas** (`ui.legacy-shape`). O bloco só degrada quando h�
    (`prompt`/`copy`), degradação e contratos de acessibilidade (grupo de ações,
    `aria-current` de `steps`, status textual de `timeline`); exemplos do
    prompt/`docs/GENUI.md` são validados por teste (se um exemplo do doc ficar
-   inválido, o teste falha).
+   inválido, o teste falha). O transcript do layout Code também tem teste
+   próprio de render do bloco `ui` e da linha `Validou a interface`.
 8. **Feedback no desenvolvimento**: o renderer **não** mostra avisos de design na
    interface — em DEV eles vão apenas para o **console do DevTools** (com
    `code`/`path`/mensagem), e o usuário vê a árvore normalizada. O harness loga
@@ -376,6 +391,8 @@ legadas são **normalizadas** (`ui.legacy-shape`). O bloco só degrada quando h�
       decorativos; sem ponto final em rótulos.
 - [ ] Todos os textos cabem nos limites recomendados (§6).
 - [ ] URLs `http(s)`; `image` com `alt`.
+- [ ] No **Code**: o bloco complementa o fecho de arquivos/diff (não repete), não
+      vai dentro do plano e decisões bloqueantes usam `ask_user`.
 - [ ] JSON sem comentários/vírgula sobrando; validado com `validate_ui` e
       emitido só depois de `ok: true` (idealmente até 2 validações por resposta).
 
@@ -603,7 +620,44 @@ legadas são **normalizadas** (`ui.legacy-shape`). O bloco só degrada quando h�
 }
 ```
 
-### 12.6 Ruim (não emitir)
+### 12.6 Bom — verificação de turno no layout Code
+
+```ui
+{
+  "components": [
+    {
+      "type": "card",
+      "props": { "title": "Verificação do turno", "subtitle": "pnpm test · 3 arquivos alterados" },
+      "children": [
+        {
+          "type": "grid",
+          "props": { "columns": 2 },
+          "children": [
+            { "type": "stat", "props": { "label": "Testes", "value": "42/42", "trend": "up", "hint": "12,4 s" } },
+            { "type": "stat", "props": { "label": "Cobertura", "value": "86%", "trend": "up" } }
+          ]
+        },
+        {
+          "type": "checklist",
+          "props": { "items": [
+            { "label": "Testes", "description": "pnpm test", "status": "done" },
+            { "label": "Lint", "description": "pnpm lint", "status": "done" },
+            { "label": "Build", "description": "pnpm build", "status": "pending" }
+          ] }
+        },
+        {
+          "type": "actions",
+          "props": { "items": [
+            { "label": "Rodar o build", "prompt": "Rode pnpm build e corrija o que falhar.", "tone": "primary", "icon": "wrench" }
+          ] }
+        }
+      ]
+    }
+  ]
+}
+```
+
+### 12.7 Ruim (não emitir)
 
 ```json
 {
@@ -638,6 +692,9 @@ e `ui.label-period`.
    O teste de paridade falha de propósito se os lados divergirem.
 4. Atualize este documento e rode os testes: os exemplos ```ui daqui são
    validados automaticamente.
-5. Mudança incompatível (remover componente/prop, mudar semântica de ação):
+5. Mudança de texto no prompt do Code também exige bump de
+   `harness::code::prompt::PROMPT_VERSION` (o snapshot congelado por sessão é
+   reconstruído na próxima mensagem).
+6. Mudança incompatível (remover componente/prop, mudar semântica de ação):
    incrementar `version` no contrato, aceitar leitura da versão anterior por um
    ciclo (`ui.version-mismatch`) e registrar em `docs/ARCHITECTURE.md`.

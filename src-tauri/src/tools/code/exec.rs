@@ -70,6 +70,7 @@ pub async fn run(ctx: &ToolCtx, exec: ToolExec, args: Value) -> ToolOutcome {
         ToolExec::AskUser => ask_user(ctx, &args).await,
         ToolExec::Goal => goal_tool(ctx, &args),
         ToolExec::Task => run_task(ctx, &args).await,
+        ToolExec::ValidateUi => validate_ui(ctx, &args),
         ToolExec::WebSearch | ToolExec::FetchUrl | ToolExec::ListSkills | ToolExec::ReadSkill => {
             bridge_chat_tool(ctx, exec.name(), &args).await
         }
@@ -125,6 +126,18 @@ async fn ask_user(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
 
 fn err(code: &str, message: impl Into<String>) -> ToolOutcome {
     ToolOutcome::error(format!("{code}: {}", message.into()))
+}
+
+/// `validate_ui`: local validation of a generative UI block. The response is
+/// the same JSON contract used by Chat (`{ ok, summary, errors, warnings,
+/// normalized }`); it never touches the workspace and is not an error when the
+/// UI has diagnostics. Large normalized trees go to spill like any tool result.
+fn validate_ui(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
+    let outcome = crate::tools::genui::run(args);
+    if outcome.is_error {
+        return outcome;
+    }
+    finish(ctx, outcome.content, outcome.summary, outcome.presentation)
 }
 
 fn arg_str(args: &Value, key: &str) -> Result<String, ToolOutcome> {
@@ -3240,6 +3253,32 @@ mod tests {
         assert_eq!(error_code(&missing), "FS_NOT_FOUND");
         let out_of_range = call(&ctx, "read_file", json!({ "path": "bin.dat", "offset": 9 })).await;
         assert!(out_of_range.is_error);
+    }
+
+    #[tokio::test]
+    async fn validate_ui_accepts_valid_blocks_and_reports_diagnostics() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        // The tool is local and must work even without an open workspace.
+        ctx.workspace = None;
+
+        let valid = call(
+            &ctx,
+            "validate_ui",
+            json!({ "block": crate::tools::genui::contract::EXAMPLE_JSON }),
+        )
+        .await;
+        assert!(!valid.is_error, "{}", valid.content);
+        assert!(valid.content.contains("\"ok\":true"), "{}", valid.content);
+
+        let invalid = call(&ctx, "validate_ui", json!({ "block": "{\"components\":[]}" })).await;
+        assert!(!invalid.is_error, "a validação com erros não é falha da tool");
+        assert!(invalid.content.contains("\"ok\":false"), "{}", invalid.content);
+        assert!(invalid.content.contains("ui.empty"), "{}", invalid.content);
+
+        let missing = call(&ctx, "validate_ui", json!({})).await;
+        assert!(missing.is_error);
+        assert!(missing.content.contains("`block`"));
     }
 
     #[tokio::test]

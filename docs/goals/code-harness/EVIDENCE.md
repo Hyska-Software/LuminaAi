@@ -320,3 +320,21 @@ configuração para MCP/servidores e "Verificações" no painel (backend exposto
   retenção/cascata, rota/modelo/effort, eventos ao vivo e transcript na UI; verificação final:
   `cargo test --lib` 1032 verdes, `pnpm test` 133 arquivos/2431 testes verdes, `pnpm typecheck` e
   `pnpm build` verdes.
+
+## 24. UI generativa no perfil Code (2026-11-01)
+
+- **Catálogo**: `CODE_VALIDATE_UI_SPEC` entra no catálogo Code como a 25ª tool
+  (`validate_ui`, `Safe`, `Read`, sem workspace/aprovação); `ToolExec::ValidateUi` despacha para
+  `tools::genui::run` e o resultado >24k vai para spill via `finish()`.
+- **Prompt**: `harness/code/prompt.rs` adiciona `# Generative UI in this Code session` (evidência
+  estruturada, sem duplicar fecho de arquivos/diff, decisões via `ask_user`, nada de `ui` no plano)
+  seguido da seção gerada de `data/genui-contract.json`; `PROMPT_VERSION` foi de 2 para 3.
+  O subagente read-only não recebe a seção nem a tool.
+- **Harness**: teste de turno Code com provider falso cobre `validate_ui` no wire, execução e
+  resultado no histórico, e o bloco ui persistido na resposta final.
+- **Renderer**: `describeCodeTool`/`AgentSteps` mostram `Validou a interface` como linha do Code;
+  `MessageList.test.tsx` cobre o render de um bloco `ui` no layout Code.
+- **Docs**: `docs/GENUI.md` (Chat + Code, exemplo de verificação), `docs/ARCHITECTURE.md` (§8.3/§9/
+  §15/§16 #25), `docs/DESIGN.md` §16, `docs/goals/code-harness/{TOOLS,HARNESS,WORKBENCH}.md`.
+- **Verificação**: `cargo check` limpo; `cargo test --lib` 1091 verdes; `pnpm typecheck` limpo;
+  `pnpm test` 141 arquivos / 2520 testes verdes.

@@ -118,6 +118,15 @@ describe('buildAgentTrace', () => {
     expect(review.verb).toBe('Delegou revisão a um subagente');
   });
 
+  it('describes the generative UI validation row in the Code timeline', () => {
+    expect(describeCodeTool(tool({ name: 'validate_ui' })).verb).toBe(
+      'Validou a interface',
+    );
+    expect(
+      describeCodeTool(tool({ name: 'validate_ui', status: 'error' })).verb,
+    ).toBe('A validação da interface falhou');
+  });
+
   it('keeps adjacent calls of the same tool in one row and separates different tools', () => {
     const trace: TraceStep[] = [{ reasoning: null, toolCalls: 3 }];
     const tools = [

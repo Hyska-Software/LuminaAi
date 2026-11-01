@@ -335,7 +335,7 @@ pub static CHAT_SPECS: [ToolSpec; 9] = [
 /* ------------------------------------------------------------------ */
 
 /// Ordem estável do catálogo Code (a ordem entra no prompt: não reordene).
-static CODE_SPECS: [&ToolSpec; 24] = [
+static CODE_SPECS: [&ToolSpec; 25] = [
     &code::fs_read::READ_FILE_SPEC,
     &code::fs_read::LIST_DIR_SPEC,
     &code::fs_read::SEARCH_FILES_SPEC,
@@ -360,6 +360,7 @@ static CODE_SPECS: [&ToolSpec; 24] = [
     &CODE_FETCH_URL_SPEC,
     &CODE_LIST_SKILLS_SPEC,
     &CODE_READ_SKILL_SPEC,
+    &CODE_VALIDATE_UI_SPEC,
 ];
 
 /// Perfil Code reaproveita web/skills do Chat (`TOOLS.md` §2.7).
@@ -411,6 +412,23 @@ pub static CODE_READ_SKILL_SPEC: ToolSpec = ToolSpec {
     requires_workspace: false,
     profiles: CODE_ADAPTED,
     guidance: "Use `read_skill` to load the full instructions before running the flow.",
+};
+
+/// Generative UI validation is shared with the Chat profile but has its own
+/// Code entry: the wire description/guidance cannot mention the Chat-only
+/// 6-call data-tool budget.
+pub static CODE_VALIDATE_UI_SPEC: ToolSpec = ToolSpec {
+    name: "validate_ui",
+    description: "Validate a generative UI block.",
+    schema: validate_ui_schema,
+    parallel: ParallelClass::Safe,
+    risk: RiskClass::Read,
+    mutating: false,
+    requires_workspace: false,
+    profiles: CODE_ADAPTED,
+    guidance: "Validate a `ui` block before emitting it: pass the complete JSON and fix every error; \
+               it is always available and does not count toward the data-tool budget. The contract \
+               is `data/genui-contract.json`.",
 };
 
 /// Cópias do catálogo do Chat (ordem determinística).
@@ -522,6 +540,7 @@ pub enum ToolExec {
     FetchUrl,
     ListSkills,
     ReadSkill,
+    ValidateUi,
 }
 
 impl ToolExec {
@@ -552,6 +571,7 @@ impl ToolExec {
             "fetch_url" => Self::FetchUrl,
             "list_skills" => Self::ListSkills,
             "read_skill" => Self::ReadSkill,
+            "validate_ui" => Self::ValidateUi,
             _ => return None,
         })
     }
@@ -582,6 +602,7 @@ impl ToolExec {
             Self::FetchUrl => "fetch_url",
             Self::ListSkills => "list_skills",
             Self::ReadSkill => "read_skill",
+            Self::ValidateUi => "validate_ui",
         }
     }
 
@@ -619,7 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn code_catalog_lists_the_twenty_four_tools_in_order() {
+    fn code_catalog_lists_the_twenty_five_tools_in_order() {
         assert_eq!(
             names(&code_spec_refs()),
             vec![
@@ -647,9 +668,10 @@ mod tests {
                 "fetch_url",
                 "list_skills",
                 "read_skill",
+                "validate_ui",
             ]
         );
-        assert_eq!(code_specs().len(), 24);
+        assert_eq!(code_specs().len(), 25);
     }
 
     #[test]
@@ -707,7 +729,13 @@ mod tests {
         }
         // Chat nunca expõe as tools de código; o Code expõe as de leitura e
         // reutiliza web/skills (TOOLS.md §2.7), mas não as mutantes do Chat.
-        let shared = ["web_search", "fetch_url", "list_skills", "read_skill"];
+        let shared = [
+            "web_search",
+            "fetch_url",
+            "list_skills",
+            "read_skill",
+            "validate_ui",
+        ];
         let code_only: Vec<&str> = code_spec_refs()
             .iter()
             .map(|spec| spec.name)
@@ -747,7 +775,7 @@ mod tests {
     #[test]
     fn code_definitions_expose_wire_fields_only() {
         let definitions = definitions_for(TurnProfile::Code);
-        assert_eq!(definitions.len(), 24);
+        assert_eq!(definitions.len(), 25);
         for definition in &definitions {
             assert!(!definition.description.is_empty(), "{}", definition.name);
             assert_eq!(definition.parameters["type"], "object", "{}", definition.name);
@@ -765,6 +793,7 @@ mod tests {
         assert_eq!(spec("run_command").parallel, ParallelClass::Exclusive);
         assert_eq!(spec("todo_write").parallel, ParallelClass::Exclusive);
         assert_eq!(spec("goal").parallel, ParallelClass::Exclusive);
+        assert_eq!(spec("validate_ui").parallel, ParallelClass::Safe);
 
         assert!(spec("write_file").mutating);
         assert!(!spec("read_file").mutating);
@@ -774,6 +803,9 @@ mod tests {
         assert_eq!(spec("goal").risk, RiskClass::Read);
         assert!(spec("run_command").requires_workspace);
         assert!(!spec("ask_user").requires_workspace);
+        assert!(!spec("validate_ui").mutating);
+        assert!(!spec("validate_ui").requires_workspace);
+        assert_eq!(spec("validate_ui").risk, RiskClass::Read);
     }
 
     #[test]

@@ -184,6 +184,8 @@ estilo `Think/Edit/Pwsh`:
   - escrita/edição: `+N −M` e, ao expandir, **diff com syntax highlight** (`DiffView`);
   - shell/verificações: badge `exit N` (verde=0, vermelho≠0), duração e, ao expandir, a **saída**
     (mono, scroll, copiar); falhas abrem a saída automaticamente;
+  - validação de UI (`validate_ui`): linha `Validou a interface` (ícone `ShieldCheck`), resultado
+    JSON sob demanda; é uma linha do Code, não o grupo agregado do Chat;
   - demais tools: saída/resultado sob demanda (região rolável, `tabindex=0`).
 - Toda linha de tool expansível usa `aria-expanded`/`aria-controls`; a linha tem nome acessível
   (`aria-label`) com o texto completo ("Leu src/app.ts"). A linha de raciocínio também usa

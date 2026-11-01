@@ -418,7 +418,7 @@ M  src/app.ts           (staged)
   "env", "enabled", "cwd" }] }`. O app conecta sob demanda na primeira sessão Code, fala o
   transporte oficial **stdio** (JSON-RPC 2.0 por linha), faz `initialize` →
   `notifications/initialized` → `tools/list` e cacheia as tools descobertas.
-- As tools entram no wire do perfil Code depois das 19 estáticas (`mcp__servidor__tool`, nomes
+- As tools entram no wire do perfil Code depois das 25 estáticas (`mcp__servidor__tool`, nomes
   sanitizados) com o `inputSchema` do servidor; o prompt lista nome/servidor/descrição.
 - **Aprovação sempre explícita** (inclusive em Autônomo; regras "sempre permitir/negar" do usuário
   com matcher exact/prefix/glob vencem); o card mostra servidor/ferramenta/argumentos. Timeout de
@@ -445,11 +445,25 @@ conteúdo antes de gravar.
 | `create_file` | **fora** do perfil Code (arquivos vão para o workspace) | — |
 | `run_code` | **fora** do perfil Code (substituído por `run_command`) | — |
 | `list_artifacts` / `read_artifact` | opcional, para reaproveitar material da Biblioteca | leitura |
-| `validate_ui` | **fora** do perfil Code (UI generativa é do Chat) | — |
+| `validate_ui` | validação do JSON de blocos `ui` (mesmo contrato do Chat) — sempre disponível, exceto no subagente read-only | leitura, sem aprovação |
 
-> Regra: o perfil Code expõe **no máximo ~14 tools** por turno. Catálogo grande degrada a escolha
-> do modelo e o cache do prompt. Tools de fases futuras (terminal/ subagentes/MCP) entram atrás de
-> flag de sessão e são documentadas em `PLAN.md` §11.
+#### `validate_ui`
+
+- Recebe `{ "block": "<JSON completo do bloco ui>" }` e devolve
+  `{ ok, summary, errors, warnings, normalized }` (o mesmo contrato do Chat).
+- Usa o normalizador/validador/lint de `src-tauri/src/tools/genui` e o contrato
+  único `data/genui-contract.json`; não muta o workspace, não pede aprovação e
+  não conta no orçamento de dados.
+- Resultado acima de 24 000 chars vai para spill (`read_tool_output`), como as
+  demais tools do perfil.
+- O prompt do Code traz as notas de uso: evidência estruturada (testes, métricas,
+  comparação, achados), sem duplicar o fecho de arquivos/diff; decisões
+  bloqueantes usam `ask_user`; nada de `ui` dentro do plano.
+
+> Regra: o perfil Code expõe hoje **25 tools** por turno (20 de código + web/skills
+> + `validate_ui`). Catálogo grande degrada a escolha do modelo e o cache do
+> prompt; tools de fases futuras entram atrás de flag de sessão e são
+> documentadas em `PLAN.md` §11.
 
 ## 3. `ToolSpec` — como uma tool é declarada no código
 
@@ -491,6 +505,7 @@ pub struct ToolSpec {
 | Leitura antes de escrita | obrigatória | stale → re-ler |
 | Jobs concorrentes | 8 por sessão | + fila |
 | Aprovações por turno | ilimitadas | timeout individual 10 min (config.); `submit_plan`/`ask_user` são limitados pelo broker, não pelo wrapper de timeout da tool |
+| Validação de UI | — | `validate_ui` sempre disponível (exceto no subagente); não conta no orçamento; resultado >24k vai para spill |
 | Tentativas de tool repetida | aviso após 3x iguais | injeção de lembrete no próximo passo |
 
 ## 5. Matriz de testes (resumo)
@@ -506,7 +521,7 @@ pub struct ToolSpec {
 | Planejamento | todo write/projeção; plano aprovar/feedback/fora de modo; ask_user single/multi/timeout |
 | Política | matriz modo × classe × path × segredo × comando; regras "sempre permitir"; negação com feedback |
 | Loop | tool que pausa (aprovação) não vaza passo; cancelamento durante aprovação; spill/replay; apresentação persistida |
-| UI (renderer) | cards por tipo, diff, aprovação (teclado/a11y), todo/plano, jobs, estados de erro |
+| UI (renderer) | cards por tipo, diff, aprovação (teclado/a11y), todo/plano, jobs, estados de erro, bloco `ui` no transcript do Code e linha `Validou a interface` |
 
 ## 6. Erros estáveis (códigos)
 

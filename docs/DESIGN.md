@@ -103,7 +103,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 - **Citações**: chips de fonte em linha (`favicon`/letra do domínio, título truncado), abrem no navegador. Até 8 chips ficam visíveis; acima disso o excedente vira o botão **+ N fontes**, que abre o painel lateral de fontes com a lista completa da conversa (sem expansão inline). Somente no layout **Chat**: o layout **Code** não exibe chips nem painel de fontes.
 - **Artefatos**: cards compactos (tile do tipo — incluindo áudio, vídeo e arquivo compactado na v1.5 —, nome truncado, "tipo · tamanho" e os botões existentes **Abrir** e **Salvar como…**), em grid de até duas colunas. Quando o turno gera mais de 4 arquivos, o chat mostra os 4 primeiros e um botão **+ Ver todos (N)** que abre o painel lateral na lista completa de artefatos gerados; clicar em um card abre a prévia no painel. A lista é atualizada ao vivo pelos eventos `artifact_created` e reconciliada com o backend ao fim do turno/ao reabrir a conversa (ordem canônica de criação), sem cards órfãos ou duplicados.
 - **Fecho do turno (somente no layout Code)**: ao terminar cada turno, a resposta termina com um card de resumo do que foi feito: título **N arquivos alterados**, totais `+N −M` (success/danger, `tabular-nums`), uma linha por arquivo (ícone colorido do tipo, path truncado e `+N −M`) e, acima de 4 arquivos, o botão **Todos os N arquivos** / **Mostrar menos** (`aria-expanded`/`aria-controls`, chevron 150ms). Clicar em uma linha abre o diff daquele arquivo na aba central, como no painel Alterações — usa o patch persistido da última edição do turno e, quando ausente, a aba busca o diff do arquivo. O card deriva das edições de arquivo já persistidas no turno (presentations `file_change` de `write_file`/`edit_file`), então continua visível ao reabrir a conversa; não aparece durante o streaming nem no layout Chat. O tempo/tokens do turno continuam no header do bloco "Thinking" ("Trabalhou por Xs"). Contrato e dados: `docs/goals/code-harness/WORKBENCH.md` §5.1.
-- **UI generativa**: renderizada inline no fluxo do markdown usando o design system (tokens, tipografia e raios do chat). Blocos interativos (`actions`, `tabs`, `reveal`) seguem regras próprias de UI/UX — ver `docs/GENUI.md` e §16.
+- **UI generativa**: renderizada inline no fluxo do markdown nos dois layouts (Chat e Code), usando o design system (tokens, tipografia e raios do chat). Blocos interativos (`actions`, `tabs`, `reveal`) seguem regras próprias de UI/UX — ver `docs/GENUI.md` e §16.
 - Rodapé da mensagem (hover): copiar, regenerar, feedback (like/dislike visual), modelo usado e tokens (se `showTokenUsage`).
 - Streaming: caret `accent` piscando após o último caractere.
 
@@ -269,7 +269,7 @@ Com `reduceMotion` (config ou media query), remover transformações e shimmer; 
   **caixas de nota coloridas (`callout`, descontinuado)**; emojis e Markdown
   dentro de props. Detalhes e limites: `docs/GENUI.md`.
 
-## 16. UI generativa no chat (interfaces do agente)
+## 16. UI generativa na conversa (Chat e Code)
 
 Regras de apresentação específicas das interfaces que o agente cria durante a
 execução (contrato e regras completas em `docs/GENUI.md`):
@@ -303,3 +303,8 @@ execução (contrato e regras completas em `docs/GENUI.md`):
   imagens, `prefers-reduced-motion` respeitado.
 - **Copy**: título e rótulos curtos em pt-BR, sentence case, sem ponto final em
   botões, sem emojis decorativos, sem repetir o que o Markdown já diz.
+- **No layout Code**: o bloco renderiza inline no transcript (mesmo renderer);
+  use para evidência estruturada (testes, métricas, comparação, achados) e
+  próximos passos, sem repetir o card de arquivos alterados nem o diff do painel
+  Alterações. Decisões bloqueantes usam `ask_user`; o plano é Markdown no card
+  de plano.

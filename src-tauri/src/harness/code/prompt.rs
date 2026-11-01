@@ -10,7 +10,7 @@
 //!
 //! Ordem das seções é estável (prefixo cacheável no provedor): identidade →
 //! ambiente → política → ferramentas → edição/verificação → workspace →
-//! instruções do projeto → formato.
+//! instruções do projeto → formato → UI generativa.
 //!
 //! Contrato e orçamento: `docs/goals/code-harness/HARNESS.md` §10.4 e §12;
 //! cache de prefixo: `docs/goals/prompt-cache/PLAN.md` §4.2/§4.3/§4.4.
@@ -20,12 +20,13 @@ use crate::domain::{
     GoalStatus, GoalView, PermissionMode, PlanState, PlanView, ProjectInfo, TodoItem, TodoStatus,
     TurnKind,
 };
+use crate::tools::genui::contract;
 
 use super::goal::{GOAL_BLOCKED_STREAK, GOAL_MAX_OBJECTIVE_CHARS};
 
 /// Version of the Code prompt layout (part of the `prompt_snapshots` identity).
 /// Bump whenever the stable prompt text changes.
-pub const PROMPT_VERSION: u32 = 2;
+pub const PROMPT_VERSION: u32 = 3;
 
 /// Orientação de uma ferramenta habilitada no turno (gerada pelo registry).
 #[derive(Debug, Clone, Copy)]
@@ -509,11 +510,50 @@ fn response_section(subagent: bool) -> &'static str {
     }
     "# Response format\n\n\
      - Respond in Brazilian Portuguese, direct and technical; no preamble.\n\
-     - Use Markdown (short headings, lists, fenced code blocks with a language).\n\
+     - Use Markdown (short headings, lists, fenced code blocks with a language). For structured, \
+       comparable or actionable evidence, prefer one `ui` block over a table/list (see **Generative \
+       UI in this Code session** below).\n\
      - Reference files as `relative/path.ext:line` (relative to the workspace).\n\
      - Quote only the code snippet needed to explain; the rest stays in the file.\n\
      - When you need a decision from the user, use `ask_user` with clear options instead of \
        asking in prose.\n"
+}
+
+/// Generative UI guidance specific to the Code profile, followed by the shared
+/// contract-generated section (single source: `data/genui-contract.json`).
+///
+/// The shared section carries the catalog/rules/limits/examples; these notes
+/// only say when the Code agent should use it and what it must not duplicate
+/// (the turn summary card, the Changes panel, the plan and blocking decisions).
+fn generative_ui_section() -> String {
+    let mut out = String::from(
+        "# Generative UI in this Code session\n\n\
+         The `ui` block contract below is the same one used by the Chat layout, and this transcript \
+         renders it inline. Use it when the answer has structured evidence the user will scan or act \
+         on:\n\
+         - End of a task: check/test results (passed/failed counts, exit codes, durations), coverage \
+           or benchmark numbers, comparison of approaches/libraries, or investigation findings \
+           (entry points, symbols, impact) — as `card` + `stat`/`table`/`chart`/`checklist`.\n\
+         - Next steps after the work: `actions` with 1–4 real prompts (they only fill the composer \
+           for review); do not use `actions` when there is no real next step.\n\
+         - The turn already ends with the \"files changed\" summary card and the Changes panel owns \
+           diffs and file lists: never repeat that data in a `ui` block and never paste diffs in the \
+           response.\n\
+         - Decisions that block the work belong to `ask_user` (it pauses the turn), not to \
+           `choices`/`actions`; use `choices` only for optional configuration the user can review in \
+           the composer.\n\
+         - The plan (`submit_plan`) is Markdown reviewed in the plan card: never put a `ui` block \
+           inside the plan Markdown. A `ui` block in the final response may summarize the plan \
+           status when useful.\n\
+         - Validate the block with `validate_ui` before emitting it (always available; it does not \
+           count toward the data-tool budget) and emit only after `ok: true`. At most 1 block per \
+           response (2 max), in Brazilian Portuguese, with plain text in props.\n\n",
+    );
+    out.push_str(&crate::harness::prompt::generative_ui_section_with_budget(
+        contract::contract(),
+        "data-tool budget",
+    ));
+    out
 }
 
 /// Monta o **system prompt estável** do perfil Code. `tools` vem do registry
@@ -569,6 +609,9 @@ pub fn build_system_prompt(
         out.push('\n');
     }
     out.push_str(response_section(ctx.subagent));
+    if !ctx.subagent {
+        out.push_str(&generative_ui_section());
+    }
     out
 }
 
@@ -679,6 +722,7 @@ mod tests {
         assert!(!prompt.contains("# How to edit and verify"));
         assert!(!prompt.contains("ask_user"));
         assert!(!prompt.contains("When you need a decision from the user"));
+        assert!(!prompt.contains("Generative UI"));
     }
 
     #[test]
@@ -702,6 +746,8 @@ mod tests {
             "# Workspace",
             "# Project instructions",
             "# Response format",
+            "# Generative UI in this Code session",
+            "# Generative UI (`ui` blocks)",
             "Session date: 2026-10-27",
             "npm test",
             "antes de commitar",
@@ -720,6 +766,45 @@ mod tests {
             assert!(
                 !prompt.contains(volatile),
                 "estado volátil `{volatile}` vazou para o system prompt"
+            );
+        }
+    }
+
+    #[test]
+    fn code_prompt_includes_the_generated_genui_contract() {
+        let prompt = build_system_prompt(&model(), &ctx(), &[], "Windows", "2026-10-27");
+        let contract = contract::contract();
+        for needle in [
+            "# Generative UI in this Code session",
+            "# Generative UI (`ui` blocks)",
+            "`validate_ui`",
+            "files changed",
+            "`ask_user`",
+            "data-tool budget",
+        ] {
+            assert!(prompt.contains(needle), "trecho de GenUI ausente: {needle}");
+        }
+        assert!(
+            !prompt.contains("{budget}"),
+            "o placeholder do orçamento não foi interpolado"
+        );
+        assert!(
+            !prompt.contains("(see **Markdown formatting**)"),
+            "o prompt do Code não tem a seção de Markdown do Chat"
+        );
+        // Catálogo e regras vêm exclusivamente do contrato (fonte única).
+        for component in &contract.components {
+            assert!(
+                prompt.contains(&format!("`{}`", component.typ)),
+                "componente `{}` ausente no prompt do Code",
+                component.typ
+            );
+        }
+        for rule in &contract.rules {
+            assert!(
+                prompt.contains(rule.prompt.trim()),
+                "regra `{}` ausente no prompt do Code",
+                rule.id
             );
         }
     }
@@ -851,7 +936,8 @@ mod tests {
         assert!(prompt.contains("…[truncated]"));
         // O prompt estável não carrega a árvore (volátil) e não explode.
         assert!(!prompt.contains("yyyy"));
-        assert!(prompt.chars().count() < MAX_AGENTS_MD_CHARS + 12_000);
+        // AGENTS.md truncado + seções fixas + contrato de UI generativa.
+        assert!(prompt.chars().count() < MAX_AGENTS_MD_CHARS + 24_000);
         // A árvore truncada vai para o contexto volátil do turno.
         let runtime = build_runtime_context(&context, true);
         assert!(runtime.contains("…[truncated]"));

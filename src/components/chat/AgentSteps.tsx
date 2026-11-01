@@ -114,6 +114,7 @@ const CODE_TOOL_NAMES = new Set([
   'git_status',
   'git_diff',
   'git_log',
+  'validate_ui',
 ]);
 
 /** Live counter while the turn streams (500ms tick). */
