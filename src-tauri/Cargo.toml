@@ -32,6 +32,7 @@ reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls",
   "json",
   "stream",
+  "blocking",
   "gzip",
   "brotli",
 ] }
@@ -104,9 +105,15 @@ strip = true
 # Windows: Job Object do runner de processos (kill de árvore confiável no
 # cancelamento/timeout; docs/research/workspace-runtime-options.md §3.4).
 [target.'cfg(windows)'.dependencies]
+winreg = "0.55"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com",
+  "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_JobObjects",
   "Win32_System_Threading",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
 ] }

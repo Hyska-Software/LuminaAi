@@ -12,10 +12,14 @@
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
     "app:dev": "tauri dev",
-    "app:build": "tauri build",
+    "app:build": "node scripts/build-installer.mjs",
+    "installer": "node scripts/build-installer.mjs",
+    "installer:dry": "node scripts/build-installer.mjs --dry-run",
+    "version:set": "node scripts/set-version.mjs",
     "catalog": "node scripts/build-catalog.mjs",
     "verify:models": "node scripts/verify-models.mjs",
     "test": "vitest run",
+    "test:installer": "node --test scripts/installer/__tests__/shared.test.mjs scripts/installer/__tests__/config.test.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

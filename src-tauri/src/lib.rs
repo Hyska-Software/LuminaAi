@@ -19,6 +19,8 @@ mod domain;
 mod events;
 mod harness;
 mod http;
+#[cfg(windows)]
+mod installer;
 mod jobs;
 mod mcp;
 mod oauth;
@@ -32,6 +34,18 @@ mod workspace;
 use tauri::Manager;
 
 pub fn run() {
+    let context = tauri::generate_context!();
+
+    #[cfg(windows)]
+    if let Some(mode) = installer::requested_mode() {
+        installer::run(mode, context);
+        return;
+    }
+
+    run_app(context);
+}
+
+fn run_app(context: tauri::Context<tauri::Wry>) {
     let app = tauri::Builder::default()
         // Must be the first plugin: a second instance focuses the existing
         // window instead of racing the rotating OAuth refresh token and the
@@ -165,7 +179,7 @@ pub fn run() {
             commands::terminal::close_terminal,
             commands::terminal::list_terminals,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building Lumina");
 
     app.run(|app_handle, event| {

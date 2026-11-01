@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "appimage"],
+    "category": "Utility",
+    "publisher": "Lumina",
+    "copyright": "© 2026 Lumina",
+    "licenseFile": "../LICENSE",
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      },
+      "rpm": {
+        "release": "1"
+      }
+    }
+  }
+}
