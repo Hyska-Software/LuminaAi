@@ -35,3 +35,4 @@ release/
 .tmp-uninstall/
 ci-artifacts/
 dist-test/
+release-download/

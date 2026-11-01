@@ -57,12 +57,17 @@ pnpm installer                 # detecta a plataforma atual
 pnpm installer --dry-run       # valida versão, git e assets sem compilar
 ```
 
-Saída em `release/<versão>/`: `Lumina-Setup-<versão>-x64.exe` no Windows;
-`.dmg` no macOS; `.deb`/`.rpm`/`.AppImage` no Linux, com `SHA256SUMS.txt` e
-`release.json`. O instalador do Windows tem UI própria (dark), escopo por
-usuário ou para todos, atalhos, atualização, desinstalação e remoção opcional
-dos dados; macOS e Linux usam os formatos nativos. Detalhes, flags e assinatura:
-[`docs/INSTALLER.md`](docs/INSTALLER.md).
+Saída em `release/<versão>/`: `Lumina-Setup-<versão>-windows-x64.exe` no
+Windows; `.dmg` no macOS; `.deb`/`.rpm`/`.AppImage` no Linux, com
+`SHA256SUMS.txt` e `release.json`. O instalador do Windows tem UI própria
+(dark), escopo por usuário ou para todos, atalhos, atualização, desinstalação e
+remoção opcional dos dados; macOS e Linux usam os formatos nativos. Detalhes,
+flags e assinatura: [`docs/INSTALLER.md`](docs/INSTALLER.md).
+
+Release de produção: tags `v<versão>` ou `workflow_dispatch` em
+`.github/workflows/installer.yml`. A release usa a versão do `package.json`:
+uma versão maior cria uma release nova; a mesma versão atualiza os assets da
+release existente; uma versão menor falha.
 
 Somente o executável (sem instalador):
 

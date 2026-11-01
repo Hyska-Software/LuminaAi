@@ -139,7 +139,7 @@ Saída:
 
 ```text
 release/<versão>/
-  windows-x64/Lumina-Setup-<versão>-x64.exe
+  windows-x64/Lumina-Setup-<versão>-windows-x64.exe
   macos-universal/Lumina-<versão>-macos-universal.dmg
   linux-x64/Lumina-<versão>-linux-x64.deb
   linux-x64/Lumina-<versão>-linux-x64.rpm
@@ -232,10 +232,14 @@ reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumina"
 .\src-tauri\target\debug\lumina.exe --uninstall --silent
 ```
 
-## 7. CI futuro
+## 7. Release pelo GitHub Actions
 
-O workflow manual já está em `.github/workflows/installer.yml`
-(`workflow_dispatch`). Ele usa uma matriz e não publica release automaticamente.
+O workflow de produção é `.github/workflows/installer.yml` (`Release`) e roda:
+
+- **tag `v*`** — publica a release; a tag precisa coincidir com a versão do app;
+- **workflow_dispatch** — cria/atualiza a release da versão atual; o input
+  `draft` permite testar sem publicar.
+
 Cada job roda a plataforma nativa (não há cross-build):
 
 ```yaml
@@ -251,12 +255,27 @@ strategy:
         platform: linux
 ```
 
-Passos: checkout, pnpm/Node, Rust, dependências Linux
-(`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `librsvg2-dev`, `patchelf`, `rpm`,
-`dpkg`), certificados (secrets), `pnpm installer --platform <...> --ci`, upload
-de `release/<versão>/`. Em tags `v*`, usar `pnpm version:set "${tag#v}"` antes.
-O manifesto já contém commit, versão, SHA-256 e status de assinatura para uma
-release futura/auto-update.
+O workflow **não roda testes** por decisão de release: ele instala dependências,
+executa `pnpm installer --platform <...> --skip-tests --ci --require-clean`,
+baixa os três artefatos e combina tudo com `scripts/combine-release.mjs`
+(necessário porque `release.json`/`SHA256SUMS.txt` teriam o mesmo nome nas três
+plataformas). A release recebe os cinco instaladores + `release.json` +
+`SHA256SUMS.txt` agregados.
+
+### Regra de versão
+
+A fonte é `package.json` (sincronizado com `Cargo.toml` e `tauri.conf.json`):
+
+| Situação | Ação |
+| --- | --- |
+| versão do app **maior** que a última release | cria uma release nova |
+| versão do app **igual** à release existente | atualiza os assets (`--clobber`) e publica/edita |
+| versão do app **menor** que a última release | falha antes do build |
+| tag `vX` diferente da versão do app | falha antes do build |
+
+`DRAFT=true` mantém/cria a release como rascunho; `DRAFT=false` publica.
+O workflow roda na `main` e precisa de `contents: write` (`GITHUB_TOKEN`).
+Certificados continuam opcionais via secrets; sem eles o build é unsigned/ad-hoc.
 
 ## 8. Troubleshooting
 
