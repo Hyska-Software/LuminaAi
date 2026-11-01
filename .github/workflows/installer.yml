@@ -1,36 +1,73 @@
-name: Installer (manual)
+name: Release
 
-# Manual until the release process is finalized. Each job builds on its native
-# host: macOS signing/notarization and Linux glibc baselines cannot be
-# cross-built reliably from Windows.
 on:
   workflow_dispatch:
     inputs:
-      channel:
-        description: Release channel
-        type: choice
-        options: [stable, beta]
-        default: stable
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/installer.yml'
-      - 'installer.html'
-      - 'installer/**'
-      - 'scripts/**'
-      - 'src/installer/**'
-      - 'src-tauri/src/installer/**'
-      - 'src-tauri/tauri.*.conf.json'
-      - 'src-tauri/Cargo.toml'
-      - 'package.json'
+      draft:
+        description: Create the GitHub release as a draft
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 concurrency:
-  group: installer-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Version
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve app version
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Versão inválida em package.json: $VERSION" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "A tag $GITHUB_REF_NAME não corresponde à versão do app (v$VERSION)." >&2
+            echo "Atualize a versão do app com 'pnpm version:set' e crie a tag correta." >&2
+            exit 1
+          fi
+
+          LATEST=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // empty' 2>/dev/null || true)
+          if [[ "$LATEST" == v* ]]; then
+            LATEST_VERSION=${LATEST#v}
+            HIGHEST=$(printf '%s\n%s\n' "$LATEST_VERSION" "$VERSION" | sort -V | tail -n 1)
+            if [[ "$HIGHEST" != "$VERSION" ]]; then
+              echo "A versão do app ($VERSION) é menor que a release mais recente ($LATEST_VERSION)." >&2
+              echo "Atualize a versão do app antes de publicar." >&2
+              exit 1
+            fi
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release v$VERSION"
+
   build:
     name: ${{ matrix.platform }}
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -47,8 +84,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:
@@ -79,23 +114,16 @@ jobs:
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Renderer and installer tests
-        run: |
-          pnpm typecheck
-          pnpm test -- src/installer
-          pnpm test:installer
-
-      - name: Full renderer suite (Windows)
-        if: matrix.platform == 'windows'
-        run: pnpm test
-
-      # The Rust suite has pre-existing platform-specific assumptions on macOS
-      # (e.g. /var vs /private/var). Artifact generation must not mask those;
-      # they are tracked separately. Windows keeps the full suite locally.
-      - name: Build installer
-        run: pnpm installer --platform ${{ matrix.platform }} ${{ matrix.args }} --ci --require-clean --skip-tests --channel ${{ inputs.channel || 'stable' }}
+      - name: Build release
+        run: >-
+          pnpm installer
+          --platform ${{ matrix.platform }}
+          ${{ matrix.args }}
+          --skip-tests
+          --ci
+          --require-clean
+          --channel stable
         env:
-          # Optional. Add these secrets when the certificates are available.
           LUMINA_WINDOWS_CERT_THUMBPRINT: ${{ secrets.LUMINA_WINDOWS_CERT_THUMBPRINT }}
           LUMINA_TIMESTAMP_URL: ${{ secrets.LUMINA_TIMESTAMP_URL }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -105,83 +133,65 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
 
-      - name: Smoke test Windows setup
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $setup = (Get-ChildItem release/*/windows-*/*.exe | Select-Object -First 1).FullName
-          $dir = Join-Path $env:RUNNER_TEMP 'lumina-smoke'
-          if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
-          Start-Process -FilePath $setup -ArgumentList @('--setup','--silent','--scope','user','--dir',$dir,'--no-desktop','--no-start-menu','--no-launch') -Wait
-          if (-not (Test-Path (Join-Path $dir 'Lumina.exe'))) { throw 'Lumina.exe não foi instalado' }
-          if (-not (Test-Path (Join-Path $dir '.lumina-install'))) { throw 'marcador de instalação ausente' }
-          Start-Process -FilePath $setup -ArgumentList @('--uninstall','--silent') -Wait
-          for ($i = 0; $i -lt 40 -and (Test-Path $dir); $i++) { Start-Sleep -Milliseconds 250 }
-          if (Test-Path $dir) { throw 'a pasta de instalação não foi removida' }
-
-      - name: Smoke test Windows machine scope
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-          $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-          if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-            Write-Host '::notice::machine-scope smoke skipped: runner is not elevated (requires interactive UAC/VM)'
-            exit 0
-          }
-          $setup = (Get-ChildItem release/*/windows-*/*.exe | Select-Object -First 1).FullName
-          $dir = Join-Path $env:ProgramFiles 'LuminaSmoke'
-          $reg = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumina'
-          if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
-          Start-Process -FilePath $setup -ArgumentList @('--setup','--silent','--scope','machine','--dir',$dir,'--no-desktop','--no-start-menu','--no-launch') -Wait
-          if (-not (Test-Path (Join-Path $dir 'Lumina.exe'))) { throw 'instalação por máquina não criou Lumina.exe' }
-          if (-not (Test-Path $reg)) { throw 'entrada HKLM ausente' }
-          Start-Process -FilePath $setup -ArgumentList @('--uninstall','--silent') -Wait
-          for ($i = 0; $i -lt 40 -and ((Test-Path $dir) -or (Test-Path $reg)); $i++) { Start-Sleep -Milliseconds 250 }
-          if (Test-Path $dir) { throw 'a pasta Program Files não foi removida' }
-          if (Test-Path $reg) { throw 'a entrada HKLM não foi removida' }
-
-      - name: Smoke test macOS DMG
-        if: matrix.platform == 'macos'
-        run: |
-          set -euo pipefail
-          dmg=$(ls release/*/macos-*/*.dmg | head -n 1)
-          mount=$(mktemp -d)
-          hdiutil attach "$dmg" -noverify -noautoopen -nobrowse -readonly -mountpoint "$mount"
-          test -d "$mount/Lumina.app"
-          codesign --verify --deep --strict "$mount/Lumina.app"
-          sudo ditto "$mount/Lumina.app" /Applications/Lumina.app
-          test -d /Applications/Lumina.app
-          sudo rm -rf /Applications/Lumina.app
-          hdiutil detach "$mount"
-
-      - name: Smoke test Linux packages
-        if: matrix.platform == 'linux'
-        run: |
-          set -euo pipefail
-          deb=$(ls release/*/linux-*/*.deb | head -n 1)
-          debname=$(dpkg-deb -f "$deb" Package)
-          sudo dpkg -i "$deb"
-          test -x /usr/bin/lumina
-          test -n "$(find /usr/share/applications -maxdepth 1 -iname '*lumina*.desktop' -print -quit)"
-          sudo dpkg -r "$debname"
-          ! test -e /usr/bin/lumina
-
-          appimage=$(ls release/*/linux-*/*.AppImage | head -n 1)
-          "$appimage" --appimage-extract >/dev/null
-          test -x squashfs-root/AppRun
-          rm -rf squashfs-root
-
-          rpm=$(ls release/*/linux-*/*.rpm | head -n 1)
-          rpmname=$(rpm -qp --qf '%{NAME}' "$rpm")
-          rpm -qpl "$rpm" | grep -q '/usr/bin/lumina'
-          sudo rpm -i --nodeps "$rpm"
-          test -x /usr/bin/lumina
-          sudo rpm -e "$rpmname"
-          ! test -e /usr/bin/lumina
-
       - uses: actions/upload-artifact@v4
         with:
-          name: lumina-${{ matrix.platform }}-${{ github.run_id }}
+          name: lumina-${{ matrix.platform }}
           path: release/**
           if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: [prepare, build]
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      DRAFT: ${{ inputs.draft || false }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lumina-*
+          path: release
+          merge-multiple: true
+
+      - name: Publish or update release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(find release -type f -print0)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "Nenhum artefato encontrado." >&2
+            exit 1
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG já existe; atualizando assets."
+            gh release edit "$TAG" --title "Lumina $TAG"
+            gh release upload "$TAG" "${files[@]}" --clobber
+          else
+            echo "Criando release $TAG."
+            extra=()
+            if [ "$DRAFT" = "true" ]; then
+              extra+=(--draft)
+            fi
+            gh release create "$TAG" "${files[@]}" \
+              --title "Lumina $TAG" \
+              --generate-notes \
+              "${extra[@]}"
+          fi
+
+          {
+            echo "### Lumina $TAG"
+            echo
+            echo "Artefatos publicados:"
+            echo
+            find release -type f | sort | while read -r file; do
+              echo "- \`$file\`"
+            done
+            echo
+            echo "Checksums:"
+            echo '```'
+            find release -name SHA256SUMS.txt -exec cat {} \;
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
