@@ -50,11 +50,19 @@ pnpm install
 pnpm app:dev        # Tauri + Vite com HMR
 ```
 
-Build de produção:
+Build de produção e instalador (script único, sempre com a build mais recente):
 
 ```bash
-pnpm app:build      # instalador NSIS em src-tauri/target/release/bundle/nsis
+pnpm installer                 # detecta a plataforma atual
+pnpm installer --dry-run       # valida versão, git e assets sem compilar
 ```
+
+Saída em `release/<versão>/`: `Lumina-Setup-<versão>-x64.exe` no Windows;
+`.dmg` no macOS; `.deb`/`.rpm`/`.AppImage` no Linux, com `SHA256SUMS.txt` e
+`release.json`. O instalador do Windows tem UI própria (dark), escopo por
+usuário ou para todos, atalhos, atualização, desinstalação e remoção opcional
+dos dados; macOS e Linux usam os formatos nativos. Detalhes, flags e assinatura:
+[`docs/INSTALLER.md`](docs/INSTALLER.md).
 
 Somente o executável (sem instalador):
 
@@ -96,7 +104,7 @@ src-tauri/skills/        skills embutidas (SKILL.md + scripts stdlib)
 docs/                    arquitetura, design, modelos, arquivos/código e screenshots
 ```
 
-Documentação: [Arquitetura](docs/ARCHITECTURE.md) · [Arquivos, código e skills](docs/FILES.md) · [Design](docs/DESIGN.md) · [Modelos & Provedores](docs/MODELS.md).
+Documentação: [Arquitetura](docs/ARCHITECTURE.md) · [Instalador](docs/INSTALLER.md) · [Arquivos, código e skills](docs/FILES.md) · [Design](docs/DESIGN.md) · [Modelos & Provedores](docs/MODELS.md).
 
 ## Privacidade
 

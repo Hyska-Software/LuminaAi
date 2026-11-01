@@ -1,6 +1,8 @@
 /**
  * Vitest setup: jsdom lacks a few browser APIs used by Radix primitives.
  */
+import './src/lib/polyfills';
+
 if (typeof window !== 'undefined') {
   if (!window.ResizeObserver) {
     class ResizeObserverStub {

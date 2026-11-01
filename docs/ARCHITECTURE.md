@@ -797,9 +797,14 @@ encerra. `refresh_provider_models` devolve o `CatalogView` mesclado
 pnpm install
 pnpm typecheck          # TypeScript
 pnpm build              # Vite (renderer)
-pnpm app:build          # Tauri: binário + instalador NSIS
+pnpm installer          # build + instalador da plataforma atual
 pnpm app:dev            # dev com HMR
 ```
+
+O instalador é gerado por `scripts/build-installer.mjs` (versão única, build
+recente, testes, checksums e manifesto). No Windows o próprio binário roda em
+modo setup com UI React; macOS usa DMG e Linux usa `.deb`/`.rpm`/`.AppImage`.
+Contrato completo: `docs/INSTALLER.md`.
 
 ## 15. Verificação (TDD)
 

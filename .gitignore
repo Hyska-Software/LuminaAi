@@ -28,3 +28,8 @@ src-tauri/gen
 
 # Research scratch (model gateway probes)
 .research
+
+# Installer build output and local smoke-test directories
+release/
+.tmp-install/
+.tmp-uninstall/

@@ -38,5 +38,11 @@ export default defineConfig({
     minify: process.env.TAURI_ENV_DEBUG ? false : 'oxc',
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        installer: path.resolve(__dirname, 'installer.html'),
+      },
+    },
   },
 });
