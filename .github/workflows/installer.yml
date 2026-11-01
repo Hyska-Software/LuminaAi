@@ -159,11 +159,14 @@ jobs:
           path: release
           merge-multiple: true
 
+      - name: Combine release assets
+        run: node scripts/combine-release.mjs release dist
+
       - name: Publish or update release
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -d '' files < <(find release -type f -print0)
+          mapfile -d '' files < <(find dist -type f -print0)
           if [ "${#files[@]}" -eq 0 ]; then
             echo "Nenhum artefato encontrado." >&2
             exit 1
@@ -190,12 +193,12 @@ jobs:
             echo
             echo "Artefatos publicados:"
             echo
-            find release -type f | sort | while read -r file; do
+            find dist -type f | sort | while read -r file; do
               echo "- \`$file\`"
             done
             echo
             echo "Checksums:"
             echo '```'
-            find release -name SHA256SUMS.txt -exec cat {} \;
+            cat dist/SHA256SUMS.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

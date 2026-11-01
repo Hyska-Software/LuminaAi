@@ -19,7 +19,7 @@
     "catalog": "node scripts/build-catalog.mjs",
     "verify:models": "node scripts/verify-models.mjs",
     "test": "vitest run",
-    "test:installer": "node --test scripts/installer/__tests__/shared.test.mjs scripts/installer/__tests__/config.test.mjs",
+    "test:installer": "node --test scripts/installer/__tests__/shared.test.mjs scripts/installer/__tests__/config.test.mjs scripts/installer/__tests__/release.test.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

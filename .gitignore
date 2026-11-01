@@ -33,3 +33,5 @@ src-tauri/gen
 release/
 .tmp-install/
 .tmp-uninstall/
+ci-artifacts/
+dist-test/
