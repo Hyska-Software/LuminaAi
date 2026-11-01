@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import '../lib/polyfills';
 import '../styles/globals.css';
 import { InstallerApp } from './InstallerApp';
 

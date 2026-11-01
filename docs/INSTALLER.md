@@ -199,8 +199,8 @@ Sem certificados, o build é **unsigned** e o manifesto registra
 - Build em Ubuntu 22.04 (glibc 2.35) para compatibilidade; não construir em
   Windows/macOS. Dependências de build incluem `libwebkit2gtk-4.1-dev`,
   `libgtk-3-dev`, `librsvg2-dev`, `patchelf`, `rpm` e, por causa dos previews
-  de mídia, os pacotes de desenvolvimento do GStreamer (`libgstreamer1.0-dev`,
-  `libgstreamer-plugins-base1.0-dev`).
+  de mídia, as bibliotecas de runtime do GStreamer
+  (`libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0` e plugins).
 - Dados: `~/.local/share/app.lumina.chat`; o pacote não apaga dados do usuário.
 
 ## 6. Testes e validação
