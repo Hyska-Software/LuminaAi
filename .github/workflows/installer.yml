@@ -115,6 +115,22 @@ jobs:
           for ($i = 0; $i -lt 40 -and (Test-Path $dir); $i++) { Start-Sleep -Milliseconds 250 }
           if (Test-Path $dir) { throw 'a pasta de instalação não foi removida' }
 
+      - name: Smoke test Windows machine scope
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem release/*/windows-*/*.exe | Select-Object -First 1).FullName
+          $dir = Join-Path $env:ProgramFiles 'LuminaSmoke'
+          $reg = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumina'
+          if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+          Start-Process -FilePath $setup -ArgumentList @('--setup','--silent','--scope','machine','--dir',$dir,'--no-desktop','--no-start-menu','--no-launch') -Wait
+          if (-not (Test-Path (Join-Path $dir 'Lumina.exe'))) { throw 'instalação por máquina não criou Lumina.exe' }
+          if (-not (Test-Path $reg)) { throw 'entrada HKLM ausente' }
+          Start-Process -FilePath $setup -ArgumentList @('--uninstall','--silent') -Wait
+          for ($i = 0; $i -lt 40 -and ((Test-Path $dir) -or (Test-Path $reg)); $i++) { Start-Sleep -Milliseconds 250 }
+          if (Test-Path $dir) { throw 'a pasta Program Files não foi removida' }
+          if (Test-Path $reg) { throw 'a entrada HKLM não foi removida' }
+
       - name: Smoke test macOS DMG
         if: matrix.platform == 'macos'
         run: |
