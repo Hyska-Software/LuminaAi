@@ -202,51 +202,61 @@
   }
 }
 
-/* Composer execution ring: three dash layers travel along a normalized SVG
-   track. Each layer starts a little further along the path so the bright head
-   leads and the tail tapers behind it. */
-@keyframes composer-orbit-tail {
+/* Composer execution ring: one continuous stroke masked by a conic alpha
+   gradient. The mask fades from transparent to accent, so the visible piece is
+   a single trail with a bright head and a soft tail — no dash segments. */
+@property --composer-orbit-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes composer-orbit-sweep {
   to {
-    stroke-dashoffset: -100;
+    --composer-orbit-angle: 360deg;
   }
 }
 
-@keyframes composer-orbit-body {
-  from {
-    stroke-dashoffset: -4.2;
-  }
-  to {
-    stroke-dashoffset: -104.2;
-  }
+.composer-orbit-mask {
+  --composer-orbit-mask: conic-gradient(
+    from var(--composer-orbit-angle, 0deg),
+    transparent 0deg,
+    transparent 218deg,
+    rgb(0 0 0 / 0.12) 258deg,
+    rgb(0 0 0 / 0.45) 312deg,
+    rgb(0 0 0 / 1) 348deg,
+    rgb(0 0 0 / 1) 352deg,
+    transparent 357deg,
+    transparent 360deg
+  );
+  -webkit-mask-image: var(--composer-orbit-mask);
+  mask-image: var(--composer-orbit-mask);
+  mask-mode: alpha;
+  mask-repeat: no-repeat;
+  mask-size: 100% 100%;
 }
 
-@keyframes composer-orbit-head {
-  from {
-    stroke-dashoffset: -8.4;
-  }
-  to {
-    stroke-dashoffset: -108.4;
-  }
+.composer-orbit-animate {
+  animation: composer-orbit-sweep 5.6s linear infinite;
 }
 
-.composer-orbit-animate .composer-orbit-tail {
-  animation: composer-orbit-tail 5.6s linear infinite;
-}
-
-.composer-orbit-animate .composer-orbit-body {
-  animation: composer-orbit-body 5.6s linear infinite;
-}
-
-.composer-orbit-animate .composer-orbit-head {
-  animation: composer-orbit-head 5.6s linear infinite;
-}
-
-.composer-orbit-paused :is(.composer-orbit-tail, .composer-orbit-body, .composer-orbit-head) {
+.composer-orbit-paused {
   animation-play-state: paused;
 }
 
+/* Reduced motion keeps the state legible: the full perimeter becomes a steady
+   accent stroke instead of a static slice of the trail. */
+.composer-orbit-mask.composer-orbit-static {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.composer-orbit-static svg {
+  opacity: 0.7;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .composer-orbit-animate :is(.composer-orbit-tail, .composer-orbit-body, .composer-orbit-head) {
+  .composer-orbit-animate {
     animation: none;
   }
 }

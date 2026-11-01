@@ -2,9 +2,9 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
 export interface ComposerActivityProps {
-  /** A turn is running: the ring is visible and the comet orbits. */
+  /** A turn is running: the ring is visible and the trail orbits. */
   active: boolean;
-  /** Removes the orbit (static comet) without hiding the execution state. */
+  /** Removes the orbit; the full static accent border carries the state. */
   reduceMotion: boolean;
 }
 
@@ -21,12 +21,10 @@ const DEFAULT_RADIUS = 32;
 /**
  * Full-perimeter execution indicator for the composer.
  *
- * The old indicator was a half-width bar pinned to the top edge, so it only
- * ever lit one side of the input. This version draws a rounded SVG track in the
- * border annulus of the composer and runs a bright comet along it. Three
- * overlapping dash layers (tail, body, head) make the tail taper without a
- * gradient, and `pathLength=100` keeps the motion uniform around the whole
- * perimeter instead of following the aspect ratio of the composer.
+ * The SVG is one continuous stroke on the composer border. A conic alpha mask
+ * cuts that stroke into a single trail: the head is solid accent and the tail
+ * dissolves smoothly into the surface. There are no dash layers, so the effect
+ * always reads as one soft highlight instead of separate trails.
  */
 export function ComposerActivity({ active, reduceMotion }: ComposerActivityProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -40,7 +38,7 @@ export function ComposerActivity({ active, reduceMotion }: ComposerActivityProps
       const rect = host.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
       // The font-scale setting changes the rem-based `rounded-3xl`; read the
-      // used radius instead of assuming 2rem so the ring follows the corners.
+      // used radius instead of assuming 2rem so the trail follows the corners.
       const parent = host.parentElement;
       const computed = parent ? window.getComputedStyle(parent) : null;
       const measuredRadius = computed
@@ -81,61 +79,26 @@ export function ComposerActivity({ active, reduceMotion }: ComposerActivityProps
       data-active={active ? 'true' : 'false'}
       data-motion={reduceMotion ? 'reduced' : 'orbit'}
       className={cn(
-        'pointer-events-none absolute -inset-px z-0 transition-opacity duration-300 ease-[var(--ease-out-soft)]',
+        'composer-orbit-mask pointer-events-none absolute -inset-px z-0',
+        'transition-opacity duration-300 ease-[var(--ease-out-soft)]',
         active ? 'opacity-100' : 'opacity-0',
+        !reduceMotion && 'composer-orbit-animate',
+        reduceMotion && 'composer-orbit-static',
+        !active && 'composer-orbit-paused',
       )}
     >
       {box ? (
         <svg
           data-testid="composer-orbit"
-          className={cn(
-            'absolute inset-0 size-full',
-            !reduceMotion && 'composer-orbit-animate',
-            !active && 'composer-orbit-paused',
-          )}
+          className="absolute inset-0 size-full"
           viewBox={`0 0 ${box.width} ${box.height}`}
         >
           {/*
-           * The rects sit on the 1px border centerline. `pathLength=100`
-           * normalizes dash units, so every composer size gets the same comet
-           * proportions; the three offsets align tail → body → head.
+           * One continuous stroke on the border centerline. The conic mask in
+           * globals.css fades its alpha from transparent to accent, so there is
+           * exactly one trail: a bright head and a long, soft tail.
            */}
           <rect
-            className="composer-orbit-tail"
-            x={0.75}
-            y={0.75}
-            width={Math.max(0, box.width - 1.5)}
-            height={Math.max(0, box.height - 1.5)}
-            rx={orbitRadius}
-            ry={orbitRadius}
-            fill="none"
-            stroke="var(--accent)"
-            strokeWidth={1}
-            strokeLinecap="round"
-            pathLength={100}
-            strokeDasharray="9 91"
-            strokeDashoffset={0}
-            opacity={0.22}
-          />
-          <rect
-            className="composer-orbit-body"
-            x={0.75}
-            y={0.75}
-            width={Math.max(0, box.width - 1.5)}
-            height={Math.max(0, box.height - 1.5)}
-            rx={orbitRadius}
-            ry={orbitRadius}
-            fill="none"
-            stroke="var(--accent)"
-            strokeWidth={1.25}
-            strokeLinecap="round"
-            pathLength={100}
-            strokeDasharray="4.2 95.8"
-            strokeDashoffset={-4.2}
-            opacity={0.55}
-          />
-          <rect
-            className="composer-orbit-head"
             x={0.75}
             y={0.75}
             width={Math.max(0, box.width - 1.5)}
@@ -146,10 +109,6 @@ export function ComposerActivity({ active, reduceMotion }: ComposerActivityProps
             stroke="var(--accent)"
             strokeWidth={1.5}
             strokeLinecap="round"
-            pathLength={100}
-            strokeDasharray="1.6 98.4"
-            strokeDashoffset={-8.4}
-            opacity={1}
           />
         </svg>
       ) : null}
