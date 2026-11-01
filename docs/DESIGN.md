@@ -113,7 +113,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 - Toasts (sonner) para falhas assíncronas, canto inferior direito.
 
 ### 6.5 Cancelamento
-- Barra de progresso indeterminada fina no topo do composer durante streaming; botão enviar vira quadrado "parar".
+- Órbita de execução no perímetro inteiro do composer durante o streaming (trilho accent contínuo + cometa de luz com cauda longa); botão enviar vira quadrado "parar".
 - Mensagem parcial permanece com selo "Cancelado".
 
 ## 7. Composer (detalhe)
@@ -134,6 +134,7 @@ Regras: nunca usar hex solto em componentes — sempre `bg-background`, `text-fo
 - Seletor de modelo (no composer do chat): pill segmentado em duas partes — ① glifo da marca do modelo (LobeHub, mono, tingido por tokens) + nome; ② rótulo do pensamento (ex.: "Alto"). O pill abre um **popover em duas etapas**: a lista de modelos (busca com foco automático, alternância Go/Zen, Favoritos + famílias) e, ao escolher um modelo, a mesma superfície troca para os **modos de pensamento** (Desligado / esforços / orçamento), com a descrição de cada modo e botão de voltar. Os **detalhes do modelo** (contexto, custo, protocolo, capacidades, favoritar) aparecem numa **bolha flutuante ao lado do popover**, como uma tooltip: surge no hover ou na navegação por teclado, nunca empurra o layout. O segmento ② abre direto a etapa de pensamento; modelos sem controle de raciocínio mostram o segmento desabilitado ("Padrão"). A busca do popover consulta os dois provedores. O item **"Ver todos os modelos…"** no rodapé abre o **seletor completo** (dialog) — não há botão extra na interface do chat.
 - **Ícones de marca**: o avatar de cada modelo (pill, lista do popover, bolha de detalhes e dialog) usa os glifos oficiais da [LobeHub Icons](https://icons.lobehub.com) (`@lobehub/icons-static-svg`, MIT) na variante mono, tingidos pelo token de cor da família; famílias sem marca oficial caem nas iniciais do nome. Mapa, decisão e licença em `docs/MODEL_ICONS.md`.
 - **Bloqueio de modelo**: no **Chat**, depois do primeiro envio o modelo da conversa fica travado (cadeado no pill, com explicação ao clicar) — trocar de modelo no meio da conversa misturaria respostas de modelos diferentes e invalidaria o replay do raciocínio. No **layout Code**, sessões do Code (nativas ou compartilhadas) podem trocar modelo/provedor **entre turnos**: a escolha é uma propriedade da sessão, persistida na hora (`set_conversation_model`) sem alterar o modelo padrão das próximas conversas; as respostas antigas mantêm o modelo que as produziu (histórico neutro) e o transcript marca o ponto com o divisor "Modelo alterado para …". Durante o streaming o seletor continua bloqueado nos dois layouts ("Aguarde a resposta atual terminar"). O **modo de pensamento continua ajustável** pelo segmento ✦ em todos os casos. "Novo chat"/"Novo agente" volta ao modelo padrão configurado; ao abrir uma conversa existente, o seletor reflete o par persistido na sessão.
+- **Indicador de execução**: enquanto um turno roda, todo o perímetro do composer vira um trilho accent sutil percorrido por um cometa de luz com cauda longa (traço de 1px rente à borda, sem interferir no campo de texto). Nos dois layouts o mesmo trilho é usado; com redução de movimento o cometa fica estático.
 - Dica de rodapé: "Lumina pode cometer erros. Verifique informações importantes." (11–12px, muted).
 
 ## 8. Model Picker (dialog completo)
@@ -208,6 +209,7 @@ Tabs à esquerda (180px), conteúdo à direita (520px):
 | Redimensionamento dos painéis laterais | sem transição de largura enquanto arrasta; slide-in/out mantém 240ms no modo sobreposto |
 | Pensando | shimmer no texto + pulso da marca |
 | Passos do agente | shimmer no header durante o streaming; timeline expande/recolhe |
+| Execução do agente (composer) | cometa de luz orbita o perímetro do composer em 5.6s chamando a atenção para o estado ativo; com reduceMotion o traço accent fica estático |
 | Timeline de passos | linha de atividade entra com fade, spinner enquanto executa |
 | Caret de streaming | blink 1.1s |
 | Hover de botões | 120ms |

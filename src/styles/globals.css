@@ -202,6 +202,55 @@
   }
 }
 
+/* Composer execution ring: three dash layers travel along a normalized SVG
+   track. Each layer starts a little further along the path so the bright head
+   leads and the tail tapers behind it. */
+@keyframes composer-orbit-tail {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+@keyframes composer-orbit-body {
+  from {
+    stroke-dashoffset: -4.2;
+  }
+  to {
+    stroke-dashoffset: -104.2;
+  }
+}
+
+@keyframes composer-orbit-head {
+  from {
+    stroke-dashoffset: -8.4;
+  }
+  to {
+    stroke-dashoffset: -108.4;
+  }
+}
+
+.composer-orbit-animate .composer-orbit-tail {
+  animation: composer-orbit-tail 5.6s linear infinite;
+}
+
+.composer-orbit-animate .composer-orbit-body {
+  animation: composer-orbit-body 5.6s linear infinite;
+}
+
+.composer-orbit-animate .composer-orbit-head {
+  animation: composer-orbit-head 5.6s linear infinite;
+}
+
+.composer-orbit-paused :is(.composer-orbit-tail, .composer-orbit-body, .composer-orbit-head) {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-orbit-animate :is(.composer-orbit-tail, .composer-orbit-body, .composer-orbit-head) {
+    animation: none;
+  }
+}
+
 @keyframes blink {
   0%,
   100% {

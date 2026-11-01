@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { CacheStats, Conversation, ProviderAuthStatus, ProviderInfo, ProviderKeyStatus } from '@/lib/types';
 import type { CacheConversationUi } from '@/lib/store/cacheStore';
+import type { StreamingState } from '@/lib/store/chatStore';
 
 const mocks = vi.hoisted(() => ({
   openExternalUrl: vi.fn(async () => true),
@@ -165,6 +166,24 @@ function seedActiveChat(conversationId = 'conv-chat'): void {
   });
 }
 
+function streamingState(overrides: Partial<StreamingState> = {}): StreamingState {
+  return {
+    turnId: 'turn-1',
+    conversationId: 'conv-chat',
+    assistantId: 'assistant-1',
+    userMessageId: 'user-1',
+    phase: 'tool',
+    step: 1,
+    startedAt: Date.now(),
+    turnKind: 'user',
+    ...overrides,
+  };
+}
+
+function composerActivity(): HTMLElement {
+  return screen.getByTestId('composer-activity');
+}
+
 function setShowCacheIndicator(showIndicator: boolean): void {
   useAppStore.setState((state) => ({
     settings: {
@@ -199,6 +218,9 @@ afterEach(() => {
   useChatStore.setState({ activeId: null, conversations: [] });
   useCacheStore.getState().reset();
   setShowCacheIndicator(true);
+  useAppStore.setState((state) => ({
+    settings: { ...state.settings, reduceMotion: false },
+  }));
 });
 
 describe('Composer — gate de envio (D9)', () => {
@@ -345,5 +367,31 @@ describe('Composer — chip de cache no Chat', () => {
     render(<Composer />);
 
     expect(screen.queryByRole('button', { name: /^Cache de prompt:/ })).toBeNull();
+  });
+});
+
+describe('Composer — indicador de execução', () => {
+  it('orbita o perímetro inteiro nos dois layouts durante o streaming', () => {
+    useChatStore.setState({ streaming: streamingState() });
+    render(<Composer />);
+
+    expect(composerActivity().getAttribute('data-active')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Parar resposta' })).toBeTruthy();
+
+    act(() => useUiStore.getState().setLayoutMode('code'));
+
+    expect(composerActivity().getAttribute('data-active')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Parar resposta' })).toBeTruthy();
+  });
+
+  it('mantém o indicador estático quando reduceMotion está ativo', () => {
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, reduceMotion: true },
+    }));
+    useChatStore.setState({ streaming: streamingState() });
+    render(<Composer />);
+
+    expect(composerActivity().getAttribute('data-active')).toBe('true');
+    expect(composerActivity().getAttribute('data-motion')).toBe('reduced');
   });
 });

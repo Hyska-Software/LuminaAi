@@ -28,6 +28,7 @@ import { AttachmentChips } from './AttachmentChips';
 import { CacheMeterChip } from './CacheMeterChip';
 import { CodeSessionControls } from './CodeSessionControls';
 import { filterSlashCommands, type SlashCommand } from './commands';
+import { ComposerActivity } from './ComposerActivity';
 import { MentionChips } from './MentionChips';
 import {
   MENTION_LISTBOX_ID,
@@ -581,21 +582,13 @@ export function Composer() {
 
       <div
         className={cn(
-          'relative overflow-hidden rounded-3xl border border-border bg-surface-raised shadow-sm',
-          'transition-colors duration-150 focus-within:border-border-strong',
+          'relative rounded-3xl border bg-surface-raised shadow-sm transition-colors duration-150',
+          isStreaming
+            ? 'border-accent/20'
+            : 'border-border focus-within:border-border-strong',
         )}
       >
-        {isStreaming ? (
-          <div aria-hidden className="absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-accent-soft">
-            <div
-              className={cn(
-                'h-full w-1/2 rounded-full bg-linear-to-r from-transparent via-accent to-transparent',
-                'bg-[length:200%_100%]',
-                !reduceMotion && 'animate-shimmer',
-              )}
-            />
-          </div>
-        ) : null}
+        <ComposerActivity active={isStreaming} reduceMotion={reduceMotion} />
 
         <Popover
           open={menu !== null}
