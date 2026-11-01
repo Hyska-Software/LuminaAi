@@ -174,8 +174,8 @@ jobs:
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG já existe; atualizando assets."
-            gh release edit "$TAG" --title "Lumina $TAG"
             gh release upload "$TAG" "${files[@]}" --clobber
+            gh release edit "$TAG" --title "Lumina $TAG" --draft="$DRAFT"
           else
             echo "Criando release $TAG."
             extra=()
