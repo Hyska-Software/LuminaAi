@@ -179,7 +179,7 @@ export function CommitBar({
   };
 
   return (
-    <div className={cn('flex shrink-0 flex-col border-t border-border bg-surface-raised', className)}>
+    <div className={cn('flex shrink-0 flex-col border-t border-border bg-surface', className)}>
       <div className="flex items-center gap-2 px-3 pt-2">
         <span className="text-[11px] font-medium uppercase tracking-wider text-foreground-subtle">
           Commit

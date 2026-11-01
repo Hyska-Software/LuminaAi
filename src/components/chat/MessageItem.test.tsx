@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import type { ChatMessage } from '@/lib/types';
-import { useChatStore, type StreamingState } from '@/lib/store';
+import { useChatStore, useUiStore, type StreamingState } from '@/lib/store';
 import { MessageItem } from './MessageItem';
 
 function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
@@ -52,6 +52,7 @@ function renderMessage(entry: ChatMessage, isStreaming = false) {
 afterEach(() => {
   cleanup();
   useChatStore.setState({ streaming: null });
+  useUiStore.setState({ layoutMode: 'chat' });
 });
 
 describe('MessageItem — readOnly', () => {
@@ -133,5 +134,35 @@ describe('MessageItem — mensagem normal do usuário (regressão)', () => {
 
     const edit = screen.getByRole('button', { name: 'Editar mensagem' }) as HTMLButtonElement;
     expect(edit.disabled).toBe(true);
+  });
+});
+
+describe('MessageItem — diferenças do layout Code', () => {
+  const cited = message({
+    id: 'a-cited',
+    role: 'assistant',
+    content: 'Resposta com fontes.',
+    citations: [
+      { id: 'cit-1', title: 'Tauri', url: 'https://tauri.app/', siteName: 'tauri.app' },
+    ],
+  });
+
+  it('omite o avatar do app e os chips de fontes no layout Code', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+
+    const { container } = renderMessage(cited);
+
+    expect(screen.getByText('Resposta com fontes.')).toBeTruthy();
+    expect(container.querySelector('img[src*="lumina-mark"]')).toBeNull();
+    expect(screen.queryByText('tauri.app')).toBeNull();
+  });
+
+  it('mantém o avatar e os chips de fontes no layout Chat', () => {
+    useUiStore.setState({ layoutMode: 'chat' });
+
+    const { container } = renderMessage(cited);
+
+    expect(container.querySelector('img[src*="lumina-mark"]')).not.toBeNull();
+    expect(screen.getByText('tauri.app')).toBeTruthy();
   });
 });

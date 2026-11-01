@@ -155,6 +155,7 @@ describe('AppShell — chrome contínuo e painel do chat', () => {
     const mainClass = main?.className ?? '';
     // Só o canto superior esquerdo encontra o chrome: é ele que arredonda.
     expect(mainClass).toContain('rounded-tl-lg');
+    expect(mainClass).not.toContain('rounded-tr-lg');
     expect(mainClass).toContain('bg-background');
     expect(mainClass).not.toContain('border');
 
@@ -209,5 +210,29 @@ describe('AppShell — painel lateral direito', () => {
 
     expect(screen.queryByTestId('right-panel')).toBeNull();
     expect(screen.getByTestId('content').closest('main')).not.toBeNull();
+  });
+
+  it('rounds the chat top-right corner only while the right panel is open', () => {
+    const { rerender } = render(
+      <AppShell rightPanel={<div data-testid="right-panel" />} rightPanelOpen>
+        <div data-testid="content" />
+      </AppShell>,
+    );
+
+    const main = screen.getByTestId('content').closest('main');
+    expect(main?.className).toContain('rounded-tl-lg');
+    expect(main?.className).toContain('rounded-tr-lg');
+
+    // Closed panel: the chat runs to the window edge, so only the left corner
+    // meets the chrome (same rule as the sidebar).
+    rerender(
+      <AppShell rightPanel={<div data-testid="right-panel" />} rightPanelOpen={false}>
+        <div data-testid="content" />
+      </AppShell>,
+    );
+
+    const closed = screen.getByTestId('content').closest('main');
+    expect(closed?.className).toContain('rounded-tl-lg');
+    expect(closed?.className).not.toContain('rounded-tr-lg');
   });
 });

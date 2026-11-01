@@ -524,7 +524,7 @@ export function ChangesPanel({
               if (groupRows.length === 0) return null;
               return (
                 <section key={group.id} aria-label={group.label} className="border-b border-border">
-                  <h3 className="sticky top-0 z-10 flex h-7 items-center gap-1.5 bg-surface-raised px-3 text-[10.5px] font-medium uppercase tracking-wider text-foreground-subtle">
+                  <h3 className="sticky top-0 z-10 flex h-7 items-center gap-1.5 bg-surface px-3 text-[10.5px] font-medium uppercase tracking-wider text-foreground-subtle">
                     {group.label}
                     <span className="tabular-nums">({groupRows.length})</span>
                   </h3>

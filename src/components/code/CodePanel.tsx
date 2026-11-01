@@ -260,7 +260,7 @@ export function CodePanel() {
     <aside
       aria-label="Painel de arquivos e alterações"
       style={{ width: layout.width }}
-      className="relative z-10 flex h-full shrink-0 flex-col border-l border-border bg-surface-raised"
+      className="relative z-10 flex h-full shrink-0 flex-col bg-surface"
     >
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
         <div
@@ -293,7 +293,7 @@ export function CodePanel() {
                   'transition-colors duration-150',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                   selected
-                    ? 'bg-surface-hover text-foreground'
+                    ? 'bg-surface-active text-foreground'
                     : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
                   compactTabs && 'px-2',
                 )}

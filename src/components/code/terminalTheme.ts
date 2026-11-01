@@ -9,10 +9,10 @@
 import type { ITheme } from '@xterm/xterm';
 
 const FALLBACK_THEME: ITheme = {
-  background: '#17171a',
+  background: '#101012',
   foreground: '#ececf1',
   cursor: '#8b7bff',
-  cursorAccent: '#17171a',
+  cursorAccent: '#101012',
   selectionBackground: '#8b7bff44',
   black: '#3a3a44',
   red: '#f07171',
@@ -44,10 +44,11 @@ function readToken(name: string, fallback: string): string {
 /** Builds an xterm theme from the current app tokens (light or dark). */
 export function buildTerminalTheme(): ITheme {
   return {
-    background: readToken('--background', FALLBACK_THEME.background ?? '#17171a'),
+    background: readToken('--surface', FALLBACK_THEME.background ?? '#101012'),
     foreground: readToken('--foreground', FALLBACK_THEME.foreground ?? '#ececf1'),
     cursor: readToken('--accent', '#8b7bff'),
-    cursorAccent: readToken('--background', '#17171a'),
+    // The cursor block blends with the terminal surface while it is inverted.
+    cursorAccent: readToken('--surface', '#101012'),
     selectionBackground: readToken('--terminal-selection', '#8b7bff44'),
     black: readToken('--terminal-ansi-black', FALLBACK_THEME.black ?? '#3a3a44'),
     red: readToken('--terminal-ansi-red', FALLBACK_THEME.red ?? '#f07171'),

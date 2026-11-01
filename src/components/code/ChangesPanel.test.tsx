@@ -116,8 +116,10 @@ describe('ChangesPanel', () => {
   it('groups by stage state and shows origin badges and counters', () => {
     render(<ChangesPanel workspaceId="ws-1" gitStatus={status()} sessionChanges={sessionChanges} />);
     expect(screen.getByRole('heading', { name: /Preparados/ })).toBeTruthy();
-    // Separadores usam o fundo padrão do painel (bg-surface-raised).
-    expect(screen.getByRole('heading', { name: /Preparados/ }).className).toContain('bg-surface-raised');
+    // Sticky group headers blend with the panel surface (same chrome as the sidebar).
+    const header = screen.getByRole('heading', { name: /Preparados/ });
+    expect(header.className).toContain('bg-surface');
+    expect(header.className).not.toContain('bg-surface-raised');
     expect(screen.getByRole('heading', { name: /Não preparados/ })).toBeTruthy();
     expect(screen.getByRole('heading', { name: /Novos/ })).toBeTruthy();
 

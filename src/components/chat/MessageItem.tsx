@@ -189,6 +189,9 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   const showTokenUsage = useAppStore((state) => state.settings.showTokenUsage);
   const artifacts = useUiStore((state) => state.artifacts);
   const layoutMode = useUiStore((state) => state.layoutMode);
+  /* The Code workbench is task-focused: the assistant avatar (brand mark) adds
+     chrome without information, so it only belongs to the Chat layout. */
+  const showAssistantAvatar = layoutMode !== 'code';
   // Workspace da sessão: com ele o resumo do turno abre o diff de cada arquivo
   // como aba central (WORKBENCH §7.2); sem workspace o card é informativo.
   const workspaceId = useChatStore(
@@ -228,7 +231,9 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
       transition={reduceMotion ? { duration: 0 } : MESSAGE_MOTION.transition}
       className={cn('group/message flex items-start gap-3', isGroupStart ? 'mt-7' : 'mt-3')}
     >
-      <BrandMark size={24} className="mt-0.5" animated={isStreaming} />
+      {showAssistantAvatar ? (
+        <BrandMark size={24} className="mt-0.5" animated={isStreaming} />
+      ) : null}
 
       <div className="min-w-0 flex-1">
         {reasoning || reasoningActive || toolCalls.length > 0 ? (
@@ -286,7 +291,10 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
         ) : null}
 
         {attachments.length > 0 ? <AttachmentChips attachments={attachments} className="mt-3" /> : null}
-        {citations.length > 0 ? <CitationChips citations={citations} className="mt-3" /> : null}
+        {/* Source chips are a Chat surface; the Code layout has no sources panel. */}
+        {citations.length > 0 && layoutMode !== 'code' ? (
+          <CitationChips citations={citations} className="mt-3" />
+        ) : null}
 
         {messageArtifacts.length > 0 ? <MessageArtifacts artifacts={messageArtifacts} /> : null}
 

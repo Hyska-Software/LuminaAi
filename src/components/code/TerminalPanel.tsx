@@ -147,7 +147,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
   };
 
   return (
-    <div className={cn('flex min-h-0 flex-1 flex-col bg-surface-raised', className)}>
+    <div className={cn('flex min-h-0 flex-1 flex-col bg-surface', className)}>
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
         <div
           ref={tabStripRef}
@@ -314,7 +314,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
         id="terminal-output"
         aria-labelledby={active ? `terminal-tab-${active.id}` : undefined}
         aria-busy={loading || undefined}
-        className="relative min-h-0 flex-1 overflow-hidden bg-background"
+        className="relative min-h-0 flex-1 overflow-hidden bg-surface"
       >
         <div ref={containerRef} className="absolute inset-0" />
         {tabs.length === 0 && !loading ? (
@@ -336,7 +336,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
           </div>
         ) : null}
         {loading && tabs.length === 0 ? (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/85 px-6 text-center">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-surface/85 px-6 text-center">
             <Spinner size="sm" />
             <p className="text-[12px] text-foreground-muted">Conectando ao shell…</p>
           </div>

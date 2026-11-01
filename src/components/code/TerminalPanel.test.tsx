@@ -127,6 +127,18 @@ describe('TerminalPanel', () => {
     expect(screen.getByText('Nenhum terminal aberto')).toBeTruthy();
   });
 
+  it('usa a mesma superfície da sidebar como fundo do painel', () => {
+    const { container } = render(<TerminalPanel conversationId="conv-1" />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain('bg-surface');
+    expect(root.className).not.toContain('bg-surface-raised');
+
+    // The terminal viewport must not fall back to the chat `background` tone.
+    const viewport = container.querySelector('[role="tabpanel"]');
+    expect(viewport?.className).toContain('bg-surface');
+    expect(viewport?.className).not.toContain('bg-background');
+  });
+
   it('mantém o destaque compacto das abas: preenchimento neutro e sem sombra', async () => {
     render(<TerminalPanel conversationId="conv-1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Abrir terminal' }));

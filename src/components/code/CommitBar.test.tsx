@@ -55,6 +55,13 @@ describe('CommitBar', () => {
     expect(screen.getByRole('button', { name: 'Sugerir mensagem' })).toBeTruthy();
   });
 
+  it('uses the sidebar surface so the footer blends with the right panel', () => {
+    const { container } = render(<CommitBar workspaceId="ws-1" hasChanges />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain('bg-surface');
+    expect(root.className).not.toContain('bg-surface-raised');
+  });
+
   it('disables the commit without a message and explains why', () => {
     render(<CommitBar workspaceId="ws-1" hasChanges />);
     expect((commitButton() as HTMLButtonElement).disabled).toBe(true);

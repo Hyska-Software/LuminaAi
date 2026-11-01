@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { clampSidebarWidth, SIDEBAR_WIDTH_DEFAULT, useUiStore } from '@/lib/store';
+import { cn } from '@/lib/utils';
 import { TitleBar } from './TitleBar';
 import { Sidebar } from './Sidebar';
 import { SidebarResizer } from './SidebarResizer';
@@ -26,6 +27,13 @@ export interface AppShellProps {
    */
   rightPanel?: ReactNode;
   /**
+   * True when the docked right panel is actually rendered. The chat then also
+   * rounds its top-right corner, mirroring the top-left corner against the
+   * sidebar: the two chrome surfaces meet the conversation only through the
+   * corner radius, never through a 1px divider (DESIGN §5).
+   */
+  rightPanelOpen?: boolean;
+  /**
    * Optional slot for global overlays (dialogs, command palette) rendered by
    * `App.tsx` above the shell content.
    */
@@ -45,6 +53,7 @@ export function AppShell({
   sidebar,
   sidebarLabel = 'Conversas',
   rightPanel,
+  rightPanelOpen = false,
   overlays,
 }: AppShellProps) {
   const sidebarOpen = useUiStore((state) => state.sidebarOpen);
@@ -141,10 +150,17 @@ export function AppShell({
             </div>
           ) : null}
 
-          {/* The chat is a rounded pane over the chrome (DESIGN §5): the topbar
-              and sidebar share the `surface` background and no divider lines,
-              so only the top-left corner radius separates the two surfaces. */}
-          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-tl-lg bg-background">
+          {/* The chat is a rounded pane over the chrome (DESIGN §5): the topbar,
+              sidebar and docked right panel share the `surface` background and
+              no divider lines, so only the top corner radii separate the
+              surfaces. The right radius only exists while that panel is open;
+              otherwise the chat runs to the window edge. */}
+          <main
+            className={cn(
+              'relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-tl-lg bg-background',
+              rightPanelOpen && 'rounded-tr-lg',
+            )}
+          >
             {children}
           </main>
 

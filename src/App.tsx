@@ -11,6 +11,7 @@ import { SourcesPanel } from '@/components/chat/SourcesPanel';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { TooltipProvider } from '@/components/ui';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel';
 import { resolveHotkey, type HotkeyCommand } from '@/lib/hotkeys';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { SplashScreen } from '@/components/SplashScreen';
@@ -91,6 +92,8 @@ export default function App() {
   const error = useAppStore((state) => state.error);
   const theme = useUiStore((state) => state.theme);
   const layoutMode = useUiStore((state) => state.layoutMode);
+  const codePanelOpen = useUiStore((state) => state.codePanelOpen);
+  const viewportWidth = useViewportWidth();
   const settingsTheme = useAppStore((state) => state.settings.theme);
   const fontScale = useAppStore((state) => state.settings.fontScale);
   const reduceMotion = useAppStore((state) => state.settings.reduceMotion);
@@ -246,6 +249,13 @@ export default function App() {
                 <SourcesPanel />
               </>
             )
+          }
+          // The Code panel only docks from this width up (see CodePanel); the
+          // chat mirrors that with its top-right corner.
+          rightPanelOpen={
+            layoutMode === 'code' &&
+            codePanelOpen &&
+            viewportWidth >= SIDE_PANEL_DOCK_MIN_VIEWPORT
           }
         >
           <WorkspaceCenter />

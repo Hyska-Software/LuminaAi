@@ -130,8 +130,10 @@ describe('CodePanel — visibilidade', () => {
 
     const aside = requiredPanel();
     expect(aside.style.width).toBe(`${SIDE_PANEL_WIDTH_DEFAULT}px`);
-    expect(aside.className).toContain('border-l');
-    expect(aside.className).toContain('bg-surface-raised');
+    // Mirrors the left sidebar chrome: same surface, no vertical divider.
+    expect(aside.className).not.toContain('border-l');
+    expect(aside.className).toContain('bg-surface');
+    expect(aside.className).not.toContain('bg-surface-raised');
     expect(screen.getByRole('tablist', { name: 'Conteúdo do painel' })).toBeTruthy();
   });
 
@@ -299,7 +301,10 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
     useUiStore.setState({ codePanelTab: 'files' });
     render(<CodePanel />);
 
-    expect(screen.getByRole('tab', { name: 'Arquivos' }).getAttribute('aria-selected')).toBe('true');
+    const arquivos = screen.getByRole('tab', { name: 'Arquivos' });
+    expect(arquivos.getAttribute('aria-selected')).toBe('true');
+    // Active tab reuses the same neutral fill as the left sidebar's active items.
+    expect(arquivos.className).toContain('bg-surface-active');
 
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Arquivos' }), { key: 'ArrowRight' });
 
