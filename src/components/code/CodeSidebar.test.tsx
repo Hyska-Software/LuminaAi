@@ -423,6 +423,28 @@ describe('CodeSidebar — Workspaces reais', () => {
     expect(screen.getByRole('button', { name: 'Sessão órfã' })).toBeTruthy();
   });
 
+  it('recolhe e expande o grupo "Sem workspace"', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Sessão órfã', workspaceId: null })],
+    });
+    renderSidebar();
+
+    expect(await screen.findByRole('heading', { name: 'Sem workspace' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sessão órfã' })).toBeTruthy();
+
+    const collapse = screen.getByRole('button', { name: 'Recolher sessões sem workspace' });
+    expect(collapse.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(collapse);
+
+    expect(screen.queryByRole('button', { name: 'Sessão órfã' })).toBeNull();
+    const expand = screen.getByRole('button', { name: 'Expandir sessões sem workspace' });
+    expect(expand.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(expand);
+    expect(screen.getByRole('button', { name: 'Sessão órfã' })).toBeTruthy();
+  });
+
   it('esconde o grupo "Sem workspace" quando não há sessões órfãs', async () => {
     mocks.listWorkspaces.mockResolvedValue([workspace()]);
     useChatStore.setState({

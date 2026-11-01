@@ -643,6 +643,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
 
   const [addSessionOpen, setAddSessionOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [unassignedCollapsed, setUnassignedCollapsed] = useState(false);
   const [openingFolder, setOpeningFolder] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
   const [workspaceQuery, setWorkspaceQuery] = useState('');
@@ -1200,13 +1201,41 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
             aria-labelledby="code-unassigned-heading"
             className="shrink-0 border-t border-border px-2 pb-1 pt-2"
           >
-            <h2
-              id="code-unassigned-heading"
-              className="px-1 text-[11px] font-medium tracking-tight text-foreground-subtle"
+            <div className="flex h-7 min-w-0 items-center gap-0.5 px-1">
+              <button
+                type="button"
+                aria-label={
+                  unassignedCollapsed
+                    ? 'Expandir sessões sem workspace'
+                    : 'Recolher sessões sem workspace'
+                }
+                aria-expanded={!unassignedCollapsed}
+                aria-controls="code-unassigned-sessions"
+                onClick={() => setUnassignedCollapsed((current) => !current)}
+                className={cn(
+                  'flex size-6 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                  'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                )}
+              >
+                {unassignedCollapsed ? (
+                  <ChevronRight aria-hidden className="size-3.5" strokeWidth={1.75} />
+                ) : (
+                  <ChevronDown aria-hidden className="size-3.5" strokeWidth={1.75} />
+                )}
+              </button>
+              <h2
+                id="code-unassigned-heading"
+                className="min-w-0 truncate text-[11px] font-medium tracking-tight text-foreground-subtle"
+              >
+                Sem workspace
+              </h2>
+            </div>
+            <div
+              id="code-unassigned-sessions"
+              hidden={unassignedCollapsed}
+              className="mt-1 max-h-44 overflow-y-auto overscroll-contain pb-1"
             >
-              Sem workspace
-            </h2>
-            <div className="mt-1 max-h-44 overflow-y-auto overscroll-contain pb-1">
               <div className="flex flex-col gap-0.5">
                 {visibleUnassignedSessions.map((conversation) => (
                   <SessionRow

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { Copy, Minus, PanelLeft, Search, Square, X } from 'lucide-react';
+import { Copy, Minus, PanelLeft, Square, X } from 'lucide-react';
 import { IconButton, Kbd, Tooltip } from '@/components/ui';
 import { useUiStore } from '@/lib/store';
 import { cn, modKey } from '@/lib/utils';
@@ -38,7 +38,6 @@ const CONTROL_BASE =
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
-  const setCommandPaletteOpen = useUiStore((state) => state.setCommandPaletteOpen);
 
   useEffect(() => {
     const win = appWindow();
@@ -147,24 +146,6 @@ export function TitleBar() {
         <div className="hidden xl:block">
           <PlanUsageChip />
         </div>
-        <button
-          type="button"
-          onClick={() => setCommandPaletteOpen(true)}
-          aria-label="Buscar conversas e comandos"
-          className={cn(
-            'flex h-8 shrink-0 items-center gap-2 rounded-lg border border-border bg-background px-2.5',
-            'text-[13px] text-foreground-subtle transition-colors duration-150',
-            'hover:border-border-strong hover:bg-surface-hover hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-          )}
-        >
-          <Search className="size-3.5" />
-          <span className="hidden sm:inline">Buscar</span>
-          <span className="hidden items-center gap-0.5 sm:flex">
-            <Kbd>{modKey}</Kbd>
-            <Kbd>K</Kbd>
-          </span>
-        </button>
 
         <div className="ml-1 flex items-center gap-0.5">
           <button type="button" aria-label="Minimizar" onClick={handleMinimize} className={CONTROL_BASE}>

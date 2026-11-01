@@ -66,13 +66,14 @@ afterEach(() => {
 });
 
 describe('TitleBar', () => {
-  it('mantém a marca, a busca e os controles nativos', async () => {
+  it('mantém a marca e os controles nativos', async () => {
     render(<TitleBar />);
 
     await waitFor(() => expect(windowMock.isMaximized).toHaveBeenCalled());
 
     expect(screen.getByText('Lumina')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Buscar conversas e comandos' })).toBeTruthy();
+    // The topbar search was removed; the command palette stays on ⌘/Ctrl+K.
+    expect(screen.queryByRole('button', { name: 'Buscar conversas e comandos' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Minimizar' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Maximizar' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Fechar' })).toBeTruthy();
