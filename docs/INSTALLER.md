@@ -116,7 +116,7 @@ determinísticos.
 ```bash
 pnpm installer                    # host atual, versão atual
 pnpm installer --platform windows --allow-dirty
-pnpm installer --platform macos --universal
+pnpm installer --platform macos
 pnpm installer --platform linux
 pnpm installer --dry-run
 pnpm installer --ci --skip-tests
@@ -141,7 +141,7 @@ Saída:
 ```text
 release/<versão>/
   windows-x64/Lumina-Setup-<versão>-windows-x64.exe
-  macos-universal/Lumina-<versão>-macos-universal.dmg
+  macos-arm64/Lumina-<versão>-macos-arm64.dmg
   linux-x64/Lumina-<versão>-linux-x64.deb
   linux-x64/Lumina-<versão>-linux-x64.rpm
   linux-x64/Lumina-<versão>-linux-x64.AppImage
@@ -215,8 +215,10 @@ Sem certificados, o build é **unsigned** e o manifesto registra
 - `src-tauri/tauri.macos.conf.json` define `app` + `dmg`, fundo dark
   (`installer/macos/dmg-background.png`), 660×400, app em (180,190) e
   Aplicativos em (480,190).
-- Versão mínima: macOS 11. `--universal` exige os alvos Rust
-  `x86_64-apple-darwin` e `aarch64-apple-darwin`.
+- Versão mínima: macOS 11. O build oficial é **arm64 (Apple Silicon)**, gerado
+  na imagem `macos-26`; não há mais DMG Intel nem universal. `--universal`
+  continua disponível para builds locais sob demanda (exige os alvos Rust
+  `x86_64-apple-darwin` e `aarch64-apple-darwin`).
 - O usuário arrasta o Lumina para Aplicativos. Não há wizard; a remoção é
   arrastar para o Lixeira.
 - Dados: `~/Library/Application Support/app.lumina.chat`,
@@ -293,12 +295,18 @@ strategy:
     include:
       - os: windows-latest
         platform: windows
-      - os: macos-14
+      - os: macos-26
         platform: macos
-        args: --universal
+        args: --arch arm64
       - os: ubuntu-22.04
         platform: linux
 ```
+
+Use labels de imagens **suportadas** pelo GitHub: `macos-14` foi aposentada em
+02/11/2026 e, durante os *brownouts* de depreciação, o job é encerrado com
+"This job was cancelled" sem rodar nenhum passo. O release publica só **Apple
+Silicon** (`macos-26`, arm64): o artefato é `Lumina-<v>-macos-arm64.dmg`, sem
+DMG Intel e sem `--universal` (nada de cross-compile no CI).
 
 O workflow **não roda testes** por decisão de release: ele instala dependências,
 executa `pnpm installer --platform <...> --skip-tests --ci --require-clean`,
@@ -336,6 +344,9 @@ push na `main` publica. O workflow precisa de `contents: write`
 | `pnpm installer` avisa sobre árvore suja | Normal em desenvolvimento; use `--require-clean` no CI e faça commit antes do release. |
 | Linux não abre em distro antiga | Build foi feito em glibc mais nova; use Ubuntu 22.04 como baseline. |
 | AppImage não abre | Falta FUSE ou WebKitGTK; use `--appimage-extract-and-run` ou o `.deb`. |
+| Job `macos` cancelado em 0s ("This job was cancelled") | Imagem do runner em depreciação/brownout; use `macos-26` (imagem arm64 atual). |
+| Mac Intel não recebe atualização | A release publica apenas `macos-arm64`; apps x86_64 não são mais suportados. |
+| Outros jobs cancelados junto | Alguém cancelou o run; `fail-fast: false` evita que uma falha derrube as demais plataformas. |
 
 ## 9. Atualização no app
 
@@ -401,7 +412,7 @@ release, o estado é “tudo atualizado” (sem toast de erro).
 | Plataforma | Arquivo | Ação |
 | --- | --- | --- |
 | Windows | `Lumina-Setup-<v>-windows-x64.exe` | Abre o wizard existente; ele detecta a instalação, pula escopo/pasta, fecha o app e preserva os dados |
-| macOS | `Lumina-<v>-macos-universal.dmg` | Abre o DMG; arrastar para Aplicativos |
+| macOS | `Lumina-<v>-macos-arm64.dmg` | Abre o DMG; arrastar para Aplicativos |
 | Linux | `.AppImage` (preferido), `.deb`, `.rpm` | Abre o pacote no sistema ou revela o AppImage na pasta |
 
 A instalação não é silenciosa na v1. Assinatura/Authenticode continuam sendo o

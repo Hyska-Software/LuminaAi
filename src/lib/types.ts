@@ -1289,7 +1289,7 @@ export interface UpdateAsset {
   size: number;
   sha256: string;
   downloadUrl: string;
-  /** Ex.: "Windows x64", "macOS (universal)", "Linux x64 · AppImage". */
+  /** Ex.: "Windows x64", "macOS (Apple Silicon)", "Linux x64 · AppImage". */
   platformLabel: string;
   kind: UpdateAssetKind;
 }

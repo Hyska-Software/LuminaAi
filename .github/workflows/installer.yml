@@ -105,9 +105,11 @@ jobs:
           - os: windows-latest
             platform: windows
             args: ""
-          - os: macos-14
+          # Apple Silicon only, on the newest arm64 image. The Intel slice is no
+          # longer built, so there is no --universal and no cross-compile step.
+          - os: macos-26
             platform: macos
-            args: "--universal"
+            args: "--arch arm64"
           - os: ubuntu-22.04
             platform: linux
             args: ""
@@ -125,10 +127,6 @@ jobs:
           cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust targets (macOS universal)
-        if: matrix.platform == 'macos'
-        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
 
       - name: Linux dependencies
         if: matrix.platform == 'linux'

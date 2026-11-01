@@ -643,6 +643,21 @@ mod tests {
     }
 
     #[test]
+    fn selects_the_apple_silicon_dmg_when_only_arm64_is_published() {
+        let list = artifacts(
+            r#"[
+              {"name":"Lumina-0.2.1-macos-arm64.dmg","size":102,"sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+            ]"#,
+        );
+        let macos = select_asset_for("macos", "aarch64", &list, "0.2.1", BASE).expect("arm64");
+        assert_eq!(macos.name, "Lumina-0.2.1-macos-arm64.dmg");
+        assert_eq!(macos.platform_label, "macOS (Apple Silicon)");
+        // Intel builds are no longer published, so they must get no asset
+        // instead of being offered an arm64 package.
+        assert!(select_asset_for("macos", "x86_64", &list, "0.2.1", BASE).is_none());
+    }
+
+    #[test]
     fn rejects_unsafe_names_hashes_and_unknown_platforms() {
         let bad = artifacts(
             r#"[
