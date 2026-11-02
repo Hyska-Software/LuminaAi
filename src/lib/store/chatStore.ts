@@ -11,6 +11,7 @@ import type {
   SubagentLiveState,
   TraceStep,
   TurnEvent,
+  TurnEventBusPayload,
   TurnOptions,
   TurnPayload,
   TurnProfile,
@@ -120,6 +121,10 @@ interface ChatState {
   processQueue: (conversationId?: string | null) => Promise<void>;
   /** Resumes every persisted agent queue that is idle and unpaused. */
   drainAgentQueues: () => Promise<void>;
+  /** Applies a turn event mirrored on the global bus (reload/reattach). */
+  applyExternalTurnEvent: (payload: TurnEventBusPayload) => Promise<void>;
+  /** Rebuilds streams/messages of turns still running in Rust after a reload. */
+  reattachTurns: () => Promise<void>;
   regenerate: () => Promise<void>;
   editAndResend: (messageId: string, content: string) => Promise<void>;
   stop: () => Promise<void>;
@@ -166,6 +171,47 @@ export interface SendOptions {
 }
 
 const EMPTY: ChatMessage[] = [];
+
+/**
+ * Turns started by this renderer. Their events arrive through the invoke
+ * channel; the global bus listener must ignore them to avoid double-applying.
+ */
+const localTurnIds = new Set<string>();
+/** Highest global-bus sequence applied per turn (reattach + live dedupe). */
+const appliedTurnSeq = new Map<string, number>();
+const terminalTurnIds = new Set<string>();
+/** Dedupe window per conversation+category to avoid notification spam. */
+const notificationThrottle = new Map<string, number>();
+const NOTIFICATION_DEDUPE_MS = 5_000;
+
+export function notificationsAllowed(category: string): boolean {
+  const settings = useAppStore.getState().settings;
+  if (settings.notificationsEnabled === false || settings.notificationsDnd === true) {
+    return false;
+  }
+  switch (category) {
+    case 'approval_requested':
+      return settings.notificationsApprovals !== false;
+    case 'question_requested':
+      return settings.notificationsQuestions !== false;
+    case 'turn_complete':
+      return settings.notificationsCompletions !== false;
+    case 'task_update':
+      return settings.notificationsTasks !== false;
+    default:
+      return true;
+  }
+}
+
+function shouldNotify(category: string, conversationId: string): boolean {
+  if (!notificationsAllowed(category)) return false;
+  const key = `${category}:${conversationId}`;
+  const now = Date.now();
+  const last = notificationThrottle.get(key) ?? 0;
+  if (now - last < NOTIFICATION_DEDUPE_MS) return false;
+  notificationThrottle.set(key, now);
+  return true;
+}
 
 /**
  * Why the model selector is locked for the active layout (`null` = switching is
@@ -443,6 +489,25 @@ export const useChatStore = create<ChatState>()((set, get) => {
     });
   };
 
+  /** Loads a conversation into the cache without changing the active thread. */
+  const loadConversationIntoCache = async (conversationId: string) => {
+    try {
+      const detail = await api.getConversation(conversationId);
+      if (!detail) return;
+      set((state) => ({
+        messagesByConversation: {
+          ...state.messagesByConversation,
+          [conversationId]: detail.messages,
+        },
+        conversations: state.conversations.map((conversation) =>
+          conversation.id === conversationId ? detail.conversation : conversation,
+        ),
+      }));
+    } catch {
+      /* a reattach is best-effort; the next open will retry */
+    }
+  };
+
   const refreshList = async () => {
     try {
       const conversations = await api.listConversations();
@@ -550,6 +615,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       removeOnFailure?: boolean;
     },
   ) => {
+    let local_turn_id: string | null = payload.turnId ?? null;
     let reasoningBuffer = '';
     let textBuffer = '';
     let flushHandle: ReturnType<typeof setTimeout> | null = null;
@@ -634,7 +700,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (isCodeEvent(event)) useCodeStore.getState().applyEvent(context.conversationId, event);
       if (
         (event.type === 'approval_requested' || event.type === 'question_requested') &&
-        useAppStore.getState().settings.notificationsEnabled !== false
+        shouldNotify(event.type, context.conversationId)
       ) {
         const uiNow = useUiStore.getState();
         const conversation = get().conversations.find(
@@ -650,7 +716,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
               ? 'Aprovação necessária'
               : 'O agente fez uma pergunta';
           const body = conversation?.title ?? 'Thread de agente';
-          toast.info(title, { description: body });
+          toast.info(title, {
+            description: body,
+            action: {
+              label: 'Abrir',
+              onClick: () => void get().openConversation(context.conversationId),
+            },
+          });
           void api.notifyDesktop(title, body);
         }
       }
@@ -792,6 +864,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         case 'done':
           flush();
           finished = true;
+          if (local_turn_id) terminalTurnIds.add(local_turn_id);
           applyResult(event.result);
           // In-app completion notice for agent threads the user is not looking
           // at. The `notificationsEnabled` setting already existed for this;
@@ -803,7 +876,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
             const uiNow = useUiStore.getState();
             if (
               finishedConversation?.mode === 'agent' &&
-              useAppStore.getState().settings.notificationsEnabled !== false &&
+              notificationsAllowed('turn_complete') &&
               (uiNow.layoutMode !== 'agent' || get().activeId !== finishedConversation.id)
             ) {
               const agentName = finishedConversation.agentId
@@ -812,6 +885,10 @@ export const useChatStore = create<ChatState>()((set, get) => {
               const title = `${agentName ?? 'Agente'} concluiu a resposta`;
               toast.success(title, {
                 description: finishedConversation.title,
+                action: {
+                  label: 'Abrir',
+                  onClick: () => void get().openConversation(finishedConversation.id),
+                },
               });
               void api.notifyDesktop(title, finishedConversation.title);
             }
@@ -834,6 +911,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           flush();
           finished = true;
           terminal = 'cancelled';
+          if (local_turn_id) terminalTurnIds.add(local_turn_id);
           void syncCacheStats(context.conversationId);
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
@@ -847,6 +925,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           flush();
           finished = true;
           terminal = 'error';
+          if (local_turn_id) terminalTurnIds.add(local_turn_id);
           void syncCacheStats(context.conversationId);
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
@@ -1081,6 +1160,10 @@ export const useChatStore = create<ChatState>()((set, get) => {
       void syncArtifacts(context.conversationId);
     } finally {
       if (flushHandle) clearTimeout(flushHandle);
+      if (local_turn_id) {
+        localTurnIds.delete(local_turn_id);
+        local_turn_id = null;
+      }
     }
   };
 
@@ -1127,6 +1210,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
   ) => {
     const { conversationId, content, attachments, selection, reasoning, options } = input;
     const turnId = newId();
+    localTurnIds.add(turnId);
     const now = Date.now();
     const optimisticUserId = `optimistic-user-${turnId}`;
     const optimisticAssistantId = `optimistic-assistant-${turnId}`;
@@ -1783,6 +1867,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       // Regenerating keeps the model the conversation was started with.
       const selection = lockedSelectionFor(state) ?? app.selection;
       const turnId = newId();
+      localTurnIds.add(turnId);
       try {
         await api.truncateConversation(conversationId, lastAssistant.id);
       } catch (error) {
@@ -1969,6 +2054,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
             : current.reasoning;
 
       const turnId = newId();
+      localTurnIds.add(turnId);
       const now = Date.now();
       const optimisticUserId = `optimistic-user-${turnId}`;
       const optimisticAssistantId = `optimistic-assistant-${turnId}`;
@@ -2093,6 +2179,258 @@ export const useChatStore = create<ChatState>()((set, get) => {
         return;
       }
       await get().runGoalRound(conversationId);
+    },
+
+    applyExternalTurnEvent: async (payload) => {
+      if (localTurnIds.has(payload.turnId)) return;
+      if (terminalTurnIds.has(payload.turnId)) return;
+      const lastSeq = appliedTurnSeq.get(payload.turnId) ?? 0;
+      if (payload.seq <= lastSeq) return;
+      appliedTurnSeq.set(payload.turnId, payload.seq);
+      const { conversationId, event, turnId } = payload;
+      if (isCodeEvent(event)) {
+        useCodeStore.getState().applyEvent(conversationId, event);
+      }
+      if (!get().messagesByConversation[conversationId]) {
+        await loadConversationIntoCache(conversationId);
+      }
+      const conversation = get().conversations.find((entry) => entry.id === conversationId);
+      let stream = selectConversationStream(get(), conversationId);
+      if (event.type === 'turn_started') {
+        stream = {
+          turnId,
+          conversationId,
+          assistantId: event.assistantMessageId,
+          userMessageId: event.userMessageId,
+          phase: 'starting',
+          step: 1,
+          startedAt: Date.now(),
+          turnKind: 'user',
+          subagents: stream?.subagents ?? {},
+        };
+        setStream(conversationId, stream);
+        const list = get().messagesByConversation[conversationId] ?? [];
+        if (!list.some((message) => message.id === event.assistantMessageId)) {
+          pushMessage(conversationId, {
+            id: event.assistantMessageId,
+            conversationId,
+            role: 'assistant',
+            content: '',
+            reasoning: '',
+            status: 'streaming',
+            toolCalls: [],
+            citations: [],
+            attachments: [],
+            trace: [],
+            modelId: conversation?.modelId ?? '',
+            providerId: conversation?.providerId ?? '',
+            createdAt: Date.now(),
+          });
+        }
+        return;
+      }
+      if (!stream) {
+        const list = get().messagesByConversation[conversationId] ?? [];
+        const assistant = [...list]
+          .reverse()
+          .find((message) => message.role === 'assistant' && message.status === 'streaming');
+        stream = {
+          turnId,
+          conversationId,
+          assistantId: assistant?.id ?? `external-assistant-${turnId}`,
+          userMessageId: null,
+          phase: 'starting',
+          step: 1,
+          startedAt: Date.now(),
+          turnKind: 'user',
+          subagents: {},
+        };
+        setStream(conversationId, stream);
+      }
+      const assistantId = stream.assistantId;
+      switch (event.type) {
+        case 'step_started':
+          patchStream(conversationId, (current) => ({ ...current, step: event.step }));
+          break;
+        case 'reasoning_delta':
+          patchStream(conversationId, (current) => ({ ...current, phase: 'reasoning' }));
+          patchMessage(conversationId, assistantId, (message) => ({
+            ...message,
+            reasoning: (message.reasoning ?? '') + event.delta,
+          }));
+          break;
+        case 'text_delta':
+          patchStream(conversationId, (current) => ({ ...current, phase: 'text' }));
+          patchMessage(conversationId, assistantId, (message) => ({
+            ...message,
+            content: message.content + event.delta,
+          }));
+          break;
+        case 'tool_call_started':
+          patchStream(conversationId, (current) => ({ ...current, phase: 'tool' }));
+          patchMessage(conversationId, assistantId, (message) => ({
+            ...message,
+            toolCalls: [
+              ...message.toolCalls.filter((tool) => tool.id !== event.toolCall.id),
+              event.toolCall,
+            ],
+          }));
+          break;
+        case 'tool_call_args':
+          patchMessage(conversationId, assistantId, (message) => ({
+            ...message,
+            toolCalls: message.toolCalls.map((tool) =>
+              tool.id === event.id ? { ...tool, arguments: tool.arguments + event.delta } : tool,
+            ),
+          }));
+          break;
+        case 'tool_call_finished':
+          patchMessage(conversationId, assistantId, (message) => ({
+            ...message,
+            toolCalls: message.toolCalls.map((tool) =>
+              tool.id === event.id
+                ? {
+                    ...tool,
+                    status: event.status,
+                    result: event.result,
+                    summary: event.summary ?? tool.summary,
+                    presentation: event.presentation ?? tool.presentation ?? null,
+                    finishedAt: Date.now(),
+                  }
+                : tool,
+            ),
+            citations: mergeCitations(message.citations, event.citations ?? []),
+          }));
+          break;
+        case 'tool_progress':
+          patchMessage(conversationId, assistantId, (message) => ({
+            ...message,
+            toolCalls: message.toolCalls.map((tool) =>
+              tool.id === event.id
+                ? { ...tool, result: `${tool.result ?? ''}${event.delta}` }
+                : tool,
+            ),
+          }));
+          break;
+        case 'message_updated':
+          patchMessage(conversationId, event.message.id, () => event.message);
+          break;
+        case 'usage':
+          patchMessage(conversationId, assistantId, (message) => ({
+            ...message,
+            usage: { ...(message.usage ?? {}), ...event.usage },
+          }));
+          break;
+        case 'title_updated':
+          set((state) => ({
+            conversations: state.conversations.map((entry) =>
+              entry.id === event.conversationId ? { ...entry, title: event.title } : entry,
+            ),
+          }));
+          break;
+        case 'artifact_created':
+          if (
+            event.artifact.conversationId === conversationId &&
+            get().activeId === conversationId
+          ) {
+            useUiStore.getState().addArtifact(event.artifact);
+          }
+          break;
+        case 'done':
+          terminalTurnIds.add(turnId);
+          finalizeAssistant(conversationId, event.result.assistantMessage);
+          if (stream.userMessageId) {
+            patchMessage(conversationId, stream.userMessageId, () => event.result.userMessage);
+          }
+          if (event.result.conversation) {
+            const updated = event.result.conversation;
+            set((state) => ({
+              conversations: state.conversations.map((entry) =>
+                entry.id === updated.id ? updated : entry,
+              ),
+            }));
+          }
+          void refreshList();
+          void syncArtifacts(conversationId);
+          break;
+        case 'cancelled':
+          terminalTurnIds.add(turnId);
+          patchMessage(conversationId, assistantId, (message) => ({
+            ...message,
+            status: 'cancelled',
+          }));
+          setStream(conversationId, null);
+          break;
+        case 'error':
+          terminalTurnIds.add(turnId);
+          patchMessage(conversationId, assistantId, (message) => ({
+            ...message,
+            status: message.content ? 'complete' : 'error',
+          }));
+          setStream(conversationId, null);
+          if (get().activeId === conversationId) {
+            set({
+              error: event.message,
+              errorCode: event.code ?? null,
+              errorHint: event.hint ?? null,
+            });
+          }
+          break;
+        default:
+          break;
+      }
+    },
+
+    reattachTurns: async () => {
+      let active: Awaited<ReturnType<typeof api.listActiveTurns>> = [];
+      try {
+        active = await api.listActiveTurns();
+      } catch {
+        return;
+      }
+      for (const turn of active) {
+        if (localTurnIds.has(turn.turnId)) continue;
+        await loadConversationIntoCache(turn.conversationId);
+        let records: Awaited<ReturnType<typeof api.listTurnEvents>> = [];
+        try {
+          records.push(...(await api.listTurnEvents(turn.turnId)));
+        } catch {
+          continue;
+        }
+        // Turns without persisted events are internal runners (task/rotina)
+        // that do not stream to the renderer; do not invent a phantom stream.
+        if (records.length === 0) continue;
+        for (const record of records) {
+          await get().applyExternalTurnEvent({
+            turnId: record.turnId,
+            seq: record.seq,
+            conversationId: turn.conversationId,
+            event: record.event,
+          });
+        }
+        if (
+          !terminalTurnIds.has(turn.turnId) &&
+          !selectConversationStream(get(), turn.conversationId)
+        ) {
+          const list = get().messagesByConversation[turn.conversationId] ?? [];
+          const assistant = [...list]
+            .reverse()
+            .find(
+              (message) => message.role === 'assistant' && message.status === 'streaming',
+            );
+          setStream(turn.conversationId, {
+            turnId: turn.turnId,
+            conversationId: turn.conversationId,
+            assistantId: assistant?.id ?? `external-assistant-${turn.turnId}`,
+            userMessageId: null,
+            phase: 'starting',
+            step: 1,
+            startedAt: turn.startedAt,
+            turnKind: 'user',
+            subagents: {},
+          });
+        }
+      }
     },
 
     syncArtifacts,

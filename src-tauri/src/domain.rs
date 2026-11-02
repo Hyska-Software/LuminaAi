@@ -139,6 +139,22 @@ pub struct ToolCallRecord {
     /// JSON opaco versionado por `kind` — ver `docs/goals/code-harness/TOOLS.md` §1.1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presentation: Option<Value>,
+    /// Imagens devolvidas pela tool (screenshot). Só caminhos/metadados entram
+    /// no DB; o base64 é lido do disco na hora de montar o replay.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ToolImageRef>,
+}
+
+/// Persisted reference to a tool image (never the bytes).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolImageRef {
+    pub mime_type: String,
+    pub path: String,
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
 }
 
 fn default_tool_status() -> ToolCallStatus {
@@ -157,6 +173,7 @@ impl ToolCallRecord {
             started_at: Some(now_ms()),
             finished_at: None,
             presentation: None,
+            images: Vec::new(),
         }
     }
 }
@@ -1070,12 +1087,32 @@ impl Default for CacheSettings {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn default_execution_environment() -> String {
     "local".to_string()
 }
 
 fn default_docker_image() -> String {
     "node:22-bookworm".to_string()
+}
+
+fn default_docker_memory_mb() -> u32 {
+    2_048
+}
+
+fn default_docker_cpus() -> f32 {
+    2.0
+}
+
+fn default_docker_pids_limit() -> u32 {
+    256
+}
+
+fn default_docker_read_only_root() -> bool {
+    true
 }
 
 fn default_max_concurrent_turns() -> u32 {
@@ -1096,6 +1133,14 @@ fn default_computer_docker_image() -> String {
 
 fn default_computer_docker_container() -> String {
     "lumina-computer".to_string()
+}
+
+fn default_computer_max_actions_per_turn() -> u32 {
+    20
+}
+
+fn default_computer_max_actions_per_hour() -> u32 {
+    120
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1148,6 +1193,18 @@ pub struct Settings {
     /// Permite rede no contêiner Docker (desligado = `--network none`).
     #[serde(default)]
     pub docker_network: bool,
+    /// Memory cap for Docker sandboxes (MB).
+    #[serde(default = "default_docker_memory_mb")]
+    pub docker_memory_mb: u32,
+    /// CPU cap for Docker sandboxes.
+    #[serde(default = "default_docker_cpus")]
+    pub docker_cpus: f32,
+    /// PID cap for Docker sandboxes.
+    #[serde(default = "default_docker_pids_limit")]
+    pub docker_pids_limit: u32,
+    /// Mount the container root filesystem read-only (workspace stays writable).
+    #[serde(default = "default_docker_read_only_root")]
+    pub docker_read_only_root: bool,
     /// Maximum simultaneous turns across the whole app.
     #[serde(default = "default_max_concurrent_turns")]
     pub max_concurrent_turns: u32,
@@ -1166,6 +1223,12 @@ pub struct Settings {
     /// Container name used by the graphical computer-use backend.
     #[serde(default = "default_computer_docker_container")]
     pub computer_docker_container: String,
+    /// Max computer-use actions in one turn.
+    #[serde(default = "default_computer_max_actions_per_turn")]
+    pub computer_max_actions_per_turn: u32,
+    /// Max computer-use actions per agent in a rolling hour.
+    #[serde(default = "default_computer_max_actions_per_hour")]
+    pub computer_max_actions_per_hour: u32,
     /// Compacta o contexto automaticamente quando a janela aperta.
     pub auto_compact: bool,
     /// Retenção dos arquivos de spill (saída completa de tools), em dias.
@@ -1174,6 +1237,21 @@ pub struct Settings {
     pub approval_timeout_secs: u32,
     /// Notificações do sistema no fim de turnos em segundo plano.
     pub notifications_enabled: bool,
+    /// Notify approvals requested by background threads.
+    #[serde(default = "default_true")]
+    pub notifications_approvals: bool,
+    /// Notify structured questions asked by background threads.
+    #[serde(default = "default_true")]
+    pub notifications_questions: bool,
+    /// Notify completed background agent turns.
+    #[serde(default = "default_true")]
+    pub notifications_completions: bool,
+    /// Notify task state changes that need a human.
+    #[serde(default = "default_true")]
+    pub notifications_tasks: bool,
+    /// Do not disturb: keep notifications in the in-app list only.
+    #[serde(default)]
+    pub notifications_dnd: bool,
     /// Modo de permissão inicial de novas sessões do Code (padrão: Autônomo),
     /// configurável em Configurações → Ferramentas. O Chat ignora os modos.
     pub code_default_permission_mode: PermissionMode,
@@ -1218,16 +1296,27 @@ impl Default for Settings {
             execution_environment: default_execution_environment(),
             docker_image: default_docker_image(),
             docker_network: false,
+            docker_memory_mb: default_docker_memory_mb(),
+            docker_cpus: default_docker_cpus(),
+            docker_pids_limit: default_docker_pids_limit(),
+            docker_read_only_root: default_docker_read_only_root(),
             max_concurrent_turns: default_max_concurrent_turns(),
             max_concurrent_turns_per_agent: default_max_concurrent_turns_per_agent(),
             max_queue_length_per_thread: default_max_queue_length(),
             agent_daily_cost_limit_usd: None,
             computer_docker_image: default_computer_docker_image(),
             computer_docker_container: default_computer_docker_container(),
+            computer_max_actions_per_turn: default_computer_max_actions_per_turn(),
+            computer_max_actions_per_hour: default_computer_max_actions_per_hour(),
             auto_compact: true,
             spill_retention_days: 30,
             approval_timeout_secs: 600,
             notifications_enabled: true,
+            notifications_approvals: true,
+            notifications_questions: true,
+            notifications_completions: true,
+            notifications_tasks: true,
+            notifications_dnd: false,
             // Padrão do produto: o Code nasce Autônomo (o usuário troca em
             // Configurações → Ferramentas e por sessão no chip do composer).
             code_default_permission_mode: PermissionMode::Autonomous,
@@ -1503,6 +1592,16 @@ pub enum ApprovalDetail {
     },
     Outside {
         path: String,
+    },
+    ComputerAction {
+        action: String,
+        target: String,
+        #[serde(default)]
+        screenshot_path: Option<String>,
+        #[serde(default)]
+        text_length: Option<u32>,
+        #[serde(default)]
+        sensitive: bool,
     },
     Other {
         text: String,

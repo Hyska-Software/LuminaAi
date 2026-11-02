@@ -576,7 +576,13 @@ async fn run_script(
     timeout: Duration,
     input_files: Vec<InputFile>,
 ) -> anyhow::Result<ToolOutcome> {
-    let interpreter = resolve_interpreter(language, &rt.settings)?;
+    let docker_image = (rt.settings.execution_environment.trim().eq_ignore_ascii_case("docker")
+        && !rt.settings.docker_image.trim().is_empty())
+    .then(|| rt.settings.docker_image.trim().to_string());
+    let interpreter = match &docker_image {
+        Some(_) => None,
+        None => Some(resolve_interpreter(language, &rt.settings)?),
+    };
     let workspace = Workspace::create(&rt.data_dir)?;
     let mut protected: BTreeSet<PathBuf> = BTreeSet::new();
 
@@ -605,13 +611,63 @@ async fn run_script(
         return Ok(cancelled_outcome(language));
     }
 
-    let mut command = Command::new(&interpreter.path);
-    if language == Language::Python {
-        // Unbuffered stdout/stderr so the captured streams reflect the run.
-        command.arg("-u");
-    }
+    let mut container_name: Option<String> = None;
+    let mut command = if let Some(image) = docker_image.as_deref() {
+        // Docker execution: the workspace is the only host path visible; the
+        // rootfs is read-only, there is no network and the container is
+        // removed with the run (including on cancellation).
+        let name = format!("lumina-code-{}", uuid::Uuid::new_v4());
+        container_name = Some(name.clone());
+        let binary = match language {
+            Language::Python => "python",
+            Language::JavaScript => "node",
+        };
+        let mut command = Command::new("docker");
+        command.args(["run", "--rm", "--name"]);
+        command.arg(&name);
+        command.args([
+            "--network",
+            "none",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--label",
+            "lumina.owner=lumina",
+        ]);
+        command
+            .arg("--pids-limit")
+            .arg(rt.settings.docker_pids_limit.max(32).to_string());
+        command
+            .arg("--memory")
+            .arg(format!("{}m", rt.settings.docker_memory_mb.max(256)));
+        command
+            .arg("--cpus")
+            .arg(format!("{:.1}", rt.settings.docker_cpus.max(0.25)));
+        if rt.settings.docker_read_only_root {
+            command.args(["--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m"]);
+        }
+        command.arg("-v");
+        command.arg(format!("{}:/workspace", workspace.path.to_string_lossy()));
+        command.args(["-w", "/workspace"]);
+        command.arg(image);
+        if language == Language::Python {
+            // Unbuffered stdout/stderr so the captured streams reflect the run.
+            command.arg("-u");
+        }
+        command.arg(binary).arg(language.script_name());
+        command
+    } else {
+        let interpreter = interpreter.as_ref().expect("interpreter resolved");
+        let mut command = Command::new(&interpreter.path);
+        if language == Language::Python {
+            // Unbuffered stdout/stderr so the captured streams reflect the run.
+            command.arg("-u");
+        }
+        command.arg(language.script_name());
+        command
+    };
     command
-        .arg(language.script_name())
         .current_dir(&workspace.path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -620,9 +676,16 @@ async fn run_script(
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
+    let spawn_label = match docker_image.as_deref() {
+        Some(image) => format!("container `{image}`"),
+        None => interpreter
+            .as_ref()
+            .map(|interpreter| interpreter.path.display().to_string())
+            .unwrap_or_else(|| language.as_str().to_string()),
+    };
     let mut child = command
         .spawn()
-        .with_context(|| format!("não foi possível iniciar {}", interpreter.path.display()))?;
+        .with_context(|| format!("não foi possível iniciar {spawn_label}"))?;
     let pid = child.id();
     let stdout_task = tokio::spawn(read_capped(child.stdout.take()));
     let stderr_task = tokio::spawn(read_capped(child.stderr.take()));
@@ -645,6 +708,9 @@ async fn run_script(
         kill_process_tree(pid).await;
         let _ = child.start_kill();
         let _ = child.wait().await;
+        if let Some(name) = container_name.as_deref() {
+            docker_remove(name).await;
+        }
     }
     let duration = started.elapsed();
 
@@ -785,6 +851,20 @@ async fn kill_process_tree(pid: Option<u32>) {
     }
     #[cfg(not(windows))]
     let _ = pid;
+}
+
+/// Removes a container left behind when the Docker CLI was killed. `--rm`
+/// handles the normal path; this is the timeout/cancel fail-safe.
+async fn docker_remove(name: &str) {
+    let mut command = Command::new("docker");
+    command
+        .args(["rm", "-f", name])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let _ = command.status().await;
 }
 
 /// Reads a stream keeping the last [`MAX_STREAM_BYTES`] while draining the rest
@@ -1431,6 +1511,30 @@ print('concluído')
             .as_deref()
             .unwrap_or_default()
             .contains("falhou"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Docker and the node:24-bookworm-slim image"]
+    async fn docker_mode_runs_node_and_collects_artifacts() {
+        let temp = TempDir::new();
+        let mut rt = runtime(&temp);
+        rt.settings.execution_environment = "docker".to_string();
+        rt.settings.docker_image = "node:24-bookworm-slim".to_string();
+        let outcome = run_script(
+            &rt,
+            Language::JavaScript,
+            "import fs from 'node:fs';\n\
+             fs.writeFileSync('saida-docker.txt', 'ok');\n\
+             console.log('docker-ok');\n",
+            Duration::from_secs(90),
+            Vec::new(),
+        )
+        .await
+        .expect("executar node no Docker");
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("docker-ok"));
+        assert_eq!(outcome.artifacts.len(), 1);
+        assert_eq!(outcome.artifacts[0].name, "saida-docker.txt");
     }
 
     #[tokio::test]

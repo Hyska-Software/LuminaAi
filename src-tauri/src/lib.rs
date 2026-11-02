@@ -89,6 +89,19 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
                     crate::commands::tasks::scheduler_tick(task_scheduler.clone()).await;
                 }
             });
+            // Orphan containers and audit sessions from a previous process are
+            // not live. Clean them once at boot; periodic cleanup would kill
+            // legitimate terminal/run_code containers.
+            let boot_cleanup = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = boot_cleanup.state::<crate::state::AppState>();
+                let _ = state
+                    .db
+                    .end_all_computer_sessions("stopped", crate::domain::now_ms());
+                if let Err(error) = crate::commands::docker::cleanup_containers(&state).await {
+                    eprintln!("lumina: limpeza de containers no boot falhou: {error}");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -96,11 +109,19 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::turn::cancel_turn,
             commands::turn::cancel_conversation,
             commands::turn::list_active_turns,
+            commands::turn::list_turn_events,
             commands::docker::docker_status,
             commands::docker::docker_pull_image,
             commands::docker::docker_validate_image,
             commands::docker::docker_cleanup,
             commands::notifications::notify_desktop,
+            commands::computer::list_computer_actions,
+            commands::computer::list_computer_sessions,
+            commands::computer::list_active_computer_sessions,
+            commands::computer::stop_computer_session,
+            commands::computer::stop_all_computer_sessions,
+            commands::computer::computer_screenshot_preview,
+            commands::diagnostics::platform_diagnostics,
             commands::models::get_catalog,
             commands::models::refresh_catalog,
             commands::models::list_remote_models,

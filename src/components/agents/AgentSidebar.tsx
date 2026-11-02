@@ -40,6 +40,7 @@ import { AgentActivityDialog } from './AgentActivityDialog';
 import { AgentChannelDialog } from './AgentChannelDialog';
 import { AgentRevisionDialog } from './AgentRevisionDialog';
 import { AgentRoutinesDialog } from './AgentRoutinesDialog';
+import { AgentTaskBoardDialog } from './AgentTaskBoardDialog';
 import { AgentTasksDialog } from './AgentTasksDialog';
 import { relativeTime } from './agentUtils';
 import {
@@ -470,6 +471,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const [revisionAgent, setRevisionAgent] = useState<Agent | null>(null);
   const [tasksAgent, setTasksAgent] = useState<Agent | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [taskBoardOpen, setTaskBoardOpen] = useState(false);
   const activeTurnCount = useChatStore(
     (state) => Object.keys(state.streamsByConversation).length,
   );
@@ -762,6 +764,14 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
               {activeTurnCount}
             </button>
           ) : null}
+          <IconButton
+            label="Quadro de tarefas"
+            size="sm"
+            variant="ghost"
+            onClick={() => setTaskBoardOpen(true)}
+          >
+            <ListChecks className="size-4" />
+          </IconButton>
           <IconButton
             label="Novo agente"
             size="sm"
@@ -1259,6 +1269,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
       />
 
       <AgentActivityDialog open={activityOpen} onOpenChange={setActivityOpen} />
+      <AgentTaskBoardDialog open={taskBoardOpen} onOpenChange={setTaskBoardOpen} />
 
       <AgentChannelDialog
         channel={editingChannel}

@@ -3,6 +3,8 @@
 
 pub mod agents;
 pub mod channels;
+pub mod computer;
+pub mod diagnostics;
 pub mod routines;
 pub mod tasks;
 pub mod artifacts;

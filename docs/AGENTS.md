@@ -42,7 +42,7 @@ Identidade (`name`, `role`, `description`, `emoji`, `department`), modelo
 (`provider_id`, `model_id`, `reasoning_json`), modelo de reserva opcional
 (`fallback_provider_id`, `fallback_model_id`), instruções, `prompt_version`,
 starters, `capabilities_json`, `memory_enabled`, `workspace_id`,
-`permission_mode`, pin/ordem e arquivamento.
+`permission_mode`, `docker_image`, pin/ordem e arquivamento.
 
 - `prompt_version` sobe quando um campo que muda o prompt muda (nome, papel,
   descrição, instruções, memória). A snapshot key do Chat/Code inclui
@@ -77,6 +77,9 @@ o turno real.
 - `webSearch` → gate de `web_search`;
 - `fileAccess` → gate de `create_file`;
 - `codeExecution` → gate de `run_code` (além do gate global);
+- `delegation` → gate das tools de tarefas (`delegate_task` etc.);
+- `computerUse`/`screenCapture` → gate das tools de computer use;
+- `dockerExecution` → permite `agents.docker_image` como override de imagem;
 - `skills: null` herda todas; `Some([...])` é allowlist (`Some([])` nega todas);
 - `tools: null` herda todas; `Some([...])` é allowlist;
 - `mcpServers: null` herda todos os servidores MCP; `Some([...])` é allowlist.
@@ -129,19 +132,19 @@ Uma persona com `workspace_id` roda o **perfil Code** nas suas threads:
 - Sem workspace, a persona usa o perfil Chat (web, arquivos/artefatos,
   `run_code` opcional) e não tem shell/FS.
 
-**Computer use local**: o agente de Code usa o computador do usuário via
-arquivos (read/write/edit), shell (`run_command`/`run_checks`), git, jobs,
-terminal interativo no painel e as abas de diff/plano. Não há automação de
-mouse/teclado nem controle de navegador/desktop — isso exigiria um driver de
-computer-use separado e não faz parte desta entrega.
+**Computer use local**: o agente pode usar o computador do usuário quando a
+capability `computerUse`/`screenCapture` está ligada: screenshot, clique,
+teclado, janelas, foco e UI tree, com aprovação por ação e auditoria. O
+detalhamento (backend Windows/Docker, denylist, rate limit e imagens para
+modelos com visão) está em `docs/COMPUTER.md`.
 
 **Execução em Docker**: `Settings.executionEnvironment` (`local` | `docker`)
-escolhe onde `run_command`/`run_checks`/jobs rodam. No modo Docker o workspace é
-montado em `/workspace`, o comando roda com `docker run --rm -i`, a rede fica
+escolhe onde `run_command`/`run_checks`/jobs, `run_code` e o terminal interativo
+rodam. No modo Docker o workspace é montado em `/workspace`, a rede fica
 desligada por padrão (`--network none`) e a imagem vem de `dockerImage`
-(padrão `node:22-bookworm`). O Docker precisa estar instalado/rodando e a imagem
-já presente; o app não baixa imagens. O terminal interativo do painel continua
-local.
+(padrão `node:22-bookworm`) ou de `agents.docker_image` quando a capability
+`dockerExecution` está ligada. Limites de CPU/memória/pids/rootfs são
+configuráveis. O detalhamento está em `docs/DOCKER.md`.
 
 Permissões: `read_only`, `review`, `edit`, `autonomous`. O chip do composer
 troca o modo da sessão; toda mutação passa por `policy::decide`.
@@ -179,9 +182,18 @@ com erro — o fallback é de rota, não um retry infinito.
 - `agentDailyCostLimitUsd` bloqueia novos turnos com `BUDGET_EXCEEDED` quando o
   custo do dia atinge o limite.
 - Sidebar tem Stop por thread; o diálogo **Atividade** lista todos os streams
-  (inclusive em segundo plano) e oferece “Parar tudo”.
+  (inclusive em segundo plano), aprovações/perguntas pendentes e tarefas
+  aguardando o usuário, e oferece “Parar tudo”.
 - Aprovação/pergunta em thread de fundo gera toast + notificação do SO via
-  `notify_desktop`; conclusão/falha de thread não ativa também notifica.
+  `notify_desktop`; conclusão/falha de thread não ativa também notifica. O toast
+  tem ação **Abrir** e há dedupe de 5 s por conversa/categoria.
+- `notificationsApprovals`, `notificationsQuestions`, `notificationsCompletions`,
+  `notificationsTasks` e `notificationsDnd` controlam as categorias; DND mantém
+  os avisos apenas no diálogo Atividade.
+- Cada evento de turno é persistido em `turn_events` com `seq` e espelhado em
+  `lumina:turn-event`. Ao recarregar o webview, `reattachTurns()` reconstrói o
+  stream ativo sem duplicar mensagens; turnos de outra instância são aplicados
+  pelo barramento global.
 
 ## 7. Rotinas
 
@@ -241,8 +253,12 @@ Contrato completo: `docs/TASKS.md`.
   `accept_task`, `decline_task`, `handoff_task`, `update_task`, `finish_task`,
   `send_message`.
 - O scheduler Rust roda tarefas a cada 5 s sob o governador de concorrência,
-  cria/reusa thread oculta com `task_id` e publica o resultado no canal.
-- UI: menu do agente → **Tarefas**; quadro completo por canal é evolução futura.
+  cria/reusa thread oculta com `task_id`, renova o lease, roda múltiplos turnos
+  com orçamento e publica o resultado no canal.
+- Handoff entra em `handoff_pending` até o destino aceitar; cancelamento
+  interrompe o turno real.
+- UI: menu do agente → **Tarefas**; botão **Quadro de tarefas** na sidebar com
+  colunas e ações; diálogo **Atividade** centraliza pendências.
 
 ## 9.2 Computer use
 
@@ -251,25 +267,32 @@ Contrato completo: `docs/COMPUTER.md`.
 - Capabilities `computerUse`, `screenCapture`, `browserUse` (reservado).
 - Windows local: screenshot, clique, teclado, janelas, foco e árvore de
   acessibilidade; Docker gráfico via `docker/computer/` (Xvfb + noVNC).
-- `RiskClass::Computer` sempre pede aprovação, inclusive em Autônomo; sem canal
-  de aprovação a tool falha fechada.
-- Screenshot vira arquivo no app-data e não é enviado como imagem ao modelo; o
-  modelo usa `computer_windows`/`computer_ui_tree` + coordenadas.
-- Browser CDP, denylist de apps sensíveis e macOS/Linux local ainda não
-  implementados.
+- `RiskClass::Computer` sempre pede aprovação, inclusive em Autônomo; o card
+  mostra screenshot/alvo e só oferece permitir uma vez/negar; sem canal de
+  aprovação a tool falha fechada.
+- Toda ação tem sessão/registro em `computer_sessions`/`computer_actions`, sem
+  texto digitado ou bytes de screenshot; rate limit por turno/hora.
+- `computer_screenshot` vira imagem para modelos com visão (máx. 2/turno,
+  1280 px) e texto/UI tree para modelos sem visão.
+- Browser CDP e macOS/Linux local ainda não implementados; a denylist de apps
+  sensíveis está ativa.
 
 ## 9.3 Docker de produção
 
 Contrato completo: `docs/DOCKER.md`.
 
-- `executionEnvironment` local/docker; imagem, rede e limites configuráveis.
+- `executionEnvironment` local/docker; imagem, rede, CPU, memória, pids e
+  rootfs configuráveis; override de imagem por agente com `dockerExecution`.
 - `run_command`/`run_checks`/jobs usam `docker run` com workspace em
   `/workspace`, non-root, cap-drop, no-new-privileges, read-only, tmpfs,
-  limites de CPU/memória/pids e rede off.
+  limites e rede off.
+- `run_code` e o terminal interativo também rodam em Docker, com cleanup de
+  container no timeout/cancelamento/fechamento da aba e label
+  `lumina.owner=lumina` para limpeza no boot.
 - `docker_status`, `docker_pull_image`, `docker_validate_image`,
   `docker_cleanup`; imagem do computer use é separada.
-- `run_code` do Chat e terminal continuam locais; perfil por agente ainda é
-  global.
+- Perfil por workspace, compose/devcontainer e containers gráficos por sessão
+  ainda não implementados.
 
 ## 10. Cache e segurança
 
@@ -307,7 +330,16 @@ Testes específicos deste contrato:
 - `src-tauri/src/workspace/exec.rs` (argv/hardening do Docker)
 - `src/components/settings/ToolsTab.test.tsx` (ambiente Docker)
 - `src-tauri/src/concurrency.rs` (governador global/por agente)
-- `src-tauri/src/tools/tasks.rs` (delegação/ownership)
-- `src-tauri/src/db.rs` (tarefas: claim/transições/handoff)
+- `src-tauri/src/tools/tasks.rs` (delegação/ownership/handoff pendente)
+- `src-tauri/src/db.rs` (tarefas: claim/transições/handoff/lease; auditoria de
+  computer use; `turn_events`)
+- `src-tauri/src/commands/tasks.rs` (runner multi-turno/cancelamento/heartbeat)
+- `src-tauri/src/commands/turn.rs` (eventos persistidos/reattach)
 - `src-tauri/src/computer/mod.rs` (backend local/Docker)
+- `src-tauri/src/tools/code_exec.rs` (`run_code` Docker, teste `#[ignore]`)
+- `src-tauri/src/terminal/mod.rs` (terminal Docker hardening)
+- `src-tauri/src/harness/mod.rs` (imagens de tool para modelos com visão)
+- `src/lib/__tests__/chatStore.test.ts` (reattach e notificações)
+- `src/components/agents/AgentTaskBoardDialog.test.tsx`
+- `src/components/agents/AgentActivityDialog.test.tsx`
 - `docs/TASKS.md`, `docs/COMPUTER.md`, `docs/DOCKER.md`

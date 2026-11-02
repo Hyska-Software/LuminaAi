@@ -594,6 +594,9 @@ fn rule_from_request(
         ),
         crate::domain::ApprovalDetail::Secret { path }
         | crate::domain::ApprovalDetail::Outside { path } => ("glob".to_string(), path.clone()),
+        crate::domain::ApprovalDetail::ComputerAction { target, .. } => {
+            ("exact".to_string(), target.clone())
+        }
         crate::domain::ApprovalDetail::Other { text } => ("exact".to_string(), text.clone()),
     };
     Ok((matcher, pattern, scope_id))

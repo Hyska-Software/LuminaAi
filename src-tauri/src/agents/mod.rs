@@ -178,6 +178,7 @@ impl AgentExportDocument {
                 memory_enabled: agent.memory_enabled,
                 workspace_id: agent.workspace_id.clone(),
                 permission_mode: agent.permission_mode,
+                docker_image: agent.docker_image.clone(),
             },
             memories: memories
                 .iter()
@@ -332,6 +333,7 @@ impl From<&Agent> for AgentInput {
             memory_enabled: agent.memory_enabled,
             workspace_id: agent.workspace_id.clone(),
             permission_mode: agent.permission_mode,
+            docker_image: agent.docker_image.clone(),
         }
     }
 }
@@ -467,6 +469,15 @@ pub fn task_transition_allowed(from: &str, to: &str) -> bool {
             | ("running", "failed")
             | ("running", "cancelled")
             | ("running", "queued")
+            | ("running", "handoff_pending")
+            | ("accepted", "handoff_pending")
+            | ("review", "handoff_pending")
+            | ("waiting_input", "handoff_pending")
+            | ("waiting_approval", "handoff_pending")
+            | ("handoff_pending", "accepted")
+            | ("handoff_pending", "declined")
+            | ("handoff_pending", "cancelled")
+            | ("handoff_pending", "failed")
             | ("waiting_input", "running")
             | ("waiting_input", "cancelled")
             | ("waiting_input", "failed")
@@ -724,6 +735,9 @@ pub struct AgentInput {
     pub workspace_id: Option<String>,
     #[serde(default)]
     pub permission_mode: PermissionMode,
+    /// Optional per-agent Docker image override (requires `dockerExecution`).
+    #[serde(default)]
+    pub docker_image: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -749,6 +763,7 @@ pub struct Agent {
     pub memory_enabled: bool,
     pub workspace_id: Option<String>,
     pub permission_mode: PermissionMode,
+    pub docker_image: Option<String>,
     pub archived_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -854,6 +869,17 @@ pub fn normalize_input(mut input: AgentInput) -> Result<AgentInput, String> {
         .workspace_id
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty());
+    input.docker_image = input
+        .docker_image
+        .map(|image| image.trim().to_string())
+        .filter(|image| !image.is_empty());
+    if input
+        .docker_image
+        .as_deref()
+        .is_some_and(|image| image.chars().count() > 200)
+    {
+        return Err("AGENT_VALIDATION: a imagem Docker passa de 200 caracteres.".to_string());
+    }
 
     if input.name.is_empty() || input.name.chars().count() > 40 {
         return Err("AGENT_VALIDATION: o nome deve ter de 1 a 40 caracteres.".to_string());
@@ -1035,6 +1061,7 @@ mod tests {
             memory_enabled: false,
             workspace_id: None,
             permission_mode: PermissionMode::Edit,
+            docker_image: None,
         }
     }
 
@@ -1060,6 +1087,7 @@ mod tests {
             memory_enabled: false,
             workspace_id: None,
             permission_mode: PermissionMode::Edit,
+            docker_image: None,
             archived_at: None,
             created_at: 0,
             updated_at: 0,

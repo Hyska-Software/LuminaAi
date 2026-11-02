@@ -75,7 +75,15 @@ fn build_body(request: &CompletionRequest) -> Value {
                     messages.push(entry);
                 }
             }
-            HistoryRole::Tool => messages.push(tool_message(message)),
+            HistoryRole::Tool => {
+                messages.push(tool_message(message));
+                // Chat Completions tool messages are text-only in several
+                // gateways. Images travel in a labelled user message right
+                // after the tool result so vision models still see them.
+                if let Some(followup) = tool_image_followup(message) {
+                    messages.push(followup);
+                }
+            }
         }
     }
 
@@ -208,6 +216,24 @@ fn tool_message(message: &HistoryMessage) -> Value {
         "tool_call_id": message.tool_call_id.clone().unwrap_or_default(),
         "content": message.text,
     })
+}
+
+fn tool_image_followup(message: &HistoryMessage) -> Option<Value> {
+    if message.images.is_empty() {
+        return None;
+    }
+    let tool = message.tool_name.clone().unwrap_or_else(|| "tool".to_string());
+    let mut parts = vec![json!({
+        "type": "text",
+        "text": format!("Imagem retornada pela ferramenta `{tool}`:"),
+    })];
+    for image in &message.images {
+        parts.push(json!({
+            "type": "image_url",
+            "image_url": {"url": image_data_url(image)},
+        }));
+    }
+    Some(json!({"role": "user", "content": parts}))
 }
 
 /* ------------------------------------------------------------------ */
@@ -405,6 +431,22 @@ fn parse_usage(usage: &Value, provider_id: &str) -> UsageInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_image_goes_to_a_labelled_followup_user_message() {
+        let mut message = HistoryMessage::tool_result("call-1", "computer_screenshot", "ok");
+        message.images.push(crate::providers::ImagePart {
+            mime_type: "image/jpeg".to_string(),
+            data_base64: "abc".to_string(),
+        });
+        let followup = tool_image_followup(&message).expect("followup");
+        assert_eq!(followup["role"], json!("user"));
+        assert_eq!(followup["content"][1]["type"], json!("image_url"));
+        assert!(followup["content"][0]["text"]
+            .as_str()
+            .expect("text")
+            .contains("computer_screenshot"));
+    }
 
     #[test]
     fn parse_usage_fills_openai_cache_counters() {

@@ -17,8 +17,8 @@ use crate::db::{CacheStateRecord, Db, StoredAttachment, UsageLogCache};
 use crate::domain::{
     now_ms, AttachmentInfo, CacheBreakReason, CacheSample, CacheSettings, ChatMessage, Citation,
     Conversation, MessageRole, MessageStatus, PrefixDigest, ReasoningMode, ReasoningSelection,
-    Settings, ToolCallRecord, ToolCallStatus, TraceStep, TurnKind, TurnOptions, TurnPayload,
-    TurnProfile, TurnResult, UsageInfo, MAX_STEPS_LIMIT,
+    Settings, ToolCallRecord, ToolCallStatus, ToolImageRef, TraceStep, TurnKind, TurnOptions,
+    TurnPayload, TurnProfile, TurnResult, UsageInfo, MAX_STEPS_LIMIT,
 };
 use crate::events::TurnEvent;
 use crate::providers::{
@@ -47,6 +47,9 @@ const MAX_ATTACHMENT_TEXT_CHARS_PER_MESSAGE: usize = 150_000;
 const MAX_HISTORY_IMAGE_BASE64_CHARS: usize = 16_000_000;
 /// Single image payload limit (providers reject very large inline images).
 const MAX_INLINE_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+/// Screenshots fed back to vision models are capped per turn and resized.
+const MAX_TOOL_IMAGES_PER_TURN: usize = 2;
+const MAX_TOOL_IMAGE_WIDTH: u32 = 1280;
 /// Tool result text sent to the renderer (the model gets a larger budget).
 const MAX_EVENT_TOOL_RESULT_CHARS: usize = 8_000;
 /// Tool result text sent to the model — keeps the context window sane when a
@@ -1478,6 +1481,7 @@ pub async fn run_turn(
     cancel: CancellationToken,
 ) -> anyhow::Result<TurnResult> {
     let started = Instant::now();
+    let mut settings = settings;
     let turn_id = payload
         .turn_id
         .clone()
@@ -1529,6 +1533,16 @@ pub async fn run_turn(
     } else {
         None
     };
+    // Per-agent Docker image override. It is a deny-only capability gate: the
+    // renderer cannot force Docker when the persona did not opt in.
+    if let Some(agent) = agent.as_ref() {
+        if agent.capabilities.docker_execution {
+            if let Some(image) = agent.docker_image.as_deref() {
+                settings.execution_environment = "docker".to_string();
+                settings.docker_image = image.to_string();
+            }
+        }
+    }
     // Perfil do turno: o Code exige uma sessão do layout Code (nativa ou
     // compartilhada do Chat). Não deixamos o renderer transformar uma conversa
     // do Chat em sessão de código por engano.
@@ -2304,6 +2318,7 @@ pub async fn run_turn(
     // Replay por passo: um bloco por resposta do provedor (com as tool calls do
     // passo), para que o próximo turno reconstrua o turno multi-step inteiro.
     let mut replay_steps: Vec<ReplayStep> = Vec::new();
+    let mut tool_images_this_turn = 0usize;
     let mut cancelled = false;
     let mut turn_failure: Option<TurnFailure> = None;
     // Estado de modo observado pelo loop: comparado a cada passo para avisar a
@@ -2766,6 +2781,14 @@ pub async fn run_turn(
             call.summary = outcome.summary.clone();
             call.presentation = outcome.presentation.clone();
             call.finished_at = Some(now_ms());
+            let remaining = MAX_TOOL_IMAGES_PER_TURN.saturating_sub(tool_images_this_turn);
+            let refs = if supports_images {
+                persist_tool_images(&data_dir, &call.id, &outcome.images, remaining)
+            } else {
+                Vec::new()
+            };
+            tool_images_this_turn += refs.len();
+            call.images = refs;
 
             emit(
                 &on_event,
@@ -2812,11 +2835,15 @@ pub async fn run_turn(
             .collect();
         history.push(assistant_history);
         for (call, outcome) in &paired {
-            history.push(HistoryMessage::tool_result(
+            let mut result = HistoryMessage::tool_result(
                 call.id.clone(),
                 call.name.clone(),
                 truncate_chars(&outcome.content, MAX_MODEL_TOOL_RESULT_CHARS),
-            ));
+            );
+            if supports_images {
+                result.images = history_tool_images(&call.images);
+            }
+            history.push(result);
         }
         let step_call_ids: Vec<String> = paired.iter().map(|(call, _)| call.id.clone()).collect();
         for (call, _) in paired {
@@ -3423,9 +3450,98 @@ fn history_tool_call(call: &ToolCallRecord) -> HistoryToolCall {
     }
 }
 
+/// Writes tool images under `<app-data>/tool-images`, resizing screenshots to a
+/// provider-friendly width. Only path metadata is persisted in the message.
+fn persist_tool_images(
+    data_dir: &std::path::Path,
+    call_id: &str,
+    images: &[crate::tools::ToolImage],
+    max: usize,
+) -> Vec<ToolImageRef> {
+    if max == 0 || images.is_empty() {
+        return Vec::new();
+    }
+    let directory = data_dir.join("tool-images");
+    if let Err(error) = std::fs::create_dir_all(&directory) {
+        eprintln!("lumina: falha ao criar diretório de imagens de tools: {error}");
+        return Vec::new();
+    }
+    images
+        .iter()
+        .take(max)
+        .filter_map(|image| {
+            let decoded = BASE64_STANDARD.decode(&image.data_base64).ok()?;
+            let (bytes, mime_type, width, height) = match image::load_from_memory(&decoded) {
+                Ok(dynamic) => {
+                    let dynamic = if dynamic.width() > MAX_TOOL_IMAGE_WIDTH {
+                        dynamic.resize(
+                            MAX_TOOL_IMAGE_WIDTH,
+                            u32::MAX,
+                            image::imageops::FilterType::Lanczos3,
+                        )
+                    } else {
+                        dynamic
+                    };
+                    let rgb = dynamic.to_rgb8();
+                    let (width, height) = rgb.dimensions();
+                    let mut out = Vec::new();
+                    let mut cursor = std::io::Cursor::new(&mut out);
+                    rgb.write_to(&mut cursor, image::ImageFormat::Jpeg).ok()?;
+                    (out, "image/jpeg".to_string(), width, height)
+                }
+                Err(_) => (
+                    decoded,
+                    image.mime_type.clone(),
+                    image.width,
+                    image.height,
+                ),
+            };
+            if bytes.is_empty() || bytes.len() > MAX_INLINE_IMAGE_BYTES {
+                return None;
+            }
+            let _ = call_id;
+            let file = directory.join(format!(
+                "{}-{}.{}",
+                uuid::Uuid::new_v4(),
+                width,
+                if mime_type == "image/png" { "png" } else { "jpg" }
+            ));
+            std::fs::write(&file, &bytes).ok()?;
+            Some(ToolImageRef {
+                mime_type,
+                path: file.to_string_lossy().to_string(),
+                width,
+                height,
+            })
+        })
+        .collect()
+}
+
+/// Reads persisted tool images back for replay. Missing/deleted files simply
+/// drop the image; the textual tool result remains.
+fn history_tool_images(images: &[ToolImageRef]) -> Vec<ImagePart> {
+    images
+        .iter()
+        .filter_map(|image| {
+            let bytes = std::fs::read(&image.path).ok()?;
+            if bytes.is_empty() || bytes.len() > MAX_INLINE_IMAGE_BYTES {
+                return None;
+            }
+            Some(ImagePart {
+                mime_type: image.mime_type.clone(),
+                data_base64: BASE64_STANDARD.encode(bytes),
+            })
+        })
+        .collect()
+}
+
 /// Tool result para o replay. Resultado ausente/vazio vira um output sintético:
 /// o provedor recusa uma tool call sem output, então nenhuma call fica órfã.
-fn tool_result_message(call: &ToolCallRecord, pruned: Option<&String>) -> HistoryMessage {
+fn tool_result_message(
+    call: &ToolCallRecord,
+    pruned: Option<&String>,
+    supports_images: bool,
+) -> HistoryMessage {
     // Decisão congelada na compactação manda: o replay é byte-a-byte entre
     // turnos/restart (render_decisions, F6). Sem decisão, trunca como antes.
     let content = match pruned {
@@ -3439,7 +3555,11 @@ fn tool_result_message(call: &ToolCallRecord, pruned: Option<&String>) -> Histor
             None => MISSING_TOOL_RESULT.to_string(),
         },
     };
-    HistoryMessage::tool_result(call.id.clone(), call.name.clone(), content)
+    let mut message = HistoryMessage::tool_result(call.id.clone(), call.name.clone(), content);
+    if supports_images {
+        message.images = history_tool_images(&call.images);
+    }
+    message
 }
 
 /// Textos podados congelados em `render_decisions` para uma mensagem assistant
@@ -3531,6 +3651,7 @@ fn build_history(
                         provider_id,
                         &model.id,
                         &pruned,
+                        supports_images,
                     ),
                 ));
             }
@@ -3597,6 +3718,7 @@ fn assistant_history_group(
     provider_id: &str,
     model_id: &str,
     pruned: &HashMap<String, String>,
+    supports_images: bool,
 ) -> Vec<HistoryMessage> {
     // F6/B3: o modo de replay é decidido uma vez e congelado por mensagem;
     // troca de modelo cai no fallback neutro sem reescrever a decisão.
@@ -3607,7 +3729,7 @@ fn assistant_history_group(
             .as_ref()
             .and_then(parse_provider_state_v2)
         {
-            return replay_steps_history(message, &steps, pruned);
+            return replay_steps_history(message, &steps, pruned, supports_images);
         }
     }
 
@@ -3627,7 +3749,11 @@ fn assistant_history_group(
 
     let mut group = vec![history_message];
     for call in &message.tool_calls {
-        group.push(tool_result_message(call, pruned.get(&call.id)));
+        group.push(tool_result_message(
+            call,
+            pruned.get(&call.id),
+            supports_images,
+        ));
     }
     group
 }
@@ -3639,6 +3765,7 @@ fn replay_steps_history(
     message: &ChatMessage,
     steps: &[ReplayStep],
     pruned: &HashMap<String, String>,
+    supports_images: bool,
 ) -> Vec<HistoryMessage> {
     let calls_by_id: HashMap<&str, &ToolCallRecord> = message
         .tool_calls
@@ -3665,7 +3792,11 @@ fn replay_steps_history(
         }
         group.push(assistant);
         for call in step_calls {
-            group.push(tool_result_message(call, pruned.get(&call.id)));
+            group.push(tool_result_message(
+                call,
+                pruned.get(&call.id),
+                supports_images,
+            ));
         }
     }
 
@@ -3685,7 +3816,11 @@ fn replay_steps_history(
             .collect();
         group.push(assistant);
         for call in unreferenced {
-            group.push(tool_result_message(call, pruned.get(&call.id)));
+            group.push(tool_result_message(
+                call,
+                pruned.get(&call.id),
+                supports_images,
+            ));
         }
     }
     group
@@ -3873,6 +4008,7 @@ fn tool_call_record(call: StreamingToolCall) -> ToolCallRecord {
         started_at: Some(now_ms()),
         finished_at: None,
         presentation: None,
+        images: Vec::new(),
     }
 }
 
@@ -4424,6 +4560,54 @@ mod tests {
         assert!(supports_images(&model));
         model.attachment = false;
         assert!(!supports_images(&model));
+    }
+
+    #[test]
+    fn tool_screenshots_are_persisted_as_paths_and_replayed_only_for_vision_models() {
+        let directory = std::env::temp_dir().join(format!(
+            "lumina-tool-images-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).expect("temp dir");
+        let source = image::RgbaImage::from_pixel(2000, 100, image::Rgba([255, 0, 0, 255]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(source)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("png");
+        let image = crate::tools::ToolImage {
+            mime_type: "image/png".to_string(),
+            data_base64: BASE64_STANDARD.encode(&png),
+            width: 2000,
+            height: 100,
+        };
+        let refs = persist_tool_images(&directory, "call-1", &[image.clone()], 2);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].width, MAX_TOOL_IMAGE_WIDTH);
+        assert_eq!(refs[0].mime_type, "image/jpeg");
+        assert!(std::path::Path::new(&refs[0].path).exists());
+        assert!(!serde_json::to_string(&refs).expect("json").contains("data_base64"));
+
+        let call = ToolCallRecord {
+            id: "call-1".to_string(),
+            name: "computer_screenshot".to_string(),
+            arguments: "{}".to_string(),
+            result: Some("{\"path\":\"shot.png\"}".to_string()),
+            status: ToolCallStatus::Done,
+            summary: None,
+            started_at: None,
+            finished_at: None,
+            presentation: None,
+            images: refs,
+        };
+        let with_vision = tool_result_message(&call, None, true);
+        assert_eq!(with_vision.images.len(), 1);
+        assert_eq!(with_vision.images[0].mime_type, "image/jpeg");
+        assert!(with_vision.text.contains("shot.png"));
+        let without_vision = tool_result_message(&call, None, false);
+        assert!(without_vision.images.is_empty());
+        // The 2-image per-turn cap is enforced before anything is written.
+        assert!(persist_tool_images(&directory, "call-2", &[image.clone()], 0).is_empty());
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]
@@ -4996,6 +5180,7 @@ mod agent_loop_tests {
             memory_enabled: false,
             workspace_id: None,
             permission_mode: crate::domain::PermissionMode::Edit,
+            docker_image: None,
         })
         .expect("agent input");
         let agent = temp.db.create_agent(&input).expect("agent");
@@ -6025,6 +6210,7 @@ mod agent_loop_tests {
             started_at: Some(0),
             finished_at: Some(1),
             presentation: None,
+            images: Vec::new(),
         }
     }
 

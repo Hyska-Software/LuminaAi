@@ -1,8 +1,20 @@
-import { Activity, Square, Timer } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Activity, AlertTriangle, ListChecks, MessageSquare, Square, Timer } from 'lucide-react';
 
 import { AgentAvatar } from './AgentAvatar';
-import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui';
-import { useAgentStore, useChatStore } from '@/lib/store';
+import {
+  Badge,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui';
+import { api } from '@/lib/api';
+import { useAgentStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
+import type { AgentTask, Conversation } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 function elapsedLabel(startedAt: number): string {
@@ -12,7 +24,14 @@ function elapsedLabel(startedAt: number): string {
   return `${minutes}m ${seconds % 60}s`;
 }
 
-/** Global view of every active turn, including background agent threads. */
+const ATTENTION_STATUSES = new Set([
+  'waiting_input',
+  'waiting_approval',
+  'review',
+  'handoff_pending',
+]);
+
+/** Global view of active turns, pending approvals/questions and tasks needing a human. */
 export function AgentActivityDialog({
   open,
   onOpenChange,
@@ -22,10 +41,53 @@ export function AgentActivityDialog({
 }) {
   const streams = useChatStore((state) => state.streamsByConversation);
   const conversations = useChatStore((state) => state.conversations);
-  const agents = useAgentStore((state) => state.agentsById);
+  const openConversation = useChatStore((state) => state.openConversation);
   const stopConversation = useChatStore((state) => state.stopConversation);
   const stopAll = useChatStore((state) => state.stopAllTurns);
+  const agents = useAgentStore((state) => state.agentsById);
+  const codeSessions = useCodeStore((state) => state.byConversation);
+  const [tasks, setTasks] = useState<AgentTask[]>([]);
+
+  const loadTasks = useCallback(async () => {
+    try {
+      const list = await api.listAgentTasks();
+      setTasks(list.filter((task) => ATTENTION_STATUSES.has(task.status)));
+    } catch {
+      setTasks([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    void loadTasks();
+    const reload = () => void loadTasks();
+    window.addEventListener('lumina:agent-task-updated', reload);
+    return () => window.removeEventListener('lumina:agent-task-updated', reload);
+  }, [open, loadTasks]);
+
   const entries = Object.values(streams);
+  const approvals = Object.values(codeSessions).flatMap((session) =>
+    session.approvals.map((approval) => ({ conversationId: session.conversationId, approval })),
+  );
+  const questions = Object.values(codeSessions).flatMap((session) =>
+    session.questions.map((question) => ({ conversationId: session.conversationId, question })),
+  );
+
+  const focusConversation = (conversationId: string) => {
+    const conversation = conversations.find((entry) => entry.id === conversationId);
+    if (conversation?.mode === 'agent') {
+      useUiStore.getState().setLayoutMode('agent');
+      if (conversation.agentId) {
+        useUiStore.getState().setActiveAgentId(conversation.agentId);
+      }
+    } else if (conversation?.mode === 'code') {
+      useUiStore.getState().setLayoutMode('code');
+    } else if (conversation?.mode === 'chat') {
+      useUiStore.getState().setLayoutMode('chat');
+    }
+    void openConversation(conversationId);
+    onOpenChange(false);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -36,49 +98,143 @@ export function AgentActivityDialog({
             Atividade
           </DialogTitle>
           <DialogDescription>
-            Turnos rodando agora, inclusive threads em segundo plano. Parar libera o slot de
-            concorrência imediatamente.
+            Turnos rodando agora, aprovações/perguntas pendentes e tarefas que precisam de você.
+            Parar um turno libera o slot de concorrência imediatamente.
           </DialogDescription>
         </DialogHeader>
-        {entries.length === 0 ? (
-          <p className="py-8 text-center text-[13px] text-foreground-muted">
-            Nenhum turno em andamento.
-          </p>
-        ) : (
-          <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
-            {entries.map((stream) => {
-              const conversation = conversations.find((entry) => entry.id === stream.conversationId);
-              const agent = conversation?.agentId ? agents[conversation.agentId] : undefined;
-              return (
-                <article
-                  key={stream.turnId}
-                  className="flex items-center gap-3 rounded-xl border border-border bg-surface-raised/50 p-2.5"
-                >
-                  {agent ? <AgentAvatar emoji={agent.emoji} size="sm" /> : null}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-medium text-foreground">
-                      {agent?.name ?? 'Sessão'} · {conversation?.title ?? stream.conversationId}
-                    </p>
-                    <p className="flex items-center gap-1.5 text-[11px] text-foreground-muted">
-                      <Timer className="size-3" />
-                      {elapsedLabel(stream.startedAt)} · {stream.phase} · passo {stream.step}
-                      {stream.turnKind === 'goal_round' ? ' · objetivo' : ''}
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className={cn('shrink-0')}
-                    onClick={() => void stopConversation(stream.conversationId)}
+        <div className="max-h-[60vh] space-y-5 overflow-y-auto pr-1">
+          {entries.length > 0 ? (
+            <section aria-labelledby="activity-running" className="space-y-2">
+              <h3
+                id="activity-running"
+                className="text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle"
+              >
+                Em andamento
+              </h3>
+              {entries.map((stream) => {
+                const conversation = conversations.find(
+                  (entry) => entry.id === stream.conversationId,
+                );
+                const agent = conversation?.agentId ? agents[conversation.agentId] : undefined;
+                return (
+                  <article
+                    key={stream.turnId}
+                    className="flex items-center gap-3 rounded-xl border border-border bg-surface-raised/50 p-2.5"
                   >
-                    <Square className="mr-1.5 size-3.5" />
-                    Parar
-                  </Button>
-                </article>
-              );
-            })}
-          </div>
-        )}
+                    {agent ? <AgentAvatar emoji={agent.emoji} size="sm" /> : null}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-medium text-foreground">
+                        {agent?.name ?? 'Sessão'} · {conversation?.title ?? stream.conversationId}
+                      </p>
+                      <p className="flex items-center gap-1.5 text-[11px] text-foreground-muted">
+                        <Timer className="size-3" />
+                        {elapsedLabel(stream.startedAt)} · {stream.phase} · passo {stream.step}
+                        {stream.turnKind === 'goal_round' ? ' · objetivo' : ''}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className={cn('shrink-0')}
+                      onClick={() => void stopConversation(stream.conversationId)}
+                    >
+                      <Square className="mr-1.5 size-3.5" />
+                      Parar
+                    </Button>
+                  </article>
+                );
+              })}
+            </section>
+          ) : null}
+
+          {approvals.length + questions.length > 0 ? (
+            <section aria-labelledby="activity-attention" className="space-y-2">
+              <h3
+                id="activity-attention"
+                className="text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle"
+              >
+                Precisa de você
+              </h3>
+              {approvals.map(({ conversationId, approval }) => (
+                <button
+                  key={approval.id}
+                  type="button"
+                  onClick={() => focusConversation(conversationId)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-warning/30 bg-warning-soft/40 p-2.5 text-left hover:bg-warning-soft/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  <AlertTriangle className="size-4 shrink-0 text-warning" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-medium text-foreground">
+                      Aprovação · {approval.title}
+                    </span>
+                    <span className="block truncate text-[11px] text-foreground-muted">
+                      {conversationLabel(conversations, conversationId)}
+                    </span>
+                  </span>
+                  <Badge tone="warning">Revisar</Badge>
+                </button>
+              ))}
+              {questions.map(({ conversationId, question }) => (
+                <button
+                  key={question.id}
+                  type="button"
+                  onClick={() => focusConversation(conversationId)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface-raised/50 p-2.5 text-left hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  <MessageSquare className="size-4 shrink-0 text-accent" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-medium text-foreground">
+                      Pergunta do agente
+                    </span>
+                    <span className="block truncate text-[11px] text-foreground-muted">
+                      {question.questions[0]?.question ?? 'Pergunta do agente'}
+                    </span>
+                  </span>
+                  <Badge tone="accent">Responder</Badge>
+                </button>
+              ))}
+            </section>
+          ) : null}
+
+          {tasks.length > 0 ? (
+            <section aria-labelledby="activity-tasks" className="space-y-2">
+              <h3
+                id="activity-tasks"
+                className="text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle"
+              >
+                Tarefas aguardando
+              </h3>
+              {tasks.map((task) => (
+                <button
+                  key={task.id}
+                  type="button"
+                  disabled={!task.conversationId}
+                  onClick={() => {
+                    if (task.conversationId) focusConversation(task.conversationId);
+                  }}
+                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface-raised/50 p-2.5 text-left hover:bg-surface-raised disabled:cursor-default disabled:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  <ListChecks className="size-4 shrink-0 text-accent" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-medium text-foreground">
+                      {task.title}
+                    </span>
+                    <span className="block truncate text-[11px] text-foreground-muted">
+                      {agents[task.ownerAgentId]?.name ?? 'Agente'} · {task.status}
+                    </span>
+                  </span>
+                  <Badge tone="neutral">Abrir</Badge>
+                </button>
+              ))}
+            </section>
+          ) : null}
+
+          {entries.length + approvals.length + questions.length + tasks.length === 0 ? (
+            <p className="py-8 text-center text-[13px] text-foreground-muted">
+              Nada pendente. Turnos, aprovações e tarefas aparecem aqui.
+            </p>
+          ) : null}
+        </div>
         <DialogFooter>
           <Button
             variant="danger"
@@ -95,4 +251,11 @@ export function AgentActivityDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function conversationLabel(
+  conversations: Conversation[],
+  conversationId: string,
+): string {
+  return conversations.find((entry) => entry.id === conversationId)?.title ?? conversationId;
 }

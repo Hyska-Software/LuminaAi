@@ -22,6 +22,8 @@ import type {
   AgentThreadPage,
   ActiveTurnInfo,
   AppInfo,
+  ComputerActionRecord,
+  ComputerSession,
   ApprovalDecision,
   ApprovalRule,
   ApprovalRuleInput,
@@ -61,6 +63,7 @@ import type {
   TerminalEvent,
   TerminalInfo,
   TurnEvent,
+  TurnEventRecord,
   TurnPayload,
   TurnResult,
   UpdateDownloadResult,
@@ -308,6 +311,34 @@ export const api = {
   cancelConversation: (conversationId: string) =>
     invoke<number>('cancel_conversation', { conversationId }),
   listActiveTurns: () => invoke<ActiveTurnInfo[]>('list_active_turns'),
+  listTurnEvents: (turnId: string, afterSeq?: number) =>
+    invoke<TurnEventRecord[]>('list_turn_events', {
+      turnId,
+      afterSeq: afterSeq ?? null,
+    }),
+  listComputerActions: (conversationId?: string | null, limit?: number) =>
+    invoke<ComputerActionRecord[]>('list_computer_actions', {
+      conversationId: conversationId ?? null,
+      limit: limit ?? null,
+    }),
+  listComputerSessions: (conversationId: string) =>
+    invoke<ComputerSession[]>('list_computer_sessions', { conversationId }),
+  listActiveComputerSessions: () =>
+    invoke<ComputerSession[]>('list_active_computer_sessions'),
+  stopComputerSession: (conversationId: string) =>
+    invoke<void>('stop_computer_session', { conversationId }),
+  stopAllComputerSessions: () => invoke<number>('stop_all_computer_sessions'),
+  computerScreenshotPreview: (path: string) =>
+    invoke<string>('computer_screenshot_preview', { path }),
+  platformDiagnostics: () =>
+    invoke<{
+      version: string;
+      activeTurns: Array<{ turnId: string; conversationId: string; startedAt: number }>;
+      activeComputerSessions: number;
+      openTasks: number;
+      tasksByStatus: Record<string, number>;
+      generatedAt: number;
+    }>('platform_diagnostics'),
 
   /* -------- workspace (harness de código) -------- */
   /** Abre o seletor nativo de pasta e devolve o caminho escolhido (null = cancelado). */

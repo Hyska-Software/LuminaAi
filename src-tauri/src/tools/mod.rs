@@ -55,6 +55,9 @@ pub struct ToolOutcome {
     pub summary: Option<String>,
     pub citations: Vec<Citation>,
     pub artifacts: Vec<Artifact>,
+    /// Raster images returned by the tool (screenshots). The harness persists
+    /// them under `<app-data>/tool-images` and only feeds them to vision models.
+    pub images: Vec<ToolImage>,
     pub is_error: bool,
     /// Apresentação estruturada do resultado (diff, lista de tarefas, plano,
     /// job, aprovação) usada pelos cards do renderer e persistida em
@@ -71,6 +74,16 @@ impl ToolOutcome {
             ..Default::default()
         }
     }
+}
+
+/// Image returned by a tool. Kept in memory for the immediate next step; the
+/// harness writes it to disk before persisting the tool call record.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ToolImage {
+    pub mime_type: String,
+    pub data_base64: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// `None` inherits every tool; `Some(list)` is the agent allowlist.

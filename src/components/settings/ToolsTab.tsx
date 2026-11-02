@@ -506,6 +506,62 @@ export function ToolsTab() {
                 aria-label="Permitir rede no contêiner Docker"
               />
             </SettingRow>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <SettingRow
+                vertical
+                label="Memória (MB)"
+                description="Limite do sandbox Docker."
+              >
+                <Input
+                  type="number"
+                  min={256}
+                  max={16384}
+                  defaultValue={settings.dockerMemoryMb ?? 2048}
+                  aria-label="Memória do sandbox Docker em MB"
+                  onBlur={(event) => {
+                    const value = Math.max(256, Math.min(16_384, Number(event.target.value) || 2048));
+                    void saveSettings({ dockerMemoryMb: value });
+                  }}
+                />
+              </SettingRow>
+              <SettingRow vertical label="CPUs" description="Limite de CPU do sandbox.">
+                <Input
+                  type="number"
+                  min={0.25}
+                  max={16}
+                  step={0.25}
+                  defaultValue={settings.dockerCpus ?? 2}
+                  aria-label="CPUs do sandbox Docker"
+                  onBlur={(event) => {
+                    const value = Math.max(0.25, Math.min(16, Number(event.target.value) || 2));
+                    void saveSettings({ dockerCpus: value });
+                  }}
+                />
+              </SettingRow>
+              <SettingRow vertical label="PIDs" description="Limite de processos do sandbox.">
+                <Input
+                  type="number"
+                  min={32}
+                  max={4096}
+                  defaultValue={settings.dockerPidsLimit ?? 256}
+                  aria-label="Limite de PIDs do sandbox Docker"
+                  onBlur={(event) => {
+                    const value = Math.max(32, Math.min(4096, Number(event.target.value) || 256));
+                    void saveSettings({ dockerPidsLimit: value });
+                  }}
+                />
+              </SettingRow>
+            </div>
+            <SettingRow
+              label="Rootfs somente leitura"
+              description="O workspace em /workspace continua gravável; o restante do contêiner fica read-only."
+            >
+              <Switch
+                checked={settings.dockerReadOnlyRoot ?? true}
+                onCheckedChange={(checked) => void saveSettings({ dockerReadOnlyRoot: checked })}
+                aria-label="Montar rootfs do contêiner como somente leitura"
+              />
+            </SettingRow>
             <SettingRow
               vertical
               label="Imagem do computer use"
@@ -536,6 +592,42 @@ export function ToolsTab() {
                 }}
               />
             </SettingRow>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <SettingRow
+                vertical
+                label="Ações por turno"
+                description="Limite de computer use em um único turno."
+              >
+                <Input
+                  type="number"
+                  min={1}
+                  max={200}
+                  defaultValue={settings.computerMaxActionsPerTurn ?? 20}
+                  aria-label="Máximo de ações de computer use por turno"
+                  onBlur={(event) => {
+                    const value = Math.max(1, Math.min(200, Number(event.target.value) || 20));
+                    void saveSettings({ computerMaxActionsPerTurn: value });
+                  }}
+                />
+              </SettingRow>
+              <SettingRow
+                vertical
+                label="Ações por hora"
+                description="Limite por agente em janela móvel de uma hora."
+              >
+                <Input
+                  type="number"
+                  min={1}
+                  max={2000}
+                  defaultValue={settings.computerMaxActionsPerHour ?? 120}
+                  aria-label="Máximo de ações de computer use por hora"
+                  onBlur={(event) => {
+                    const value = Math.max(1, Math.min(2_000, Number(event.target.value) || 120));
+                    void saveSettings({ computerMaxActionsPerHour: value });
+                  }}
+                />
+              </SettingRow>
+            </div>
             <SettingsBlock>
               <div className="flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft p-3">
                 <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
@@ -578,6 +670,25 @@ export function ToolsTab() {
                   onClick={() => {
                     setDockerBusy(true);
                     void api
+                      .dockerPullImage(settings.dockerImage ?? 'node:22-bookworm')
+                      .then((image) => toast.success(`Imagem disponível: ${image}`))
+                      .catch((error) =>
+                        toast.error('Não foi possível baixar a imagem', {
+                          description: String(error),
+                        }),
+                      )
+                      .finally(() => setDockerBusy(false));
+                  }}
+                >
+                  Baixar imagem
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={dockerBusy}
+                  onClick={() => {
+                    setDockerBusy(true);
+                    void api
                       .dockerCleanup()
                       .then((count) =>
                         toast.success(
@@ -595,6 +706,26 @@ export function ToolsTab() {
                   }}
                 >
                   Limpar containers
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    void api
+                      .platformDiagnostics()
+                      .then((diagnostics) =>
+                        toast.info(`Diagnóstico · v${diagnostics.version}`, {
+                          description: `${diagnostics.activeTurns.length} turno(s) ativo(s) · ${diagnostics.openTasks} tarefa(s) aberta(s) · ${diagnostics.activeComputerSessions} sessão(ões) de computer use`,
+                        }),
+                      )
+                      .catch((error) =>
+                        toast.error('Não foi possível ler o diagnóstico', {
+                          description: String(error),
+                        }),
+                      );
+                  }}
+                >
+                  Diagnóstico
                 </Button>
                 {dockerInfo ? (
                   <span className="text-[11px] text-foreground-muted">{dockerInfo}</span>

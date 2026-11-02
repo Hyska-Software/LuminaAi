@@ -16,6 +16,38 @@ use crate::workspace::exec::{self, ExecRequest};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ComputerSession {
+    pub id: String,
+    pub agent_id: Option<String>,
+    pub conversation_id: String,
+    pub backend: String,
+    pub status: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputerActionRecord {
+    pub id: String,
+    pub session_id: String,
+    pub agent_id: Option<String>,
+    pub conversation_id: String,
+    pub turn_id: String,
+    pub tool: String,
+    pub action: String,
+    pub target: serde_json::Value,
+    pub approval_scope: Option<String>,
+    pub decision: Option<String>,
+    pub result: String,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub redacted_text_len: Option<i64>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ComputerScreenshot {
     pub path: String,
     pub width: u32,
@@ -699,6 +731,8 @@ async fn ensure_container(settings: &Settings, data_dir: &Path) -> anyhow::Resul
         "ALL".to_string(),
         "--security-opt".to_string(),
         "no-new-privileges".to_string(),
+        "--label".to_string(),
+        "lumina.owner=lumina".to_string(),
         "--pids-limit".to_string(),
         "256".to_string(),
         "--memory".to_string(),

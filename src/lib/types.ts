@@ -200,6 +200,14 @@ export type ApprovalDetail =
   | { kind: 'paths'; paths: string[]; change: string }
   | { kind: 'secret'; path: string }
   | { kind: 'outside'; path: string }
+  | {
+      kind: 'computer_action';
+      action: string;
+      target: string;
+      screenshotPath?: string | null;
+      textLength?: number | null;
+      sensitive?: boolean;
+    }
   | { kind: 'other'; text: string };
 
 /** Pedido de aprovação mostrado no card da timeline (`approval_requested`). */
@@ -873,6 +881,8 @@ export interface Agent {
   /** Optional workspace for Code-profile turns (files/shell/approvals). */
   workspaceId: string | null;
   permissionMode: PermissionMode;
+  /** Optional Docker image override (requires capability dockerExecution). */
+  dockerImage?: string | null;
   archivedAt: number | null;
   createdAt: number;
   updatedAt: number;
@@ -897,6 +907,7 @@ export interface AgentInput {
   memoryEnabled: boolean;
   workspaceId: string | null;
   permissionMode: PermissionMode;
+  dockerImage?: string | null;
 }
 
 export interface AgentChange {
@@ -968,6 +979,7 @@ export type AgentTaskStatus =
   | 'waiting_input'
   | 'waiting_approval'
   | 'review'
+  | 'handoff_pending'
   | 'done'
   | 'cancelled'
   | 'failed'
@@ -1208,6 +1220,48 @@ export interface TurnPayload {
 export interface ActiveTurnInfo {
   turnId: string;
   conversationId: string;
+  startedAt: number;
+}
+
+export interface TurnEventRecord {
+  turnId: string;
+  seq: number;
+  event: TurnEvent;
+}
+
+export interface TurnEventBusPayload {
+  turnId: string;
+  seq: number;
+  conversationId: string;
+  event: TurnEvent;
+}
+
+export interface ComputerSession {
+  id: string;
+  agentId: string | null;
+  conversationId: string;
+  backend: string;
+  status: string;
+  startedAt: number;
+  endedAt: number | null;
+}
+
+export interface ComputerActionRecord {
+  id: string;
+  sessionId: string;
+  agentId: string | null;
+  conversationId: string;
+  turnId: string;
+  tool: string;
+  action: string;
+  target: unknown;
+  approvalScope: string | null;
+  decision: string | null;
+  result: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  redactedTextLen: number | null;
+  createdAt: number;
 }
 
 export interface TurnResult {
@@ -1508,6 +1562,14 @@ export interface Settings {
   dockerImage?: string;
   /** Permite rede no contêiner Docker (padrão: desligado). */
   dockerNetwork?: boolean;
+  /** Limite de memória do sandbox Docker (MB). */
+  dockerMemoryMb?: number;
+  /** Limite de CPU do sandbox Docker. */
+  dockerCpus?: number;
+  /** Limite de PIDs do sandbox Docker. */
+  dockerPidsLimit?: number;
+  /** Monta o rootfs do contêiner como somente leitura. */
+  dockerReadOnlyRoot?: boolean;
   /** Turnos simultâneos no app inteiro. */
   maxConcurrentTurns?: number;
   /** Turnos simultâneos por agente. */
@@ -1520,6 +1582,10 @@ export interface Settings {
   computerDockerImage?: string;
   /** Nome do container do computer use gráfico. */
   computerDockerContainer?: string;
+  /** Máximo de ações de computer use por turno. */
+  computerMaxActionsPerTurn?: number;
+  /** Máximo de ações de computer use por agente em uma hora. */
+  computerMaxActionsPerHour?: number;
   /** Compacta o contexto automaticamente quando a janela aperta. */
   autoCompact?: boolean;
   /** Retenção dos arquivos de spill, em dias. */
@@ -1528,6 +1594,16 @@ export interface Settings {
   approvalTimeoutSecs?: number;
   /** Notificações do sistema no fim de turnos em segundo plano. */
   notificationsEnabled?: boolean;
+  /** Notificar aprovações pedidas em segundo plano. */
+  notificationsApprovals?: boolean;
+  /** Notificar perguntas feitas em segundo plano. */
+  notificationsQuestions?: boolean;
+  /** Notificar conclusão de turnos de agente em segundo plano. */
+  notificationsCompletions?: boolean;
+  /** Notificar tarefas que precisam de uma pessoa. */
+  notificationsTasks?: boolean;
+  /** Não perturbe: mantém só os avisos in-app da Atividade. */
+  notificationsDnd?: boolean;
   /** Modo de permissão inicial de novas sessões do Code (padrão: Autônomo). */
   codeDefaultPermissionMode?: PermissionMode;
   /** Confia automaticamente em workspaces abertos antes. */

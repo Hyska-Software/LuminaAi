@@ -624,7 +624,22 @@ pub(crate) async fn policy_check(
                 detail,
                 risk,
                 preview: None,
-                options: approval_options(),
+                options: if risk == RiskClass::Computer {
+                    vec![
+                        ApprovalOption {
+                            id: "allow".into(),
+                            label: "Permitir uma vez".into(),
+                            scope: None,
+                        },
+                        ApprovalOption {
+                            id: "deny".into(),
+                            label: "Negar".into(),
+                            scope: None,
+                        },
+                    ]
+                } else {
+                    approval_options()
+                },
                 created_at: now_ms(),
             };
             audit_append(
@@ -1606,6 +1621,7 @@ async fn bridge_chat_tool(ctx: &ToolCtx, name: &str, args: &Value) -> ToolOutcom
         started_at: None,
         finished_at: None,
         presentation: None,
+        images: Vec::new(),
     };
     crate::tools::execute(&runtime, &call).await
 }
@@ -1914,7 +1930,10 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 &exec::SandboxConfig {
                     image: ctx.settings.docker_image.clone(),
                     network: ctx.settings.docker_network,
-                    ..exec::SandboxConfig::default()
+                    memory_mb: ctx.settings.docker_memory_mb,
+                    cpus: ctx.settings.docker_cpus,
+                    pids_limit: ctx.settings.docker_pids_limit,
+                    read_only_root: ctx.settings.docker_read_only_root,
                 },
                 &root,
                 &workdir,

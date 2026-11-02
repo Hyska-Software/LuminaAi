@@ -266,6 +266,7 @@ pub fn duplicate_agent(state: State<'_, AppState>, agent_id: String) -> Result<A
         memory_enabled: current.memory_enabled,
         workspace_id: current.workspace_id,
         permission_mode: current.permission_mode,
+        docker_image: current.docker_image,
     };
     let input = crate::agents::normalize_input(input).map_err(to_error)?;
     validate_model(&state, &input)?;
@@ -471,6 +472,7 @@ pub async fn suggest_agent(
         memory_enabled: false,
         workspace_id: None,
         permission_mode: crate::domain::PermissionMode::Edit,
+        docker_image: None,
     };
     crate::agents::normalize_input(input).map_err(to_error)
 }

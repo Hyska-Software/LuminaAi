@@ -599,6 +599,7 @@ mod tests {
             started_at: None,
             finished_at: None,
             presentation: None,
+            images: Vec::new(),
         }];
         assistant.citations = vec![Citation {
             id: "cit-1".to_string(),

@@ -504,6 +504,7 @@ mod tests {
             memory_enabled: false,
             workspace_id: None,
             permission_mode: PermissionMode::Edit,
+            docker_image: None,
         })
         .expect("agent")
     }
@@ -559,6 +560,101 @@ mod tests {
         );
         assert!(!finished.is_error, "{}", finished.content);
         assert_eq!(task_status(&db, &task_id), "done");
+    }
+
+    #[test]
+    fn handoff_waits_for_target_acceptance_and_is_not_scheduled() {
+        let db = Db::open_in_memory().expect("db");
+        let first = agent(&db, "Ana", true);
+        let second = agent(&db, "Bia", true);
+        let third = agent(&db, "Caio", true);
+        let conversation = db
+            .create_agent_conversation(&first.id, "Handoff")
+            .expect("conversation");
+        let delegated = run(
+            &db,
+            &first.id,
+            &conversation.id,
+            "delegate_task",
+            &serde_json::json!({
+                "toAgentId": second.id,
+                "title": "Preparar entrega",
+                "brief": "Prepare o pacote.",
+            }),
+        );
+        assert!(!delegated.is_error, "{}", delegated.content);
+        let value: serde_json::Value = serde_json::from_str(&delegated.content).expect("json");
+        let task_id = value["id"].as_str().expect("id").to_string();
+        let accepted = run(
+            &db,
+            &second.id,
+            &conversation.id,
+            "accept_task",
+            &serde_json::json!({ "taskId": task_id }),
+        );
+        assert!(!accepted.is_error, "{}", accepted.content);
+
+        let handoff = run(
+            &db,
+            &second.id,
+            &conversation.id,
+            "handoff_task",
+            &serde_json::json!({
+                "taskId": task_id,
+                "toAgentId": third.id,
+                "summary": "Precisa da revisão final.",
+                "nextSteps": "Revisar e publicar.",
+            }),
+        );
+        assert!(!handoff.is_error, "{}", handoff.content);
+        assert_eq!(task_status(&db, &task_id), "handoff_pending");
+        assert!(db
+            .list_queued_agent_tasks(crate::domain::now_ms(), 10)
+            .expect("queued")
+            .iter()
+            .all(|entry| entry.id != task_id));
+        let wrong_owner = run(
+            &db,
+            &second.id,
+            &conversation.id,
+            "accept_task",
+            &serde_json::json!({ "taskId": task_id }),
+        );
+        assert!(wrong_owner.is_error);
+        assert!(wrong_owner.content.contains("AGENT_TASK_FORBIDDEN"));
+
+        let accepted = run(
+            &db,
+            &third.id,
+            &conversation.id,
+            "accept_task",
+            &serde_json::json!({ "taskId": task_id }),
+        );
+        assert!(!accepted.is_error, "{}", accepted.content);
+        assert_eq!(task_status(&db, &task_id), "accepted");
+
+        let second_handoff = run(
+            &db,
+            &third.id,
+            &conversation.id,
+            "handoff_task",
+            &serde_json::json!({
+                "taskId": task_id,
+                "toAgentId": second.id,
+                "summary": "Devolvendo com dúvida.",
+            }),
+        );
+        assert!(!second_handoff.is_error, "{}", second_handoff.content);
+        assert_eq!(task_status(&db, &task_id), "handoff_pending");
+        let declined = run(
+            &db,
+            &second.id,
+            &conversation.id,
+            "decline_task",
+            &serde_json::json!({ "taskId": task_id, "reason": "sem contexto" }),
+        );
+        assert!(!declined.is_error, "{}", declined.content);
+        assert_eq!(task_status(&db, &task_id), "declined");
     }
 
     #[test]

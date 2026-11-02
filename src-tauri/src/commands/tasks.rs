@@ -92,6 +92,19 @@ pub fn cancel_agent_task(
     state: State<'_, AppState>,
     task_id: String,
 ) -> Result<AgentTask, String> {
+    let task = state
+        .db
+        .get_agent_task(&task_id)
+        .map_err(to_error)?
+        .ok_or_else(|| format!("AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"))?;
+    if let Some(conversation_id) = task.conversation_id.as_deref() {
+        // Stop the actual harness before changing the durable status. The
+        // runner checks the status before writing a terminal transition.
+        state.cancel_conversation(conversation_id);
+        let _ = state
+            .db
+            .end_computer_session(conversation_id, "stopped", crate::domain::now_ms());
+    }
     state
         .db
         .transition_agent_task(
@@ -217,6 +230,42 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
         }
     };
 
+    if let Some(limit) = settings.agent_daily_cost_limit_usd {
+        if let Ok(usage) = state.db.get_agent_usage(&agent.id) {
+            if usage.cost >= limit {
+                return finish_failure(
+                    app,
+                    &task,
+                    &format!(
+                        "AGENT_TASK_BUDGET: o agente já usou US$ {:.2} do limite diário de US$ {:.2}",
+                        usage.cost, limit
+                    ),
+                );
+            }
+        }
+    }
+    let turn_id = uuid::Uuid::new_v4().to_string();
+    let cancel = state.register_turn(&turn_id, &conversation.id);
+    let heartbeat = {
+        let db = state.db.clone();
+        let task_id = task.id.clone();
+        let lease_cancel = cancel.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(5 * 60)).await;
+                match db.renew_agent_task_lease(&task_id, crate::domain::now_ms()) {
+                    Ok(true) => {}
+                    _ => {
+                        // Another runner took over or the task was cancelled:
+                        // stop the harness instead of writing a stale result.
+                        lease_cancel.cancel();
+                        break;
+                    }
+                }
+            }
+        })
+    };
+
     let channel_line = match task.channel_id.as_deref() {
         Some(channel_id) => state
             .db
@@ -253,22 +302,6 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
     } else {
         TurnProfile::Chat
     };
-    let payload = TurnPayload {
-        conversation_id: conversation.id.clone(),
-        content: prompt,
-        attachment_ids: Vec::new(),
-        provider_id: agent.provider_id.clone(),
-        model_id: agent.model_id.clone(),
-        reasoning: agent.reasoning.clone(),
-        options: TurnOptions {
-            max_steps: ((task.max_turns as u32) * 8).clamp(8, 200),
-            ..TurnOptions::default()
-        },
-        profile,
-        turn_kind: TurnKind::User,
-        goal_request: false,
-        turn_id: Some(uuid::Uuid::new_v4().to_string()),
-    };
     let deps = HarnessDeps {
         app: Some(app.clone()),
         db: state.db.clone(),
@@ -289,64 +322,170 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
         refresh_override: None,
         model_source: None,
     };
-    let result = harness::run_turn(
-        deps,
-        payload,
-        settings,
-        Arc::new(SilentEmitter),
-        CancellationToken::new(),
-    )
-    .await;
-
-    let now = crate::domain::now_ms();
-    match result {
-        Ok(result) => {
-            let text = result.assistant_message.content.trim().to_string();
-            let cost = result.usage.as_ref().and_then(|usage| usage.cost).unwrap_or(0.0);
-            if cost > task.max_cost {
-                return finish_failure(
-                    app,
-                    &task,
-                    &format!(
-                        "AGENT_TASK_BUDGET: custo US$ {cost:.2} passou do limite US$ {:.2}",
-                        task.max_cost
-                    ),
-                );
-            }
-            if let Some(channel_id) = task.channel_id.as_deref() {
-                let message = if text.is_empty() {
-                    format!("Tarefa `{}` concluída sem texto de resultado.", task.title)
-                } else {
-                    format!("Tarefa `{}` concluída:\n\n{}", task.title, text)
-                };
-                let _ = state.db.append_agent_channel_message(
-                    channel_id,
-                    "agent",
-                    Some(&agent.id),
-                    &message,
-                    now,
-                );
-            }
-            let updated = state
-                .db
-                .transition_agent_task(
-                    &task.id,
-                    "done",
-                    "agent",
-                    serde_json::json!({
-                        "usage": result.usage,
-                        "conversationId": conversation.id,
-                    }),
-                    Some(if text.is_empty() { "(sem resultado textual)" } else { text.as_str() }),
-                    None,
-                    now,
-                )
-                .map_err(to_error)?;
-            emit_updated(app, &updated);
-            Ok(())
+    let max_turns = task.max_turns.clamp(1, 32) as u32;
+    let mut total_cost = 0.0f64;
+    let mut total_tokens = 0i64;
+    let mut last_text = String::new();
+    let mut budget_error: Option<String> = None;
+    let mut worker_error: Option<String> = None;
+    let mut turns_run = 0u32;
+    for index in 0..max_turns {
+        if cancel.is_cancelled() {
+            break;
         }
-        Err(error) => finish_failure(app, &task, &format!("{error:#}")),
+        let current = state.db.get_agent_task(&task.id).ok().flatten();
+        if current.as_ref().is_some_and(|value| {
+            matches!(value.status.as_str(), "cancelled" | "declined")
+        }) {
+            break;
+        }
+        if current.as_ref().is_some_and(|value| value.status == "done") {
+            break;
+        }
+        let content = if index == 0 {
+            prompt.clone()
+        } else {
+            format!(
+                "Continuação {}/{} da tarefa `{}`.\n\nO trabalho ainda não foi concluído. \
+                 Continue de onde parou, verifique o resultado com evidência real e chame \
+                 `finish_task` quando o critério de aceite estiver cumprido. Não repita o que \
+                 já está pronto e respeite o orçamento.",
+                index + 1,
+                max_turns,
+                task.title
+            )
+        };
+        let payload = TurnPayload {
+            conversation_id: conversation.id.clone(),
+            content,
+            attachment_ids: Vec::new(),
+            provider_id: agent.provider_id.clone(),
+            model_id: agent.model_id.clone(),
+            reasoning: agent.reasoning.clone(),
+            options: TurnOptions {
+                max_steps: 16,
+                ..TurnOptions::default()
+            },
+            profile,
+            turn_kind: TurnKind::User,
+            goal_request: false,
+            turn_id: Some(format!("{turn_id}-{}", index + 1)),
+        };
+        match harness::run_turn(
+            deps.clone(),
+            payload,
+            settings.clone(),
+            Arc::new(SilentEmitter),
+            cancel.clone(),
+        )
+        .await
+        {
+            Ok(result) => {
+                turns_run += 1;
+                total_cost += result.usage.as_ref().and_then(|usage| usage.cost).unwrap_or(0.0);
+                total_tokens += i64::from(
+                    result
+                        .usage
+                        .as_ref()
+                        .and_then(|usage| usage.total_tokens)
+                        .unwrap_or(0),
+                );
+                last_text = result.assistant_message.content.trim().to_string();
+                if total_cost > task.max_cost {
+                    budget_error = Some(format!(
+                        "AGENT_TASK_BUDGET: custo US$ {total_cost:.2} passou do limite US$ {:.2}",
+                        task.max_cost
+                    ));
+                    break;
+                }
+                if total_tokens > task.max_tokens {
+                    budget_error = Some(format!(
+                        "AGENT_TASK_BUDGET: {} tokens passaram do limite {}",
+                        total_tokens, task.max_tokens
+                    ));
+                    break;
+                }
+                let latest = state.db.get_agent_task(&task.id).ok().flatten();
+                if latest.as_ref().is_some_and(|value| value.status == "done") {
+                    break;
+                }
+            }
+            Err(error) => {
+                worker_error = Some(format!("{error:#}"));
+                break;
+            }
+        }
     }
+    heartbeat.abort();
+    state.finish_turn(&turn_id);
+
+    let mut latest = state.db.get_agent_task(&task.id).ok().flatten();
+    if latest
+        .as_ref()
+        .is_some_and(|value| matches!(value.status.as_str(), "cancelled" | "declined"))
+    {
+        return Ok(());
+    }
+    if let Some(error) = budget_error {
+        return finish_failure(app, &task, &error);
+    }
+    if let Some(error) = worker_error {
+        return finish_failure(app, &task, &error);
+    }
+    let Some(mut current) = latest.take() else {
+        return finish_failure(app, &task, "a tarefa sumiu durante a execução");
+    };
+    if current.status != "done" {
+        if last_text.trim().is_empty() {
+            return finish_failure(
+                app,
+                &task,
+                &format!(
+                    "AGENT_TASK_INCOMPLETE: a tarefa não foi concluída em {max_turns} turno(s) \
+                     e não devolveu resultado"
+                ),
+            );
+        }
+        current = state
+            .db
+            .transition_agent_task(
+                &task.id,
+                "done",
+                "agent",
+                serde_json::json!({
+                    "turns": turns_run,
+                    "tokens": total_tokens,
+                    "cost": total_cost,
+                }),
+                Some(&last_text),
+                None,
+                crate::domain::now_ms(),
+            )
+            .map_err(to_error)?;
+    }
+    let latest = current;
+    let text = latest
+        .result
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(last_text.as_str())
+        .to_string();
+    if let Some(channel_id) = task.channel_id.as_deref() {
+        let message = if text.is_empty() {
+            format!("Tarefa `{}` concluída sem texto de resultado.", task.title)
+        } else {
+            format!("Tarefa `{}` concluída:\n\n{}", task.title, text)
+        };
+        let _ = state.db.append_agent_channel_message(
+            channel_id,
+            "agent",
+            Some(&agent.id),
+            &message,
+            crate::domain::now_ms(),
+        );
+    }
+    emit_updated(app, &latest);
+    Ok(())
 }
 
 fn finish_failure(app: &AppHandle, task: &AgentTask, message: &str) -> Result<(), String> {

@@ -196,10 +196,11 @@ pub async fn docker_validate_image(
     })
 }
 
-#[tauri::command]
-pub async fn docker_cleanup(state: State<'_, AppState>) -> Result<u32, String> {
+/// Removes every container labeled `lumina.owner=lumina`. Used by the
+/// command and by the boot cleanup; active containers are only removed at boot.
+pub async fn cleanup_containers(state: &AppState) -> Result<u32, String> {
     let listed = docker(
-        &state,
+        state,
         vec![
             "ps".into(),
             "-aq".into(),
@@ -218,7 +219,7 @@ pub async fn docker_cleanup(state: State<'_, AppState>) -> Result<u32, String> {
     if !ids.is_empty() {
         let mut args = vec!["rm".into(), "-f".into()];
         args.extend(ids.iter().cloned());
-        let removed = docker(&state, args, Duration::from_secs(30))
+        let removed = docker(state, args, Duration::from_secs(30))
             .await
             .map_err(to_error)?;
         if removed.exit_code != Some(0) {
@@ -229,4 +230,9 @@ pub async fn docker_cleanup(state: State<'_, AppState>) -> Result<u32, String> {
         }
     }
     Ok(ids.len() as u32)
+}
+
+#[tauri::command]
+pub async fn docker_cleanup(state: State<'_, AppState>) -> Result<u32, String> {
+    cleanup_containers(state.inner()).await
 }

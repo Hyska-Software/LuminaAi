@@ -5,7 +5,7 @@
 //! §8.3 e `WORKBENCH.md` §7.3.
 
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::events::TerminalEvent;
 use crate::state::AppState;
@@ -18,15 +18,24 @@ fn map_err(error: impl std::fmt::Display) -> String {
 /// Abre um terminal no workspace da conversa e transmite a saída pelo channel.
 #[tauri::command]
 pub async fn open_terminal(
+    app: AppHandle,
     state: State<'_, AppState>,
     conversation_id: String,
     cols: u16,
     rows: u16,
     on_event: Channel<TerminalEvent>,
 ) -> Result<TerminalInfo, String> {
+    let settings = crate::config::load_settings(&app);
     state
         .terminals
-        .open(&state.db, &conversation_id, cols, rows, on_event)
+        .open(
+            &state.db,
+            &settings,
+            &conversation_id,
+            cols,
+            rows,
+            on_event,
+        )
         .map_err(map_err)
 }
 

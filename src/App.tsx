@@ -13,11 +13,17 @@ import { SourcesPanel } from '@/components/chat/SourcesPanel';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { TooltipProvider } from '@/components/ui';
 import { useAgentStore, useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { api } from '@/lib/api';
 import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel';
 import { resolveHotkey, type HotkeyCommand } from '@/lib/hotkeys';
+import { ComputerControlBanner } from '@/components/computer/ComputerControlBanner';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { SplashScreen } from '@/components/SplashScreen';
-import type { AgentRoutineRunEvent, AgentTaskUpdatedEvent } from '@/lib/types';
+import type {
+  AgentRoutineRunEvent,
+  AgentTaskUpdatedEvent,
+  TurnEventBusPayload,
+} from '@/lib/types';
 import { useUpdateCheck } from '@/components/layout/useUpdateCheck';
 
 /** Ensures bootstrap runs once even under React StrictMode double-effects. */
@@ -40,6 +46,8 @@ function bootstrap(): Promise<void> {
     if (useUiStore.getState().layoutMode === 'agent') {
       await useChatStore.getState().drainAgentQueues();
     }
+    // A webview reload must reattach turns that kept running in Rust.
+    await useChatStore.getState().reattachTurns();
   })();
   return bootstrapPromise;
 }
@@ -204,6 +212,16 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
+    const seen = new Set<string>();
+    const ATTENTION = new Set([
+      'waiting_input',
+      'waiting_approval',
+      'handoff_pending',
+      'review',
+      'done',
+      'failed',
+      'declined',
+    ]);
     void listen<AgentTaskUpdatedEvent>('lumina:agent-task-updated', (event) => {
       if (disposed) return;
       window.dispatchEvent(
@@ -211,6 +229,81 @@ export default function App() {
       );
       void useChatStore.getState().refreshConversations();
       void useAgentStore.getState().refresh();
+      const settings = useAppStore.getState().settings;
+      const status = event.payload.status;
+      if (
+        settings.notificationsEnabled === false ||
+        settings.notificationsDnd === true ||
+        settings.notificationsTasks === false ||
+        !ATTENTION.has(status)
+      ) {
+        return;
+      }
+      const key = `${event.payload.taskId}:${status}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      void (async () => {
+        let conversationId: string | null = null;
+        let agentId: string | null = event.payload.ownerAgentId;
+        try {
+          const detail = await api.getAgentTask(event.payload.taskId);
+          conversationId = detail.task.conversationId;
+          agentId = detail.task.ownerAgentId;
+        } catch {
+          /* the task may have been deleted; the toast still explains it */
+        }
+        const ui = useUiStore.getState();
+        const focused =
+          typeof document !== 'undefined' &&
+          document.hasFocus() &&
+          ui.layoutMode === 'agent' &&
+          useChatStore.getState().activeId === conversationId;
+        if (focused) return;
+        const title =
+          status === 'done'
+            ? 'Tarefa concluída'
+            : status === 'failed' || status === 'declined'
+              ? 'Tarefa falhou'
+              : status === 'handoff_pending'
+                ? 'Tarefa aguardando aceite'
+                : 'Tarefa precisa de você';
+        toast.info(title, {
+          description: event.payload.title,
+          action: conversationId
+            ? {
+                label: 'Abrir',
+                onClick: () => {
+                  useUiStore.getState().setLayoutMode('agent');
+                  if (agentId) useUiStore.getState().setActiveAgentId(agentId);
+                  void useChatStore.getState().openConversation(conversationId!);
+                },
+              }
+            : undefined,
+        });
+        void api.notifyDesktop(title, event.payload.title);
+      })();
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* event bridge unavailable outside Tauri */
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Global turn bus: turns reattached after a webview reload keep streaming
+  // even though their original invoke Channel is gone.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<TurnEventBusPayload>('lumina:turn-event', (event) => {
+      if (disposed) return;
+      void useChatStore.getState().applyExternalTurnEvent(event.payload);
     })
       .then((fn) => {
         if (disposed) fn();
@@ -367,6 +460,7 @@ export default function App() {
         <SettingsDialog />
         <ModelPickerDialog />
         <CommandPalette />
+        <ComputerControlBanner />
       </ErrorBoundary>
       <Toaster
         position="bottom-right"

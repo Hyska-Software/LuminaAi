@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => {
     getConversation: vi.fn(),
     getCacheStats: vi.fn(),
     notifyDesktop: vi.fn().mockResolvedValue(true),
+    listActiveTurns: vi.fn(),
+    listTurnEvents: vi.fn(),
     renameConversation: vi.fn(),
     deleteConversation: vi.fn(),
     setConversationPinned: vi.fn(),
@@ -57,6 +59,7 @@ import {
   useChatStore,
   selectActiveConversationStarted,
   modelLockReason,
+  notificationsAllowed,
 } from '@/lib/store/chatStore';
 import { emptyCodeSession, useCodeStore } from '@/lib/store/codeStore';
 import { useUiStore } from '@/lib/store/uiStore';
@@ -192,6 +195,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetStores();
   mocks.api.listConversations.mockResolvedValue([]);
+  mocks.api.listActiveTurns.mockResolvedValue([]);
+  mocks.api.listTurnEvents.mockResolvedValue([]);
   mocks.api.getConversation.mockResolvedValue(undefined);
   mocks.api.getCacheStats.mockResolvedValue(null);
   mocks.api.listArtifacts.mockResolvedValue([]);
@@ -2069,6 +2074,99 @@ describe('chatStore — concorrência entre agentes', () => {
   });
 });
 
+describe('chatStore — notificações por categoria', () => {
+  it('respeita DND, o master switch e cada categoria', () => {
+    const base = useAppStore.getState().settings;
+    useAppStore.setState({ settings: { ...base, notificationsEnabled: true, notificationsDnd: true } });
+    expect(notificationsAllowed('turn_complete')).toBe(false);
+    useAppStore.setState({ settings: { ...base, notificationsDnd: false } });
+    expect(notificationsAllowed('turn_complete')).toBe(true);
+    useAppStore.setState({ settings: { ...base, notificationsCompletions: false } });
+    expect(notificationsAllowed('turn_complete')).toBe(false);
+    expect(notificationsAllowed('approval_requested')).toBe(true);
+    useAppStore.setState({ settings: { ...base, notificationsEnabled: false } });
+    expect(notificationsAllowed('approval_requested')).toBe(false);
+  });
+});
+
+describe('chatStore — reattach de turnos', () => {  it('reconstrói um turno ativo a partir dos eventos persistidos', async () => {
+    const activeConversation = conversation({ id: 'conv-1', title: 'Reattach', messageCount: 2 });
+    mocks.api.listActiveTurns.mockResolvedValue([
+      { turnId: 'turn-reattach', conversationId: 'conv-1', startedAt: 1 },
+    ]);
+    mocks.api.getConversation.mockResolvedValue({
+      conversation: activeConversation,
+      messages: [
+        userMessage({ id: 'user-1' }),
+        assistantMessage({ id: 'assistant-1', content: '', status: 'streaming' }),
+      ],
+    });
+    const result = {
+      userMessage: userMessage({ id: 'user-1' }),
+      assistantMessage: assistantMessage({ id: 'assistant-1', content: 'Resposta final' }),
+      usage: null,
+      error: null,
+      conversation: activeConversation,
+    };
+    mocks.api.listTurnEvents.mockResolvedValue([
+      {
+        turnId: 'turn-reattach',
+        seq: 1,
+        event: {
+          type: 'turn_started',
+          turnId: 'turn-reattach',
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        },
+      },
+      {
+        turnId: 'turn-reattach',
+        seq: 2,
+        event: { type: 'text_delta', delta: 'Resposta ' },
+      },
+      { turnId: 'turn-reattach', seq: 3, event: { type: 'done', result } },
+    ]);
+    useChatStore.setState({
+      conversations: [activeConversation],
+      activeId: 'conv-1',
+      messagesByConversation: {},
+      streamsByConversation: {},
+      streaming: null,
+    });
+
+    await useChatStore.getState().reattachTurns();
+
+    const messages = useChatStore.getState().messagesByConversation['conv-1'] ?? [];
+    expect(messages.find((message) => message.id === 'assistant-1')?.content).toBe(
+      'Resposta final',
+    );
+    expect(useChatStore.getState().streamsByConversation['conv-1']).toBeUndefined();
+    expect(useChatStore.getState().streaming).toBeNull();
+  });
+
+  it('não cria stream fantasma para turnos internos sem eventos', async () => {
+    mocks.api.listActiveTurns.mockResolvedValue([
+      { turnId: 'task-turn', conversationId: 'conv-task', startedAt: 1 },
+    ]);
+    mocks.api.listTurnEvents.mockResolvedValue([]);
+    mocks.api.getConversation.mockResolvedValue({
+      conversation: conversation({ id: 'conv-task', title: 'Tarefa' }),
+      messages: [],
+    });
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-task', title: 'Tarefa' })],
+      activeId: null,
+      messagesByConversation: {},
+      streamsByConversation: {},
+      streaming: null,
+    });
+
+    await useChatStore.getState().reattachTurns();
+
+    expect(useChatStore.getState().streamsByConversation['conv-task']).toBeUndefined();
+  });
+});
+
 describe('chatStore — notificações de agente', () => {
   it('avisa quando um turno de agente termina fora do layout Agentes', async () => {
     const agentConversation = conversation({
@@ -2105,9 +2203,10 @@ describe('chatStore — notificações de agente', () => {
     await useChatStore.getState().send('Resuma o trimestre');
 
     await vi.waitFor(() =>
-      expect(toast.success).toHaveBeenCalledWith('Agente concluiu a resposta', {
-        description: 'Plano trimestral',
-      }),
+      expect(toast.success).toHaveBeenCalledWith(
+        'Agente concluiu a resposta',
+        expect.objectContaining({ description: 'Plano trimestral' }),
+      ),
     );
   });
 });

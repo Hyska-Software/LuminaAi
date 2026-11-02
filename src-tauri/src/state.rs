@@ -29,6 +29,7 @@ pub struct DynamicModels {
 struct TurnEntry {
     cancel: CancellationToken,
     conversation_id: String,
+    started_at: i64,
 }
 
 /// Registro de turnos ativos (testável sem Tauri). `AppState` delega para ele.
@@ -49,6 +50,7 @@ impl TurnRegistry {
             TurnEntry {
                 cancel: token.clone(),
                 conversation_id: conversation_id.to_string(),
+                started_at: crate::domain::now_ms(),
             },
         );
         token
@@ -101,6 +103,24 @@ impl TurnRegistry {
             .lock()
             .iter()
             .map(|(turn_id, entry)| (turn_id.clone(), entry.conversation_id.clone()))
+            .collect();
+        turns.sort();
+        turns
+    }
+
+    /// `(turn_id, conversation_id, started_at)` of every active turn.
+    pub fn active_turn_details(&self) -> Vec<(String, String, i64)> {
+        let mut turns: Vec<(String, String, i64)> = self
+            .turns
+            .lock()
+            .iter()
+            .map(|(turn_id, entry)| {
+                (
+                    turn_id.clone(),
+                    entry.conversation_id.clone(),
+                    entry.started_at,
+                )
+            })
             .collect();
         turns.sort();
         turns
@@ -337,6 +357,10 @@ impl AppState {
 
     pub fn active_turns(&self) -> Vec<(String, String)> {
         self.turns.active_turns()
+    }
+
+    pub fn active_turn_details(&self) -> Vec<(String, String, i64)> {
+        self.turns.active_turn_details()
     }
 
     /// Há um turno ativo nesta conversa? Usado pelo preflight de objetivos

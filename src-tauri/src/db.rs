@@ -21,6 +21,7 @@ use crate::agents::{
     AgentMemoryInput, AgentRoutine, AgentRoutineInput, AgentTask, AgentTaskEvent, AgentTaskInput,
     AgentThreadCursor, AgentThreadPage, AgentUsage,
 };
+use crate::computer::{ComputerActionRecord, ComputerSession};
 use crate::domain::{
     conversation_mode_or_default, now_ms, ApprovalDecision, ApprovalRule, ApprovalScope, Artifact,
     ArtifactKind, AttachmentInfo, CacheBreakReason, CacheSample, CacheState, ChatMessage,
@@ -41,8 +42,8 @@ const CONVERSATION_COLUMNS: &str = "id, title, created_at, updated_at, pinned, \
 const AGENT_COLUMNS: &str = "a.id, a.name, a.role, a.description, a.emoji, a.department, \
      a.pinned, a.sort_order, a.provider_id, a.model_id, a.fallback_provider_id, \
      a.fallback_model_id, a.reasoning_json, a.instructions, a.prompt_version, a.starters_json, \
-     a.capabilities_json, a.memory_enabled, a.workspace_id, a.permission_mode, a.archived_at, \
-     a.created_at, a.updated_at";
+     a.capabilities_json, a.memory_enabled, a.workspace_id, a.permission_mode, a.docker_image, \
+     a.archived_at, a.created_at, a.updated_at";
 
 const AGENT_TASK_COLUMNS: &str = "id, channel_id, parent_task_id, owner_agent_id, \
      created_by_agent_id, created_by_user, title, brief, acceptance, status, priority, \
@@ -100,6 +101,7 @@ CREATE TABLE IF NOT EXISTS agents (
   memory_enabled    INTEGER NOT NULL DEFAULT 0,
   workspace_id      TEXT,
   permission_mode   TEXT NOT NULL DEFAULT 'edit',
+  docker_image      TEXT,
   archived_at       INTEGER,
   created_at        INTEGER NOT NULL,
   updated_at        INTEGER NOT NULL
@@ -214,6 +216,55 @@ CREATE TABLE IF NOT EXISTS agent_task_events (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_task_events
   ON agent_task_events(task_id, created_at);
+
+-- Computer-use audit (v1.16). Never stores typed text/screenshot bytes.
+CREATE TABLE IF NOT EXISTS computer_sessions (
+  id              TEXT PRIMARY KEY,
+  agent_id        TEXT,
+  conversation_id TEXT NOT NULL,
+  backend         TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'active',
+  started_at      INTEGER NOT NULL,
+  ended_at        INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_computer_sessions_conv
+  ON computer_sessions(conversation_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS computer_actions (
+  id                TEXT PRIMARY KEY,
+  session_id        TEXT NOT NULL REFERENCES computer_sessions(id) ON DELETE CASCADE,
+  agent_id          TEXT,
+  conversation_id   TEXT NOT NULL,
+  turn_id           TEXT NOT NULL,
+  tool              TEXT NOT NULL,
+  action            TEXT NOT NULL,
+  target_json       TEXT NOT NULL DEFAULT '{}',
+  approval_scope    TEXT,
+  decision          TEXT,
+  result            TEXT NOT NULL,
+  error_code        TEXT,
+  error_message     TEXT,
+  redacted_text_len INTEGER,
+  created_at        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_computer_actions_turn
+  ON computer_actions(turn_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_computer_actions_agent
+  ON computer_actions(agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_computer_actions_conv
+  ON computer_actions(conversation_id, created_at DESC);
+
+-- Persisted turn events for renderer reattach after reload (v1.16).
+CREATE TABLE IF NOT EXISTS turn_events (
+  turn_id         TEXT NOT NULL,
+  seq             INTEGER NOT NULL,
+  conversation_id TEXT NOT NULL,
+  event_json      TEXT NOT NULL,
+  created_at      INTEGER NOT NULL,
+  PRIMARY KEY (turn_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_turn_events_conversation
+  ON turn_events(conversation_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS conversations (
   id            TEXT PRIMARY KEY,
@@ -1092,6 +1143,12 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         "fallback_model_id",
         "ALTER TABLE agents ADD COLUMN fallback_model_id TEXT",
     )?;
+    ensure_column(
+        conn,
+        "agents",
+        "docker_image",
+        "ALTER TABLE agents ADD COLUMN docker_image TEXT",
+    )?;
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_agent_memories_agent \
          ON agent_memories(agent_id, pinned DESC, updated_at DESC);",
@@ -1473,11 +1530,12 @@ fn agent_from_row(row: &Row<'_>) -> rusqlite::Result<Agent> {
         memory_enabled: row.get::<_, i64>(17)? != 0,
         workspace_id: row.get(18)?,
         permission_mode: PermissionMode::from_str(&row.get::<_, String>(19)?),
-        archived_at: row.get(20)?,
-        created_at: row.get(21)?,
-        updated_at: row.get(22)?,
-        thread_count: row.get(23)?,
-        last_active_at: row.get(24)?,
+        docker_image: row.get(20)?,
+        archived_at: row.get(21)?,
+        created_at: row.get(22)?,
+        updated_at: row.get(23)?,
+        thread_count: row.get(24)?,
+        last_active_at: row.get(25)?,
     })
 }
 
@@ -1523,6 +1581,39 @@ fn agent_channel_message_from_row(row: &Row<'_>) -> rusqlite::Result<AgentChanne
         agent_id: row.get(3)?,
         content: row.get(4)?,
         created_at: row.get(5)?,
+    })
+}
+
+fn computer_session_from_row(row: &Row<'_>) -> rusqlite::Result<ComputerSession> {
+    Ok(ComputerSession {
+        id: row.get(0)?,
+        agent_id: row.get(1)?,
+        conversation_id: row.get(2)?,
+        backend: row.get(3)?,
+        status: row.get(4)?,
+        started_at: row.get(5)?,
+        ended_at: row.get(6)?,
+    })
+}
+
+fn computer_action_from_row(row: &Row<'_>) -> rusqlite::Result<ComputerActionRecord> {
+    let target: String = row.get(7)?;
+    Ok(ComputerActionRecord {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        agent_id: row.get(2)?,
+        conversation_id: row.get(3)?,
+        turn_id: row.get(4)?,
+        tool: row.get(5)?,
+        action: row.get(6)?,
+        target: serde_json::from_str(&target).unwrap_or(serde_json::Value::Null),
+        approval_scope: row.get(8)?,
+        decision: row.get(9)?,
+        result: row.get(10)?,
+        error_code: row.get(11)?,
+        error_message: row.get(12)?,
+        redacted_text_len: row.get(13)?,
+        created_at: row.get(14)?,
     })
 }
 
@@ -2155,8 +2246,9 @@ impl Db {
                 "INSERT INTO agents (id, name, role, description, emoji, department, pinned, \
                  sort_order, provider_id, model_id, fallback_provider_id, fallback_model_id, \
                  reasoning_json, instructions, prompt_version, starters_json, capabilities_json, \
-                 memory_enabled, workspace_id, permission_mode, archived_at, created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?15, ?16, ?17, ?18, NULL, ?19, ?19)",
+                 memory_enabled, workspace_id, permission_mode, docker_image, archived_at, \
+                 created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?15, ?16, ?17, ?18, ?19, NULL, ?20, ?20)",
                 params![
                     &id,
                     &input.name,
@@ -2176,6 +2268,7 @@ impl Db {
                     input.memory_enabled as i64,
                     &input.workspace_id,
                     input.permission_mode.as_str(),
+                    &input.docker_image,
                     now,
                 ],
             )
@@ -2212,8 +2305,8 @@ impl Db {
              department = ?6, provider_id = ?7, model_id = ?8, fallback_provider_id = ?9, \
              fallback_model_id = ?10, reasoning_json = ?11, instructions = ?12, \
              prompt_version = ?13, starters_json = ?14, capabilities_json = ?15, \
-             memory_enabled = ?16, workspace_id = ?17, permission_mode = ?18, updated_at = ?19 \
-             WHERE id = ?1",
+             memory_enabled = ?16, workspace_id = ?17, permission_mode = ?18, \
+             docker_image = ?19, updated_at = ?20 WHERE id = ?1",
             params![
                 id,
                 &input.name,
@@ -2233,6 +2326,7 @@ impl Db {
                 input.memory_enabled as i64,
                 &input.workspace_id,
                 input.permission_mode.as_str(),
+                &input.docker_image,
                 now_ms(),
             ],
         )
@@ -2594,6 +2688,244 @@ impl Db {
             }))
     }
 
+    /* ---------------- computer-use audit ---------------- */
+
+    pub fn get_or_create_computer_session(
+        &self,
+        agent_id: Option<&str>,
+        conversation_id: &str,
+        backend: &str,
+        now: i64,
+    ) -> Result<ComputerSession> {
+        let conn = self.conn.lock();
+        let existing = {
+            let mut stmt = conn.prepare(
+                "SELECT id, agent_id, conversation_id, backend, status, started_at, ended_at \
+                 FROM computer_sessions WHERE conversation_id = ?1 AND backend = ?2 \
+                 AND status = 'active' ORDER BY started_at DESC LIMIT 1",
+            )?;
+            let mut rows = stmt.query_map(params![conversation_id, backend], computer_session_from_row)?;
+            rows.next().transpose()?
+        };
+        if let Some(session) = existing {
+            return Ok(session);
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO computer_sessions (id, agent_id, conversation_id, backend, status, \
+             started_at) VALUES (?1, ?2, ?3, ?4, 'active', ?5)",
+            params![id, agent_id, conversation_id, backend, now],
+        )?;
+        drop(conn);
+        Ok(ComputerSession {
+            id,
+            agent_id: agent_id.map(str::to_string),
+            conversation_id: conversation_id.to_string(),
+            backend: backend.to_string(),
+            status: "active".to_string(),
+            started_at: now,
+            ended_at: None,
+        })
+    }
+
+    pub fn end_computer_session(
+        &self,
+        conversation_id: &str,
+        status: &str,
+        now: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE computer_sessions SET status = ?2, ended_at = ?3 \
+             WHERE conversation_id = ?1 AND status = 'active'",
+            params![conversation_id, status, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn end_all_computer_sessions(&self, status: &str, now: i64) -> Result<u64> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE computer_sessions SET status = ?1, ended_at = ?2 WHERE status = 'active'",
+            params![status, now],
+        )?;
+        Ok(changed as u64)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_computer_action(
+        &self,
+        session_id: &str,
+        agent_id: Option<&str>,
+        conversation_id: &str,
+        turn_id: &str,
+        tool: &str,
+        action: &str,
+        target: &serde_json::Value,
+        approval_scope: Option<&str>,
+        decision: Option<&str>,
+        result: &str,
+        error_code: Option<&str>,
+        error_message: Option<&str>,
+        redacted_text_len: Option<i64>,
+        now: i64,
+    ) -> Result<ComputerActionRecord> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let target_json = serde_json::to_string(target)?;
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO computer_actions (id, session_id, agent_id, conversation_id, turn_id, \
+             tool, action, target_json, approval_scope, decision, result, error_code, \
+             error_message, redacted_text_len, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            params![
+                id,
+                session_id,
+                agent_id,
+                conversation_id,
+                turn_id,
+                tool,
+                action,
+                target_json,
+                approval_scope,
+                decision,
+                result,
+                error_code,
+                error_message,
+                redacted_text_len,
+                now,
+            ],
+        )?;
+        drop(conn);
+        Ok(ComputerActionRecord {
+            id,
+            session_id: session_id.to_string(),
+            agent_id: agent_id.map(str::to_string),
+            conversation_id: conversation_id.to_string(),
+            turn_id: turn_id.to_string(),
+            tool: tool.to_string(),
+            action: action.to_string(),
+            target: target.clone(),
+            approval_scope: approval_scope.map(str::to_string),
+            decision: decision.map(str::to_string),
+            result: result.to_string(),
+            error_code: error_code.map(str::to_string),
+            error_message: error_message.map(str::to_string),
+            redacted_text_len,
+            created_at: now,
+        })
+    }
+
+    pub fn count_computer_actions_for_turn(&self, turn_id: &str) -> Result<i64> {
+        let conn = self.conn.lock();
+        let count = conn.query_row(
+            "SELECT COUNT(*) FROM computer_actions WHERE turn_id = ?1",
+            [turn_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    pub fn count_computer_actions_for_agent_since(
+        &self,
+        agent_id: &str,
+        since: i64,
+    ) -> Result<i64> {
+        let conn = self.conn.lock();
+        let count = conn.query_row(
+            "SELECT COUNT(*) FROM computer_actions WHERE agent_id = ?1 AND created_at >= ?2",
+            params![agent_id, since],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    pub fn list_computer_actions(
+        &self,
+        conversation_id: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<Vec<ComputerActionRecord>> {
+        let limit = limit.unwrap_or(200).clamp(1, 500) as i64;
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, agent_id, conversation_id, turn_id, tool, action, \
+             target_json, approval_scope, decision, result, error_code, error_message, \
+             redacted_text_len, created_at FROM computer_actions \
+             WHERE (?1 IS NULL OR conversation_id = ?1) \
+             ORDER BY created_at DESC, id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![conversation_id, limit], computer_action_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn list_active_computer_sessions(&self) -> Result<Vec<ComputerSession>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_id, conversation_id, backend, status, started_at, ended_at \
+             FROM computer_sessions WHERE status = 'active' ORDER BY started_at DESC",
+        )?;
+        let rows = stmt.query_map([], computer_session_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn list_computer_sessions(&self, conversation_id: &str) -> Result<Vec<ComputerSession>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_id, conversation_id, backend, status, started_at, ended_at \
+             FROM computer_sessions WHERE conversation_id = ?1 ORDER BY started_at DESC",
+        )?;
+        let rows = stmt.query_map([conversation_id], computer_session_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /* ---------------- turn events (reattach) ---------------- */
+
+    pub fn append_turn_event(
+        &self,
+        turn_id: &str,
+        seq: u64,
+        conversation_id: &str,
+        event_json: &str,
+        now: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO turn_events (turn_id, seq, conversation_id, event_json, \
+             created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![turn_id, seq as i64, conversation_id, event_json, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_turn_events(
+        &self,
+        turn_id: &str,
+        after_seq: Option<u64>,
+    ) -> Result<Vec<(u64, serde_json::Value)>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT seq, event_json FROM turn_events WHERE turn_id = ?1 AND seq > ?2 \
+             ORDER BY seq LIMIT 5000",
+        )?;
+        let rows = stmt.query_map(params![turn_id, after_seq.unwrap_or(0) as i64], |row| {
+            Ok((row.get::<_, i64>(0)? as u64, row.get::<_, String>(1)?))
+        })?;
+        let mut events = Vec::new();
+        for row in rows {
+            let (seq, raw) = row?;
+            if let Ok(value) = serde_json::from_str(&raw) {
+                events.push((seq, value));
+            }
+        }
+        Ok(events)
+    }
+
+    pub fn prune_turn_events(&self, before: i64) -> Result<u64> {
+        let conn = self.conn.lock();
+        let changed = conn.execute("DELETE FROM turn_events WHERE created_at < ?1", [before])?;
+        Ok(changed as u64)
+    }
+
     /* ---------------- agent tasks (delegation) ---------------- */
 
     fn task_open_statuses() -> &'static str {
@@ -2840,6 +3172,17 @@ impl Db {
             .ok_or_else(|| anyhow::anyhow!("tarefa reivindicada não encontrada"))
     }
 
+    /// Extends a running task lease. Returns false when the task is no longer
+    /// running/owned by another runner (the caller should cancel its harness).
+    pub fn renew_agent_task_lease(&self, task_id: &str, now: i64) -> Result<bool> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE agent_tasks SET lease_until = ?2 WHERE id = ?1 AND status = 'running'",
+            params![task_id, now + crate::agents::AGENT_TASK_LEASE_MS],
+        )?;
+        Ok(changed > 0)
+    }
+
     pub fn transition_agent_task(
         &self,
         task_id: &str,
@@ -2946,13 +3289,14 @@ impl Db {
             ));
         }
         conn.execute(
-            "UPDATE agent_tasks SET owner_agent_id = ?2, status = 'queued', lease_until = NULL, \
-             handoff_count = handoff_count + 1, version = version + 1, updated_at = ?3 WHERE id = ?1",
+            "UPDATE agent_tasks SET owner_agent_id = ?2, status = 'handoff_pending', \
+             lease_until = NULL, handoff_count = handoff_count + 1, version = version + 1, \
+             updated_at = ?3 WHERE id = ?1",
             params![task_id, to_agent_id, now],
         )?;
         conn.execute(
             "INSERT INTO agent_task_events (id, task_id, from_status, to_status, actor, \
-             payload_json, created_at) VALUES (?1, ?2, ?3, 'queued', ?4, ?5, ?6)",
+             payload_json, created_at) VALUES (?1, ?2, ?3, 'handoff_pending', ?4, ?5, ?6)",
             params![
                 uuid::Uuid::new_v4().to_string(),
                 task_id,
@@ -5395,6 +5739,7 @@ mod tests {
             memory_enabled: false,
             workspace_id: None,
             permission_mode: crate::domain::PermissionMode::Edit,
+            docker_image: None,
         }
     }
 
@@ -5562,6 +5907,15 @@ mod tests {
         assert_eq!(claimed.status, "running");
         assert!(claimed.lease_until.is_some());
         assert!(db.claim_agent_task(&task.id, now_ms()).is_err());
+        let lease_before = claimed.lease_until.expect("lease");
+        assert!(db
+            .renew_agent_task_lease(&task.id, now_ms() + 1_000)
+            .expect("renew"));
+        let renewed = db
+            .get_agent_task(&task.id)
+            .expect("get")
+            .expect("task");
+        assert!(renewed.lease_until.expect("lease") > lease_before);
 
         let waiting = db
             .transition_agent_task(
@@ -5596,11 +5950,16 @@ mod tests {
             )
             .expect("handoff");
         assert_eq!(handoff.owner_agent_id, first.id);
-        assert_eq!(handoff.status, "queued");
+        assert_eq!(handoff.status, "handoff_pending");
         assert_eq!(handoff.handoff_count, 1);
         assert!(db
             .handoff_agent_task(&task.id, &second.id, "agent", "de novo", now_ms())
             .is_err());
+        assert!(db
+            .list_queued_agent_tasks(now_ms(), 10)
+            .expect("queued")
+            .iter()
+            .all(|entry| entry.id != task.id));
 
         db.transition_agent_task(
             &task.id,
@@ -5636,6 +5995,9 @@ mod tests {
         assert_eq!(done.status, "done");
         assert_eq!(done.result.as_deref(), Some("Contrato revisado; 3 riscos."));
         assert_eq!(done.result_artifact_ids, vec!["artifact-1".to_string()]);
+        assert!(!db
+            .renew_agent_task_lease(&task.id, now_ms())
+            .expect("renew after done"));
         let events = db.list_agent_task_events(&task.id).expect("events");
         assert!(events.len() >= 6);
         assert_eq!(
@@ -5673,6 +6035,85 @@ mod tests {
         assert!(db
             .create_agent_task(&input, None, true, now_ms())
             .is_err());
+    }
+
+    #[test]
+    fn computer_audit_records_actions_without_text_and_counts_limits() {
+        let db = test_db();
+        let now = now_ms();
+        let session = db
+            .get_or_create_computer_session(Some("agent-1"), "conv-1", "local", now)
+            .expect("session");
+        assert_eq!(session.status, "active");
+        let action = db
+            .insert_computer_action(
+                &session.id,
+                Some("agent-1"),
+                "conv-1",
+                "turn-1",
+                "computer_type",
+                "computer_type",
+                &serde_json::json!({ "textLength": 12 }),
+                Some("once"),
+                Some("approved"),
+                "ok",
+                None,
+                None,
+                Some(12),
+                now,
+            )
+            .expect("action");
+        assert_eq!(action.redacted_text_len, Some(12));
+        assert!(!serde_json::to_string(&action)
+            .expect("json")
+            .contains("segredo"));
+        assert_eq!(
+            db.count_computer_actions_for_turn("turn-1")
+                .expect("count"),
+            1
+        );
+        assert_eq!(
+            db.count_computer_actions_for_agent_since("agent-1", now - 1000)
+                .expect("count"),
+            1
+        );
+        assert_eq!(
+            db.list_computer_actions(Some("conv-1"), Some(10))
+                .expect("list")
+                .len(),
+            1
+        );
+        db.end_computer_session("conv-1", "completed", now + 1)
+            .expect("end");
+        assert_eq!(
+            db.list_computer_sessions("conv-1").expect("sessions")[0].status,
+            "completed"
+        );
+    }
+
+    #[test]
+    fn turn_events_are_persisted_in_order_and_pruned() {
+        let db = test_db();
+        let now = now_ms();
+        db.append_turn_event("turn-1", 1, "conv-1", r#"{"type":"step_started"}"#, now)
+            .expect("event 1");
+        db.append_turn_event("turn-1", 2, "conv-1", r#"{"type":"text_delta"}"#, now)
+            .expect("event 2");
+        let events = db.list_turn_events("turn-1", None).expect("list");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].0, 1);
+        assert_eq!(events[1].0, 2);
+        assert_eq!(
+            db.list_turn_events("turn-1", Some(1))
+                .expect("after")
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.prune_turn_events(now + 1).expect("prune"),
+            2
+        );
+        assert!(db.list_turn_events("turn-1", None).expect("empty").is_empty());
     }
 
     #[test]

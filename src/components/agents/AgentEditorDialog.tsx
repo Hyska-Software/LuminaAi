@@ -122,6 +122,7 @@ interface FormState {
   memoryEnabled: boolean;
   workspaceId: string;
   permissionMode: PermissionMode;
+  dockerImage: string;
 }
 
 function emptyForm(providerId: string, modelId: string): FormState {
@@ -142,6 +143,7 @@ function emptyForm(providerId: string, modelId: string): FormState {
     memoryEnabled: false,
     workspaceId: '',
     permissionMode: 'edit',
+    dockerImage: '',
   };
 }
 
@@ -205,6 +207,7 @@ export function AgentEditorDialog() {
         memoryEnabled: input.memoryEnabled,
         workspaceId: input.workspaceId ?? '',
         permissionMode: input.permissionMode,
+        dockerImage: input.dockerImage ?? '',
       });
     } else if (editor.mode === 'create' && editor.draft) {
       const draft = editor.draft;
@@ -225,6 +228,7 @@ export function AgentEditorDialog() {
         memoryEnabled: draft.memoryEnabled,
         workspaceId: draft.workspaceId ?? '',
         permissionMode: draft.permissionMode,
+        dockerImage: draft.dockerImage ?? '',
       });
     } else {
       setForm(emptyForm(fallbackProvider?.id ?? '', fallbackProvider?.defaultModelId ?? ''));
@@ -349,6 +353,7 @@ export function AgentEditorDialog() {
       memoryEnabled: form.memoryEnabled,
       workspaceId: form.workspaceId.trim() || null,
       permissionMode: form.permissionMode,
+      dockerImage: form.dockerImage.trim() || null,
     };
     setError(null);
     setSubmitting(true);
@@ -709,6 +714,21 @@ export function AgentEditorDialog() {
                       <option value="autonomous">Autônomo</option>
                     </NativeSelect>
                   </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="agent-docker-image">Imagem Docker do agente (opcional)</Label>
+                  <Input
+                    id="agent-docker-image"
+                    value={form.dockerImage}
+                    maxLength={200}
+                    placeholder="Ex.: node:22-bookworm"
+                    disabled={!form.capabilities.dockerExecution}
+                    onChange={(event) => set('dockerImage', event.target.value)}
+                  />
+                  <p className="text-[11px] text-foreground-subtle">
+                    Requer “Override de Docker” nas capacidades. Sem imagem, usa a configuração
+                    global.
+                  </p>
                 </div>
                 {form.workspaceId && workspaces.find((workspace) => workspace.id === form.workspaceId)?.trusted === false ? (
                   <p className="text-[11px] text-warning">

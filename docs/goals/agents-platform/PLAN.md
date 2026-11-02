@@ -79,7 +79,10 @@ multi-usuário com papéis.
 - [x] `browser_open` (navegador real local/Docker, operado pelas tools de
       desktop).
 - [x] Denylist de títulos sensíveis (senhas/bancos/UAC) antes da aprovação.
-- [ ] Cliente CDP dedicado e screenshot como imagem no resultado da tool.
+- [x] Screenshot como imagem no resultado da tool (visão, 2/turno, 1280 px).
+- [x] Auditoria (`computer_sessions`/`computer_actions`), rate limit por
+      turno/hora e banner de controle com “Parar”.
+- [ ] Cliente CDP dedicado.
 - [ ] macOS/Linux local.
 
 ### Etapa 2 — delegação agente↔agente
@@ -90,7 +93,9 @@ multi-usuário com papéis.
 - [x] Scheduler Rust a cada 5 s sob o governador, thread oculta por tarefa,
       resultado no canal e orçamento por tarefa.
 - [x] UI de tarefas no menu do agente (criar/executar/cancelar).
-- [ ] Quadro kanban no canal, reassign visual e orçamento por múltiplos turnos.
+- [x] Quadro kanban global na sidebar, cancelamento real, lease heartbeat,
+      handoff com aceite e orçamento por múltiplos turnos.
+- [ ] Menções `@agente` no canal e reassign visual.
 
 ### Etapa 3 — streams, notificações e orçamento
 
@@ -98,8 +103,9 @@ multi-usuário com papéis.
 - [x] Stop por thread/agente e “Parar tudo” (diálogo Atividade).
 - [x] `maxConcurrentTurns`, `maxConcurrentTurnsPerAgent`,
       `maxQueueLengthPerThread`, `agentDailyCostLimitUsd`.
-- [x] Toast + notificação do SO para aprovação/pergunta/conclusão em background.
-- [ ] Reattach completo via `turn_events` após reload do renderer.
+- [x] Toast + notificação do SO para aprovação/pergunta/conclusão em background,
+      com ação “Abrir” no toast e dedupe por conversa/categoria.
+- [x] Reattach completo via `turn_events` após reload do renderer.
 
 ### Etapa 4 — Docker de produção
 
@@ -107,5 +113,7 @@ multi-usuário com papéis.
       limites, workspace único, rede off).
 - [x] `docker_status`/`pull`/`validate`/`cleanup` e UI de validação.
 - [x] Imagem gráfica separada.
-- [ ] Perfil por agente/workspace, `run_code` e terminal em Docker, integração
-      real com daemon no CI.
+- [x] Perfil de imagem por agente, `run_code` e terminal em Docker, limites
+      configuráveis na UI.
+- [ ] Perfil por workspace, compose/devcontainer e containers gráficos por
+      sessão.

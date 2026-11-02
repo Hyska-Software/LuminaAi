@@ -60,5 +60,6 @@ export function inputFromAgent(agent: Agent) {
     memoryEnabled: agent.memoryEnabled,
     workspaceId: agent.workspaceId,
     permissionMode: agent.permissionMode,
+    dockerImage: agent.dockerImage ?? null,
   };
 }

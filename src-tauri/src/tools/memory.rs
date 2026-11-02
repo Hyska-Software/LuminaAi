@@ -236,6 +236,7 @@ mod tests {
             memory_enabled: true,
             workspace_id: None,
             permission_mode: crate::domain::PermissionMode::Edit,
+            docker_image: None,
         };
         let agent = rt.db.create_agent(&agent).expect("agent");
         let rt = ToolRuntime {

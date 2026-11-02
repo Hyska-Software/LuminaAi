@@ -15,6 +15,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
+import { api } from '@/lib/api';
 import {
   Badge,
   Button,
@@ -371,6 +372,64 @@ function dangerRing(risk: RiskClass): string {
   return risk === 'destroy' ? 'border-danger/30' : '';
 }
 
+function ComputerActionDetail({
+  detail,
+}: {
+  detail: Extract<ApprovalRequest['detail'], { kind: 'computer_action' }>;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    if (!detail.screenshotPath) return;
+    void api
+      .computerScreenshotPreview(detail.screenshotPath)
+      .then((value) => {
+        if (!disposed) setSrc(value);
+      })
+      .catch(() => {
+        if (!disposed) setError(true);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [detail.screenshotPath]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-[12px] text-foreground">
+        Ação: <span className="font-medium">{detail.action}</span>
+      </p>
+      <p className="break-words font-mono text-[11px] text-foreground-muted">
+        {detail.target}
+      </p>
+      {detail.textLength != null ? (
+        <p className="text-[11px] text-foreground-muted">
+          Texto: {detail.textLength} caractere(s) — o conteúdo não é exibido.
+        </p>
+      ) : null}
+      {detail.sensitive ? (
+        <p className="rounded-lg border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning">
+          Esta janela parece conter dados sensíveis. A automação será bloqueada.
+        </p>
+      ) : null}
+      {src ? (
+        <img
+          src={src}
+          alt="Screenshot do alvo da ação"
+          className="max-h-72 w-full rounded-lg border border-border object-contain"
+        />
+      ) : detail.screenshotPath && !error ? (
+        <p className="text-[11px] text-foreground-subtle">Carregando screenshot…</p>
+      ) : (
+        <p className="text-[11px] text-foreground-subtle">
+          Sem screenshot disponível; confira a janela antes de permitir.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ApprovalDetailView({
   detail,
   preview,
@@ -445,6 +504,8 @@ function ApprovalDetailView({
           </p>
         </div>
       );
+    case 'computer_action':
+      return <ComputerActionDetail detail={detail} />;
     case 'other':
       return (
         <p className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground-muted">

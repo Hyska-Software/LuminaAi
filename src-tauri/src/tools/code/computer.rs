@@ -4,12 +4,13 @@
 //! input action goes through `policy_check` with `RiskClass::Computer`, so it
 //! always requires an explicit approval, including in Autonomous mode.
 
+use base64::Engine;
 use serde_json::{json, Value};
 
 use crate::domain::{ApprovalDetail, RiskClass};
 use crate::providers::ToolDefinition;
 use crate::tools::registry::ToolCtx;
-use crate::tools::ToolOutcome;
+use crate::tools::{ToolImage, ToolOutcome};
 
 const TOOL_NAMES: &[&str] = &[
     "computer_screenshot",
@@ -156,7 +157,18 @@ async fn guard_sensitive(ctx: &ToolCtx) -> Result<(), ToolOutcome> {
     }
 }
 
-async fn approve(ctx: &ToolCtx, tool: &str, text: String) -> Result<(), ToolOutcome> {
+async fn approval_preview(ctx: &ToolCtx) -> Option<String> {
+    crate::computer::screenshot(&ctx.settings, &ctx.data_dir, &ctx.conversation_id)
+        .await
+        .ok()
+        .map(|shot| shot.path)
+}
+
+async fn approve(
+    ctx: &ToolCtx,
+    tool: &str,
+    detail: ApprovalDetail,
+) -> Result<(), ToolOutcome> {
     super::exec::policy_check(
         ctx,
         tool,
@@ -165,13 +177,13 @@ async fn approve(ctx: &ToolCtx, tool: &str, text: String) -> Result<(), ToolOutc
         None,
         false,
         None,
-        ApprovalDetail::Other { text },
+        detail,
         "Controlar o computador?",
     )
     .await
 }
 
-pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
+async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
     match tool {
         "computer_screenshot" => match crate::computer::screenshot(
             &ctx.settings,
@@ -180,11 +192,20 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
         )
         .await
         {
-            Ok(shot) => ToolOutcome {
-                content: serde_json::to_string_pretty(&shot).unwrap_or_else(|_| "{}".to_string()),
-                summary: Some(format!("Screenshot {}×{}", shot.width, shot.height)),
-                ..Default::default()
-            },
+            Ok(shot) => {
+                let image = std::fs::read(&shot.path).ok().map(|bytes| ToolImage {
+                    mime_type: "image/png".to_string(),
+                    data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+                    width: shot.width,
+                    height: shot.height,
+                });
+                ToolOutcome {
+                    content: serde_json::to_string_pretty(&shot).unwrap_or_else(|_| "{}".to_string()),
+                    summary: Some(format!("Screenshot {}×{}", shot.width, shot.height)),
+                    images: image.into_iter().collect(),
+                    ..Default::default()
+                }
+            }
             Err(error) => ToolOutcome::error(format!("{error:#}")),
         },
         "computer_windows" => match crate::computer::windows(&ctx.settings, &ctx.data_dir).await {
@@ -211,9 +232,14 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             let Some(url_value) = str_arg(args, "url") else {
                 return ToolOutcome::error("o argumento `url` é obrigatório");
             };
-            if let Err(outcome) =
-                approve(ctx, tool, format!("Abrir `{url_value}` no navegador")).await
-            {
+            let detail = ApprovalDetail::ComputerAction {
+                action: "browser_open".to_string(),
+                target: url_value.clone(),
+                screenshot_path: approval_preview(ctx).await,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
                 return outcome;
             }
             match crate::computer::open_url(&ctx.settings, &ctx.data_dir, &url_value).await {
@@ -237,16 +263,14 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             if let Err(outcome) = guard_sensitive(ctx).await {
                 return outcome;
             }
-            if let Err(outcome) = approve(
-                ctx,
-                tool,
-                format!(
-                    "Clique {}x no botão {} em ({x}, {y})",
-                    clicks, button
-                ),
-            )
-            .await
-            {
+            let detail = ApprovalDetail::ComputerAction {
+                action: "click".to_string(),
+                target: format!("({x}, {y}) botão {button} ×{clicks}"),
+                screenshot_path: approval_preview(ctx).await,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
                 return outcome;
             }
             match crate::computer::click(
@@ -274,13 +298,14 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             if let Err(outcome) = guard_sensitive(ctx).await {
                 return outcome;
             }
-            if let Err(outcome) = approve(
-                ctx,
-                tool,
-                format!("Digitar {} caractere(s) na janela focada", text.chars().count()),
-            )
-            .await
-            {
+            let detail = ApprovalDetail::ComputerAction {
+                action: "type".to_string(),
+                target: "janela focada".to_string(),
+                screenshot_path: approval_preview(ctx).await,
+                text_length: Some(text.chars().count() as u32),
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
                 return outcome;
             }
             match crate::computer::type_text(&ctx.settings, &ctx.data_dir, &text).await {
@@ -302,9 +327,14 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             if let Err(outcome) = guard_sensitive(ctx).await {
                 return outcome;
             }
-            if let Err(outcome) =
-                approve(ctx, tool, format!("Pressionar `{combo}` na janela focada")).await
-            {
+            let detail = ApprovalDetail::ComputerAction {
+                action: "key".to_string(),
+                target: combo.clone(),
+                screenshot_path: approval_preview(ctx).await,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
                 return outcome;
             }
             match crate::computer::key(&ctx.settings, &ctx.data_dir, &combo).await {
@@ -323,9 +353,14 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             if let Err(outcome) = guard_sensitive(ctx).await {
                 return outcome;
             }
-            if let Err(outcome) =
-                approve(ctx, tool, format!("Focar a janela `{window_id}`")).await
-            {
+            let detail = ApprovalDetail::ComputerAction {
+                action: "focus".to_string(),
+                target: window_id.clone(),
+                screenshot_path: approval_preview(ctx).await,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
                 return outcome;
             }
             match crate::computer::focus(&ctx.settings, &ctx.data_dir, &window_id).await {
@@ -338,5 +373,172 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             }
         }
         other => ToolOutcome::error(format!("ferramenta de computador desconhecida: {other}")),
+    }
+}
+
+fn audit_target(tool: &str, args: &Value) -> Value {
+    match tool {
+        "computer_type" => json!({
+            "textLength": args
+                .get("text")
+                .and_then(Value::as_str)
+                .map(|text| text.chars().count())
+                .unwrap_or(0),
+        }),
+        "computer_click" => json!({
+            "x": args.get("x"),
+            "y": args.get("y"),
+            "button": args.get("button"),
+            "clicks": args.get("clicks"),
+        }),
+        "computer_key" => json!({ "key": args.get("key") }),
+        "computer_focus" => json!({ "windowId": args.get("windowId") }),
+        "browser_open" => json!({ "url": args.get("url") }),
+        "computer_screenshot" => json!({ "display": args.get("display") }),
+        _ => json!({}),
+    }
+}
+
+fn error_code_of(outcome: &ToolOutcome) -> Option<String> {
+    if !outcome.is_error {
+        return None;
+    }
+    let text = outcome.content.trim();
+    let text = text.strip_prefix("ERROR:").unwrap_or(text).trim();
+    let first = text.split(':').next().unwrap_or("TOOL_ERROR").trim();
+    if first.is_empty() {
+        Some("TOOL_ERROR".to_string())
+    } else {
+        Some(first.chars().take(80).collect())
+    }
+}
+
+fn decision_of(outcome: &ToolOutcome) -> Option<String> {
+    let code = error_code_of(outcome)?;
+    if code.contains("APPROVAL_CANCEL") {
+        Some("cancelled".to_string())
+    } else if code.contains("APPROVAL_TIMEOUT") || code.contains("APPROVAL_EXPIRED") {
+        Some("expired".to_string())
+    } else if code.contains("APPROVAL") {
+        Some("denied".to_string())
+    } else {
+        None
+    }
+}
+
+pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
+    let conversation = ctx.db.get_conversation(&ctx.conversation_id).ok().flatten();
+    let agent_id = conversation.as_ref().and_then(|value| value.agent_id.clone());
+    let now = crate::domain::now_ms();
+    if let Ok(count) = ctx
+        .db
+        .count_computer_actions_for_turn(&ctx.turn_id)
+    {
+        if count >= i64::from(ctx.settings.computer_max_actions_per_turn.max(1)) {
+            return ToolOutcome::error(format!(
+                "COMPUTER_RATE_LIMIT: limite de {} ações por turno atingido",
+                ctx.settings.computer_max_actions_per_turn
+            ));
+        }
+    }
+    if let Some(agent_id) = agent_id.as_deref() {
+        if let Ok(count) = ctx
+            .db
+            .count_computer_actions_for_agent_since(agent_id, now - 60 * 60 * 1000)
+        {
+            if count >= i64::from(ctx.settings.computer_max_actions_per_hour.max(1)) {
+                return ToolOutcome::error(format!(
+                    "COMPUTER_RATE_LIMIT: limite de {} ações por hora atingido",
+                    ctx.settings.computer_max_actions_per_hour
+                ));
+            }
+        }
+    }
+    let backend = if ctx.settings.execution_environment == "docker" {
+        "docker"
+    } else {
+        "local"
+    };
+    let session = match ctx.db.get_or_create_computer_session(
+        agent_id.as_deref(),
+        &ctx.conversation_id,
+        backend,
+        now,
+    ) {
+        Ok(session) => session,
+        Err(error) => return ToolOutcome::error(format!("{error:#}")),
+    };
+    let outcome = run_inner(ctx, tool, args).await;
+    let redacted_text_len = args
+        .get("text")
+        .and_then(Value::as_str)
+        .map(|text| text.chars().count() as i64);
+    let decision = decision_of(&outcome);
+    let _ = ctx.db.insert_computer_action(
+        &session.id,
+        agent_id.as_deref(),
+        &ctx.conversation_id,
+        &ctx.turn_id,
+        tool,
+        tool,
+        &audit_target(tool, args),
+        Some(if decision.is_some() { "once" } else { "read" }),
+        decision.as_deref(),
+        if outcome.is_error { "error" } else { "ok" },
+        error_code_of(&outcome).as_deref(),
+        outcome
+            .is_error
+            .then(|| outcome.content.chars().take(300).collect::<String>())
+            .as_deref(),
+        redacted_text_len,
+        crate::domain::now_ms(),
+    );
+    outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audit_error_codes_skip_the_error_prefix_and_map_decisions() {
+        assert_eq!(
+            error_code_of(&ToolOutcome::error(
+                "APPROVAL_DENIED: o usuário negou a ação"
+            ))
+            .as_deref(),
+            Some("APPROVAL_DENIED")
+        );
+        assert_eq!(
+            decision_of(&ToolOutcome::error(
+                "APPROVAL_CANCELLED: a aprovação foi cancelada"
+            ))
+            .as_deref(),
+            Some("cancelled")
+        );
+        assert_eq!(
+            decision_of(&ToolOutcome::error("APPROVAL_DENIED: negado")).as_deref(),
+            Some("denied")
+        );
+        assert_eq!(
+            decision_of(&ToolOutcome::error("COMPUTER_RATE_LIMIT: limite")),
+            None
+        );
+        assert!(error_code_of(&ToolOutcome {
+            content: "ok".to_string(),
+            ..Default::default()
+        })
+        .is_none());
+    }
+
+    #[test]
+    fn audit_target_never_contains_typed_text() {
+        let target = audit_target(
+            "computer_type",
+            &json!({ "text": "senha-secreta", "x": 1 }),
+        );
+        assert_eq!(target["textLength"], json!(13));
+        let serialized = target.to_string();
+        assert!(!serialized.contains("senha"));
     }
 }

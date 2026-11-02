@@ -30,6 +30,7 @@ const STATUS_META: Record<AgentTaskStatus, { label: string; tone: string }> = {
   waiting_input: { label: 'Aguardando resposta', tone: 'text-warning' },
   waiting_approval: { label: 'Aguardando aprovação', tone: 'text-warning' },
   review: { label: 'Em revisão', tone: 'text-accent' },
+  handoff_pending: { label: 'Aguardando aceite', tone: 'text-warning' },
   done: { label: 'Concluída', tone: 'text-success' },
   cancelled: { label: 'Cancelada', tone: 'text-foreground-subtle' },
   failed: { label: 'Falhou', tone: 'text-danger' },

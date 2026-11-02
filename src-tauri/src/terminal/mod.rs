@@ -28,6 +28,7 @@ use serde::Serialize;
 use tauri::ipc::Channel;
 
 use crate::db::Db;
+use crate::domain::Settings;
 use crate::events::TerminalEvent;
 
 /// Limite de terminais **rodando** por conversa. Abas já encerradas não contam
@@ -41,6 +42,8 @@ struct TerminalSession {
     cols: u16,
     rows: u16,
     pid: Option<u32>,
+    /// Container created for this terminal when Docker execution is enabled.
+    container: Option<String>,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
@@ -53,11 +56,31 @@ impl TerminalSession {
         self.running.load(Ordering::SeqCst)
     }
 
+    fn cleanup_container(&self) {
+        let Some(name) = self.container.as_deref() else {
+            return;
+        };
+        let mut command = std::process::Command::new("docker");
+        command
+            .args(["rm", "-f", name])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+        let _ = command.status();
+    }
+
     fn terminate(&mut self) {
         if !self.is_running() {
             return;
         }
         kill_process_tree(self.pid, self.killer.as_mut());
+        self.cleanup_container();
     }
 }
 
@@ -114,6 +137,78 @@ fn shell_program() -> String {
     {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
     }
+}
+
+fn terminal_command(cwd: &std::path::Path, settings: &Settings) -> (CommandBuilder, Option<String>) {
+    let docker_image = (settings
+        .execution_environment
+        .trim()
+        .eq_ignore_ascii_case("docker")
+        && !settings.docker_image.trim().is_empty())
+    .then(|| settings.docker_image.trim().to_string());
+    let mut container = None;
+    let mut builder = if let Some(image) = docker_image.as_deref() {
+        let name = format!("lumina-term-{}", uuid::Uuid::new_v4());
+        let mut builder = CommandBuilder::new("docker");
+        builder.arg("run");
+        builder.arg("--rm");
+        builder.arg("-it");
+        builder.arg("--name");
+        builder.arg(&name);
+        builder.arg("--network");
+        builder.arg("none");
+        builder.arg("--cap-drop");
+        builder.arg("ALL");
+        builder.arg("--security-opt");
+        builder.arg("no-new-privileges");
+        builder.arg("--label");
+        builder.arg("lumina.owner=lumina");
+        builder.arg("--pids-limit");
+        builder.arg(settings.docker_pids_limit.max(32).to_string());
+        builder.arg("--memory");
+        builder.arg(format!("{}m", settings.docker_memory_mb.max(256)));
+        builder.arg("--cpus");
+        builder.arg(format!("{:.1}", settings.docker_cpus.max(0.25)));
+        if settings.docker_read_only_root {
+            builder.arg("--read-only");
+            builder.arg("--tmpfs");
+            builder.arg("/tmp:rw,exec,nosuid,size=512m");
+        }
+        builder.arg("-e");
+        builder.arg("TERM=xterm-256color");
+        builder.arg("-v");
+        builder.arg(format!("{}:/workspace", cwd.to_string_lossy()));
+        builder.arg("-w");
+        builder.arg("/workspace");
+        builder.arg(image);
+        builder.arg("sh");
+        builder.arg("-lc");
+        builder.arg("if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi");
+        container = Some(name);
+        builder
+    } else {
+        CommandBuilder::new(shell_program())
+    };
+    builder.cwd(cwd);
+    builder.env("TERM", "xterm-256color");
+    builder.env("COLORTERM", "truecolor");
+    builder.env("LUMINA_AGENT", "1");
+    // Higiene: remove variáveis sensíveis herdadas do ambiente do app. In
+    // Docker mode they are also withheld from the container (no `-e`).
+    let inherited: Vec<(String, String)> = std::env::vars().collect();
+    let sensitive: Vec<String> = inherited
+        .iter()
+        .map(|(key, _)| key.clone())
+        .filter(|key| {
+            !sanitized_env(&[(key.clone(), String::new())])
+                .iter()
+                .any(|(kept, _)| kept == key)
+        })
+        .collect();
+    for key in sensitive {
+        builder.env_remove(&key);
+    }
+    (builder, container)
 }
 
 fn terminal_cwd(db: &Db, conversation_id: &str) -> Result<PathBuf, String> {
@@ -204,6 +299,7 @@ impl TerminalRegistry {
     pub fn open(
         &self,
         db: &Db,
+        settings: &Settings,
         conversation_id: &str,
         cols: u16,
         rows: u16,
@@ -237,24 +333,7 @@ impl TerminalRegistry {
             })
             .map_err(|error| format!("TERMINAL_SPAWN: {error}"))?;
 
-        let program = shell_program();
-        let mut builder = CommandBuilder::new(&program);
-        builder.cwd(&cwd);
-        builder.env("TERM", "xterm-256color");
-        builder.env("COLORTERM", "truecolor");
-        builder.env("LUMINA_AGENT", "1");
-        // Higiene: remove variáveis sensíveis herdadas do ambiente do app.
-        let inherited: Vec<(String, String)> = std::env::vars().collect();
-        let sensitive: Vec<String> = inherited
-            .iter()
-            .map(|(key, _)| key.clone())
-            .filter(|key| !sanitized_env(&[(key.clone(), String::new())])
-                .iter()
-                .any(|(kept, _)| kept == key))
-            .collect();
-        for key in sensitive {
-            builder.env_remove(&key);
-        }
+        let (builder, container) = terminal_command(&cwd, settings);
 
         let mut child = pair
             .slave
@@ -351,6 +430,7 @@ impl TerminalRegistry {
                 cols,
                 rows,
                 pid,
+                container,
                 master,
                 writer,
                 killer,
@@ -495,6 +575,36 @@ mod tests {
         assert!(!keys.contains(&"GH_TOKEN"));
         assert!(!keys.contains(&"DB_PASSWORD"));
         assert!(!keys.contains(&"LUMINA_INTERNAL"));
+    }
+
+    #[test]
+    fn docker_terminal_uses_hardened_container_flags() {
+        let mut settings = Settings::default();
+        settings.execution_environment = "docker".to_string();
+        settings.docker_image = "node:24-bookworm-slim".to_string();
+        let cwd = std::env::temp_dir();
+        let (builder, container) = terminal_command(&cwd, &settings);
+        assert!(container.is_some());
+        let argv: Vec<String> = builder
+            .get_argv()
+            .iter()
+            .map(|value| value.to_string_lossy().to_string())
+            .collect();
+        let joined = argv.join(" ");
+        assert!(joined.contains("docker"));
+        assert!(joined.contains("--network none"));
+        assert!(joined.contains("--cap-drop ALL"));
+        assert!(joined.contains("no-new-privileges"));
+        assert!(joined.contains("node:24-bookworm-slim"));
+        assert!(joined.contains(":/workspace"));
+        assert!(joined.contains("bash"));
+    }
+
+    #[test]
+    fn local_terminal_has_no_container() {
+        let settings = Settings::default();
+        let (_builder, container) = terminal_command(&std::env::temp_dir(), &settings);
+        assert!(container.is_none());
     }
 
     #[test]

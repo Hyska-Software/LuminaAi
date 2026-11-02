@@ -121,6 +121,70 @@ export function GeneralTab() {
           />
         </SettingRow>
       </SettingsSection>
+
+      <SettingsSection
+        title="Notificações"
+        description="Avisos de threads de agente em segundo plano. O SO e o toast in-app respeitam estas opções."
+      >
+        <SettingRow
+          label="Notificações ativas"
+          description="Desligado, nenhuma notificação de segundo plano é emitida."
+        >
+          <Switch
+            checked={settings.notificationsEnabled ?? true}
+            onCheckedChange={(checked) => void saveSettings({ notificationsEnabled: checked })}
+            aria-label="Notificações ativas"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label="Não perturbe"
+          description="Mantém os avisos apenas no diálogo Atividade, sem toast nem notificação do SO."
+        >
+          <Switch
+            checked={settings.notificationsDnd ?? false}
+            onCheckedChange={(checked) => void saveSettings({ notificationsDnd: checked })}
+            aria-label="Não perturbe"
+          />
+        </SettingRow>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <SettingRow label="Aprovações" description="Ações que precisam de você.">
+            <Switch
+              checked={settings.notificationsApprovals ?? true}
+              onCheckedChange={(checked) =>
+                void saveSettings({ notificationsApprovals: checked })
+              }
+              aria-label="Notificar aprovações"
+            />
+          </SettingRow>
+          <SettingRow label="Perguntas" description="Perguntas estruturadas do agente.">
+            <Switch
+              checked={settings.notificationsQuestions ?? true}
+              onCheckedChange={(checked) =>
+                void saveSettings({ notificationsQuestions: checked })
+              }
+              aria-label="Notificar perguntas"
+            />
+          </SettingRow>
+          <SettingRow label="Conclusões" description="Turnos de agente concluídos.">
+            <Switch
+              checked={settings.notificationsCompletions ?? true}
+              onCheckedChange={(checked) =>
+                void saveSettings({ notificationsCompletions: checked })
+              }
+              aria-label="Notificar conclusões"
+            />
+          </SettingRow>
+          <SettingRow label="Tarefas" description="Tarefas que precisam de uma pessoa.">
+            <Switch
+              checked={settings.notificationsTasks ?? true}
+              onCheckedChange={(checked) => void saveSettings({ notificationsTasks: checked })}
+              aria-label="Notificar tarefas"
+            />
+          </SettingRow>
+        </div>
+      </SettingsSection>
     </div>
   );
 }

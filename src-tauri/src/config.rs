@@ -166,6 +166,9 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     if settings.docker_image.is_empty() || settings.docker_image.chars().count() > 200 {
         settings.docker_image = defaults.docker_image;
     }
+    settings.docker_memory_mb = settings.docker_memory_mb.clamp(256, 16_384);
+    settings.docker_cpus = settings.docker_cpus.clamp(0.25, 16.0);
+    settings.docker_pids_limit = settings.docker_pids_limit.clamp(32, 4_096);
     settings.max_concurrent_turns = settings.max_concurrent_turns.clamp(1, 8);
     settings.max_concurrent_turns_per_agent = settings.max_concurrent_turns_per_agent.clamp(1, 4);
     settings.max_queue_length_per_thread = settings.max_queue_length_per_thread.clamp(1, 100);
@@ -193,6 +196,8 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     {
         settings.computer_docker_container = defaults.computer_docker_container;
     }
+    settings.computer_max_actions_per_turn = settings.computer_max_actions_per_turn.clamp(1, 200);
+    settings.computer_max_actions_per_hour = settings.computer_max_actions_per_hour.clamp(1, 2_000);
     settings.spill_retention_days = settings
         .spill_retention_days
         .clamp(SPILL_RETENTION_MIN_DAYS, SPILL_RETENTION_MAX_DAYS);
@@ -1925,6 +1930,15 @@ mod tests {
         let normalized = normalize_settings(invalid);
         assert_eq!(normalized.execution_environment, "local");
         assert_eq!(normalized.docker_image, "node:22-bookworm");
+
+        let mut resources = Settings::default();
+        resources.docker_memory_mb = 1;
+        resources.docker_cpus = 99.0;
+        resources.docker_pids_limit = 1;
+        let normalized = normalize_settings(resources);
+        assert_eq!(normalized.docker_memory_mb, 256);
+        assert_eq!(normalized.docker_cpus, 16.0);
+        assert_eq!(normalized.docker_pids_limit, 32);
     }
 
     #[test]
