@@ -634,6 +634,7 @@ mod tests {
                 subagent_type: None,
                 agent_id: None,
                 channel_id: None,
+                task_id: None,
             },
             messages: vec![user, assistant],
         }

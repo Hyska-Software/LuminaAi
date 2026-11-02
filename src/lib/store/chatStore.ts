@@ -123,6 +123,10 @@ interface ChatState {
   regenerate: () => Promise<void>;
   editAndResend: (messageId: string, content: string) => Promise<void>;
   stop: () => Promise<void>;
+  /** Stops one conversation even when it is running in the background. */
+  stopConversation: (conversationId: string) => Promise<void>;
+  /** Stops every active turn (global kill switch). */
+  stopAllTurns: () => Promise<void>;
   /**
    * Inicia uma rodada do objetivo na conversa informada (turno `goal_round`).
    * Não roda se já houver streaming/rodada sendo montada; o backend revalida
@@ -628,6 +632,28 @@ export const useChatStore = create<ChatState>()((set, get) => {
       // O estado de harness de código (aprovações/plano/tarefas/contexto/
       // alterações/jobs) é ortogonal ao streaming e vive no `codeStore`.
       if (isCodeEvent(event)) useCodeStore.getState().applyEvent(context.conversationId, event);
+      if (
+        (event.type === 'approval_requested' || event.type === 'question_requested') &&
+        useAppStore.getState().settings.notificationsEnabled !== false
+      ) {
+        const uiNow = useUiStore.getState();
+        const conversation = get().conversations.find(
+          (entry) => entry.id === context.conversationId,
+        );
+        const background =
+          uiNow.layoutMode !== 'agent' ||
+          get().activeId !== context.conversationId ||
+          (typeof document !== 'undefined' && !document.hasFocus());
+        if (background) {
+          const title =
+            event.type === 'approval_requested'
+              ? 'Aprovação necessária'
+              : 'O agente fez uma pergunta';
+          const body = conversation?.title ?? 'Thread de agente';
+          toast.info(title, { description: body });
+          void api.notifyDesktop(title, body);
+        }
+      }
       switch (event.type) {
         case 'turn_started': {
           started = true;
@@ -783,9 +809,11 @@ export const useChatStore = create<ChatState>()((set, get) => {
               const agentName = finishedConversation.agentId
                 ? useAgentStore.getState().agentsById[finishedConversation.agentId]?.name
                 : null;
-              toast.success(`${agentName ?? 'Agente'} concluiu a resposta`, {
+              const title = `${agentName ?? 'Agente'} concluiu a resposta`;
+              toast.success(title, {
                 description: finishedConversation.title,
               });
+              void api.notifyDesktop(title, finishedConversation.title);
             }
           }
           // Sincroniza o snapshot da sessão e só então decide a próxima rodada
@@ -1651,6 +1679,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
             ? (conversation?.agentId ?? ui.activeAgentId ?? null)
             : null;
         if (ui.layoutMode === 'agent' && state.activeId && agentId) {
+          const queueLimit =
+            useAppStore.getState().settings.maxQueueLengthPerThread ?? 20;
+          if (useAgentQueueStore.getState().count(state.activeId) >= queueLimit) {
+            toast.error('Fila cheia', {
+              description: `Esta thread já tem ${queueLimit} mensagens na fila. Aguarde ou limpe a fila.`,
+            });
+            return;
+          }
           const agent = useAgentStore.getState().agentsById[agentId];
           useAgentQueueStore.getState().enqueue({
             id: newId(),
@@ -1858,6 +1894,35 @@ export const useChatStore = create<ChatState>()((set, get) => {
       } catch (error) {
         console.error('cancel failed', error);
       }
+    },
+
+    stopConversation: async (conversationId) => {
+      const state = get();
+      const streaming = selectConversationStream(state, conversationId);
+      if (!streaming) {
+        // The renderer may have reloaded and lost the stream object while the
+        // Rust side still owns the turn; the conversation-level cancel covers it.
+        try {
+          await api.cancelConversation(conversationId);
+        } catch (error) {
+          console.error('cancel conversation failed', error);
+        }
+        return;
+      }
+      setStream(conversationId, { ...streaming, phase: 'starting' });
+      if (streaming.turnKind === 'goal_round') {
+        void useCodeStore.getState().updateGoal(streaming.conversationId, 'pause');
+      }
+      try {
+        await api.cancelTurn(streaming.turnId);
+      } catch (error) {
+        console.error('cancel failed', error);
+      }
+    },
+
+    stopAllTurns: async () => {
+      const ids = Object.keys(get().streamsByConversation);
+      await Promise.all(ids.map((id) => get().stopConversation(id)));
     },
 
     runGoalRound: async (conversationId) => {

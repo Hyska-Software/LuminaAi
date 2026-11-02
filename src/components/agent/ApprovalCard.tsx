@@ -8,6 +8,7 @@ import {
   FolderLock,
   Globe,
   KeyRound,
+  MousePointerClick,
   ShieldQuestion,
   SquareTerminal,
   TriangleAlert,
@@ -81,6 +82,12 @@ const RISK: Record<RiskClass, RiskMeta> = {
   secret: { label: 'Segredo', tone: 'warning', Icon: KeyRound, ask: 'Ler arquivo de segredo?' },
   destroy: { label: 'Destrutivo', tone: 'danger', Icon: Flame, ask: 'Executar ação destrutiva?' },
   network: { label: 'Rede', tone: 'warning', Icon: Globe, ask: 'Acessar a rede?' },
+  computer: {
+    label: 'Computador',
+    tone: 'warning',
+    Icon: MousePointerClick,
+    ask: 'Controlar o computador?',
+  },
   ask: { label: 'Confirmar', tone: 'accent', Icon: ShieldQuestion, ask: 'Confirmar ação?' },
 };
 
@@ -351,6 +358,7 @@ function riskColor(risk: RiskClass): string {
     case 'secret':
     case 'outside':
     case 'network':
+    case 'computer':
       return 'text-warning';
     case 'read':
       return 'text-foreground-muted';

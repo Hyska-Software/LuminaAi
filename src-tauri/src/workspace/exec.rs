@@ -38,10 +38,27 @@ impl StreamKind {
 
 /// Docker execution backend for Code commands. The workspace is mounted at
 /// `/workspace`; network is disabled unless the user opts in.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SandboxConfig {
     pub image: String,
     pub network: bool,
+    pub memory_mb: u32,
+    pub cpus: f32,
+    pub pids_limit: u32,
+    pub read_only_root: bool,
+}
+
+impl Default for SandboxConfig {
+    fn default() -> Self {
+        Self {
+            image: String::new(),
+            network: false,
+            memory_mb: 2_048,
+            cpus: 2.0,
+            pids_limit: 256,
+            read_only_root: true,
+        }
+    }
 }
 
 /// Builds the `docker run` argv for a command. Pure so the mount/workdir/network
@@ -63,12 +80,34 @@ pub fn docker_shell_for(
     let mut args = vec![
         "run".to_string(),
         "--rm".to_string(),
+        "--init".to_string(),
         "-i".to_string(),
+        "--cap-drop".to_string(),
+        "ALL".to_string(),
+        "--security-opt".to_string(),
+        "no-new-privileges".to_string(),
+        "--label".to_string(),
+        "lumina.owner=lumina".to_string(),
+        "--pids-limit".to_string(),
+        sandbox.pids_limit.max(32).to_string(),
+        "--memory".to_string(),
+        format!("{}m", sandbox.memory_mb.max(256)),
+        "--cpus".to_string(),
+        format!("{:.1}", sandbox.cpus.max(0.25)),
+        "--user".to_string(),
+        "1000:1000".to_string(),
+        "--tmpfs".to_string(),
+        "/tmp:rw,exec,nosuid,size=512m".to_string(),
+    ];
+    if sandbox.read_only_root {
+        args.push("--read-only".to_string());
+    }
+    args.extend([
         "--mount".to_string(),
         format!("type=bind,source={source},target=/workspace"),
         "--workdir".to_string(),
         container_workdir,
-    ];
+    ]);
     if !sandbox.network {
         args.push("--network".to_string());
         args.push("none".to_string());
@@ -798,6 +837,7 @@ mod tests {
             &SandboxConfig {
                 image: "node:22-bookworm".to_string(),
                 network: false,
+                ..SandboxConfig::default()
             },
             root,
             &root.join("src"),
@@ -809,6 +849,11 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair[0] == "--workdir"
             && pair[1] == "/workspace/src"));
         assert!(args.windows(2).any(|pair| pair[0] == "--network" && pair[1] == "none"));
+        assert!(args.windows(2).any(|pair| pair[0] == "--cap-drop" && pair[1] == "ALL"));
+        assert!(args.windows(2).any(|pair| pair[0] == "--security-opt"
+            && pair[1] == "no-new-privileges"));
+        assert!(args.windows(2).any(|pair| pair[0] == "--user" && pair[1] == "1000:1000"));
+        assert!(args.iter().any(|arg| arg == "--read-only"));
         assert!(args.iter().any(|arg| arg == "node:22-bookworm"));
         assert_eq!(
             &args[args.len() - 3..],
@@ -819,6 +864,7 @@ mod tests {
             &SandboxConfig {
                 image: "ubuntu:24.04".to_string(),
                 network: true,
+                ..SandboxConfig::default()
             },
             root,
             root,

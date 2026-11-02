@@ -62,18 +62,50 @@
 - [x] Skills/tools/MCP por agente, workspace e permissões no editor.
 - [x] Sidebar de canais e gestão de membros; exclusão remove threads derivadas.
 
-## P4 estratégico — decisão do usuário (2026-11-01)
+## P4 local-first — decisão do usuário (2026-11-01)
 
 O usuário aprovou **apenas local-first**: computer use no PC do usuário e
-execução em Docker, como no MausBot. Ficam **fora** desta entrega: computador
-always-on na nuvem, apps iOS/Android, acesso remoto web, voz, Vault de logins e
-times multi-usuário com papéis.
+execução em Docker, como no MausBot. Ficam **fora**: computador always-on na
+nuvem, apps iOS/Android, acesso remoto web, voz, Vault de logins e times
+multi-usuário com papéis.
 
-No escopo local:
+### Etapa 1 — computer use (implementado no Windows/Docker)
 
-- computer use via arquivos, shell (`run_command`/`run_checks`), git, jobs e
-  terminal no painel;
-- execução em Docker para comandos/jobs do agente (workspace montado em
-  `/workspace`, rede desligada por padrão, imagem configurável);
-- automação de mouse/teclado e controle de navegador/desktop **não** foram
-  implementados: exigem um driver de computer-use separado.
+- [x] Capabilities `computerUse`/`screenCapture`/`browserUse`/`delegation`.
+- [x] Screenshot, clique, teclado, janelas, foco e árvore de acessibilidade.
+- [x] Aprovação por ação (`RiskClass::Computer` sempre Ask).
+- [x] Docker gráfico (`docker/computer/`: Xvfb + noVNC + xdotool/scrot),
+      validado com container real (1440×900, screenshot, clique, Chromium).
+- [x] `browser_open` (navegador real local/Docker, operado pelas tools de
+      desktop).
+- [x] Denylist de títulos sensíveis (senhas/bancos/UAC) antes da aprovação.
+- [ ] Cliente CDP dedicado e screenshot como imagem no resultado da tool.
+- [ ] macOS/Linux local.
+
+### Etapa 2 — delegação agente↔agente
+
+- [x] `agent_tasks`/`agent_task_events`, máquina de estados, lease/version.
+- [x] Tools `delegate_task`, `accept_task`, `handoff_task`, `finish_task`,
+      `send_message`, `task_list`/`task_get`.
+- [x] Scheduler Rust a cada 5 s sob o governador, thread oculta por tarefa,
+      resultado no canal e orçamento por tarefa.
+- [x] UI de tarefas no menu do agente (criar/executar/cancelar).
+- [ ] Quadro kanban no canal, reassign visual e orçamento por múltiplos turnos.
+
+### Etapa 3 — streams, notificações e orçamento
+
+- [x] `ConcurrencyGovernor` backend (global + por agente).
+- [x] Stop por thread/agente e “Parar tudo” (diálogo Atividade).
+- [x] `maxConcurrentTurns`, `maxConcurrentTurnsPerAgent`,
+      `maxQueueLengthPerThread`, `agentDailyCostLimitUsd`.
+- [x] Toast + notificação do SO para aprovação/pergunta/conclusão em background.
+- [ ] Reattach completo via `turn_events` após reload do renderer.
+
+### Etapa 4 — Docker de produção
+
+- [x] Hardening (`cap-drop`, no-new-privileges, non-root, read-only, tmpfs,
+      limites, workspace único, rede off).
+- [x] `docker_status`/`pull`/`validate`/`cleanup` e UI de validação.
+- [x] Imagem gráfica separada.
+- [ ] Perfil por agente/workspace, `run_code` e terminal em Docker, integração
+      real com daemon no CI.

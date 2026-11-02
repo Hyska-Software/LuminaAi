@@ -78,6 +78,15 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
         };
     }
 
+    // 2.1 Computer use sempre pede aprovação, inclusive no modo Autônomo: a
+    // tela pode conter segredos e a ação pode ser induzida por conteúdo hostil.
+    if facts.risk == RiskClass::Computer {
+        return PolicyDecision::Ask {
+            risk: RiskClass::Computer,
+            reason: "o agente quer controlar o computador".to_string(),
+        };
+    }
+
     // 3. Arquivos de segredo exigem consentimento explícito.
     if facts.secret {
         return PolicyDecision::Ask {
@@ -299,6 +308,36 @@ mod tests {
             inside_workspace: true,
             secret: false,
             destructive_reason: destructive,
+        }
+    }
+
+    #[test]
+    fn computer_control_always_asks_even_in_autonomous_mode() {
+        let facts = CallFacts {
+            tool: "computer_click",
+            risk: RiskClass::Computer,
+            mutating: true,
+            target: None,
+            inside_workspace: true,
+            secret: false,
+            destructive_reason: None,
+        };
+        for mode in [
+            PermissionMode::ReadOnly,
+            PermissionMode::Edit,
+            PermissionMode::Review,
+            PermissionMode::Autonomous,
+        ] {
+            assert!(
+                matches!(
+                    decide(&ctx(mode), &facts),
+                    PolicyDecision::Ask {
+                        risk: RiskClass::Computer,
+                        ..
+                    }
+                ),
+                "mode {mode:?} must ask for computer control"
+            );
         }
     }
 

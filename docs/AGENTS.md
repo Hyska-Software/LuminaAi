@@ -173,6 +173,15 @@ com erro — o fallback é de rota, não um retry infinito.
   thread, um toast in-app avisa (respeita `notificationsEnabled`).
 - O erro visível (`error`/`errorCode`/`errorHint`) é da thread ativa: uma falha
   em segundo plano não pinta o banner por cima de outra conversa.
+- O backend aplica `ConcurrencyGovernor`: `maxConcurrentTurns` global e
+  `maxConcurrentTurnsPerAgent` por agente; turnos além do limite aguardam com o
+  token de cancelamento (Stop/Cancelar libera).
+- `agentDailyCostLimitUsd` bloqueia novos turnos com `BUDGET_EXCEEDED` quando o
+  custo do dia atinge o limite.
+- Sidebar tem Stop por thread; o diálogo **Atividade** lista todos os streams
+  (inclusive em segundo plano) e oferece “Parar tudo”.
+- Aprovação/pergunta em thread de fundo gera toast + notificação do SO via
+  `notify_desktop`; conclusão/falha de thread não ativa também notifica.
 
 ## 7. Rotinas
 
@@ -222,6 +231,46 @@ com erro — o fallback é de rota, não um retry infinito.
 - Skills/tools/MCP e workspace são escolhidos no editor; permissões continuam
   limitadas pelo backend.
 
+## 9.1 Delegação agente↔agente
+
+Contrato completo: `docs/TASKS.md`.
+
+- `agent_tasks` + `agent_task_events`; dono único, brief, aceite, orçamento,
+  deadline, lease/version e profundidade máxima 2.
+- Tools (capability `delegation`): `delegate_task`, `task_list`, `task_get`,
+  `accept_task`, `decline_task`, `handoff_task`, `update_task`, `finish_task`,
+  `send_message`.
+- O scheduler Rust roda tarefas a cada 5 s sob o governador de concorrência,
+  cria/reusa thread oculta com `task_id` e publica o resultado no canal.
+- UI: menu do agente → **Tarefas**; quadro completo por canal é evolução futura.
+
+## 9.2 Computer use
+
+Contrato completo: `docs/COMPUTER.md`.
+
+- Capabilities `computerUse`, `screenCapture`, `browserUse` (reservado).
+- Windows local: screenshot, clique, teclado, janelas, foco e árvore de
+  acessibilidade; Docker gráfico via `docker/computer/` (Xvfb + noVNC).
+- `RiskClass::Computer` sempre pede aprovação, inclusive em Autônomo; sem canal
+  de aprovação a tool falha fechada.
+- Screenshot vira arquivo no app-data e não é enviado como imagem ao modelo; o
+  modelo usa `computer_windows`/`computer_ui_tree` + coordenadas.
+- Browser CDP, denylist de apps sensíveis e macOS/Linux local ainda não
+  implementados.
+
+## 9.3 Docker de produção
+
+Contrato completo: `docs/DOCKER.md`.
+
+- `executionEnvironment` local/docker; imagem, rede e limites configuráveis.
+- `run_command`/`run_checks`/jobs usam `docker run` com workspace em
+  `/workspace`, non-root, cap-drop, no-new-privileges, read-only, tmpfs,
+  limites de CPU/memória/pids e rede off.
+- `docker_status`, `docker_pull_image`, `docker_validate_image`,
+  `docker_cleanup`; imagem do computer use é separada.
+- `run_code` do Chat e terminal continuam locais; perfil por agente ainda é
+  global.
+
 ## 10. Cache e segurança
 
 - O prompt do agente é congelado por sessão; a memória e o estado de rotina/
@@ -255,5 +304,10 @@ Testes específicos deste contrato:
   export, fallback e revisão)
 - `src-tauri/src/db.rs` (CRUD de agente, threads, canais, rotinas)
 - `src-tauri/src/tools/memory.rs` e `src-tauri/src/tools/mod.rs` (allowlist)
-- `src-tauri/src/workspace/exec.rs` (argv do Docker)
+- `src-tauri/src/workspace/exec.rs` (argv/hardening do Docker)
 - `src/components/settings/ToolsTab.test.tsx` (ambiente Docker)
+- `src-tauri/src/concurrency.rs` (governador global/por agente)
+- `src-tauri/src/tools/tasks.rs` (delegação/ownership)
+- `src-tauri/src/db.rs` (tarefas: claim/transições/handoff)
+- `src-tauri/src/computer/mod.rs` (backend local/Docker)
+- `docs/TASKS.md`, `docs/COMPUTER.md`, `docs/DOCKER.md`

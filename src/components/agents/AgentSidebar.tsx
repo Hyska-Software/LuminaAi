@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
+  Activity,
   Archive,
   ArchiveRestore,
   CalendarClock,
@@ -11,6 +12,7 @@ import {
   Download,
   Ellipsis,
   Hash,
+  ListChecks,
   ListTree,
   Loader2,
   MessageCircleQuestion,
@@ -23,6 +25,7 @@ import {
   Search,
   Settings,
   ShieldAlert,
+  Square,
   Trash2,
   Upload,
   Users,
@@ -33,9 +36,11 @@ import { toast } from 'sonner';
 
 import { api } from '@/lib/api';
 import { AgentAvatar } from './AgentAvatar';
+import { AgentActivityDialog } from './AgentActivityDialog';
 import { AgentChannelDialog } from './AgentChannelDialog';
 import { AgentRevisionDialog } from './AgentRevisionDialog';
 import { AgentRoutinesDialog } from './AgentRoutinesDialog';
+import { AgentTasksDialog } from './AgentTasksDialog';
 import { relativeTime } from './agentUtils';
 import {
   Button,
@@ -79,6 +84,7 @@ function ThreadRow({
   onStartRename,
   onExport,
   onDelete,
+  onStop,
 }: {
   conversation: Conversation;
   active: boolean;
@@ -87,6 +93,7 @@ function ThreadRow({
   onStartRename: () => void;
   onExport: () => void;
   onDelete: () => void;
+  onStop: () => void;
 }) {
   const queued = useAgentQueueStore(
     (state) => state.byConversation[conversation.id]?.length ?? 0,
@@ -167,6 +174,18 @@ function ThreadRow({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-44">
+          {busy ? (
+            <>
+              <DropdownMenuItem
+                variant="danger"
+                icon={<Square className="size-3.5" />}
+                onSelect={onStop}
+              >
+                Parar execução
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
           <DropdownMenuItem
             icon={
               conversation.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />
@@ -216,8 +235,10 @@ function AgentRow({
   onStartThreadRename,
   onExportThread,
   onDeleteThread,
+  onStopThread,
   onShowAllThreads,
   onRoutines,
+  onTasks,
 }: {
   agent: Agent;
   active: boolean;
@@ -239,8 +260,10 @@ function AgentRow({
   onStartThreadRename: (thread: Conversation) => void;
   onExportThread: (thread: Conversation) => void;
   onDeleteThread: (thread: Conversation) => void;
+  onStopThread: (thread: Conversation) => void;
   onShowAllThreads: () => void;
   onRoutines: () => void;
+  onTasks: () => void;
 }) {
   const shown = threads.slice(0, 5);
   const streamsByConversation = useChatStore((state) => state.streamsByConversation);
@@ -316,6 +339,9 @@ function AgentRow({
             <DropdownMenuItem icon={<CalendarClock className="size-3.5" />} onSelect={onRoutines}>
               Rotinas
             </DropdownMenuItem>
+            <DropdownMenuItem icon={<ListChecks className="size-3.5" />} onSelect={onTasks}>
+              Tarefas
+            </DropdownMenuItem>
             <DropdownMenuItem icon={<Pencil className="size-3.5" />} onSelect={onEdit}>
               Editar agente
             </DropdownMenuItem>
@@ -360,6 +386,7 @@ function AgentRow({
               onStartRename={() => onStartThreadRename(thread)}
               onExport={() => onExportThread(thread)}
               onDelete={() => onDeleteThread(thread)}
+              onStop={() => onStopThread(thread)}
             />
           ))}
           {threads.length > shown.length ? (
@@ -441,6 +468,11 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const [allThreadsAgent, setAllThreadsAgent] = useState<Agent | null>(null);
   const [routinesAgent, setRoutinesAgent] = useState<Agent | null>(null);
   const [revisionAgent, setRevisionAgent] = useState<Agent | null>(null);
+  const [tasksAgent, setTasksAgent] = useState<Agent | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const activeTurnCount = useChatStore(
+    (state) => Object.keys(state.streamsByConversation).length,
+  );
   const [channels, setChannels] = useState<AgentChannel[]>([]);
   const [channelDialogOpen, setChannelDialogOpen] = useState(false);
   const [editingChannel, setEditingChannel] = useState<AgentChannel | null>(null);
@@ -591,6 +623,10 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
     void useChatStore.getState().togglePinned(thread.id);
   };
 
+  const stopThread = (thread: Conversation) => {
+    void useChatStore.getState().stopConversation(thread.id);
+  };
+
   const startThreadRename = (thread: Conversation) => {
     setRenameThreadTarget(thread);
     setRenameThreadValue(thread.title);
@@ -714,14 +750,27 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         <span className="text-[12px] font-semibold uppercase tracking-wide text-foreground-subtle">
           Agentes
         </span>
-        <IconButton
-          label="Novo agente"
-          size="sm"
-          variant="ghost"
-          onClick={() => openEditor({ mode: 'create' })}
-        >
-          <Plus className="size-4" />
-        </IconButton>
+        <div className="flex items-center gap-1">
+          {activeTurnCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => setActivityOpen(true)}
+              aria-label={`Atividade: ${activeTurnCount} turno(s) em andamento`}
+              className="flex h-6 items-center gap-1 rounded-full bg-accent-soft px-2 text-[10px] font-medium text-accent hover:bg-accent-soft/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            >
+              <Activity className="size-3" />
+              {activeTurnCount}
+            </button>
+          ) : null}
+          <IconButton
+            label="Novo agente"
+            size="sm"
+            variant="ghost"
+            onClick={() => openEditor({ mode: 'create' })}
+          >
+            <Plus className="size-4" />
+          </IconButton>
+        </div>
       </div>
 
       <div className="px-3">
@@ -875,8 +924,10 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                 onStartThreadRename={startThreadRename}
                 onExportThread={(thread) => void exportThread(thread)}
                 onDeleteThread={setDeleteThreadTarget}
+                onStopThread={stopThread}
                 onShowAllThreads={() => setAllThreadsAgent(agent)}
                 onRoutines={() => setRoutinesAgent(agent)}
+                onTasks={() => setTasksAgent(agent)}
               />
             ))}
           </section>
@@ -917,8 +968,10 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                 onStartThreadRename={startThreadRename}
                 onExportThread={(thread) => void exportThread(thread)}
                 onDeleteThread={setDeleteThreadTarget}
+                onStopThread={stopThread}
                 onShowAllThreads={() => setAllThreadsAgent(agent)}
                 onRoutines={() => setRoutinesAgent(agent)}
+                onTasks={() => setTasksAgent(agent)}
               />
             ))}
           </section>
@@ -1164,6 +1217,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                     onStartRename={() => startThreadRename(thread)}
                     onExport={() => void exportThread(thread)}
                     onDelete={() => setDeleteThreadTarget(thread)}
+                    onStop={() => stopThread(thread)}
                   />
                 ))
               : null}
@@ -1197,6 +1251,14 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         open={revisionAgent !== null}
         onOpenChange={(open) => !open && setRevisionAgent(null)}
       />
+
+      <AgentTasksDialog
+        agent={tasksAgent}
+        open={tasksAgent !== null}
+        onOpenChange={(open) => !open && setTasksAgent(null)}
+      />
+
+      <AgentActivityDialog open={activityOpen} onOpenChange={setActivityOpen} />
 
       <AgentChannelDialog
         channel={editingChannel}

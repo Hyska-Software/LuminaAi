@@ -13,6 +13,8 @@
 mod agents;
 mod catalog;
 mod commands;
+mod computer;
+mod concurrency;
 mod config;
 mod db;
 mod documents;
@@ -60,6 +62,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             crate::state::ensure_dirs(app.handle()).expect("failed to create app dirs");
             let state = crate::state::AppState::init(app.handle())
@@ -77,11 +80,27 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
                     crate::commands::routines::scheduler_tick(scheduler.clone()).await;
                 }
             });
+            // Delegated tasks are latency-sensitive: pick them up quickly while
+            // still respecting the concurrency governor.
+            let task_scheduler = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    crate::commands::tasks::scheduler_tick(task_scheduler.clone()).await;
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::turn::run_turn,
             commands::turn::cancel_turn,
+            commands::turn::cancel_conversation,
+            commands::turn::list_active_turns,
+            commands::docker::docker_status,
+            commands::docker::docker_pull_image,
+            commands::docker::docker_validate_image,
+            commands::docker::docker_cleanup,
+            commands::notifications::notify_desktop,
             commands::models::get_catalog,
             commands::models::refresh_catalog,
             commands::models::list_remote_models,
@@ -124,6 +143,12 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::channels::delete_agent_channel,
             commands::channels::list_agent_channel_messages,
             commands::channels::post_agent_channel_message,
+            commands::tasks::list_agent_tasks,
+            commands::tasks::get_agent_task,
+            commands::tasks::create_agent_task,
+            commands::tasks::cancel_agent_task,
+            commands::tasks::reassign_agent_task,
+            commands::tasks::run_agent_task_now,
             commands::conversations::list_conversations,
             commands::conversations::list_subagent_conversations,
             commands::conversations::create_conversation,

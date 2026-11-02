@@ -17,7 +17,7 @@ import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel'
 import { resolveHotkey, type HotkeyCommand } from '@/lib/hotkeys';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { SplashScreen } from '@/components/SplashScreen';
-import type { AgentRoutineRunEvent } from '@/lib/types';
+import type { AgentRoutineRunEvent, AgentTaskUpdatedEvent } from '@/lib/types';
 import { useUpdateCheck } from '@/components/layout/useUpdateCheck';
 
 /** Ensures bootstrap runs once even under React StrictMode double-effects. */
@@ -185,6 +185,32 @@ export default function App() {
       if (run.conversationId && useChatStore.getState().activeId === run.conversationId) {
         void useChatStore.getState().openConversation(run.conversationId);
       }
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* event bridge unavailable outside Tauri */
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Delegated tasks run in Rust. Refresh the task board/listeners without
+  // stealing the active thread; task detail opens on demand.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<AgentTaskUpdatedEvent>('lumina:agent-task-updated', (event) => {
+      if (disposed) return;
+      window.dispatchEvent(
+        new CustomEvent('lumina:agent-task-updated', { detail: event.payload }),
+      );
+      void useChatStore.getState().refreshConversations();
+      void useAgentStore.getState().refresh();
     })
       .then((fn) => {
         if (disposed) fn();

@@ -9,6 +9,7 @@
 //! O registry central (perfis, definições e orientações) fica em
 //! [`crate::tools::registry`]; aqui só mora a implementação por tool.
 
+pub mod computer;
 pub mod exec;
 pub mod fs_read;
 pub mod fs_write;

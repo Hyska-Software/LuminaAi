@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
     createConversation: vi.fn(),
     getConversation: vi.fn(),
     getCacheStats: vi.fn(),
+    notifyDesktop: vi.fn().mockResolvedValue(true),
     renameConversation: vi.fn(),
     deleteConversation: vi.fn(),
     setConversationPinned: vi.fn(),
@@ -666,6 +667,40 @@ describe('chatStore other actions', () => {
     });
     await useChatStore.getState().stop();
     expect(mocks.api.cancelTurn).toHaveBeenCalledWith('turn-9');
+  });
+
+  it('stopConversation cancels a background thread and keeps the visible one', async () => {
+    const background = {
+      turnId: 'turn-bg',
+      conversationId: 'conv-bg',
+      assistantId: 'assistant-bg',
+      userMessageId: null,
+      phase: 'tool' as const,
+      step: 2,
+      startedAt: Date.now(),
+      turnKind: 'user' as const,
+    };
+    const visible = {
+      turnId: 'turn-visible',
+      conversationId: 'conv-1',
+      assistantId: 'assistant-1',
+      userMessageId: null,
+      phase: 'text' as const,
+      step: 1,
+      startedAt: Date.now(),
+      turnKind: 'user' as const,
+    };
+    useChatStore.setState({
+      activeId: 'conv-1',
+      streamsByConversation: { 'conv-bg': background, 'conv-1': visible },
+      streaming: visible,
+    });
+
+    await useChatStore.getState().stopConversation('conv-bg');
+
+    expect(mocks.api.cancelTurn).toHaveBeenCalledWith('turn-bg');
+    expect(useChatStore.getState().streaming?.turnId).toBe('turn-visible');
+    expect(useChatStore.getState().streamsByConversation['conv-1']).toBeTruthy();
   });
 
   it('openConversation loads messages and artifacts', async () => {

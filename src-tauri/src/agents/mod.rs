@@ -336,6 +336,150 @@ impl From<&Agent> for AgentInput {
     }
 }
 
+/// A durable piece of work owned by one agent inside a channel/task board.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTask {
+    pub id: String,
+    pub channel_id: Option<String>,
+    pub parent_task_id: Option<String>,
+    pub owner_agent_id: String,
+    pub created_by_agent_id: Option<String>,
+    pub created_by_user: bool,
+    pub title: String,
+    pub brief: String,
+    pub acceptance: String,
+    pub status: String,
+    pub priority: i64,
+    pub max_turns: i64,
+    pub max_tokens: i64,
+    pub max_cost: f64,
+    pub deadline_at: Option<i64>,
+    pub conversation_id: Option<String>,
+    pub result: Option<String>,
+    pub result_artifact_ids: Vec<String>,
+    pub lease_until: Option<i64>,
+    pub handoff_count: i64,
+    pub version: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTaskInput {
+    pub to_agent_id: String,
+    pub title: String,
+    pub brief: String,
+    #[serde(default)]
+    pub acceptance: String,
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
+    pub parent_task_id: Option<String>,
+    #[serde(default)]
+    pub max_turns: Option<u32>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub max_cost: Option<f64>,
+    #[serde(default)]
+    pub deadline_minutes: Option<u32>,
+}
+
+pub const AGENT_TASK_MAX_OPEN_PER_AGENT: i64 = 3;
+pub const AGENT_TASK_MAX_DEPTH: usize = 2;
+pub const AGENT_TASK_MAX_HANDOFFS: i64 = 3;
+pub const AGENT_TASK_LEASE_MS: i64 = 30 * 60 * 1000;
+
+impl AgentTaskInput {
+    pub fn normalize(mut self) -> Result<Self, String> {
+        self.to_agent_id = self.to_agent_id.trim().to_string();
+        self.title = self.title.trim().to_string();
+        self.brief = self.brief.trim().to_string();
+        self.acceptance = self.acceptance.trim().to_string();
+        self.channel_id = self
+            .channel_id
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty());
+        self.parent_task_id = self
+            .parent_task_id
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty());
+        if self.to_agent_id.is_empty() {
+            return Err("AGENT_TASK_INVALID: informe o agente destino.".to_string());
+        }
+        if self.title.is_empty() || self.title.chars().count() > 120 {
+            return Err("AGENT_TASK_INVALID: o título deve ter de 1 a 120 caracteres.".to_string());
+        }
+        if self.brief.is_empty() || self.brief.chars().count() > 16_000 {
+            return Err(
+                "AGENT_TASK_INVALID: o brief deve ter de 1 a 16.000 caracteres.".to_string(),
+            );
+        }
+        if self.acceptance.chars().count() > 8_000 {
+            return Err("AGENT_TASK_INVALID: o aceite passa de 8.000 caracteres.".to_string());
+        }
+        self.max_turns = Some(self.max_turns.unwrap_or(8).clamp(1, 32));
+        self.max_tokens = Some(self.max_tokens.unwrap_or(100_000).clamp(1_000, 500_000));
+        self.max_cost = Some(
+            self.max_cost
+                .unwrap_or(1.0)
+                .clamp(0.01, 50.0),
+        );
+        self.deadline_minutes = Some(self.deadline_minutes.unwrap_or(120).clamp(1, 1_440));
+        Ok(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTaskEvent {
+    pub id: String,
+    pub task_id: String,
+    pub from_status: Option<String>,
+    pub to_status: String,
+    pub actor: String,
+    pub payload: serde_json::Value,
+    pub created_at: i64,
+}
+
+/// Allowed task state changes. Terminal states have no outgoing edges.
+pub fn task_transition_allowed(from: &str, to: &str) -> bool {
+    if from == to {
+        return true;
+    }
+    matches!(
+        (from, to),
+        ("queued", "accepted")
+            | ("queued", "declined")
+            | ("queued", "cancelled")
+            | ("queued", "failed")
+            | ("accepted", "running")
+            | ("accepted", "review")
+            | ("accepted", "done")
+            | ("accepted", "cancelled")
+            | ("accepted", "failed")
+            | ("running", "waiting_input")
+            | ("running", "waiting_approval")
+            | ("running", "review")
+            | ("running", "done")
+            | ("running", "failed")
+            | ("running", "cancelled")
+            | ("running", "queued")
+            | ("waiting_input", "running")
+            | ("waiting_input", "cancelled")
+            | ("waiting_input", "failed")
+            | ("waiting_approval", "running")
+            | ("waiting_approval", "cancelled")
+            | ("waiting_approval", "failed")
+            | ("review", "running")
+            | ("review", "done")
+            | ("review", "failed")
+            | ("review", "cancelled")
+    )
+}
+
 /// Aggregated billing/usage of one agent (all its conversations, including
 /// hidden channel/routine threads). Tokens come from `usage_log`, which keeps
 /// one row per turn.
@@ -500,6 +644,21 @@ pub struct AgentCapabilities {
     pub file_access: bool,
     #[serde(default = "default_true")]
     pub code_execution: bool,
+    /// Allows `delegate_task`/`handoff_task` between agents.
+    #[serde(default)]
+    pub delegation: bool,
+    /// Allows visual computer-use tools (screenshot/click/type/key).
+    #[serde(default)]
+    pub computer_use: bool,
+    /// Allows read-only screen capture without input.
+    #[serde(default)]
+    pub screen_capture: bool,
+    /// Allows the controlled browser (CDP) tools.
+    #[serde(default)]
+    pub browser_use: bool,
+    /// Allows this persona to override the global Docker execution setting.
+    #[serde(default)]
+    pub docker_execution: bool,
     #[serde(default)]
     pub skills: Option<Vec<String>>,
     #[serde(default)]
@@ -516,6 +675,11 @@ impl Default for AgentCapabilities {
             web_search: true,
             file_access: true,
             code_execution: true,
+            delegation: false,
+            computer_use: false,
+            screen_capture: false,
+            browser_use: false,
+            docker_execution: false,
             skills: None,
             tools: None,
             mcp_servers: None,
@@ -1019,6 +1183,41 @@ mod tests {
         let mut wrong = document;
         wrong.version = 99;
         assert!(wrong.normalize().is_err());
+    }
+
+    #[test]
+    fn task_state_machine_allows_expected_edges() {
+        assert!(task_transition_allowed("queued", "accepted"));
+        assert!(task_transition_allowed("accepted", "running"));
+        assert!(task_transition_allowed("running", "waiting_approval"));
+        assert!(task_transition_allowed("running", "queued"));
+        assert!(task_transition_allowed("review", "done"));
+        assert!(!task_transition_allowed("done", "running"));
+        assert!(!task_transition_allowed("cancelled", "accepted"));
+        assert!(!task_transition_allowed("queued", "done"));
+    }
+
+    #[test]
+    fn task_input_normalizes_budget_and_deadline() {
+        let input = AgentTaskInput {
+            to_agent_id: " agent-2 ".into(),
+            title: " Revisar ".into(),
+            brief: " Leia o relatório. ".into(),
+            ..AgentTaskInput::default()
+        }
+        .normalize()
+        .expect("task");
+        assert_eq!(input.to_agent_id, "agent-2");
+        assert_eq!(input.max_turns, Some(8));
+        assert_eq!(input.max_tokens, Some(100_000));
+        assert_eq!(input.deadline_minutes, Some(120));
+        assert_eq!(input.max_cost, Some(1.0));
+
+        let invalid = AgentTaskInput {
+            to_agent_id: "".into(),
+            ..AgentTaskInput::default()
+        };
+        assert!(invalid.normalize().is_err());
     }
 
     #[test]

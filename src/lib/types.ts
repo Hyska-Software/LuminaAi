@@ -182,6 +182,7 @@ export type RiskClass =
   | 'secret'
   | 'destroy'
   | 'network'
+  | 'computer'
   | 'ask';
 
 export type ApprovalScope = 'session' | 'workspace' | 'global';
@@ -833,6 +834,16 @@ export interface AgentCapabilities {
   webSearch: boolean;
   fileAccess: boolean;
   codeExecution: boolean;
+  /** Delegação de tarefas para outros agentes. */
+  delegation?: boolean;
+  /** Computer use visual (screenshot + input). */
+  computerUse?: boolean;
+  /** Captura de tela sem input. */
+  screenCapture?: boolean;
+  /** Browser controlado por CDP. */
+  browserUse?: boolean;
+  /** Permite override de execução Docker por agente. */
+  dockerExecution?: boolean;
   /** `null` herda todas as skills habilitadas; `[]` não usa nenhuma. */
   skills: string[] | null;
   tools: string[] | null;
@@ -948,6 +959,92 @@ export interface AgentChannelMessage {
 export interface AgentChannelPostResult {
   messages: AgentChannelMessage[];
   errors: string[];
+}
+
+export type AgentTaskStatus =
+  | 'queued'
+  | 'accepted'
+  | 'running'
+  | 'waiting_input'
+  | 'waiting_approval'
+  | 'review'
+  | 'done'
+  | 'cancelled'
+  | 'failed'
+  | 'declined';
+
+export interface DockerStatus {
+  available: boolean;
+  serverVersion: string | null;
+  images: string[];
+  error: string | null;
+}
+
+export interface DockerImageInfo {
+  image: string;
+  id: string;
+  architecture: string;
+}
+
+export interface AgentTask {
+  id: string;
+  channelId: string | null;
+  parentTaskId: string | null;
+  ownerAgentId: string;
+  createdByAgentId: string | null;
+  createdByUser: boolean;
+  title: string;
+  brief: string;
+  acceptance: string;
+  status: AgentTaskStatus;
+  priority: number;
+  maxTurns: number;
+  maxTokens: number;
+  maxCost: number;
+  deadlineAt: number | null;
+  conversationId: string | null;
+  result: string | null;
+  resultArtifactIds: string[];
+  leaseUntil: number | null;
+  handoffCount: number;
+  version: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AgentTaskInput {
+  toAgentId: string;
+  title: string;
+  brief: string;
+  acceptance?: string;
+  channelId?: string | null;
+  parentTaskId?: string | null;
+  maxTurns?: number;
+  maxTokens?: number;
+  maxCost?: number;
+  deadlineMinutes?: number;
+}
+
+export interface AgentTaskEvent {
+  id: string;
+  taskId: string;
+  fromStatus: string | null;
+  toStatus: string;
+  actor: string;
+  payload: unknown;
+  createdAt: number;
+}
+
+export interface AgentTaskDetail {
+  task: AgentTask;
+  events: AgentTaskEvent[];
+}
+
+export interface AgentTaskUpdatedEvent {
+  taskId: string;
+  ownerAgentId: string;
+  status: string;
+  title: string;
 }
 
 export interface AgentUsage {
@@ -1106,6 +1203,11 @@ export interface TurnPayload {
    */
   goalRequest?: boolean;
   turnId?: string | null;
+}
+
+export interface ActiveTurnInfo {
+  turnId: string;
+  conversationId: string;
 }
 
 export interface TurnResult {
@@ -1406,6 +1508,18 @@ export interface Settings {
   dockerImage?: string;
   /** Permite rede no contêiner Docker (padrão: desligado). */
   dockerNetwork?: boolean;
+  /** Turnos simultâneos no app inteiro. */
+  maxConcurrentTurns?: number;
+  /** Turnos simultâneos por agente. */
+  maxConcurrentTurnsPerAgent?: number;
+  /** Mensagens máximas na fila de uma thread. */
+  maxQueueLengthPerThread?: number;
+  /** Limite diário de custo por agente (USD); `null` desliga. */
+  agentDailyCostLimitUsd?: number | null;
+  /** Imagem Docker do computer use gráfico. */
+  computerDockerImage?: string;
+  /** Nome do container do computer use gráfico. */
+  computerDockerContainer?: string;
   /** Compacta o contexto automaticamente quando a janela aperta. */
   autoCompact?: boolean;
   /** Retenção dos arquivos de spill, em dias. */

@@ -166,6 +166,33 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     if settings.docker_image.is_empty() || settings.docker_image.chars().count() > 200 {
         settings.docker_image = defaults.docker_image;
     }
+    settings.max_concurrent_turns = settings.max_concurrent_turns.clamp(1, 8);
+    settings.max_concurrent_turns_per_agent = settings.max_concurrent_turns_per_agent.clamp(1, 4);
+    settings.max_queue_length_per_thread = settings.max_queue_length_per_thread.clamp(1, 100);
+    match settings.agent_daily_cost_limit_usd {
+        Some(value) if !value.is_finite() || value <= 0.0 => {
+            settings.agent_daily_cost_limit_usd = None;
+        }
+        Some(value) => {
+            settings.agent_daily_cost_limit_usd = Some(value.min(10_000.0));
+        }
+        None => {}
+    }
+    settings.computer_docker_image = settings.computer_docker_image.trim().to_string();
+    if settings.computer_docker_image.is_empty()
+        || settings.computer_docker_image.chars().count() > 200
+    {
+        settings.computer_docker_image = defaults.computer_docker_image;
+    }
+    settings.computer_docker_container = settings.computer_docker_container.trim().to_string();
+    if settings.computer_docker_container.is_empty()
+        || !settings
+            .computer_docker_container
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        settings.computer_docker_container = defaults.computer_docker_container;
+    }
     settings.spill_retention_days = settings
         .spill_retention_days
         .clamp(SPILL_RETENTION_MIN_DAYS, SPILL_RETENTION_MAX_DAYS);

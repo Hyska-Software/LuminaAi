@@ -13,10 +13,14 @@ import type {
   AgentMemoryInput,
   AgentRevision,
   AgentRoutine,
+  AgentTask,
+  AgentTaskDetail,
+  AgentTaskInput,
   AgentRoutineInput,
   AgentThreadCursor,
   AgentUsage,
   AgentThreadPage,
+  ActiveTurnInfo,
   AppInfo,
   ApprovalDecision,
   ApprovalRule,
@@ -37,6 +41,8 @@ import type {
   ConversationDetail,
   ConversationMode,
   CreateGoalInput,
+  DockerImageInfo,
+  DockerStatus,
   FileChange,
   GoalAction,
   GoalContinuation,
@@ -83,6 +89,13 @@ export const api = {
   openDataDir: () => invoke<void>('open_data_dir'),
   resetAppData: () => invoke<void>('reset_app_data'),
   getCodeEnvironment: () => invoke<CodeEnvironmentStatus>('get_code_environment'),
+  notifyDesktop: (title: string, body: string) =>
+    invoke<boolean>('notify_desktop', { title, body }),
+  dockerStatus: () => invoke<DockerStatus>('docker_status'),
+  dockerPullImage: (image: string) => invoke<string>('docker_pull_image', { image }),
+  dockerValidateImage: (image: string) =>
+    invoke<DockerImageInfo>('docker_validate_image', { image }),
+  dockerCleanup: () => invoke<number>('docker_cleanup'),
   openSkillsDir: () => invoke<void>('open_skills_dir'),
 
   /* -------- atualizações -------- */
@@ -203,6 +216,23 @@ export const api = {
     invoke<void>('delete_agent_routine', { routineId }),
   runAgentRoutineNow: (routineId: string) =>
     invoke<AgentRoutine>('run_agent_routine_now', { routineId }),
+  listAgentTasks: (filter?: {
+    status?: string;
+    ownerAgentId?: string;
+    channelId?: string;
+  }) =>
+    invoke<AgentTask[]>('list_agent_tasks', {
+      status: filter?.status ?? null,
+      ownerAgentId: filter?.ownerAgentId ?? null,
+      channelId: filter?.channelId ?? null,
+    }),
+  getAgentTask: (taskId: string) => invoke<AgentTaskDetail>('get_agent_task', { taskId }),
+  createAgentTask: (input: AgentTaskInput) =>
+    invoke<AgentTask>('create_agent_task', { input }),
+  cancelAgentTask: (taskId: string) => invoke<AgentTask>('cancel_agent_task', { taskId }),
+  reassignAgentTask: (taskId: string, toAgentId: string) =>
+    invoke<AgentTask>('reassign_agent_task', { taskId, toAgentId }),
+  runAgentTaskNow: (taskId: string) => invoke<AgentTask>('run_agent_task_now', { taskId }),
   listAgentChannels: () => invoke<AgentChannel[]>('list_agent_channels'),
   createAgentChannel: (input: AgentChannelInput) =>
     invoke<AgentChannel>('create_agent_channel', { input }),
@@ -275,6 +305,9 @@ export const api = {
 
   /* -------- turn streaming -------- */
   cancelTurn: (turnId: string) => invoke<boolean>('cancel_turn', { turnId }),
+  cancelConversation: (conversationId: string) =>
+    invoke<number>('cancel_conversation', { conversationId }),
+  listActiveTurns: () => invoke<ActiveTurnInfo[]>('list_active_turns'),
 
   /* -------- workspace (harness de código) -------- */
   /** Abre o seletor nativo de pasta e devolve o caminho escolhido (null = cancelado). */

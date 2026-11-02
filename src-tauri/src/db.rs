@@ -18,8 +18,8 @@ use sha2::{Digest, Sha256};
 
 use crate::agents::{
     Agent, AgentChannel, AgentChannelInput, AgentChannelMessage, AgentInput, AgentMemory,
-    AgentMemoryInput, AgentRoutine, AgentRoutineInput, AgentThreadCursor, AgentThreadPage,
-    AgentUsage,
+    AgentMemoryInput, AgentRoutine, AgentRoutineInput, AgentTask, AgentTaskEvent, AgentTaskInput,
+    AgentThreadCursor, AgentThreadPage, AgentUsage,
 };
 use crate::domain::{
     conversation_mode_or_default, now_ms, ApprovalDecision, ApprovalRule, ApprovalScope, Artifact,
@@ -36,13 +36,18 @@ use crate::domain::{
 const CONVERSATION_COLUMNS: &str = "id, title, created_at, updated_at, pinned, \
      provider_id, model_id, message_count, preview, mode, code_linked, workspace_id, \
      agent_kind, permission_mode, parent_conversation_id, subagent_task_call_id, subagent_type, \
-     agent_id, channel_id";
+     agent_id, channel_id, task_id";
 
 const AGENT_COLUMNS: &str = "a.id, a.name, a.role, a.description, a.emoji, a.department, \
      a.pinned, a.sort_order, a.provider_id, a.model_id, a.fallback_provider_id, \
      a.fallback_model_id, a.reasoning_json, a.instructions, a.prompt_version, a.starters_json, \
      a.capabilities_json, a.memory_enabled, a.workspace_id, a.permission_mode, a.archived_at, \
      a.created_at, a.updated_at";
+
+const AGENT_TASK_COLUMNS: &str = "id, channel_id, parent_task_id, owner_agent_id, \
+     created_by_agent_id, created_by_user, title, brief, acceptance, status, priority, \
+     max_turns, max_tokens, max_cost, deadline_at, conversation_id, result, \
+     result_artifact_ids, lease_until, handoff_count, version, created_at, updated_at";
 
 const WORKSPACE_COLUMNS: &str = "id, name, path, created_at, updated_at, last_opened_at, \
      pinned, trusted";
@@ -165,6 +170,51 @@ CREATE TABLE IF NOT EXISTS agent_channel_messages (
 CREATE INDEX IF NOT EXISTS idx_agent_channel_messages
   ON agent_channel_messages(channel_id, created_at, id);
 
+-- Delegated work: one owner, optional channel/parent, budget and lease.
+CREATE TABLE IF NOT EXISTS agent_tasks (
+  id                    TEXT PRIMARY KEY,
+  channel_id            TEXT,
+  parent_task_id        TEXT,
+  owner_agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  created_by_agent_id   TEXT,
+  created_by_user       INTEGER NOT NULL DEFAULT 0,
+  title                 TEXT NOT NULL,
+  brief                 TEXT NOT NULL,
+  acceptance            TEXT NOT NULL DEFAULT '',
+  status                TEXT NOT NULL DEFAULT 'queued',
+  priority              INTEGER NOT NULL DEFAULT 0,
+  max_turns             INTEGER NOT NULL DEFAULT 8,
+  max_tokens            INTEGER NOT NULL DEFAULT 100000,
+  max_cost              REAL NOT NULL DEFAULT 1.0,
+  deadline_at           INTEGER,
+  conversation_id       TEXT,
+  result                TEXT,
+  result_artifact_ids   TEXT NOT NULL DEFAULT '[]',
+  lease_until           INTEGER,
+  handoff_count         INTEGER NOT NULL DEFAULT 0,
+  version               INTEGER NOT NULL DEFAULT 1,
+  created_at            INTEGER NOT NULL,
+  updated_at            INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_owner
+  ON agent_tasks(owner_agent_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_channel
+  ON agent_tasks(channel_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_status
+  ON agent_tasks(status, priority DESC, created_at);
+
+CREATE TABLE IF NOT EXISTS agent_task_events (
+  id           TEXT PRIMARY KEY,
+  task_id      TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+  from_status  TEXT,
+  to_status    TEXT NOT NULL,
+  actor        TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_task_events
+  ON agent_task_events(task_id, created_at);
+
 CREATE TABLE IF NOT EXISTS conversations (
   id            TEXT PRIMARY KEY,
   title         TEXT NOT NULL,
@@ -193,7 +243,9 @@ CREATE TABLE IF NOT EXISTS conversations (
   -- Persona dona da conversa (NULL em Chat/Code).
   agent_id               TEXT REFERENCES agents(id) ON DELETE RESTRICT,
   -- Canais: thread privada que pertence a um canal compartilhado.
-  channel_id             TEXT
+  channel_id             TEXT,
+  -- Delegação: thread de execução de uma tarefa.
+  task_id                TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -999,6 +1051,17 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         "channel_id",
         "ALTER TABLE conversations ADD COLUMN channel_id TEXT",
     )?;
+    ensure_column(
+        conn,
+        "conversations",
+        "task_id",
+        "ALTER TABLE conversations ADD COLUMN task_id TEXT",
+    )?;
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_agent_tasks_due \
+         ON agent_tasks(status, created_at);",
+    )
+    .context("falha ao criar o índice de tarefas")?;
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_conversations_agent_updated \
          ON conversations(agent_id, updated_at DESC, id DESC);",
@@ -1379,6 +1442,7 @@ fn conversation_from_row(row: &Row<'_>) -> rusqlite::Result<Conversation> {
         subagent_type: row.get(16)?,
         agent_id: row.get(17)?,
         channel_id: row.get(18)?,
+        task_id: row.get(19)?,
     })
 }
 
@@ -1459,6 +1523,48 @@ fn agent_channel_message_from_row(row: &Row<'_>) -> rusqlite::Result<AgentChanne
         agent_id: row.get(3)?,
         content: row.get(4)?,
         created_at: row.get(5)?,
+    })
+}
+
+fn agent_task_from_row(row: &Row<'_>) -> rusqlite::Result<AgentTask> {
+    let artifacts: String = row.get(17)?;
+    Ok(AgentTask {
+        id: row.get(0)?,
+        channel_id: row.get(1)?,
+        parent_task_id: row.get(2)?,
+        owner_agent_id: row.get(3)?,
+        created_by_agent_id: row.get(4)?,
+        created_by_user: row.get::<_, i64>(5)? != 0,
+        title: row.get(6)?,
+        brief: row.get(7)?,
+        acceptance: row.get(8)?,
+        status: row.get(9)?,
+        priority: row.get(10)?,
+        max_turns: row.get(11)?,
+        max_tokens: row.get(12)?,
+        max_cost: row.get(13)?,
+        deadline_at: row.get(14)?,
+        conversation_id: row.get(15)?,
+        result: row.get(16)?,
+        result_artifact_ids: serde_json::from_str(&artifacts).unwrap_or_default(),
+        lease_until: row.get(18)?,
+        handoff_count: row.get(19)?,
+        version: row.get(20)?,
+        created_at: row.get(21)?,
+        updated_at: row.get(22)?,
+    })
+}
+
+fn agent_task_event_from_row(row: &Row<'_>) -> rusqlite::Result<AgentTaskEvent> {
+    let payload: String = row.get(5)?;
+    Ok(AgentTaskEvent {
+        id: row.get(0)?,
+        task_id: row.get(1)?,
+        from_status: row.get(2)?,
+        to_status: row.get(3)?,
+        actor: row.get(4)?,
+        payload: serde_json::from_str(&payload).unwrap_or(serde_json::Value::Null),
+        created_at: row.get(6)?,
     })
 }
 
@@ -2488,6 +2594,395 @@ impl Db {
             }))
     }
 
+    /* ---------------- agent tasks (delegation) ---------------- */
+
+    fn task_open_statuses() -> &'static str {
+        "'queued','accepted','running','waiting_input','waiting_approval','review'"
+    }
+
+    pub fn create_agent_task(
+        &self,
+        input: &AgentTaskInput,
+        created_by_agent_id: Option<&str>,
+        created_by_user: bool,
+        now: i64,
+    ) -> Result<AgentTask> {
+        let conn = self.conn.lock();
+        let owner_exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM agents WHERE id = ?1 AND archived_at IS NULL",
+            [&input.to_agent_id],
+            |row| row.get(0),
+        )?;
+        if owner_exists == 0 {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_INVALID: o agente `{}` não existe ou está arquivado",
+                input.to_agent_id
+            ));
+        }
+        if let Some(channel_id) = input.channel_id.as_deref() {
+            let member: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM agent_channel_members WHERE channel_id = ?1 AND agent_id = ?2",
+                params![channel_id, input.to_agent_id],
+                |row| row.get(0),
+            )?;
+            if member == 0 {
+                return Err(anyhow::anyhow!(
+                    "AGENT_TASK_INVALID: o agente destino não participa do canal"
+                ));
+            }
+        }
+        let open: i64 = conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM agent_tasks WHERE owner_agent_id = ?1 \
+                 AND status IN ({})",
+                Self::task_open_statuses()
+            ),
+            [&input.to_agent_id],
+            |row| row.get(0),
+        )?;
+        if open >= crate::agents::AGENT_TASK_MAX_OPEN_PER_AGENT {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_LIMIT: o agente já tem {} tarefas abertas; conclua ou cancele antes",
+                crate::agents::AGENT_TASK_MAX_OPEN_PER_AGENT
+            ));
+        }
+        if let Some(parent_id) = input.parent_task_id.as_deref() {
+            let depth: i64 = conn.query_row(
+                "WITH RECURSIVE ancestors(id, parent_task_id, depth) AS ( \
+                   SELECT id, parent_task_id, 1 FROM agent_tasks WHERE id = ?1 \
+                   UNION ALL \
+                   SELECT t.id, t.parent_task_id, a.depth + 1 FROM agent_tasks t \
+                     JOIN ancestors a ON t.id = a.parent_task_id \
+                 ) SELECT COALESCE(MAX(depth), 0) FROM ancestors",
+                [parent_id],
+                |row| row.get(0),
+            )?;
+            let parent_exists: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM agent_tasks WHERE id = ?1",
+                [parent_id],
+                |row| row.get(0),
+            )?;
+            if parent_exists == 0 {
+                return Err(anyhow::anyhow!(
+                    "AGENT_TASK_INVALID: a tarefa pai não existe"
+                ));
+            }
+            if depth as usize >= crate::agents::AGENT_TASK_MAX_DEPTH {
+                return Err(anyhow::anyhow!(
+                    "AGENT_TASK_LIMIT: profundidade máxima de delegação ({}) atingida",
+                    crate::agents::AGENT_TASK_MAX_DEPTH
+                ));
+            }
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let deadline_at = input
+            .deadline_minutes
+            .map(|minutes| now + i64::from(minutes) * 60_000);
+        conn.execute(
+            "INSERT INTO agent_tasks (id, channel_id, parent_task_id, owner_agent_id, \
+             created_by_agent_id, created_by_user, title, brief, acceptance, status, priority, \
+             max_turns, max_tokens, max_cost, deadline_at, conversation_id, result, \
+             result_artifact_ids, lease_until, handoff_count, version, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'queued', 0, ?10, ?11, ?12, ?13, \
+             NULL, NULL, '[]', NULL, 0, 1, ?14, ?14)",
+            params![
+                id,
+                input.channel_id,
+                input.parent_task_id,
+                input.to_agent_id,
+                created_by_agent_id,
+                created_by_user as i64,
+                input.title,
+                input.brief,
+                input.acceptance,
+                input.max_turns.unwrap_or(8) as i64,
+                input.max_tokens.unwrap_or(100_000) as i64,
+                input.max_cost.unwrap_or(1.0),
+                deadline_at,
+                now,
+            ],
+        )
+        .context("falha ao criar tarefa do agente")?;
+        let event_id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO agent_task_events (id, task_id, from_status, to_status, actor, \
+             payload_json, created_at) VALUES (?1, ?2, NULL, 'queued', ?3, '{}', ?4)",
+            params![
+                event_id,
+                id,
+                if created_by_user { "user" } else { "agent" },
+                now
+            ],
+        )?;
+        drop(conn);
+        self.get_agent_task(&id)?
+            .ok_or_else(|| anyhow::anyhow!("tarefa recém-criada não encontrada"))
+    }
+
+    pub fn get_agent_task(&self, id: &str) -> Result<Option<AgentTask>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AGENT_TASK_COLUMNS} FROM agent_tasks WHERE id = ?1"
+        ))?;
+        let mut rows = stmt.query_map([id], agent_task_from_row)?;
+        Ok(rows.next().transpose()?)
+    }
+
+    pub fn list_agent_tasks(
+        &self,
+        status: Option<&str>,
+        owner_agent_id: Option<&str>,
+        channel_id: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<Vec<AgentTask>> {
+        let limit = limit.unwrap_or(100).clamp(1, 500) as i64;
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AGENT_TASK_COLUMNS} FROM agent_tasks \
+             WHERE (?1 IS NULL OR status = ?1) \
+               AND (?2 IS NULL OR owner_agent_id = ?2) \
+               AND (?3 IS NULL OR channel_id = ?3) \
+             ORDER BY priority DESC, created_at DESC LIMIT ?4"
+        ))?;
+        let rows = stmt.query_map(
+            params![status, owner_agent_id, channel_id, limit],
+            agent_task_from_row,
+        )?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn list_queued_agent_tasks(&self, now: i64, limit: u32) -> Result<Vec<AgentTask>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AGENT_TASK_COLUMNS} FROM agent_tasks \
+             WHERE status IN ('queued','accepted') \
+               AND (deadline_at IS NULL OR deadline_at > ?1) \
+             ORDER BY priority DESC, created_at, id LIMIT ?2"
+        ))?;
+        let rows = stmt.query_map(params![now, i64::from(limit.clamp(1, 50))], agent_task_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn count_open_agent_tasks(&self, owner_agent_id: &str) -> Result<i64> {
+        let conn = self.conn.lock();
+        let count = conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM agent_tasks WHERE owner_agent_id = ?1 \
+                 AND status IN ({})",
+                Self::task_open_statuses()
+            ),
+            [owner_agent_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    pub fn set_agent_task_conversation(
+        &self,
+        task_id: &str,
+        conversation_id: &str,
+        now: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE agent_tasks SET conversation_id = ?2, updated_at = ?3 WHERE id = ?1",
+            params![task_id, conversation_id, now],
+        )?;
+        conn.execute(
+            "UPDATE conversations SET task_id = ?2 WHERE id = ?3",
+            params![task_id, conversation_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn claim_agent_task(&self, task_id: &str, now: i64) -> Result<AgentTask> {
+        let conn = self.conn.lock();
+        let current = {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {AGENT_TASK_COLUMNS} FROM agent_tasks WHERE id = ?1"
+            ))?;
+            let mut rows = stmt.query_map([task_id], agent_task_from_row)?;
+            rows.next()
+                .transpose()?
+                .ok_or_else(|| anyhow::anyhow!("AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"))?
+        };
+        if !matches!(current.status.as_str(), "queued" | "accepted") {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_BUSY: a tarefa está em `{}`",
+                current.status
+            ));
+        }
+        if current.lease_until.is_some_and(|lease| lease > now) {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_BUSY: outro runner tem a tarefa até {}",
+                current.lease_until.unwrap_or(0)
+            ));
+        }
+        let version = current.version + 1;
+        let lease = now + crate::agents::AGENT_TASK_LEASE_MS;
+        conn.execute(
+            "UPDATE agent_tasks SET status = 'running', lease_until = ?2, version = ?3, \
+             updated_at = ?4 WHERE id = ?1",
+            params![task_id, lease, version, now],
+        )?;
+        conn.execute(
+            "INSERT INTO agent_task_events (id, task_id, from_status, to_status, actor, \
+             payload_json, created_at) VALUES (?1, ?2, ?3, 'running', 'system', '{}', ?4)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                task_id,
+                current.status,
+                now
+            ],
+        )?;
+        drop(conn);
+        self.get_agent_task(task_id)?
+            .ok_or_else(|| anyhow::anyhow!("tarefa reivindicada não encontrada"))
+    }
+
+    pub fn transition_agent_task(
+        &self,
+        task_id: &str,
+        to_status: &str,
+        actor: &str,
+        payload: serde_json::Value,
+        result: Option<&str>,
+        artifact_ids: Option<&[String]>,
+        now: i64,
+    ) -> Result<AgentTask> {
+        let conn = self.conn.lock();
+        let current = {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {AGENT_TASK_COLUMNS} FROM agent_tasks WHERE id = ?1"
+            ))?;
+            let mut rows = stmt.query_map([task_id], agent_task_from_row)?;
+            rows.next()
+                .transpose()?
+                .ok_or_else(|| anyhow::anyhow!("AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"))?
+        };
+        if !crate::agents::task_transition_allowed(&current.status, to_status) {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_INVALID: transição `{}` → `{to_status}` não permitida",
+                current.status
+            ));
+        }
+        let terminal = matches!(to_status, "done" | "cancelled" | "failed" | "declined");
+        let artifacts = artifact_ids
+            .map(|ids| serde_json::to_string(ids))
+            .transpose()?
+            .unwrap_or_else(|| serde_json::to_string(&current.result_artifact_ids).unwrap_or_else(|_| "[]".to_string()));
+        conn.execute(
+            "UPDATE agent_tasks SET status = ?2, result = COALESCE(?3, result), \
+             result_artifact_ids = ?4, lease_until = CASE WHEN ?5 THEN NULL ELSE lease_until END, \
+             version = version + 1, updated_at = ?6 WHERE id = ?1",
+            params![
+                task_id,
+                to_status,
+                result,
+                artifacts,
+                terminal as i64,
+                now
+            ],
+        )?;
+        conn.execute(
+            "INSERT INTO agent_task_events (id, task_id, from_status, to_status, actor, \
+             payload_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                task_id,
+                current.status,
+                to_status,
+                actor,
+                serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
+                now
+            ],
+        )?;
+        drop(conn);
+        self.get_agent_task(task_id)?
+            .ok_or_else(|| anyhow::anyhow!("tarefa atualizada não encontrada"))
+    }
+
+    pub fn handoff_agent_task(
+        &self,
+        task_id: &str,
+        to_agent_id: &str,
+        actor: &str,
+        summary: &str,
+        now: i64,
+    ) -> Result<AgentTask> {
+        let conn = self.conn.lock();
+        let current = {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {AGENT_TASK_COLUMNS} FROM agent_tasks WHERE id = ?1"
+            ))?;
+            let mut rows = stmt.query_map([task_id], agent_task_from_row)?;
+            rows.next()
+                .transpose()?
+                .ok_or_else(|| anyhow::anyhow!("AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"))?
+        };
+        if current.handoff_count >= crate::agents::AGENT_TASK_MAX_HANDOFFS {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_LIMIT: esta tarefa já teve {} handoffs",
+                crate::agents::AGENT_TASK_MAX_HANDOFFS
+            ));
+        }
+        if !matches!(
+            current.status.as_str(),
+            "accepted" | "running" | "waiting_input" | "waiting_approval" | "review"
+        ) {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_INVALID: não é possível fazer handoff no estado `{}`",
+                current.status
+            ));
+        }
+        let target_exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM agents WHERE id = ?1 AND archived_at IS NULL",
+            [to_agent_id],
+            |row| row.get(0),
+        )?;
+        if target_exists == 0 {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_INVALID: o agente destino não existe ou está arquivado"
+            ));
+        }
+        conn.execute(
+            "UPDATE agent_tasks SET owner_agent_id = ?2, status = 'queued', lease_until = NULL, \
+             handoff_count = handoff_count + 1, version = version + 1, updated_at = ?3 WHERE id = ?1",
+            params![task_id, to_agent_id, now],
+        )?;
+        conn.execute(
+            "INSERT INTO agent_task_events (id, task_id, from_status, to_status, actor, \
+             payload_json, created_at) VALUES (?1, ?2, ?3, 'queued', ?4, ?5, ?6)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                task_id,
+                current.status,
+                actor,
+                serde_json::json!({
+                    "handoff": true,
+                    "fromAgentId": current.owner_agent_id,
+                    "toAgentId": to_agent_id,
+                    "summary": summary,
+                })
+                .to_string(),
+                now
+            ],
+        )?;
+        drop(conn);
+        self.get_agent_task(task_id)?
+            .ok_or_else(|| anyhow::anyhow!("tarefa com handoff não encontrada"))
+    }
+
+    pub fn list_agent_task_events(&self, task_id: &str) -> Result<Vec<AgentTaskEvent>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, task_id, from_status, to_status, actor, payload_json, created_at \
+             FROM agent_task_events WHERE task_id = ?1 ORDER BY created_at, id",
+        )?;
+        let rows = stmt.query_map([task_id], agent_task_event_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /* ---------------- agent routines ---------------- */
 
     pub fn list_agent_routines(&self, agent_id: &str) -> Result<Vec<AgentRoutine>> {
@@ -3177,7 +3672,7 @@ impl Db {
             "SELECT DISTINCT c.id, c.title, c.created_at, c.updated_at, c.pinned, \
              c.provider_id, c.model_id, c.message_count, c.preview, c.mode, c.code_linked, \
              c.workspace_id, c.agent_kind, c.permission_mode, c.parent_conversation_id, \
-             c.subagent_task_call_id, c.subagent_type, c.agent_id, c.channel_id \
+             c.subagent_task_call_id, c.subagent_type, c.agent_id, c.channel_id, c.task_id \
              FROM conversations c \
              LEFT JOIN messages m ON m.conversation_id = c.id \
              WHERE c.parent_conversation_id IS NULL \
@@ -5026,6 +5521,158 @@ mod tests {
         db.delete_agent_channel(&channel.id).expect("delete channel");
         assert!(db.list_agent_channels().expect("channels").is_empty());
         assert!(db.get_conversation(&thread.id).expect("get").is_none());
+    }
+
+    #[test]
+    fn agent_tasks_claim_transition_handoff_and_events() {
+        let db = test_db();
+        let first = db.create_agent(&agent_input("Ana")).expect("agent");
+        let second = db.create_agent(&agent_input("Bia")).expect("agent");
+        let channel = db
+            .create_agent_channel(
+                &crate::agents::AgentChannelInput {
+                    name: "Entrega".to_string(),
+                    member_ids: vec![first.id.clone(), second.id.clone()],
+                },
+                now_ms(),
+            )
+            .expect("channel");
+        let input = crate::agents::AgentTaskInput {
+            to_agent_id: second.id.clone(),
+            title: "Revisar contrato".to_string(),
+            brief: "Leia o contrato e liste riscos.".to_string(),
+            acceptance: "Lista com referência de página.".to_string(),
+            channel_id: Some(channel.id.clone()),
+            parent_task_id: None,
+            max_turns: Some(4),
+            max_tokens: Some(20_000),
+            max_cost: Some(0.5),
+            deadline_minutes: Some(30),
+        }
+        .normalize()
+        .expect("input");
+        let task = db
+            .create_agent_task(&input, Some(&first.id), false, now_ms())
+            .expect("task");
+        assert_eq!(task.status, "queued");
+        assert_eq!(task.owner_agent_id, second.id);
+        assert_eq!(task.channel_id.as_deref(), Some(channel.id.as_str()));
+
+        let claimed = db.claim_agent_task(&task.id, now_ms()).expect("claim");
+        assert_eq!(claimed.status, "running");
+        assert!(claimed.lease_until.is_some());
+        assert!(db.claim_agent_task(&task.id, now_ms()).is_err());
+
+        let waiting = db
+            .transition_agent_task(
+                &task.id,
+                "waiting_approval",
+                "agent",
+                serde_json::json!({ "reason": "precisa de acesso" }),
+                None,
+                None,
+                now_ms(),
+            )
+            .expect("waiting");
+        assert_eq!(waiting.status, "waiting_approval");
+        db.transition_agent_task(
+            &task.id,
+            "running",
+            "user",
+            serde_json::json!({}),
+            None,
+            None,
+            now_ms(),
+        )
+        .expect("resume");
+
+        let handoff = db
+            .handoff_agent_task(
+                &task.id,
+                &first.id,
+                "agent",
+                "Precisa da visão de engenharia.",
+                now_ms(),
+            )
+            .expect("handoff");
+        assert_eq!(handoff.owner_agent_id, first.id);
+        assert_eq!(handoff.status, "queued");
+        assert_eq!(handoff.handoff_count, 1);
+        assert!(db
+            .handoff_agent_task(&task.id, &second.id, "agent", "de novo", now_ms())
+            .is_err());
+
+        db.transition_agent_task(
+            &task.id,
+            "accepted",
+            "agent",
+            serde_json::json!({}),
+            None,
+            None,
+            now_ms(),
+        )
+        .expect("accept");
+        db.transition_agent_task(
+            &task.id,
+            "running",
+            "system",
+            serde_json::json!({}),
+            None,
+            None,
+            now_ms(),
+        )
+        .expect("run again");
+        let done = db
+            .transition_agent_task(
+                &task.id,
+                "done",
+                "agent",
+                serde_json::json!({ "usage": { "totalTokens": 120 } }),
+                Some("Contrato revisado; 3 riscos."),
+                Some(&["artifact-1".to_string()]),
+                now_ms(),
+            )
+            .expect("done");
+        assert_eq!(done.status, "done");
+        assert_eq!(done.result.as_deref(), Some("Contrato revisado; 3 riscos."));
+        assert_eq!(done.result_artifact_ids, vec!["artifact-1".to_string()]);
+        let events = db.list_agent_task_events(&task.id).expect("events");
+        assert!(events.len() >= 6);
+        assert_eq!(
+            db.list_agent_tasks(Some("done"), Some(&first.id), None, Some(10))
+                .expect("list")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn agent_task_open_limit_is_enforced_per_owner() {
+        let db = test_db();
+        let owner = db.create_agent(&agent_input("Owner")).expect("agent");
+        for index in 0..crate::agents::AGENT_TASK_MAX_OPEN_PER_AGENT {
+            let input = crate::agents::AgentTaskInput {
+                to_agent_id: owner.id.clone(),
+                title: format!("Tarefa {index}"),
+                brief: "Faça algo.".to_string(),
+                ..crate::agents::AgentTaskInput::default()
+            }
+            .normalize()
+            .expect("input");
+            db.create_agent_task(&input, None, true, now_ms())
+                .expect("task");
+        }
+        let input = crate::agents::AgentTaskInput {
+            to_agent_id: owner.id.clone(),
+            title: "Excedente".to_string(),
+            brief: "Faça algo.".to_string(),
+            ..crate::agents::AgentTaskInput::default()
+        }
+        .normalize()
+        .expect("input");
+        assert!(db
+            .create_agent_task(&input, None, true, now_ms())
+            .is_err());
     }
 
     #[test]

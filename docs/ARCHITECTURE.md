@@ -491,6 +491,15 @@ Contrato completo: **`docs/AGENTS.md`**. Resumo:
   cada run é um turno normal na thread dedicada.
 - **Canais**: `agent_channels` + membros + mensagens; cada membro responde em
   sua thread privada oculta e a resposta é publicada no histórico compartilhado.
+- **Delegação**: `agent_tasks`/`agent_task_events` com dono, lease, orçamento e
+  máquina de estados; tools `delegate_task`/`handoff_task`/`finish_task`; runner
+  Rust a cada 5 s sob o governador (`docs/TASKS.md`).
+- **Computer use**: screenshot/clique/teclado/janelas/UI tree local no Windows e
+  Docker gráfico (Xvfb + noVNC); input sempre com aprovação
+  (`RiskClass::Computer`), contrato em `docs/COMPUTER.md`.
+- **Docker**: `run_command`/jobs com hardening (non-root, cap-drop, read-only,
+  limites, workspace único, rede off), validação de imagem e cleanup
+  (`docs/DOCKER.md`).
 - **Modelo de reserva**: `fallback_provider_id`/`fallback_model_id`; se a rota
   principal não resolve ou não tem credencial, o turno usa a reserva antes de
   persistir mensagens.

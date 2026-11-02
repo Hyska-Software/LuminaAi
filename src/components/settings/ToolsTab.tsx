@@ -63,6 +63,20 @@ export function ToolsTab() {
   const [temperature, setTemperature] = useState(settings.temperature ?? 0.7);
   const [timeoutSecs, setTimeoutSecs] = useState(settings.codeTimeoutSecs);
   const [dockerImage, setDockerImage] = useState(settings.dockerImage ?? 'node:22-bookworm');
+  const [maxConcurrentTurns, setMaxConcurrentTurns] = useState(
+    settings.maxConcurrentTurns ?? 3,
+  );
+  const [maxConcurrentPerAgent, setMaxConcurrentPerAgent] = useState(
+    settings.maxConcurrentTurnsPerAgent ?? 1,
+  );
+  const [maxQueueLength, setMaxQueueLength] = useState(
+    settings.maxQueueLengthPerThread ?? 20,
+  );
+  const [costLimit, setCostLimit] = useState(
+    settings.agentDailyCostLimitUsd != null ? String(settings.agentDailyCostLimitUsd) : '',
+  );
+  const [dockerInfo, setDockerInfo] = useState<string | null>(null);
+  const [dockerBusy, setDockerBusy] = useState(false);
   const [environment, setEnvironment] = useState<CodeEnvironmentStatus | null>(null);
   const [environmentLoading, setEnvironmentLoading] = useState(true);
   const [environmentError, setEnvironmentError] = useState<string | null>(null);
@@ -77,6 +91,27 @@ export function ToolsTab() {
   useEffect(
     () => setDockerImage(settings.dockerImage ?? 'node:22-bookworm'),
     [settings.dockerImage],
+  );
+  useEffect(
+    () => setMaxConcurrentTurns(settings.maxConcurrentTurns ?? 3),
+    [settings.maxConcurrentTurns],
+  );
+  useEffect(
+    () => setMaxConcurrentPerAgent(settings.maxConcurrentTurnsPerAgent ?? 1),
+    [settings.maxConcurrentTurnsPerAgent],
+  );
+  useEffect(
+    () => setMaxQueueLength(settings.maxQueueLengthPerThread ?? 20),
+    [settings.maxQueueLengthPerThread],
+  );
+  useEffect(
+    () =>
+      setCostLimit(
+        settings.agentDailyCostLimitUsd != null
+          ? String(settings.agentDailyCostLimitUsd)
+          : '',
+      ),
+    [settings.agentDailyCostLimitUsd],
   );
 
   useEffect(() => {
@@ -328,6 +363,89 @@ export function ToolsTab() {
       </SettingsSection>
 
       <SettingsSection
+        title="Concorrência e orçamento"
+        description="Quantos turnos podem rodar ao mesmo tempo e quando o app deve parar de gastar. Turnos além do limite aguardam na fila da própria thread."
+      >
+        <SettingRow
+          vertical
+          label="Turnos simultâneos (global)"
+          description={`Até ${maxConcurrentTurns} turnos rodando ao mesmo tempo em todo o app. O backend também aplica este limite.`}
+        >
+          <Input
+            type="number"
+            min={1}
+            max={8}
+            value={maxConcurrentTurns}
+            aria-label="Máximo de turnos simultâneos"
+            onChange={(event) => setMaxConcurrentTurns(Number(event.target.value) || 1)}
+            onBlur={() =>
+              void saveSettings({
+                maxConcurrentTurns: Math.max(1, Math.min(8, maxConcurrentTurns)),
+              })
+            }
+          />
+        </SettingRow>
+        <SettingRow
+          vertical
+          label="Turnos simultâneos por agente"
+          description="Evita que um único agente ocupe todos os slots. Padrão: 1."
+        >
+          <Input
+            type="number"
+            min={1}
+            max={4}
+            value={maxConcurrentPerAgent}
+            aria-label="Máximo de turnos simultâneos por agente"
+            onChange={(event) => setMaxConcurrentPerAgent(Number(event.target.value) || 1)}
+            onBlur={() =>
+              void saveSettings({
+                maxConcurrentTurnsPerAgent: Math.max(1, Math.min(4, maxConcurrentPerAgent)),
+              })
+            }
+          />
+        </SettingRow>
+        <SettingRow
+          vertical
+          label="Mensagens na fila por thread"
+          description="Quando a fila atinge este tamanho, novas mensagens são recusadas com um aviso."
+        >
+          <Input
+            type="number"
+            min={1}
+            max={100}
+            value={maxQueueLength}
+            aria-label="Máximo de mensagens na fila por thread"
+            onChange={(event) => setMaxQueueLength(Number(event.target.value) || 1)}
+            onBlur={() =>
+              void saveSettings({
+                maxQueueLengthPerThread: Math.max(1, Math.min(100, maxQueueLength)),
+              })
+            }
+          />
+        </SettingRow>
+        <SettingRow
+          vertical
+          label="Limite diário por agente (US$)"
+          description="Vazio desliga. O backend recusa novos turnos quando o custo acumulado do dia atinge o limite."
+        >
+          <Input
+            value={costLimit}
+            inputMode="decimal"
+            placeholder="Sem limite"
+            aria-label="Limite diário de custo por agente em dólares"
+            onChange={(event) => setCostLimit(event.target.value)}
+            onBlur={() => {
+              const value = Number(costLimit.replace(',', '.'));
+              void saveSettings({
+                agentDailyCostLimitUsd:
+                  costLimit.trim() && Number.isFinite(value) && value > 0 ? value : null,
+              });
+            }}
+          />
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection
         title="Sandbox de comandos"
         description="Onde os comandos do agente de código rodam. O padrão executa nesta máquina; Docker isola o processo com o workspace montado em /workspace."
       >
@@ -388,6 +506,36 @@ export function ToolsTab() {
                 aria-label="Permitir rede no contêiner Docker"
               />
             </SettingRow>
+            <SettingRow
+              vertical
+              label="Imagem do computer use"
+              description="Imagem gráfica (Xvfb + Chromium + xdotool + noVNC). O agente controla o display; o noVNC fica em 127.0.0.1:6080 para você observar."
+            >
+              <Input
+                defaultValue={settings.computerDockerImage ?? 'lumina/computer:latest'}
+                maxLength={200}
+                aria-label="Imagem Docker do computer use"
+                onBlur={(event) => {
+                  const value = event.target.value.trim();
+                  if (value) void saveSettings({ computerDockerImage: value });
+                }}
+              />
+            </SettingRow>
+            <SettingRow
+              vertical
+              label="Container do computer use"
+              description="Nome fixo do container gráfico. Ele é criado no primeiro screenshot e mantido entre ações."
+            >
+              <Input
+                defaultValue={settings.computerDockerContainer ?? 'lumina-computer'}
+                maxLength={80}
+                aria-label="Nome do container do computer use"
+                onBlur={(event) => {
+                  const value = event.target.value.trim();
+                  if (value) void saveSettings({ computerDockerContainer: value });
+                }}
+              />
+            </SettingRow>
             <SettingsBlock>
               <div className="flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft p-3">
                 <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
@@ -396,6 +544,61 @@ export function ToolsTab() {
                   em <code>/workspace</code>; o contêiner pode ler e alterar esses arquivos, mas
                   não tem acesso ao resto do computador. Ainda assim, revise o que o agente executa.
                 </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={dockerBusy}
+                  onClick={() => {
+                    setDockerBusy(true);
+                    void api
+                      .dockerValidateImage(settings.dockerImage ?? 'node:22-bookworm')
+                      .then((info) =>
+                        setDockerInfo(
+                          `${info.image} · ${info.architecture} · ${info.id.slice(0, 19)}…`,
+                        ),
+                      )
+                      .catch((error) => {
+                        setDockerInfo(null);
+                        toast.error('Imagem Docker inválida', {
+                          description: String(error),
+                        });
+                      })
+                      .finally(() => setDockerBusy(false));
+                  }}
+                >
+                  {dockerBusy ? <Spinner className="mr-1.5 size-3.5" /> : null}
+                  Validar imagem
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={dockerBusy}
+                  onClick={() => {
+                    setDockerBusy(true);
+                    void api
+                      .dockerCleanup()
+                      .then((count) =>
+                        toast.success(
+                          count === 0
+                            ? 'Nenhum container Lumina ativo'
+                            : `${count} container(s) removido(s)`,
+                        ),
+                      )
+                      .catch((error) =>
+                        toast.error('Não foi possível limpar', {
+                          description: String(error),
+                        }),
+                      )
+                      .finally(() => setDockerBusy(false));
+                  }}
+                >
+                  Limpar containers
+                </Button>
+                {dockerInfo ? (
+                  <span className="text-[11px] text-foreground-muted">{dockerInfo}</span>
+                ) : null}
               </div>
             </SettingsBlock>
           </>

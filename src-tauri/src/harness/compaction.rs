@@ -666,6 +666,41 @@ pub async fn summarize_manual_for_conversation(
     {
         tool_definitions.push(crate::tools::memory::definition());
     }
+    if agent
+        .as_ref()
+        .is_some_and(|agent| agent.capabilities.delegation)
+    {
+        for definition in crate::tools::tasks::definitions() {
+            if crate::tools::tool_allowed(&options, &definition.name)
+                && !tool_definitions.iter().any(|tool| tool.name == definition.name)
+            {
+                tool_definitions.push(definition);
+            }
+        }
+    }
+    if agent.as_ref().is_some_and(|agent| {
+        agent.capabilities.computer_use
+            || agent.capabilities.screen_capture
+            || agent.capabilities.browser_use
+    }) {
+        let read_only = ["computer_screenshot", "computer_windows", "computer_ui_tree"];
+        for definition in crate::tools::code::computer::definitions() {
+            let allowed_by_capability = agent.as_ref().is_some_and(|agent| {
+                if definition.name == "browser_open" {
+                    agent.capabilities.browser_use
+                } else {
+                    agent.capabilities.computer_use
+                        || read_only.contains(&definition.name.as_str())
+                }
+            });
+            if allowed_by_capability
+                && crate::tools::tool_allowed(&options, &definition.name)
+                && !tool_definitions.iter().any(|tool| tool.name == definition.name)
+            {
+                tool_definitions.push(definition);
+            }
+        }
+    }
     let mcp_prompt_section = mcp_tools_prompt_section(&mcp_tools, options.delegation_depth);
     let snapshot = code_prompt_snapshot(
         &deps.db,

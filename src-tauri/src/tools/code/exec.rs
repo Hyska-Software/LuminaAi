@@ -547,7 +547,7 @@ fn mcp_result_text(result: &Value) -> String {
 
 /// Aplica a matriz de permissões e, se necessário, pausa o turno pedindo
 /// aprovação humana. `Allow` → `Ok`; `Deny`/`Ask` recusado → `Err(erro)`.
-async fn policy_check(
+pub(crate) async fn policy_check(
     ctx: &ToolCtx,
     tool: &str,
     risk: RiskClass,
@@ -1914,6 +1914,7 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 &exec::SandboxConfig {
                     image: ctx.settings.docker_image.clone(),
                     network: ctx.settings.docker_network,
+                    ..exec::SandboxConfig::default()
                 },
                 &root,
                 &workdir,

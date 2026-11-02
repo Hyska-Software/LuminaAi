@@ -82,6 +82,30 @@ impl TurnRegistry {
             .any(|entry| entry.conversation_id == conversation_id)
     }
 
+    /// Cancels every turn of one conversation (background-thread Stop).
+    pub fn cancel_conversation(&self, conversation_id: &str) -> usize {
+        let mut cancelled = 0;
+        for entry in self.turns.lock().values() {
+            if entry.conversation_id == conversation_id {
+                entry.cancel.cancel();
+                cancelled += 1;
+            }
+        }
+        cancelled
+    }
+
+    /// `(turn_id, conversation_id)` of every active turn, sorted by turn id.
+    pub fn active_turns(&self) -> Vec<(String, String)> {
+        let mut turns: Vec<(String, String)> = self
+            .turns
+            .lock()
+            .iter()
+            .map(|(turn_id, entry)| (turn_id.clone(), entry.conversation_id.clone()))
+            .collect();
+        turns.sort();
+        turns
+    }
+
     /// Ids de conversas com turno ativo (para reconciliação/diagnóstico).
     pub fn active_conversations(&self) -> Vec<String> {
         let mut conversations: Vec<String> = self
@@ -114,8 +138,10 @@ pub struct AppState {
     pub mcp: Arc<crate::mcp::McpManager>,
     /// Terminais PTY abertos no layout Code.
     pub terminals: Arc<crate::terminal::TerminalRegistry>,
-    /// Perguntas estruturadas pendentes (sk_user).
+    /// Perguntas estruturadas pendentes (`ask_user`).
     pub questions: Arc<crate::harness::code::questions::QuestionRegistry>,
+    /// Global/per-agent turn slots (cost/CPU protection for background agents).
+    pub governor: Arc<crate::concurrency::ConcurrencyGovernor>,
     dynamic_models: RwLock<HashMap<String, DynamicModels>>,
     turns: TurnRegistry,
 }
@@ -139,6 +165,7 @@ impl AppState {
             mcp: Arc::new(crate::mcp::McpManager::load(data_dir.as_path())),
             terminals: Arc::new(crate::terminal::TerminalRegistry::new()),
             questions: Arc::new(crate::harness::code::questions::QuestionRegistry::new()),
+            governor: crate::concurrency::ConcurrencyGovernor::new(),
             jobs: Arc::new(crate::jobs::JobRegistry::new()),
             dynamic_models: RwLock::new(HashMap::new()),
             turns: TurnRegistry::new(),
@@ -302,6 +329,14 @@ impl AppState {
 
     pub fn cancel_all(&self) {
         self.turns.cancel_all();
+    }
+
+    pub fn cancel_conversation(&self, conversation_id: &str) -> usize {
+        self.turns.cancel_conversation(conversation_id)
+    }
+
+    pub fn active_turns(&self) -> Vec<(String, String)> {
+        self.turns.active_turns()
     }
 
     /// Há um turno ativo nesta conversa? Usado pelo preflight de objetivos

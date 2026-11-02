@@ -1520,6 +1520,11 @@ pub async fn run_turn(
         payload.options.allowed_mcp_servers = agent.capabilities.mcp_servers.clone();
         payload.options.agent_memory = agent.memory_enabled;
         payload.options.agent_id = Some(agent.id.clone());
+        payload.options.agent_delegation = agent.capabilities.delegation;
+        payload.options.agent_computer = agent.capabilities.computer_use
+            || agent.capabilities.screen_capture;
+        payload.options.agent_browser = agent.capabilities.browser_use;
+        payload.options.agent_docker = agent.capabilities.docker_execution;
         Some(agent)
     } else {
         None
@@ -2011,6 +2016,56 @@ pub async fn run_turn(
             name: "memory",
             guidance: "Use `memory` to save stable facts, preferences and procedures shared by \
                        every conversation of this agent. Never store secrets or transient state.",
+        });
+    }
+    if agent
+        .as_ref()
+        .is_some_and(|agent| agent.capabilities.delegation)
+    {
+        for definition in crate::tools::tasks::definitions() {
+            if tools::tool_allowed(&options, &definition.name)
+                && !code_tool_definitions_canonical
+                    .iter()
+                    .any(|tool| tool.name == definition.name)
+            {
+                code_tool_definitions_canonical.push(definition);
+            }
+        }
+        code_tool_prompts_list.push(code::prompt::ToolPrompt {
+            name: "delegate_task",
+            guidance: "Use delegation for small, independent work with explicit acceptance \
+                       criteria. You stay responsible for checking the result with real evidence.",
+        });
+    }
+    if agent.as_ref().is_some_and(|agent| {
+        agent.capabilities.computer_use
+            || agent.capabilities.screen_capture
+            || agent.capabilities.browser_use
+    }) {
+        let read_only = ["computer_screenshot", "computer_windows", "computer_ui_tree"];
+        for definition in crate::tools::code::computer::definitions() {
+            let allowed_by_capability = agent.as_ref().is_some_and(|agent| {
+                if definition.name == "browser_open" {
+                    agent.capabilities.browser_use
+                } else {
+                    agent.capabilities.computer_use
+                        || read_only.contains(&definition.name.as_str())
+                }
+            });
+            if allowed_by_capability
+                && tools::tool_allowed(&options, &definition.name)
+                && !code_tool_definitions_canonical
+                    .iter()
+                    .any(|tool| tool.name == definition.name)
+            {
+                code_tool_definitions_canonical.push(definition);
+            }
+        }
+        code_tool_prompts_list.push(code::prompt::ToolPrompt {
+            name: "computer_screenshot",
+            guidance: "Observe before acting: take a screenshot and list windows, then request \
+                       one input action at a time. Every click/type/key asks for the user's \
+                       approval; never assume approval was granted.",
         });
     }
     // Seção MCP do system prompt (faz parte do snapshot congelado).
@@ -3855,6 +3910,33 @@ pub(crate) fn code_agent_allowed_tools(
     allowed.retain(|name| agent.capabilities.allows_tool(name));
     if agent.memory_enabled && agent.capabilities.allows_tool("memory") {
         allowed.push("memory".to_string());
+    }
+    if agent.capabilities.delegation {
+        allowed.extend(
+            crate::tools::tasks::tool_names()
+                .iter()
+                .filter(|name| agent.capabilities.allows_tool(name))
+                .map(|name| (*name).to_string()),
+        );
+    }
+    if agent.capabilities.computer_use
+        || agent.capabilities.screen_capture
+        || agent.capabilities.browser_use
+    {
+        let read_only = ["computer_screenshot", "computer_windows", "computer_ui_tree"];
+        allowed.extend(
+            crate::tools::code::computer::tool_names()
+                .iter()
+                .filter(|name| {
+                    let capability_ok = if **name == "browser_open" {
+                        agent.capabilities.browser_use
+                    } else {
+                        agent.capabilities.computer_use || read_only.contains(name)
+                    };
+                    capability_ok && agent.capabilities.allows_tool(name)
+                })
+                .map(|name| (*name).to_string()),
+        );
     }
     allowed.extend(mcp_tools.iter().map(|tool| tool.wire_name.clone()));
     allowed

@@ -85,6 +85,12 @@ pub async fn execute(ctx: &ToolCtx, call: &ToolCallRecord) -> ToolOutcome {
     if call.name == "memory" {
         return run_memory(&call_ctx, args);
     }
+    if crate::tools::tasks::is_delegation_tool(&call.name) {
+        return run_delegation(&call_ctx, &call.name, args);
+    }
+    if crate::tools::code::computer::is_computer_tool(&call.name) {
+        return crate::tools::code::computer::run(&call_ctx, &call.name, &args).await;
+    }
     let Some(exec) = ToolExec::for_tool(&call.name) else {
         return ToolOutcome::error(format!(
             "TOOL_UNKNOWN: ferramenta desconhecida: {}",
@@ -136,6 +142,20 @@ fn run_memory(ctx: &ToolCtx, args: Value) -> ToolOutcome {
         return ToolOutcome::error("a memória deste agente está desativada");
     }
     crate::tools::memory::run_with(&ctx.db, agent_id, &ctx.conversation_id, &args)
+}
+
+/// Delegation tools for the Code profile. The conversation resolves the
+/// persona; a normal Code session has no agent and the tools are not exposed.
+fn run_delegation(ctx: &ToolCtx, tool: &str, args: Value) -> ToolOutcome {
+    let conversation = match ctx.db.get_conversation(&ctx.conversation_id) {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return ToolOutcome::error("AGENT_TASK_INVALID: conversa não encontrada"),
+        Err(error) => return ToolOutcome::error(format!("{error:#}")),
+    };
+    let Some(agent_id) = conversation.agent_id.as_deref() else {
+        return ToolOutcome::error("a delegação só existe em conversas de um agente");
+    };
+    crate::tools::tasks::run(&ctx.db, agent_id, &ctx.conversation_id, tool, &args)
 }
 
 /// Executa um lote de chamadas respeitando o scheduler do registry

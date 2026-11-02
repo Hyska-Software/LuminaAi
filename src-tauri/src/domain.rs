@@ -76,6 +76,9 @@ pub struct Conversation {
     /// Shared channel that owns this hidden agent thread (`None` = normal thread).
     #[serde(default)]
     pub channel_id: Option<String>,
+    /// Delegated task that owns this hidden thread (`None` = normal thread).
+    #[serde(default)]
+    pub task_id: Option<String>,
 }
 
 fn default_agent_kind() -> String {
@@ -638,6 +641,16 @@ pub struct TurnOptions {
     /// Persona bound to the turn (internal, used by the `memory` tool).
     #[serde(skip)]
     pub agent_id: Option<String>,
+    /// Agent capability gates for delegation/computer/browser/docker tools.
+    /// Internal: resolved from the persona, never accepted from the renderer.
+    #[serde(skip)]
+    pub agent_delegation: bool,
+    #[serde(skip)]
+    pub agent_computer: bool,
+    #[serde(skip)]
+    pub agent_browser: bool,
+    #[serde(skip)]
+    pub agent_docker: bool,
 }
 
 impl Default for TurnOptions {
@@ -657,6 +670,10 @@ impl Default for TurnOptions {
             allowed_mcp_servers: None,
             agent_memory: false,
             agent_id: None,
+            agent_delegation: false,
+            agent_computer: false,
+            agent_browser: false,
+            agent_docker: false,
         }
     }
 }
@@ -1061,6 +1078,26 @@ fn default_docker_image() -> String {
     "node:22-bookworm".to_string()
 }
 
+fn default_max_concurrent_turns() -> u32 {
+    3
+}
+
+fn default_max_concurrent_turns_per_agent() -> u32 {
+    1
+}
+
+fn default_max_queue_length() -> u32 {
+    20
+}
+
+fn default_computer_docker_image() -> String {
+    "lumina/computer:latest".to_string()
+}
+
+fn default_computer_docker_container() -> String {
+    "lumina-computer".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -1111,6 +1148,24 @@ pub struct Settings {
     /// Permite rede no contêiner Docker (desligado = `--network none`).
     #[serde(default)]
     pub docker_network: bool,
+    /// Maximum simultaneous turns across the whole app.
+    #[serde(default = "default_max_concurrent_turns")]
+    pub max_concurrent_turns: u32,
+    /// Maximum simultaneous turns for one agent.
+    #[serde(default = "default_max_concurrent_turns_per_agent")]
+    pub max_concurrent_turns_per_agent: u32,
+    /// Maximum queued messages per agent thread.
+    #[serde(default = "default_max_queue_length")]
+    pub max_queue_length_per_thread: u32,
+    /// Optional daily cost cap per agent (USD). `None` disables the cap.
+    #[serde(default)]
+    pub agent_daily_cost_limit_usd: Option<f64>,
+    /// Docker image used by the graphical computer-use backend.
+    #[serde(default = "default_computer_docker_image")]
+    pub computer_docker_image: String,
+    /// Container name used by the graphical computer-use backend.
+    #[serde(default = "default_computer_docker_container")]
+    pub computer_docker_container: String,
     /// Compacta o contexto automaticamente quando a janela aperta.
     pub auto_compact: bool,
     /// Retenção dos arquivos de spill (saída completa de tools), em dias.
@@ -1163,6 +1218,12 @@ impl Default for Settings {
             execution_environment: default_execution_environment(),
             docker_image: default_docker_image(),
             docker_network: false,
+            max_concurrent_turns: default_max_concurrent_turns(),
+            max_concurrent_turns_per_agent: default_max_concurrent_turns_per_agent(),
+            max_queue_length_per_thread: default_max_queue_length(),
+            agent_daily_cost_limit_usd: None,
+            computer_docker_image: default_computer_docker_image(),
+            computer_docker_container: default_computer_docker_container(),
             auto_compact: true,
             spill_retention_days: 30,
             approval_timeout_secs: 600,
@@ -1360,6 +1421,8 @@ pub enum RiskClass {
     Destroy,
     /// Tráfego de rede (busca/fetch).
     Network,
+    /// Computer use visual (screenshot/clique/teclado).
+    Computer,
     /// Pausa explícita para o usuário (plano/pergunta).
     Ask,
 }
@@ -2335,6 +2398,7 @@ mod tests {
             subagent_type: None,
             agent_id: None,
             channel_id: None,
+            task_id: None,
         };
         let json = serde_json::to_value(&conversation).expect("serialize conversation");
         assert_eq!(json["mode"], "code");

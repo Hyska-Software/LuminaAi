@@ -41,6 +41,11 @@ const DEFAULT_CAPABILITIES: AgentCapabilities = {
   webSearch: true,
   fileAccess: true,
   codeExecution: true,
+  delegation: false,
+  computerUse: false,
+  screenCapture: false,
+  browserUse: false,
+  dockerExecution: false,
   skills: null,
   tools: null,
   mcpServers: null,
@@ -79,6 +84,23 @@ const TOOL_OPTIONS: Array<{ name: string; label: string; group: string }> = [
   { name: 'read_artifact', label: 'Ler artefato', group: 'Biblioteca' },
   { name: 'validate_ui', label: 'Validar interface', group: 'Interface' },
   { name: 'memory', label: 'Memória durável', group: 'Memória' },
+  { name: 'delegate_task', label: 'Delegar tarefa', group: 'Delegação' },
+  { name: 'task_list', label: 'Listar tarefas', group: 'Delegação' },
+  { name: 'task_get', label: 'Ler tarefa', group: 'Delegação' },
+  { name: 'accept_task', label: 'Aceitar tarefa', group: 'Delegação' },
+  { name: 'decline_task', label: 'Recusar tarefa', group: 'Delegação' },
+  { name: 'handoff_task', label: 'Transferir tarefa', group: 'Delegação' },
+  { name: 'update_task', label: 'Atualizar tarefa', group: 'Delegação' },
+  { name: 'finish_task', label: 'Concluir tarefa', group: 'Delegação' },
+  { name: 'send_message', label: 'Mensagem no canal', group: 'Delegação' },
+  { name: 'computer_screenshot', label: 'Screenshot', group: 'Computador' },
+  { name: 'computer_windows', label: 'Listar janelas', group: 'Computador' },
+  { name: 'computer_ui_tree', label: 'Árvore de acessibilidade', group: 'Computador' },
+  { name: 'computer_click', label: 'Clique', group: 'Computador' },
+  { name: 'computer_type', label: 'Digitar', group: 'Computador' },
+  { name: 'computer_key', label: 'Tecla', group: 'Computador' },
+  { name: 'computer_focus', label: 'Focar janela', group: 'Computador' },
+  { name: 'browser_open', label: 'Abrir navegador', group: 'Computador' },
 ];
 
 const TOOL_GROUPS = [...new Set(TOOL_OPTIONS.map((tool) => tool.group))];
@@ -612,6 +634,36 @@ export function AgentEditorDialog() {
                   onCheckedChange={(checked) => setCapability('codeExecution', checked)}
                   label="Executar código"
                   description="Usa o sandbox de código do app (quando habilitado nas configurações)."
+                />
+                <Switch
+                  checked={form.capabilities.delegation ?? false}
+                  onCheckedChange={(checked) => setCapability('delegation', checked)}
+                  label="Delegar tarefas"
+                  description="Permite criar, aceitar, transferir e concluir tarefas para outros agentes."
+                />
+                <Switch
+                  checked={form.capabilities.computerUse ?? false}
+                  onCheckedChange={(checked) => setCapability('computerUse', checked)}
+                  label="Computer use"
+                  description="Screenshot, clique e teclado no computador, sempre com aprovação por ação."
+                />
+                <Switch
+                  checked={form.capabilities.screenCapture ?? false}
+                  onCheckedChange={(checked) => setCapability('screenCapture', checked)}
+                  label="Captura de tela"
+                  description="Somente leitura da tela; não permite clicar nem digitar."
+                />
+                <Switch
+                  checked={form.capabilities.browserUse ?? false}
+                  onCheckedChange={(checked) => setCapability('browserUse', checked)}
+                  label="Browser controlado"
+                  description="Navegação e interação via CDP em um navegador isolado."
+                />
+                <Switch
+                  checked={form.capabilities.dockerExecution ?? false}
+                  onCheckedChange={(checked) => setCapability('dockerExecution', checked)}
+                  label="Override de Docker"
+                  description="Permite escolher um perfil de execução Docker específico para este agente."
                 />
               </div>
 

@@ -21,6 +21,7 @@ pub mod memory;
 pub mod pipeline;
 pub mod registry;
 pub mod skills;
+pub mod tasks;
 pub mod web_search;
 
 /// Upper bound for the text fed back to the model from a single tool call.
@@ -109,6 +110,9 @@ pub fn definitions(options: &TurnOptions) -> Vec<ToolDefinition> {
     if options.agent_memory {
         tools.push(memory::definition());
     }
+    if options.agent_delegation {
+        tools.extend(tasks::definitions());
+    }
     // Agent capabilities restrict the catalog **after** the global gates: a
     // persona can remove tools, never add ones the app disabled globally.
     tools.retain(|tool| tool_allowed(options, &tool.name));
@@ -153,6 +157,14 @@ pub async fn execute(rt: &ToolRuntime, call: &ToolCallRecord) -> ToolOutcome {
         "validate_ui" => genui::run(&arguments),
         // Durable agent memory (only for agent turns with memory enabled).
         "memory" => memory::run(rt, &arguments),
+        name if tasks::is_delegation_tool(name) => {
+            let Some(agent_id) = rt.options.agent_id.as_deref() else {
+                return ToolOutcome::error(
+                    "a delegação só existe em conversas de um agente",
+                );
+            };
+            tasks::run(&rt.db, agent_id, &rt.conversation_id, name, &arguments)
+        }
         other => ToolOutcome::error(format!("ferramenta desconhecida: {other}")),
     };
     truncate_outcome(outcome)
