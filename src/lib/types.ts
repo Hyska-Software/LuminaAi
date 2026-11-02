@@ -827,7 +827,199 @@ export interface ChatMessage {
 }
 
 /** Origem de uma sessão: o layout onde ela foi criada. */
-export type ConversationMode = 'chat' | 'code';
+export type ConversationMode = 'chat' | 'code' | 'agent';
+
+export interface AgentCapabilities {
+  webSearch: boolean;
+  fileAccess: boolean;
+  codeExecution: boolean;
+  /** `null` herda todas as skills habilitadas; `[]` não usa nenhuma. */
+  skills: string[] | null;
+  tools: string[] | null;
+  mcpServers: string[] | null;
+}
+
+export interface Agent {
+  id: string;
+  name: string;
+  role: string;
+  description: string;
+  emoji: string;
+  department: string;
+  pinned: boolean;
+  sortOrder: number;
+  providerId: string;
+  modelId: string;
+  /** Backup route used when the primary route has no model/credential. */
+  fallbackProviderId?: string | null;
+  fallbackModelId?: string | null;
+  reasoning: ReasoningSelection | null;
+  instructions: string;
+  promptVersion: number;
+  starters: string[];
+  capabilities: AgentCapabilities;
+  memoryEnabled: boolean;
+  /** Optional workspace for Code-profile turns (files/shell/approvals). */
+  workspaceId: string | null;
+  permissionMode: PermissionMode;
+  archivedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+  threadCount: number;
+  lastActiveAt: number | null;
+}
+
+export interface AgentInput {
+  name: string;
+  role: string;
+  description: string;
+  emoji: string;
+  department: string;
+  providerId: string;
+  modelId: string;
+  fallbackProviderId?: string | null;
+  fallbackModelId?: string | null;
+  reasoning: ReasoningSelection | null;
+  instructions: string;
+  starters: string[];
+  capabilities: AgentCapabilities;
+  memoryEnabled: boolean;
+  workspaceId: string | null;
+  permissionMode: PermissionMode;
+}
+
+export interface AgentChange {
+  field: string;
+  label: string;
+  before: unknown;
+  after: unknown;
+}
+
+export interface AgentRevision {
+  agentId: string;
+  before: AgentInput;
+  after: AgentInput;
+  changes: AgentChange[];
+}
+
+export type AgentMemoryKind = 'fact' | 'preference' | 'procedure' | 'note';
+
+export interface AgentMemory {
+  id: string;
+  agentId: string;
+  kind: AgentMemoryKind;
+  content: string;
+  sourceConversationId: string | null;
+  pinned: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AgentMemoryInput {
+  kind: AgentMemoryKind;
+  content: string;
+  sourceConversationId?: string | null;
+  pinned?: boolean;
+}
+
+export interface AgentChannel {
+  id: string;
+  name: string;
+  memberIds: string[];
+  createdAt: number;
+  updatedAt: number;
+  lastMessageAt: number | null;
+}
+
+export interface AgentChannelInput {
+  name: string;
+  memberIds: string[];
+}
+
+export interface AgentChannelMessage {
+  id: string;
+  channelId: string;
+  role: 'user' | 'agent' | 'system';
+  agentId: string | null;
+  content: string;
+  createdAt: number;
+}
+
+export interface AgentChannelPostResult {
+  messages: AgentChannelMessage[];
+  errors: string[];
+}
+
+export interface AgentUsage {
+  agentId: string;
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  cost: number;
+  lastUsedAt: number | null;
+}
+
+export interface AgentRoutine {
+  id: string;
+  agentId: string;
+  title: string;
+  prompt: string;
+  scheduleKind: 'interval' | 'daily';
+  intervalMinutes: number;
+  hour: number;
+  minute: number;
+  enabled: boolean;
+  conversationId: string | null;
+  nextRunAt: number;
+  lastRunAt: number | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AgentRoutineInput {
+  title: string;
+  prompt: string;
+  scheduleKind: 'interval' | 'daily';
+  intervalMinutes: number;
+  hour: number;
+  minute: number;
+  enabled: boolean;
+}
+
+export interface AgentRoutineRunEvent {
+  routineId: string;
+  agentId: string;
+  conversationId: string | null;
+  title: string;
+  status: string;
+  error: string | null;
+}
+
+export interface McpServerSummary {
+  name: string;
+  enabled?: boolean;
+  [key: string]: unknown;
+}
+
+export interface McpStatus {
+  servers: McpServerSummary[];
+  tools: Array<{ server: string; name: string; wireName: string }>;
+}
+
+export interface AgentThreadCursor {
+  updatedAt: number;
+  id: string;
+}
+
+export interface AgentThreadPage {
+  items: Conversation[];
+  nextCursor: AgentThreadCursor | null;
+  hasMore: boolean;
+}
 
 export interface Conversation {
   id: string;
@@ -861,6 +1053,10 @@ export interface Conversation {
   subagentTaskCallId?: string | null;
   /** Subagent kind (`explore` | `review` | `general`). */
   subagentType?: string | null;
+  /** Persona dona da conversa (`mode === 'agent'`); ausente em Chat/Code. */
+  agentId?: string | null;
+  /** Shared channel that owns this hidden agent thread. */
+  channelId?: string | null;
 }
 
 export interface ConversationDetail {
@@ -1204,6 +1400,12 @@ export interface Settings {
   codeMaxSteps?: number;
   /** Permite ao agente executar comandos de shell (`run_command`). */
   shellEnabled?: boolean;
+  /** `local` (máquina do usuário) ou `docker` para os comandos do Code. */
+  executionEnvironment?: 'local' | 'docker';
+  /** Imagem usada quando `executionEnvironment === 'docker'`. */
+  dockerImage?: string;
+  /** Permite rede no contêiner Docker (padrão: desligado). */
+  dockerNetwork?: boolean;
   /** Compacta o contexto automaticamente quando a janela aperta. */
   autoCompact?: boolean;
   /** Retenção dos arquivos de spill, em dias. */

@@ -42,13 +42,15 @@ Lumina é um aplicativo desktop de conversação com LLMs, construído em **Taur
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-O renderer tem dois layouts (`uiStore.layoutMode`): **Chat** (sidebar de conversas, Biblioteca,
-Skills, painéis de artefatos/fontes) e **Code** (sidebar de workspaces/sessões, cabeçalho/abas de
-agente, painel Arquivos/Alterações/commit; sem Biblioteca). Os dois compartilham a mesma instância de
-`ChatView` e o mesmo `TitleBar` com o seletor Chat/Code. **As sessões são separadas por layout**
-(`conversations.mode`): uma sessão do Chat nunca aparece no Code e vice-versa; uma sessão do Chat
-pode ser marcada como compartilhada com o Code (`code_linked`), passando a aparecer nos dois e sendo
-a mesma conversa.
+O renderer tem três layouts (`uiStore.layoutMode`): **Chat** (sidebar de conversas, Biblioteca,
+Skills, painéis de artefatos/fontes), **Code** (sidebar de workspaces/sessões, cabeçalho/abas de
+agente, painel Arquivos/Alterações/commit; sem Biblioteca) e **Agentes** (sidebar de personas,
+canais e threads; home/thread do agente com memória, workspace opcional, fila e rotinas). Os três
+compartilham a mesma instância de `ChatView` e o mesmo `TitleBar` com o seletor. **As sessões são
+separadas por layout** (`conversations.mode`): uma sessão do Chat nunca aparece no Code/Agentes e
+vice-versa; uma sessão do Chat pode ser marcada como compartilhada com o Code (`code_linked`). O
+contrato do layout Agentes (memória, capabilities, workspace, fila, rotinas, canais e portabilidade)
+está em **`docs/AGENTS.md`**.
 
 O **harness de código** é real neste app (v1.9): sessões do Code apontam para um `workspaces`
 (pasta do usuário, git opcional), rodam o perfil `Code` do mesmo loop de agente (prompt próprio,
@@ -107,7 +109,21 @@ prompt de continuação, `origin` próprio na mensagem do usuário e fecho em `g
 
 ```sql
 conversations(id PK, title, created_at, updated_at, pinned, provider_id, model_id, message_count, preview,
-              mode, code_linked, workspace_id NULL, agent_kind, permission_mode)
+              mode, code_linked, workspace_id NULL, agent_kind, permission_mode,
+              parent_conversation_id NULL, subagent_task_call_id NULL, subagent_type NULL,
+              agent_id NULL, channel_id NULL)
+-- agentes (v1.14, docs/AGENTS.md)
+agents(id PK, name, role, description, emoji, department, pinned, sort_order, provider_id, model_id,
+       fallback_provider_id NULL, fallback_model_id NULL, reasoning_json, instructions,
+       prompt_version, starters_json, capabilities_json, memory_enabled, workspace_id NULL,
+       permission_mode, archived_at NULL, created_at, updated_at)
+agent_memories(id PK, agent_id, kind, content, source_conversation_id NULL, pinned, created_at, updated_at)
+agent_routines(id PK, agent_id, title, prompt, schedule_kind, interval_minutes, hour, minute, enabled,
+               conversation_id NULL, next_run_at, last_run_at NULL, last_status NULL, last_error NULL,
+               created_at, updated_at)
+agent_channels(id PK, name, created_at, updated_at)
+agent_channel_members(channel_id, agent_id, PK(channel_id, agent_id))
+agent_channel_messages(id PK, channel_id, role, agent_id NULL, content, created_at)
 messages(id PK, conversation_id, role, content, reasoning, status, tool_calls JSON,
          citations JSON, attachments JSON, model_id, provider_id, usage JSON,
          provider_state JSON, created_at, seq, trace JSON, origin)
@@ -448,6 +464,41 @@ explícita; config <app-data>/mcp.json; indisponíveis em subagentes).
 
 Contratos completos (tools/eventos/comandos/UI): `docs/goals/code-harness/TOOLS.md`,
 `HARNESS.md` e `WORKBENCH.md`.
+
+### 8.3.1 Layout Agentes (v1.14)
+
+Contrato completo: **`docs/AGENTS.md`**. Resumo:
+
+- **Persona**: `agents` + `conversations.agent_id`; o backend é a autoridade do
+  prompt, do modelo e das capabilities. `prompt_version` + `agent.id` entram na
+  snapshot key.
+- **Memória**: `agent_memories` + tool `memory`; o bloco entra como
+  `surface_item kind="memory"` na cauda volátil (nunca no system prompt). Só o
+  item de memória mais recente é renderizado.
+- **Capabilities**: allowlists de tools/skills/MCP são aplicadas no catálogo,
+  na execução e no conteúdo; `Some([])` nega tudo.
+- **Workspace**: persona com `workspace_id` roda o perfil Code (FS/shell/git/
+  jobs/plano/aprovações) com o bloco de identidade do agente; sem workspace é
+  chat-only. `executionEnvironment` alterna `run_command`/jobs entre a máquina
+  local e Docker (workspace em `/workspace`, rede desligada por padrão).
+- **Concorrência**: `chatStore.streamsByConversation` mantém um stream por
+  conversa; `streaming` é a fatia visível de `activeId`. Várias threads de agente
+  rodam ao mesmo tempo, com erro/notificação por thread.
+- **Fila**: FIFO por thread em `agentQueueStore` (persistida); cada `done` drena
+  o próprio FIFO, inclusive em segundo plano. Filas persistidas são retomadas ao
+  abrir/entrar no layout Agentes.
+- **Rotinas**: `agent_routines` + agendador Rust (enquanto o app está aberto);
+  cada run é um turno normal na thread dedicada.
+- **Canais**: `agent_channels` + membros + mensagens; cada membro responde em
+  sua thread privada oculta e a resposta é publicada no histórico compartilhado.
+- **Modelo de reserva**: `fallback_provider_id`/`fallback_model_id`; se a rota
+  principal não resolve ou não tem credencial, o turno usa a reserva antes de
+  persistir mensagens.
+- **Uso/custo**: `usage_log` agregado por `conversations.agent_id`
+  (`get_agent_usage`/`list_agent_usage`), exibido na Equipe/home.
+- **Portabilidade/edição**: templates locais, construtor por IA (`suggest_agent`),
+  revisão por IA com diff (`revise_agent`), duplicar e export/import de documento
+  `lumina-agent` versionado.
 
 ### 8.4 Cache de prompt (v1.10)
 

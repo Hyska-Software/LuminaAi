@@ -940,7 +940,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
           leftIcon={<SquarePen className="size-4" />}
           className="h-9 flex-1 justify-start rounded-xl px-3 text-[13px] font-medium"
         >
-          Novo agente
+          Nova sessão
         </Button>
         {onClose ? (
           <IconButton label="Fechar barra lateral" size="sm" onClick={onClose}>

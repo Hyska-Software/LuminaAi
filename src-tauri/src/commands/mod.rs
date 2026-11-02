@@ -1,6 +1,9 @@
 //! Tauri command surface. Commands are grouped by concern; each file in this
 //! module is owned by one subsystem.
 
+pub mod agents;
+pub mod channels;
+pub mod routines;
 pub mod artifacts;
 pub mod attachments;
 pub mod cache;

@@ -36,6 +36,50 @@ impl StreamKind {
     }
 }
 
+/// Docker execution backend for Code commands. The workspace is mounted at
+/// `/workspace`; network is disabled unless the user opts in.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SandboxConfig {
+    pub image: String,
+    pub network: bool,
+}
+
+/// Builds the `docker run` argv for a command. Pure so the mount/workdir/network
+/// contract is testable without a Docker daemon.
+pub fn docker_shell_for(
+    sandbox: &SandboxConfig,
+    workspace_root: &Path,
+    workdir: &Path,
+    command: &str,
+) -> (String, Vec<String>) {
+    let relative = workdir.strip_prefix(workspace_root).unwrap_or(Path::new(""));
+    let relative = relative.to_string_lossy().replace('\\', "/");
+    let container_workdir = if relative.is_empty() {
+        "/workspace".to_string()
+    } else {
+        format!("/workspace/{}", relative.trim_start_matches('/'))
+    };
+    let source = workspace_root.to_string_lossy().replace('\\', "/");
+    let mut args = vec![
+        "run".to_string(),
+        "--rm".to_string(),
+        "-i".to_string(),
+        "--mount".to_string(),
+        format!("type=bind,source={source},target=/workspace"),
+        "--workdir".to_string(),
+        container_workdir,
+    ];
+    if !sandbox.network {
+        args.push("--network".to_string());
+        args.push("none".to_string());
+    }
+    args.push(sandbox.image.clone());
+    args.push("sh".to_string());
+    args.push("-lc".to_string());
+    args.push(command.to_string());
+    ("docker".to_string(), args)
+}
+
 /// Pedido de execução (env já higienizado por [`sanitized_env`]).
 #[derive(Debug, Clone)]
 pub struct ExecRequest {
@@ -745,6 +789,44 @@ mod tests {
     fn shell_available() -> bool {
         let (program, _) = shell_for("exit 0");
         find_executable(&program).is_some()
+    }
+
+    #[test]
+    fn docker_shell_mounts_the_workspace_and_disables_network_by_default() {
+        let root = Path::new("C:/work/project");
+        let (program, args) = docker_shell_for(
+            &SandboxConfig {
+                image: "node:22-bookworm".to_string(),
+                network: false,
+            },
+            root,
+            &root.join("src"),
+            "npm test",
+        );
+        assert_eq!(program, "docker");
+        assert!(args.windows(2).any(|pair| pair[0] == "--mount"
+            && pair[1].contains("target=/workspace")));
+        assert!(args.windows(2).any(|pair| pair[0] == "--workdir"
+            && pair[1] == "/workspace/src"));
+        assert!(args.windows(2).any(|pair| pair[0] == "--network" && pair[1] == "none"));
+        assert!(args.iter().any(|arg| arg == "node:22-bookworm"));
+        assert_eq!(
+            &args[args.len() - 3..],
+            ["sh".to_string(), "-lc".to_string(), "npm test".to_string()]
+        );
+
+        let (_, online) = docker_shell_for(
+            &SandboxConfig {
+                image: "ubuntu:24.04".to_string(),
+                network: true,
+            },
+            root,
+            root,
+            "curl example.com",
+        );
+        assert!(!online.windows(2).any(|pair| pair[0] == "--network"));
+        assert!(online.windows(2).any(|pair| pair[0] == "--workdir"
+            && pair[1] == "/workspace"));
     }
 
     #[cfg(windows)]

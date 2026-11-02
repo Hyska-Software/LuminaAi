@@ -309,7 +309,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
             Turnos cancelados/erro também mostram o resumo: as edições
             parciais já são reais. Depois do selo "Cancelado", que qualifica o
             turno, e antes do rodapé de ações. */}
-        {layoutMode === 'code' && !isStreaming ? (
+        {(layoutMode === 'code' || (layoutMode === 'agent' && workspaceId)) && !isStreaming ? (
           <CodeTurnSummary message={message} workspaceId={workspaceId} />
         ) : null}
 

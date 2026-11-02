@@ -1,0 +1,259 @@
+# Agentes — contrato do layout, memória, workspace e colaboração
+
+> Este documento descreve o layout **Agentes** (v1.14): personas persistentes,
+> memória durável, workspace opcional, fila, rotinas, canais, templates e
+> import/export. Ele complementa `docs/ARCHITECTURE.md` (visão técnica),
+> `docs/DESIGN.md` (UI/UX) e `docs/goals/code-harness/` (harness de código).
+
+## 1. Layout
+
+O aplicativo tem três layouts, persistidos em `uiStore.layoutMode`:
+
+| Layout | Sessões | Sidebar | Centro |
+| --- | --- | --- | --- |
+| `chat` | `conversations.mode = 'chat'` | conversas, Biblioteca, Skills | `ChatView` |
+| `code` | `mode = 'code'` + sessões do Chat com `code_linked` | workspaces/sessões | workbench de código |
+| `agent` | `mode = 'agent'` de uma persona | agentes, canais, threads | home/thread do agente ou canal |
+
+Uma sessão nasce em um layout e não vaza para os outros. A única exceção é
+`code_linked` (sessão do Chat adicionada ao Code). Threads de canal têm
+`channel_id` e são **ocultas** das listas de agente; elas pertencem ao canal.
+
+Arquivos principais:
+
+- `src/components/agents/**` — sidebar, home, editor, memória, rotinas, canais,
+  templates e construtor por IA.
+- `src/lib/store/agentStore.ts` — catálogo de personas.
+- `src/lib/store/agentQueueStore.ts` — fila FIFO persistida (localStorage).
+- `src-tauri/src/agents/mod.rs` — domínio, validação, prompt, memória, rotinas,
+  canais e documento de export.
+- `src-tauri/src/commands/agents.rs`, `routines.rs`, `channels.rs` — comandos.
+- `src-tauri/src/harness/mod.rs` — composição de prompt/tools, memória volátil,
+  perfil de código para agentes com workspace.
+- `src-tauri/src/tools/memory.rs` — ferramenta `memory` (Chat e Code).
+- `src-tauri/src/tools/registry.rs` + `harness/code/tools.rs` — execução das
+  tools do perfil Code e fronteira de execução.
+
+## 2. Modelo de dados
+
+### `agents`
+
+Identidade (`name`, `role`, `description`, `emoji`, `department`), modelo
+(`provider_id`, `model_id`, `reasoning_json`), modelo de reserva opcional
+(`fallback_provider_id`, `fallback_model_id`), instruções, `prompt_version`,
+starters, `capabilities_json`, `memory_enabled`, `workspace_id`,
+`permission_mode`, pin/ordem e arquivamento.
+
+- `prompt_version` sobe quando um campo que muda o prompt muda (nome, papel,
+  descrição, instruções, memória). A snapshot key do Chat/Code inclui
+  `agent.id` + `prompt_version`, então editar o prompt causa **exatamente um**
+  cache miss e nunca reutiliza o prompt de outra persona.
+- `workspace_id` é opcional; sem ele a persona é chat-only.
+- `permission_mode` é herdado pela conversa criada e pode ser trocado na sessão
+  pelo chip do Code.
+
+### `agent_memories`
+
+Uma linha por memória: `kind` (`fact`/`preference`/`procedure`/`note`),
+`content`, origem (`source_conversation_id`), `pinned`, timestamps. Limites:
+4 KiB por memória e 200 memórias por agente.
+
+### `agent_routines`
+
+`title`, `prompt`, `schedule_kind` (`interval`/`daily`), `interval_minutes`,
+`hour`/`minute`, `enabled`, `conversation_id` (thread dedicada criada no primeiro
+run), `next_run_at`, `last_run_at`, `last_status`, `last_error`.
+
+### `agent_channels` / `agent_channel_members` / `agent_channel_messages`
+
+Um canal tem nome, membros (até 6) e um histórico cronológico `user`/`agent`.
+Cada membro tem uma thread privada oculta (`conversations.channel_id`) usada para
+o turno real.
+
+## 3. Capabilities — aplicadas no backend
+
+`AgentCapabilities` só **remove** acesso:
+
+- `webSearch` → gate de `web_search`;
+- `fileAccess` → gate de `create_file`;
+- `codeExecution` → gate de `run_code` (além do gate global);
+- `skills: null` herda todas; `Some([...])` é allowlist (`Some([])` nega todas);
+- `tools: null` herda todas; `Some([...])` é allowlist;
+- `mcpServers: null` herda todos os servidores MCP; `Some([...])` é allowlist.
+
+A aplicação acontece em três camadas:
+
+1. **Catálogo**: `tools::definitions` (Chat) e `code_tool_definitions_with_mcp`
+   (Code) são filtrados antes do wire e do prompt.
+2. **Execução**: `tools::execute` recusa tools fora da allowlist; o Code usa
+   `ToolCtx::is_tool_enabled` como fronteira de execução.
+3. **Conteúdo**: `list_skills`/`read_skill` escondem skills não autorizadas;
+   o catálogo de skills do prompt é filtrado; tools MCP de servidores não
+   autorizados não entram no catálogo.
+
+O renderer nunca envia a allowlist: o harness resolve as capabilities da
+persona vinculada à conversa. `TurnOptions` carrega esses campos com
+`#[serde(skip)]`.
+
+## 4. Memória durável
+
+- Ativada por `agents.memory_enabled`.
+- A ferramenta `memory` (`list`/`save`/`update`/`forget`) grava em
+  `agent_memories`. Ela existe no Chat e no Code-profile de agentes; no Code ela
+  resolve o agente pela conversa e falha fechado se a memória estiver desligada.
+- No início do turno, o harness carrega as memórias e injeta um bloco
+  `surface_item kind="memory"` na **cauda volátil** do histórico. Nunca entra no
+  system prompt congelado.
+- O bloco leva uma revisão (`quantidade:maior_updated_at`); uma mudança no
+  conjunto gera um novo item. Apenas o item de memória mais recente é
+  renderizado (`load_surface_items`), então fatos apagados não sobrevivem em
+  blocos antigos.
+- Orçamento de contexto: 8 KiB; memórias fixadas primeiro, depois as mais
+  recentes. O agente é instruído a não guardar segredos, credenciais, estado
+  transitório ou transcripts.
+
+## 5. Workspace e perfil Code
+
+Uma persona com `workspace_id` roda o **perfil Code** nas suas threads:
+
+- `run_turn` aceita `profile=code` para `mode=agent` apenas quando a conversa
+  tem workspace. A conversa mantém o workspace com que foi criada: mudar o
+  workspace padrão da persona depois não invalida threads antigas.
+- A conversa herda `workspace_id` e `permission_mode` do agente na criação.
+- O prompt do Code recebe o bloco `# Agent profile` (identidade/instruções/
+  memória) e a snapshot key inclui `agent.id` + `prompt_version`.
+- Tools de FS/shell/git/jobs/plano/objetivo/subagente, política de aprovação,
+  journal/diff e jobs são os mesmos do Code.
+- O layout Agentes mostra o painel Arquivos/Alterações e as abas centrais de
+  diff/arquivo/plano/commits/objetivo; aprovações continuam inline.
+- Sem workspace, a persona usa o perfil Chat (web, arquivos/artefatos,
+  `run_code` opcional) e não tem shell/FS.
+
+**Computer use local**: o agente de Code usa o computador do usuário via
+arquivos (read/write/edit), shell (`run_command`/`run_checks`), git, jobs,
+terminal interativo no painel e as abas de diff/plano. Não há automação de
+mouse/teclado nem controle de navegador/desktop — isso exigiria um driver de
+computer-use separado e não faz parte desta entrega.
+
+**Execução em Docker**: `Settings.executionEnvironment` (`local` | `docker`)
+escolhe onde `run_command`/`run_checks`/jobs rodam. No modo Docker o workspace é
+montado em `/workspace`, o comando roda com `docker run --rm -i`, a rede fica
+desligada por padrão (`--network none`) e a imagem vem de `dockerImage`
+(padrão `node:22-bookworm`). O Docker precisa estar instalado/rodando e a imagem
+já presente; o app não baixa imagens. O terminal interativo do painel continua
+local.
+
+Permissões: `read_only`, `review`, `edit`, `autonomous`. O chip do composer
+troca o modo da sessão; toda mutação passa por `policy::decide`.
+
+**Modelo de reserva** (opcional): quando a rota principal não resolve
+(provedor/modelo indisponível) ou não tem credencial utilizável, o harness tenta
+a rota de reserva antes de persistir o turno. A conversa continua a mesma e o
+modo de raciocínio vai como `Auto`, porque o esforço do modelo principal pode
+não existir na reserva. Falhas de quota no meio do stream ainda encerram o turno
+com erro — o fallback é de rota, não um retry infinito.
+
+## 6. Concorrência e fila (FIFO por thread)
+
+- `chatStore.streamsByConversation` guarda **um stream por conversa** (turno
+  ativo). `streaming` é só a fatia visível de `activeId`; trocar de thread
+  reata o stream daquela conversa e nunca apaga o de outra.
+- Várias threads de agente rodam ao mesmo tempo (o backend já registra turnos
+  por conversa). Enviar em uma thread ocupada enfileira só aquela thread; o
+  composer/stop refletem a thread visível.
+- `agentQueueStore` persiste a fila em `localStorage` (`lumina.agent-queue.v1`).
+  O `done` de cada thread drena o próprio FIFO, inclusive em segundo plano; as
+  filas persistidas são retomadas ao abrir o app no layout Agentes e ao entrar
+  no layout.
+- A sidebar mostra o contador da fila e um spinner por thread/agente que está
+  respondendo (lido do mapa, não do stream visível); threads com aprovação
+  pendente, pergunta pendente ou último turno com erro exibem um ícone de
+  atenção no lugar do horário.
+- Ao concluir um turno de agente enquanto o usuário está em outro layout ou
+  thread, um toast in-app avisa (respeita `notificationsEnabled`).
+- O erro visível (`error`/`errorCode`/`errorHint`) é da thread ativa: uma falha
+  em segundo plano não pinta o banner por cima de outra conversa.
+
+## 7. Rotinas
+
+- CRUD em `AgentRoutinesDialog` (menu do agente → Rotinas).
+- O agendador roda no Rust enquanto o app está aberto (tick de 30 s). Ele não é
+  um serviço de nuvem nem promete execução com o app fechado.
+- Cada rotina executa um turno normal na sua thread dedicada, com o modelo,
+  instruções, memória e workspace do agente. O resultado aparece na thread.
+- Frequência: intervalo mínimo de 5 min (máx. 7 dias) ou horário diário local.
+- Status/erro ficam na rotina; o evento `lumina:agent-routine-run` atualiza a
+  lista de conversas e mostra um toast.
+- Execuções não assistidas não têm card de aprovação/pergunta: tools que exigem
+  interação falham fechado imediatamente (sem esperar o timeout).
+
+## 8. Canais (agentes no mesmo thread)
+
+- Criados na sidebar (Canais → +) com até 6 agentes.
+- Publicar um texto: Grava a mensagem `user`, e cada membro executa um turno em
+  sua thread privada oculta com o histórico compartilhado injetado. A resposta
+  é publicada no canal. Como os turnos são sequenciais, o segundo agente vê a
+  resposta do primeiro.
+- Threads de canal são ocultas das listas/paleta (`channelId`), mas preservadas
+  ao sair do canal; excluir o canal remove as threads derivadas.
+- Erros de um agente não derrubam os demais: vêm em `errors` e aparecem no
+  painel do canal. Respostas de canal são não assistidas: aprovações/perguntas
+  falham fechado em vez de bloquear o canal.
+
+## 9. Templates, construtor e portabilidade
+
+- `src/lib/agentTemplates.ts` contém 8 templates locais (assistente,
+  pesquisador, engenheiro, revisor, redator, operações, analista, suporte).
+- “Criar com IA” (`suggest_agent`) usa o modelo selecionado para devolver um
+  rascunho JSON; o editor abre com o draft e **nada é salvo sem revisão**.
+- “Editar com IA” (`revise_agent`) recebe um pedido em linguagem natural,
+  devolve um patch JSON, normaliza/valida no backend e abre um diálogo com o
+  **diff campo a campo** (antes/depois). Só `name`, `role`, `description`,
+  `emoji`, `department`, `instructions`, `starters` e `memoryEnabled` são
+  revisáveis; rota, reserva, workspace, permissões e capabilities continuam no
+  editor estruturado. Aplicar chama o mesmo `update_agent` do editor.
+- Duplicar agente copia configuração (não conversas nem memórias).
+- Uso por agente: `get_agent_usage`/`list_agent_usage` agregam `usage_log` por
+  `conversations.agent_id` (turnos, tokens de entrada/saída/raciocínio, total,
+  custo e última atividade). A Equipe e a home do agente mostram esses números;
+  threads de rotina/canal entram no mesmo agregado.
+- Exportar gera um documento `lumina-agent` versionado (JSON) com configuração
+  + memórias; importar valida versão, modelo/workspace e recria o agente.
+- Skills/tools/MCP e workspace são escolhidos no editor; permissões continuam
+  limitadas pelo backend.
+
+## 10. Cache e segurança
+
+- O prompt do agente é congelado por sessão; a memória e o estado de rotina/
+  canal entram como `surface_items` voláteis.
+- Mudanças de capabilities alteram o catálogo de tools e, portanto, o
+  `tools_hash`/snapshot key.
+- Instruções do agente são configuração, não autorização; o prompt base de
+  segurança vem antes.
+- A allowlist de tools/skills/MCP é aplicada no backend; o renderer não é
+  autoridade.
+- Segredos nunca entram na memória ou no workspace do agente. O agente de Code
+  continua sujeito ao confinamento de path, journal e aprovação.
+
+## 11. Verificação
+
+- `pnpm typecheck`
+- `pnpm test`
+- `cd src-tauri && cargo test --lib` (ou filtros `agent`, `memory`)
+- `cd src-tauri && cargo check`
+
+Testes específicos deste contrato:
+
+- `src/lib/store/__tests__/agentQueueStore.test.ts`
+- `src/lib/__tests__/chatStore.test.ts` (streams simultâneos, fila em segundo
+  plano e notificações)
+- `src/components/agents/AgentSidebar.test.tsx`
+- `src/components/agents/AgentMemoryPanel.test.tsx`
+- `src/components/agents/AgentRevisionDialog.test.tsx`
+- `src/components/agents/TeamView.test.tsx`
+- `src-tauri/src/agents/mod.rs` (prompt, memória, rotinas, capabilities,
+  export, fallback e revisão)
+- `src-tauri/src/db.rs` (CRUD de agente, threads, canais, rotinas)
+- `src-tauri/src/tools/memory.rs` e `src-tauri/src/tools/mod.rs` (allowlist)
+- `src-tauri/src/workspace/exec.rs` (argv do Docker)
+- `src/components/settings/ToolsTab.test.tsx` (ambiente Docker)

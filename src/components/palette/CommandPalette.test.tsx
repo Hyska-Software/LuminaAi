@@ -861,9 +861,9 @@ describe('CommandPalette — sessões separadas Chat/Code', () => {
   it('creates a Code session from "Novo agente" while in the Code layout', async () => {
     useUiStore.setState({ layoutMode: 'code' });
     renderPalette();
-    typeQuery('novo agente');
+    typeQuery('nova sess');
 
-    fireEvent.click(await screen.findByRole('option', { name: 'Novo agente' }));
+    fireEvent.click(await screen.findByRole('option', { name: /Nova sess/i }));
 
     await waitFor(() =>
       expect(mocks.createConversation).toHaveBeenCalledWith(

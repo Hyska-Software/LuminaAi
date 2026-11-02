@@ -311,6 +311,8 @@ mod tests {
             parent_conversation_id: None,
             subagent_task_call_id: None,
             subagent_type: None,
+            agent_id: None,
+            channel_id: None,
         }
     }
 

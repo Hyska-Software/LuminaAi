@@ -157,7 +157,7 @@ beforeEach(() => {
     conversations: [],
     conversationsLoading: false,
     activeId: null,
-    activeIdByLayout: { chat: null, code: null },
+    activeIdByLayout: { chat: null, code: null, agent: null },
   });
   useUiStore.setState({
     layoutMode: 'code',
@@ -772,7 +772,7 @@ describe('CodeSessionHeader — sessões separadas por layout', () => {
     useChatStore.setState({
       conversations: [conversation({ id: 'c-1', title: 'Única sessão' })],
       activeId: 'c-1',
-      activeIdByLayout: { chat: 'c-chat-preservada', code: 'c-1' },
+      activeIdByLayout: { chat: 'c-chat-preservada', code: 'c-1', agent: null },
     });
     useUiStore.setState({ artifactPanelOpen: true });
 
@@ -785,6 +785,7 @@ describe('CodeSessionHeader — sessões separadas por layout', () => {
     expect(useChatStore.getState().activeIdByLayout).toEqual({
       chat: 'c-chat-preservada',
       code: null,
+      agent: null,
     });
     expect(useUiStore.getState().artifactPanelOpen).toBe(false);
     expect(tab('Nova sessão').getAttribute('aria-selected')).toBe('true');

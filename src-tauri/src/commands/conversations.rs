@@ -118,11 +118,32 @@ pub fn create_conversation(
     provider_id: Option<String>,
     model_id: Option<String>,
     mode: Option<String>,
+    agent_id: Option<String>,
 ) -> Result<Conversation, String> {
     let title = title
         .map(|title| title.trim().to_string())
         .filter(|title| !title.is_empty())
         .unwrap_or_else(|| "Nova conversa".to_string());
+    if let Some(agent_id) = agent_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        if let Some(mode) = mode.as_deref().map(str::trim).filter(|mode| !mode.is_empty()) {
+            if mode != crate::domain::CONVERSATION_MODE_AGENT {
+                return Err(
+                    "AGENT_VALIDATION: uma conversa de agente não pode usar outro layout"
+                        .to_string(),
+                );
+            }
+        }
+        return state
+            .db
+            .create_agent_conversation(&agent_id, &title)
+            .map_err(to_error);
+    }
+    if mode.as_deref().map(str::trim) == Some(crate::domain::CONVERSATION_MODE_AGENT) {
+        return Err("AGENT_VALIDATION: informe o agente da conversa".to_string());
+    }
     let (provider_id, model_id) = resolve_defaults(&state, provider_id, model_id);
     // `mode` ausente/inválido cai no layout padrão (Chat).
     let mode = crate::domain::conversation_mode_or_default(mode.as_deref());
@@ -611,6 +632,8 @@ mod tests {
                 parent_conversation_id: None,
                 subagent_task_call_id: None,
                 subagent_type: None,
+                agent_id: None,
+                channel_id: None,
             },
             messages: vec![user, assistant],
         }

@@ -22,6 +22,8 @@ import { defaultSelection, findModelIn, getModel } from '../catalog';
 import { filterConversationsForLayout } from '../conversations';
 import { reasoningForModel } from '../modelMenu';
 import { shouldContinueGoal } from '../goalRunner';
+import { useAgentQueueStore, compactAgentQueue } from './agentQueueStore';
+import { useAgentStore } from './agentStore';
 import { useAppStore } from './appStore';
 import { isCodeEvent, useCodeStore } from './codeStore';
 import { useCacheStore } from './cacheStore';
@@ -53,6 +55,13 @@ interface ChatState {
   activeIdByLayout: Record<LayoutMode, string | null>;
   messagesByConversation: Record<string, ChatMessage[]>;
   loadingConversationId: string | null;
+  /**
+   * Active turns per conversation. `streaming` below is only the visible slice
+   * of `activeId`; background agent threads keep their own entry here so
+   * several agents can work at the same time without sharing a single slot.
+   */
+  streamsByConversation: Record<string, StreamingState>;
+  /** Visible stream of the active conversation (always mirrors the map). */
   streaming: StreamingState | null;
   pendingAttachments: AttachmentInfo[];
   error: string | null;
@@ -72,7 +81,10 @@ interface ChatState {
    * another surface (docs/goals/chat-code-sessions/PLAN.md §3).
    */
   openConversation: (id: string, options?: { preserveView?: boolean }) => Promise<void>;
-  startNewConversation: (mode?: LayoutMode) => Promise<string | null>;
+  startNewConversation: (
+    mode?: LayoutMode,
+    options?: { agentId?: string },
+  ) => Promise<string | null>;
   /**
    * Restores the active session of a layout after the Chat | Code switch:
    * remembers/validates the layout's session and falls back to its first
@@ -104,6 +116,10 @@ interface ChatState {
   removeAttachment: (id: string) => Promise<void>;
   clearAttachments: () => void;
   send: (content: string, options?: SendOptions) => Promise<void>;
+  /** Drains the next queued message of a conversation (no-op when busy/paused). */
+  processQueue: (conversationId?: string | null) => Promise<void>;
+  /** Resumes every persisted agent queue that is idle and unpaused. */
+  drainAgentQueues: () => Promise<void>;
   regenerate: () => Promise<void>;
   editAndResend: (messageId: string, content: string) => Promise<void>;
   stop: () => Promise<void>;
@@ -163,6 +179,27 @@ const EMPTY: ChatMessage[] = [];
  */
 export type ModelLockReason = 'started' | 'streaming';
 
+/**
+ * Stream of one conversation. `streamsByConversation` is authoritative; the
+ * top-level `streaming` is accepted as a mirror for state written by older
+ * call sites/tests that only set the visible slice.
+ */
+export function selectConversationStream(
+  state: ChatState,
+  conversationId: string | null | undefined,
+): StreamingState | null {
+  if (!conversationId) return null;
+  return (
+    state.streamsByConversation[conversationId] ??
+    (state.streaming?.conversationId === conversationId ? state.streaming : null)
+  );
+}
+
+/** Stream of the active conversation (`null` when it is idle). */
+export function selectActiveStream(state: ChatState): StreamingState | null {
+  return selectConversationStream(state, state.activeId);
+}
+
 /** True when the active conversation already has messages (any layout). */
 export function selectActiveConversationStarted(state: ChatState): boolean {
   const conversationId = state.activeId;
@@ -187,7 +224,10 @@ export function modelLockReason(state: ChatState, layout: LayoutMode): ModelLock
   // shown here (transitional state) keeps the Chat rules.
   const unlockable = layout === 'code' && isCodeSessionConversation(conversation);
   if (!unlockable && selectActiveConversationStarted(state)) return 'started';
-  if (state.streaming) return 'streaming';
+  // While a turn is visible, the selector stays locked even if the active
+  // conversation has not loaded yet (defensive: the model is already frozen
+  // into the request).
+  if (selectActiveStream(state) ?? state.streaming) return 'streaming';
   return null;
 }
 
@@ -354,6 +394,32 @@ export const useChatStore = create<ChatState>()((set, get) => {
     });
   };
 
+  /**
+   * Writes the stream of one conversation. Only the visible conversation
+   * updates `streaming`; a background agent keeps its state in the map and
+   * never steals the composer/stop button from the thread on screen.
+   */
+  const setStream = (conversationId: string, stream: StreamingState | null) => {
+    set((state) => {
+      const streamsByConversation = { ...state.streamsByConversation };
+      if (stream) streamsByConversation[conversationId] = stream;
+      else delete streamsByConversation[conversationId];
+      return {
+        streamsByConversation,
+        ...(state.activeId === conversationId ? { streaming: stream } : {}),
+      };
+    });
+  };
+
+  const patchStream = (
+    conversationId: string,
+    update: (stream: StreamingState) => StreamingState,
+  ) => {
+    const current = get().streamsByConversation[conversationId];
+    if (!current) return;
+    setStream(conversationId, update(current));
+  };
+
   const finalizeAssistant = (conversationId: string, message: ChatMessage) => {
     set((state) => {
       const list = state.messagesByConversation[conversationId] ?? [];
@@ -361,9 +427,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
       const next = exists
         ? list.map((m) => (m.id === message.id ? message : m))
         : [...list, message];
+      const streamsByConversation = { ...state.streamsByConversation };
+      delete streamsByConversation[conversationId];
       return {
         messagesByConversation: { ...state.messagesByConversation, [conversationId]: next },
-        streaming: null,
+        streamsByConversation,
+        // A finished background turn must not clear the visible stream of
+        // another conversation.
+        ...(state.activeId === conversationId ? { streaming: null } : {}),
       };
     });
   };
@@ -387,20 +458,39 @@ export const useChatStore = create<ChatState>()((set, get) => {
    */
   const turnProfileFor = (conversation: Conversation | undefined): TurnProfile => {
     if (!conversation) return 'chat';
-    if (currentLayout() !== 'code') return 'chat';
+    // Agent threads own their profile: a queued background turn must keep the
+    // Code profile even when the user is looking at the Chat layout.
+    if (conversation.mode === 'agent') {
+      return conversation.workspaceId ? 'code' : 'chat';
+    }
+    const layout = currentLayout();
+    if (layout === 'chat') return 'chat';
     return conversation.mode === 'code' || conversation.codeLinked ? 'code' : 'chat';
   };
+
+  /** True when the conversation owns Code-session state. */
+  const isCodeProfileConversation = (conversation: Conversation | undefined): boolean =>
+    Boolean(
+      conversation &&
+        (conversation.mode === 'code' ||
+          conversation.codeLinked ||
+          (conversation.mode === 'agent' && conversation.workspaceId)),
+    );
 
   /** Carrega/atualiza o estado da sessão de código quando ela é do Code. */
   const syncCodeSession = (conversation: Conversation | undefined): void => {
     if (!conversation) return;
-    if (conversation.mode !== 'code' && !conversation.codeLinked) return;
+    if (!isCodeProfileConversation(conversation)) return;
     void useCodeStore.getState().load(conversation.id);
   };
 
-  /** Sessions visible in one layout, preserving the backend order. */
+  /**
+   * Sessions visible in one layout, preserving the backend order. Agentes is
+   * persona-scoped: the sidebar/home owns selection, so a layout switch never
+   * opens an arbitrary agent thread.
+   */
   const visibleConversations = (conversations: Conversation[], layout: LayoutMode) =>
-    filterConversationsForLayout(conversations, layout);
+    layout === 'agent' ? [] : filterConversationsForLayout(conversations, layout);
 
   /** Remembers `id` as the active session of `layout` (default: current). */
   const rememberActive = (id: string | null, layout: LayoutMode = currentLayout()) => {
@@ -521,16 +611,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
       taskCallId: string,
       update: (current: SubagentLiveState) => SubagentLiveState,
     ) => {
-      set((state) => {
-        const current = state.streaming?.subagents?.[taskCallId];
-        if (!state.streaming || !current) return {};
+      patchStream(context.conversationId, (stream) => {
+        const current = stream.subagents?.[taskCallId];
+        if (!current) return stream;
         return {
-          streaming: {
-            ...state.streaming,
-            subagents: {
-              ...(state.streaming.subagents ?? {}),
-              [taskCallId]: update(current),
-            },
+          ...stream,
+          subagents: {
+            ...(stream.subagents ?? {}),
+            [taskCallId]: update(current),
           },
         };
       });
@@ -550,17 +638,11 @@ export const useChatStore = create<ChatState>()((set, get) => {
           }
           replaceMessageId(context.conversationId, context.assistantId, event.assistantMessageId);
           context.assistantId = event.assistantMessageId;
-          set((state) =>
-            state.streaming
-              ? {
-                  streaming: {
-                    ...state.streaming,
-                    assistantId: event.assistantMessageId,
-                    userMessageId: event.userMessageId,
-                  },
-                }
-              : {},
-          );
+          patchStream(context.conversationId, (stream) => ({
+            ...stream,
+            assistantId: event.assistantMessageId,
+            userMessageId: event.userMessageId,
+          }));
           break;
         }
         case 'step_started':
@@ -573,13 +655,11 @@ export const useChatStore = create<ChatState>()((set, get) => {
             ...message,
             trace: [...(message.trace ?? []), { toolCalls: 0 }],
           }));
-          set((state) => (state.streaming ? { streaming: { ...state.streaming, step: event.step } } : {}));
+          patchStream(context.conversationId, (stream) => ({ ...stream, step: event.step }));
           break;
         case 'reasoning_delta':
           reasoningBuffer += event.delta;
-          set((state) =>
-            state.streaming ? { streaming: { ...state.streaming, phase: 'reasoning' } } : {},
-          );
+          patchStream(context.conversationId, (stream) => ({ ...stream, phase: 'reasoning' }));
           schedule();
           break;
         case 'reasoning_done':
@@ -597,12 +677,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
             }
           }
           textBuffer += event.delta;
-          set((state) => (state.streaming ? { streaming: { ...state.streaming, phase: 'text' } } : {}));
+          patchStream(context.conversationId, (stream) => ({ ...stream, phase: 'text' }));
           schedule();
           break;
         case 'tool_call_started':
           flush();
-          set((state) => (state.streaming ? { streaming: { ...state.streaming, phase: 'tool' } } : {}));
+          patchStream(context.conversationId, (stream) => ({ ...stream, phase: 'tool' }));
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
             toolCalls: [...message.toolCalls.filter((t) => t.id !== event.toolCall.id), event.toolCall],
@@ -687,11 +767,36 @@ export const useChatStore = create<ChatState>()((set, get) => {
           flush();
           finished = true;
           applyResult(event.result);
+          // In-app completion notice for agent threads the user is not looking
+          // at. The `notificationsEnabled` setting already existed for this;
+          // this is the renderer side (no OS-level notification yet).
+          {
+            const finishedConversation = get().conversations.find(
+              (conversation) => conversation.id === context.conversationId,
+            );
+            const uiNow = useUiStore.getState();
+            if (
+              finishedConversation?.mode === 'agent' &&
+              useAppStore.getState().settings.notificationsEnabled !== false &&
+              (uiNow.layoutMode !== 'agent' || get().activeId !== finishedConversation.id)
+            ) {
+              const agentName = finishedConversation.agentId
+                ? useAgentStore.getState().agentsById[finishedConversation.agentId]?.name
+                : null;
+              toast.success(`${agentName ?? 'Agente'} concluiu a resposta`, {
+                description: finishedConversation.title,
+              });
+            }
+          }
           // Sincroniza o snapshot da sessão e só então decide a próxima rodada
           // do objetivo (o estado do goal_updated/finish_round precisa chegar).
           void (async () => {
             await useCodeStore.getState().refresh(context.conversationId);
             await get().maybeContinueGoal(context.conversationId);
+            // A queued message is the next turn of the same thread. This runs
+            // for background agent threads too: each thread drains its own
+            // FIFO without waiting for the user to look at it.
+            await get().processQueue(context.conversationId);
           })();
           // The per-request event carries only cache counters; TTL/min/savings
           // come from the authoritative snapshot, so refresh it at turn end.
@@ -706,7 +811,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
             ...message,
             status: 'cancelled',
           }));
-          set({ streaming: null });
+          setStream(context.conversationId, null);
           void syncArtifacts(context.conversationId);
           void useCodeStore.getState().refresh(context.conversationId);
           break;
@@ -719,46 +824,44 @@ export const useChatStore = create<ChatState>()((set, get) => {
             ...message,
             status: message.content ? 'complete' : 'error',
           }));
-          set({
-            streaming: null,
-            error: event.message,
-            errorCode: event.code ?? null,
-            errorHint: event.hint ?? null,
-          });
+          setStream(context.conversationId, null);
+          // A background failure must not paint the error banner over the
+          // thread the user is reading; it still gets the toast below.
+          if (get().activeId === context.conversationId) {
+            set({
+              error: event.message,
+              errorCode: event.code ?? null,
+              errorHint: event.hint ?? null,
+            });
+          }
           void syncArtifacts(context.conversationId);
           void useCodeStore.getState().refresh(context.conversationId);
           toast.error('Falha na resposta', { description: event.hint ?? event.message });
           break;
         case 'subagent_started':
-          set((state) =>
-            state.streaming
-              ? {
-                  streaming: {
-                    ...state.streaming,
-                    subagents: {
-                      ...(state.streaming.subagents ?? {}),
-                      [event.taskCallId]: {
-                        taskCallId: event.taskCallId,
-                        conversationId: event.conversationId,
-                        subagentType: event.subagentType,
-                        description: event.description,
-                        prompt: event.prompt,
-                        providerId: event.providerId,
-                        modelId: event.modelId,
-                        effort: event.effort ?? null,
-                        status: 'running',
-                        startedAt: Date.now(),
-                        steps: 0,
-                        text: '',
-                        reasoning: '',
-                        trace: [],
-                        toolCalls: [],
-                      },
-                    },
-                  },
-                }
-              : {},
-          );
+          patchStream(context.conversationId, (stream) => ({
+            ...stream,
+            subagents: {
+              ...(stream.subagents ?? {}),
+              [event.taskCallId]: {
+                taskCallId: event.taskCallId,
+                conversationId: event.conversationId,
+                subagentType: event.subagentType,
+                description: event.description,
+                prompt: event.prompt,
+                providerId: event.providerId,
+                modelId: event.modelId,
+                effort: event.effort ?? null,
+                status: 'running',
+                startedAt: Date.now(),
+                steps: 0,
+                text: '',
+                reasoning: '',
+                trace: [],
+                toolCalls: [],
+              },
+            },
+          }));
           break;
         case 'subagent_event': {
           const nested = event.event;
@@ -902,7 +1005,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
         });
       }
       if (result.error) {
-        set({ error: result.error });
+        if (get().activeId === context.conversationId) {
+          set({ error: result.error });
+        }
         toast.error('A resposta terminou com erro', { description: result.error });
       }
       void refreshList();
@@ -931,7 +1036,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
           context.optimisticUserId ?? context.userMessageId ?? '',
         );
         removeMessage(context.conversationId, context.assistantId);
-        set({ streaming: null, error: message });
+        setStream(context.conversationId, null);
+        if (get().activeId === context.conversationId) set({ error: message });
         toast.error('Não foi possível iniciar a rodada do objetivo', { description: message });
         void useCodeStore.getState().refresh(context.conversationId);
         return;
@@ -941,7 +1047,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
           ? { ...m, status: 'complete' }
           : { ...m, status: 'error', content: message },
       );
-      set({ streaming: null, error: message });
+      setStream(context.conversationId, null);
+      if (get().activeId === context.conversationId) set({ error: message });
       toast.error('Não foi possível concluir a mensagem', { description: message });
       void syncArtifacts(context.conversationId);
     } finally {
@@ -953,12 +1060,19 @@ export const useChatStore = create<ChatState>()((set, get) => {
     const current = get().activeId;
     if (current) return current;
     const layout = currentLayout();
-    const conversation = await api.createConversation(
-      title,
-      selection.providerId,
-      selection.modelId,
-      layout,
-    );
+    const agentId = layout === 'agent' ? useUiStore.getState().activeAgentId : null;
+    if (layout === 'agent' && !agentId) {
+      throw new Error('Selecione um agente antes de enviar a mensagem.');
+    }
+    const conversation = agentId
+      ? await api.createConversation(
+          title,
+          selection.providerId,
+          selection.modelId,
+          layout,
+          agentId,
+        )
+      : await api.createConversation(title, selection.providerId, selection.modelId, layout);
     set((state) => ({
       conversations: [conversation, ...state.conversations],
       activeId: conversation.id,
@@ -968,13 +1082,167 @@ export const useChatStore = create<ChatState>()((set, get) => {
     return conversation.id;
   };
 
+  /**
+   * Appends the optimistic user/assistant pair and starts one turn in an
+   * existing conversation. Shared by `send` and the agent queue drain.
+   */
+  const startTurn = (
+    input: {
+      conversationId: string;
+      content: string;
+      attachments: AttachmentInfo[];
+      selection: ModelSelection;
+      reasoning: ReasoningSelection | null;
+      options?: SendOptions;
+    },
+    clearPendingAttachments = true,
+  ) => {
+    const { conversationId, content, attachments, selection, reasoning, options } = input;
+    const turnId = newId();
+    const now = Date.now();
+    const optimisticUserId = `optimistic-user-${turnId}`;
+    const optimisticAssistantId = `optimistic-assistant-${turnId}`;
+    const userMessage: ChatMessage = {
+      id: optimisticUserId,
+      conversationId,
+      role: 'user',
+      content,
+      status: 'complete',
+      toolCalls: [],
+      citations: [],
+      attachments,
+      modelId: selection.modelId,
+      providerId: selection.providerId,
+      createdAt: now,
+    };
+    const assistantMessage: ChatMessage = {
+      id: optimisticAssistantId,
+      conversationId,
+      role: 'assistant',
+      content: '',
+      reasoning: '',
+      status: 'streaming',
+      toolCalls: [],
+      citations: [],
+      attachments: [],
+      trace: [],
+      modelId: selection.modelId,
+      providerId: selection.providerId,
+      createdAt: now + 1,
+    };
+
+    const previous = get().messagesByConversation[conversationId] ?? [];
+    const stream: StreamingState = {
+      turnId,
+      conversationId,
+      assistantId: optimisticAssistantId,
+      userMessageId: optimisticUserId,
+      phase: 'starting',
+      step: 1,
+      startedAt: now,
+      turnKind: 'user',
+      subagents: {},
+    };
+    set((s) => ({
+      messagesByConversation: {
+        ...s.messagesByConversation,
+        [conversationId]: [...previous, userMessage, assistantMessage],
+      },
+      ...(clearPendingAttachments ? { pendingAttachments: [] } : {}),
+      // Errors are per visible thread: a background turn must not clear the
+      // banner of the conversation on screen.
+      ...(s.activeId === conversationId
+        ? { error: null, errorCode: null, errorHint: null }
+        : {}),
+      streamsByConversation: { ...s.streamsByConversation, [conversationId]: stream },
+      ...(s.activeId === conversationId ? { streaming: stream } : {}),
+    }));
+
+    const payload: TurnPayload = {
+      conversationId,
+      content,
+      attachmentIds: attachments.map((a) => a.id),
+      providerId: selection.providerId,
+      modelId: selection.modelId,
+      reasoning: reasoning ?? null,
+      options: turnOptionsFromSettings(options?.turnOptions),
+      profile: turnProfileFor(get().conversations.find((c) => c.id === conversationId)),
+      turnKind: 'user',
+      goalRequest: options?.goalRequest ?? false,
+      turnId,
+    };
+
+    void runTurn(payload, {
+      conversationId,
+      assistantId: optimisticAssistantId,
+      userMessageId: null,
+      optimisticUserId,
+      mode: 'new',
+    });
+  };
+
+  /**
+   * Starts the next queued message of one conversation, if any. Each agent
+   * thread drains its own FIFO, including while it is in the background.
+   */
+  const processQueue = async (conversationId?: string | null) => {
+    const target = conversationId ?? get().activeId;
+    if (!target) return;
+    if (selectConversationStream(get(), target)) return;
+    const queue = useAgentQueueStore.getState();
+    if (queue.isPaused(target)) return;
+    const item = queue.peek(target);
+    if (!item) {
+      compactAgentQueue();
+      return;
+    }
+    const agent = useAgentStore.getState().agentsById[item.agentId];
+    if (!agent || agent.archivedAt !== null) {
+      queue.pause(target, true);
+      toast.error('A fila está pausada: restaure o agente para continuar');
+      return;
+    }
+    queue.dequeue(target);
+    const selection: ModelSelection = {
+      providerId: item.providerId || agent?.providerId || useAppStore.getState().selection.providerId,
+      modelId: item.modelId || agent?.modelId || useAppStore.getState().selection.modelId,
+      reasoning: item.reasoning ?? agent?.reasoning ?? null,
+    };
+    startTurn({
+      conversationId: target,
+      content: item.content,
+      attachments: item.attachments,
+      selection,
+      reasoning: item.reasoning ?? agent?.reasoning ?? null,
+      options: {
+        selection,
+        reasoning: item.reasoning ?? agent?.reasoning ?? null,
+        turnOptions: item.turnOptions,
+        goalRequest: item.goalRequest,
+      },
+    }, false);
+  };
+
+  /**
+   * Resumes persisted FIFOs. Each thread starts independently, so a reload can
+   * pick up several queued agent tasks without waiting for the user to visit
+   * them one by one.
+   */
+  const drainAgentQueues = async () => {
+    const ids = Object.keys(useAgentQueueStore.getState().byConversation);
+    for (const id of ids) {
+      await processQueue(id);
+    }
+  };
+
   return {
     conversations: [],
     conversationsLoading: false,
     activeId: null,
-    activeIdByLayout: { chat: null, code: null },
+    activeIdByLayout: { chat: null, code: null, agent: null },
     messagesByConversation: {},
     loadingConversationId: null,
+    streamsByConversation: {},
     streaming: null,
     pendingAttachments: [],
     error: null,
@@ -1004,30 +1272,48 @@ export const useChatStore = create<ChatState>()((set, get) => {
       const state = get();
       const visible = visibleConversations(state.conversations, mode);
       const remembered = state.activeIdByLayout[mode];
-      const target = visible.some((conversation) => conversation.id === remembered)
-        ? remembered
-        : (visible[0]?.id ?? null);
+      const rememberedAgent =
+        mode === 'agent' && remembered
+          ? state.conversations.find(
+              (conversation) =>
+                conversation.id === remembered && conversation.mode === 'agent',
+            )
+          : undefined;
+      const target =
+        mode === 'agent'
+          ? (rememberedAgent?.id ?? null)
+          : visible.some((conversation) => conversation.id === remembered)
+            ? remembered
+            : (visible[0]?.id ?? null);
       if (target === state.activeId && (target === null || state.messagesByConversation[target])) {
         rememberActive(target, mode);
         return;
       }
       if (target) {
+        if (mode === 'agent') {
+          const conversation = state.conversations.find((entry) => entry.id === target);
+          if (conversation?.agentId) {
+            useUiStore.getState().setActiveAgentId(conversation.agentId);
+          }
+        }
         // Restore the session in the background: the layout keeps whichever page
         // it was showing (Biblioteca/Skills) instead of being forced back to the
         // conversation, matching WorkspaceCenter's per-layout view state.
         await get().openConversation(target, { preserveView: true });
+        if (mode === 'agent') void get().drainAgentQueues();
         return;
       }
       // No session for this layout: show its welcome state without touching the
       // other layout's cached conversation.
-      set({ activeId: null, loadingConversationId: null });
+      if (mode === 'agent') void get().drainAgentQueues();
+      set({ activeId: null, loadingConversationId: null, streaming: null });
       rememberActive(null, mode);
       useUiStore.getState().setArtifacts([]);
       useUiStore.getState().closeArtifactPanel();
     },
 
     clearActiveConversation: () => {
-      set({ activeId: null, loadingConversationId: null });
+      set({ activeId: null, loadingConversationId: null, streaming: null });
       rememberActive(null);
       useUiStore.getState().setArtifacts([]);
       useUiStore.getState().closeArtifactPanel();
@@ -1050,23 +1336,39 @@ export const useChatStore = create<ChatState>()((set, get) => {
 
     openConversation: async (id, options) => {
       // Navigating to a conversation leaves the skills view by default and shows
-      // the session surface in both layouts (Code shares the same conversation).
-      // `enterLayout` preserves the page instead: switching layouts must not
-      // close the Biblioteca/Skills page the user was reading.
+      // the session surface in the current layout. A page open in another layout
+      // must survive: Agent navigation never closes the Chat Library or the Code
+      // Skills page.
+      const layout = currentLayout();
       if (!options?.preserveView) {
-        useUiStore.getState().setActiveView('chat');
-        useUiStore.getState().setCodeView('session');
+        if (layout === 'chat') useUiStore.getState().setActiveView('chat');
+        if (layout === 'code' || layout === 'agent') {
+          useUiStore.getState().setCodeView('session');
+        }
+      }
+      // The agent thread is the authority for the selected persona: opening it
+      // from the palette/sidebar must switch the sidebar selection too.
+      const targetConversation = get().conversations.find((conversation) => conversation.id === id);
+      if (targetConversation?.mode === 'agent' && targetConversation.agentId) {
+        useUiStore.getState().setActiveAgentId(targetConversation.agentId);
       }
       if (get().activeId === id && get().messagesByConversation[id]) {
         // Messages are cached, but the artifacts may have changed (turn ended
         // in the background, deletion, app reload): always reconcile them.
         rememberActive(id);
+        // Re-attach the visible stream of this thread (it may have been
+        // running in the background while another conversation was open).
+        set({ streaming: get().streamsByConversation[id] ?? null });
         await syncArtifacts(id);
         void syncCacheStats(id);
         syncCodeSession(get().conversations.find((conversation) => conversation.id === id));
         return;
       }
-      set({ activeId: id, loadingConversationId: id });
+      set({
+        activeId: id,
+        loadingConversationId: id,
+        streaming: get().streamsByConversation[id] ?? null,
+      });
       rememberActive(id);
       // Never show the previous conversation's artifacts while the new one
       // loads (the panel may be open on the list).
@@ -1093,12 +1395,21 @@ export const useChatStore = create<ChatState>()((set, get) => {
       }
     },
 
-    startNewConversation: async (mode) => {
+    startNewConversation: async (mode, options) => {
       // "Novo chat"/"Novo agente" creates the session in that layout's own
       // namespace and returns to the conversation surface.
       const layout = mode ?? currentLayout();
-      useUiStore.getState().setActiveView('chat');
-      useUiStore.getState().setCodeView('session');
+      const agentId = layout === 'agent' ? options?.agentId : undefined;
+      if (layout === 'agent' && !agentId) {
+        toast.info('Selecione um agente para iniciar a conversa');
+        return null;
+      }
+      // Only the page state of the layout that started the conversation is
+      // reset; the other layouts keep their own surface.
+      if (layout === 'chat') useUiStore.getState().setActiveView('chat');
+      if (layout === 'code' || layout === 'agent') {
+        useUiStore.getState().setCodeView('session');
+      }
       // Leaving a started conversation resets the composer to the configured
       // default model (the previous conversation keeps its own model, which may
       // have been changed during the session in the Code layout).
@@ -1109,19 +1420,29 @@ export const useChatStore = create<ChatState>()((set, get) => {
       }
       const selection = useAppStore.getState().selection;
       try {
-        const conversation = await api.createConversation(
-          'Nova conversa',
-          selection.providerId,
-          selection.modelId,
-          layout,
-        );
+        const conversation = agentId
+          ? await api.createConversation(
+              'Nova conversa',
+              selection.providerId,
+              selection.modelId,
+              layout,
+              agentId,
+            )
+          : await api.createConversation(
+              'Nova conversa',
+              selection.providerId,
+              selection.modelId,
+              layout,
+            );
         set((state) => ({
           conversations: [conversation, ...state.conversations],
           activeId: conversation.id,
           messagesByConversation: { ...state.messagesByConversation, [conversation.id]: [] },
           pendingAttachments: [],
+          streaming: state.streamsByConversation[conversation.id] ?? null,
           activeIdByLayout: { ...state.activeIdByLayout, [layout]: conversation.id },
         }));
+        if (layout === 'agent') void useAgentStore.getState().refresh();
         useUiStore.getState().setArtifacts([]);
         useUiStore.getState().closeArtifactPanel();
         return conversation.id;
@@ -1134,15 +1455,20 @@ export const useChatStore = create<ChatState>()((set, get) => {
     deleteConversation: async (id) => {
       try {
         await api.deleteConversation(id);
+        useAgentQueueStore.getState().clear(id);
         const layout = currentLayout();
         set((state) => {
           const rest = state.conversations.filter((c) => c.id !== id);
           const messagesByConversation = { ...state.messagesByConversation };
           delete messagesByConversation[id];
+          const streamsByConversation = { ...state.streamsByConversation };
+          delete streamsByConversation[id];
           const stillActive = state.activeId !== id;
           const fallback = stillActive
             ? state.activeId
-            : (filterConversationsForLayout(rest, layout)[0]?.id ?? null);
+            : layout === 'agent'
+              ? null
+              : (filterConversationsForLayout(rest, layout)[0]?.id ?? null);
           const activeIdByLayout = { ...state.activeIdByLayout };
           if (!stillActive) activeIdByLayout[layout] = fallback;
           for (const key of Object.keys(activeIdByLayout) as LayoutMode[]) {
@@ -1151,10 +1477,17 @@ export const useChatStore = create<ChatState>()((set, get) => {
           return {
             conversations: rest,
             messagesByConversation,
+            streamsByConversation,
             activeId: fallback,
+            streaming: stillActive
+              ? state.streaming
+              : fallback
+                ? (streamsByConversation[fallback] ?? null)
+                : null,
             activeIdByLayout,
           };
         });
+        if (layout === 'agent') void useAgentStore.getState().refresh();
         const next = get().activeId;
         if (next) {
           await get().openConversation(next);
@@ -1210,6 +1543,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
       const conversation = conversationId
         ? state.conversations.find((entry) => entry.id === conversationId)
         : undefined;
+      if (conversation?.mode === 'agent') {
+        toast.info('O modelo é definido pelo agente', {
+          description: 'Abra “Editar agente” para trocar o modelo deste agente.',
+        });
+        return false;
+      }
       // A **started Code session** owns its model: persist the pair immediately
       // so the next turn, goal rounds and reopening the session use the same
       // route, while the configured defaults stay untouched. Older replies keep
@@ -1288,20 +1627,71 @@ export const useChatStore = create<ChatState>()((set, get) => {
 
     dismissError: () => set({ error: null, errorCode: null, errorHint: null }),
 
+    processQueue: async (conversationId) => {
+      await processQueue(conversationId);
+    },
+
+    drainAgentQueues,
+
     send: async (content, options) => {
       const state = get();
-      if (state.streaming) {
-        toast.info('Aguarde a resposta atual terminar');
-        return;
-      }
       const trimmed = content.trim();
       const attachments = state.pendingAttachments;
       if (!trimmed && !attachments.length) return;
+      // Only the conversation being sent to is busy. A background agent turn
+      // never blocks another thread.
+      const activeStream = selectActiveStream(state);
+      if (activeStream) {
+        const ui = useUiStore.getState();
+        const conversation = state.activeId
+          ? state.conversations.find((entry) => entry.id === state.activeId)
+          : undefined;
+        const agentId =
+          ui.layoutMode === 'agent'
+            ? (conversation?.agentId ?? ui.activeAgentId ?? null)
+            : null;
+        if (ui.layoutMode === 'agent' && state.activeId && agentId) {
+          const agent = useAgentStore.getState().agentsById[agentId];
+          useAgentQueueStore.getState().enqueue({
+            id: newId(),
+            conversationId: state.activeId,
+            agentId,
+            content: trimmed,
+            attachments,
+            providerId: agent?.providerId ?? useAppStore.getState().selection.providerId,
+            modelId: agent?.modelId ?? useAppStore.getState().selection.modelId,
+            reasoning: agent?.reasoning ?? null,
+            turnOptions: options?.turnOptions,
+            goalRequest: options?.goalRequest,
+            createdAt: Date.now(),
+          });
+          set({ pendingAttachments: [] });
+          toast.info('Mensagem na fila', {
+            description: 'Ela será enviada quando a resposta atual terminar.',
+          });
+          return;
+        }
+        toast.info('Aguarde a resposta atual terminar');
+        return;
+      }
 
       const app = useAppStore.getState();
+      const ui = useUiStore.getState();
+      const activeAgent =
+        ui.layoutMode === 'agent' && ui.activeAgentId
+          ? useAgentStore.getState().agentsById[ui.activeAgentId]
+          : undefined;
+      const agentSelection: ModelSelection | null = activeAgent
+        ? {
+            providerId: activeAgent.providerId,
+            modelId: activeAgent.modelId,
+            reasoning: activeAgent.reasoning,
+          }
+        : null;
       // A started conversation keeps its model even if some other surface
       // changed the global selection (defense in depth for the model lock).
-      const selection = options?.selection ?? lockedSelectionFor(state) ?? app.selection;
+      const selection =
+        options?.selection ?? lockedSelectionFor(state) ?? agentSelection ?? app.selection;
       const reasoning = options?.reasoning !== undefined ? options.reasoning : selection.reasoning;
       // Never start a turn whose provider has no credential: show the same
       // actionable CTA the settings screen offers (API key or ChatGPT login).
@@ -1320,7 +1710,6 @@ export const useChatStore = create<ChatState>()((set, get) => {
           return;
         }
       }
-      const turnId = newId();
       let conversationId: string;
       try {
         conversationId = await ensureConversation(deriveTitle(trimmed || attachments[0]?.name || 'Nova conversa'), selection);
@@ -1329,87 +1718,19 @@ export const useChatStore = create<ChatState>()((set, get) => {
         return;
       }
 
-      const now = Date.now();
-      const optimisticUserId = `optimistic-user-${turnId}`;
-      const optimisticAssistantId = `optimistic-assistant-${turnId}`;
-      const userMessage: ChatMessage = {
-        id: optimisticUserId,
+      startTurn({
         conversationId,
-        role: 'user',
         content: trimmed,
-        status: 'complete',
-        toolCalls: [],
-        citations: [],
         attachments,
-        modelId: selection.modelId,
-        providerId: selection.providerId,
-        createdAt: now,
-      };
-      const assistantMessage: ChatMessage = {
-        id: optimisticAssistantId,
-        conversationId,
-        role: 'assistant',
-        content: '',
-        reasoning: '',
-        status: 'streaming',
-        toolCalls: [],
-        citations: [],
-        attachments: [],
-        trace: [],
-        modelId: selection.modelId,
-        providerId: selection.providerId,
-        createdAt: now + 1,
-      };
-
-      const previous = get().messagesByConversation[conversationId] ?? [];
-      set((s) => ({
-        messagesByConversation: {
-          ...s.messagesByConversation,
-          [conversationId]: [...previous, userMessage, assistantMessage],
-        },
-        pendingAttachments: [],
-        error: null,
-        errorCode: null,
-        errorHint: null,
-        streaming: {
-          turnId,
-          conversationId,
-          assistantId: optimisticAssistantId,
-          userMessageId: optimisticUserId,
-          phase: 'starting',
-          step: 1,
-          startedAt: now,
-          turnKind: 'user',
-          subagents: {},
-        },
-      }));
-
-      const payload: TurnPayload = {
-        conversationId,
-        content: trimmed,
-        attachmentIds: attachments.map((a) => a.id),
-        providerId: selection.providerId,
-        modelId: selection.modelId,
-        reasoning: reasoning ?? null,
-        options: turnOptionsFromSettings(options?.turnOptions),
-        profile: turnProfileFor(get().conversations.find((c) => c.id === conversationId)),
-        turnKind: 'user',
-        goalRequest: options?.goalRequest ?? false,
-        turnId,
-      };
-
-      void runTurn(payload, {
-        conversationId,
-        assistantId: optimisticAssistantId,
-        userMessageId: null,
-        optimisticUserId,
-        mode: 'new',
+        selection,
+        reasoning,
+        options,
       });
     },
 
     regenerate: async () => {
       const state = get();
-      if (state.streaming || !state.activeId) return;
+      if (!state.activeId || selectActiveStream(state)) return;
       const conversationId = state.activeId;
       const messages = state.messagesByConversation[conversationId] ?? [];
       const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
@@ -1453,22 +1774,24 @@ export const useChatStore = create<ChatState>()((set, get) => {
         createdAt: Date.now(),
       };
       pushMessage(conversationId, assistantMessage);
-      set({
-        streaming: {
-          turnId,
-          conversationId,
-          assistantId: assistantMessage.id,
-          userMessageId: lastUser.id,
-          phase: 'starting',
-          step: 1,
-          startedAt: Date.now(),
-          turnKind: 'user',
-          subagents: {},
-        },
+      const stream: StreamingState = {
+        turnId,
+        conversationId,
+        assistantId: assistantMessage.id,
+        userMessageId: lastUser.id,
+        phase: 'starting',
+        step: 1,
+        startedAt: Date.now(),
+        turnKind: 'user',
+        subagents: {},
+      };
+      set((s) => ({
+        streamsByConversation: { ...s.streamsByConversation, [conversationId]: stream },
+        streaming: s.activeId === conversationId ? stream : s.streaming,
         error: null,
         errorCode: null,
         errorHint: null,
-      });
+      }));
 
       const payload: TurnPayload = {
         conversationId,
@@ -1494,7 +1817,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
 
     editAndResend: async (messageId, content) => {
       const state = get();
-      if (state.streaming || !state.activeId) return;
+      if (!state.activeId || selectActiveStream(state)) return;
       const conversationId = state.activeId;
       const messages = state.messagesByConversation[conversationId] ?? [];
       const index = messages.findIndex((m) => m.id === messageId);
@@ -1518,13 +1841,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
     },
 
     stop: async () => {
-      const streaming = get().streaming;
+      const state = get();
+      const conversationId = state.activeId;
+      const streaming = selectConversationStream(state, conversationId) ?? state.streaming;
       if (!streaming) return;
-      set((state) =>
-        state.streaming
-          ? { streaming: { ...state.streaming, phase: 'starting' } }
-          : {},
-      );
+      if (conversationId) {
+        setStream(conversationId, { ...streaming, phase: 'starting' });
+      }
       // Parar uma rodada do objetivo também pausa a continuidade automática:
       // sem isso o próximo `done` retomaria sozinho o que o usuário parou.
       if (streaming.turnKind === 'goal_round') {
@@ -1539,7 +1862,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
 
     runGoalRound: async (conversationId) => {
       const state = get();
-      if (state.streaming) return false;
+      if (selectConversationStream(state, conversationId)) return false;
       const conversation = state.conversations.find((entry) => entry.id === conversationId);
       if (!conversation) return false;
       const session = useCodeStore.getState().byConversation[conversationId];
@@ -1617,25 +1940,27 @@ export const useChatStore = create<ChatState>()((set, get) => {
       useCodeStore.getState().setGoalStarting(conversationId, true);
       try {
         const previous = get().messagesByConversation[conversationId] ?? [];
+        const stream: StreamingState = {
+          turnId,
+          conversationId,
+          assistantId: optimisticAssistantId,
+          userMessageId: optimisticUserId,
+          phase: 'starting',
+          step: 1,
+          startedAt: now,
+          turnKind: 'goal_round',
+          subagents: {},
+        };
         set((s) => ({
           messagesByConversation: {
             ...s.messagesByConversation,
             [conversationId]: [...previous, userMessage, assistantMessage],
           },
-          error: null,
-          errorCode: null,
-          errorHint: null,
-          streaming: {
-            turnId,
-            conversationId,
-            assistantId: optimisticAssistantId,
-            userMessageId: optimisticUserId,
-            phase: 'starting',
-            step: 1,
-            startedAt: now,
-            turnKind: 'goal_round',
-            subagents: {},
-          },
+          ...(s.activeId === conversationId
+            ? { error: null, errorCode: null, errorHint: null }
+            : {}),
+          streamsByConversation: { ...s.streamsByConversation, [conversationId]: stream },
+          ...(s.activeId === conversationId ? { streaming: stream } : {}),
         }));
 
         const payload: TurnPayload = {
@@ -1666,9 +1991,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
     },
 
     maybeContinueGoal: async (conversationId) => {
-      if (get().streaming) return;
+      if (selectConversationStream(get(), conversationId)) return;
       const ui = useUiStore.getState();
-      if (ui.layoutMode !== 'code' || get().activeId !== conversationId) return;
+      const conversation = get().conversations.find((entry) => entry.id === conversationId);
+      const codeCapable =
+        ui.layoutMode === 'code' ||
+        (ui.layoutMode === 'agent' && Boolean(conversation?.workspaceId));
+      if (!codeCapable || get().activeId !== conversationId) return;
       const session = useCodeStore.getState().byConversation[conversationId];
       if (!session) return;
       if (
@@ -1681,6 +2010,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           activeId: get().activeId,
           conversationId,
           layoutMode: ui.layoutMode,
+          hasWorkspace: Boolean(conversation?.workspaceId),
         })
       ) {
         return;
@@ -1694,7 +2024,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (!gate?.ok) return;
       // Revalida depois do await (o usuário pode ter trocado de sessão/iniciado
       // um turno enquanto o preflight respondia).
-      if (get().streaming || get().activeId !== conversationId) return;
+      if (selectConversationStream(get(), conversationId) || get().activeId !== conversationId) {
+        return;
+      }
       await get().runGoalRound(conversationId);
     },
 

@@ -76,7 +76,7 @@ beforeEach(() => {
     conversations: [],
     conversationsLoading: false,
     activeId: null,
-    activeIdByLayout: { chat: null, code: null },
+    activeIdByLayout: { chat: null, code: null, agent: null },
     messagesByConversation: {},
   });
   useUiStore.setState({

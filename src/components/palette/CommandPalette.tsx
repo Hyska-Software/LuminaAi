@@ -141,12 +141,21 @@ export function CommandPalette() {
   const open = useUiStore((state) => state.commandPaletteOpen);
   const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
   const layoutMode = useUiStore((state) => state.layoutMode);
+  const activeAgentId = useUiStore((state) => state.activeAgentId);
   const conversations = useChatStore((state) => state.conversations);
 
-  /** Chat and Code search their own sessions only (shared ones show in both). */
+  /**
+   * Chat and Code search their own sessions only (shared ones show in both).
+   * Agentes is persona-scoped: a palette row must never open a thread that
+   * belongs to another agent, otherwise AgentWorkspace drops it on the next
+   * paint.
+   */
   const visibleConversations = useMemo(
-    () => filterConversationsForLayout(conversations, layoutMode),
-    [conversations, layoutMode],
+    () =>
+      filterConversationsForLayout(conversations, layoutMode, {
+        agentId: layoutMode === 'agent' ? activeAgentId : undefined,
+      }),
+    [activeAgentId, conversations, layoutMode],
   );
 
   const [rawQuery, setRawQuery] = useState('');

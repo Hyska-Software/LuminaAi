@@ -70,7 +70,7 @@ beforeEach(() => {
     conversations: [],
     conversationsLoading: false,
     activeId: null,
-    activeIdByLayout: { chat: null, code: null },
+    activeIdByLayout: { chat: null, code: null, agent: null },
   });
   useUiStore.setState({ layoutMode: 'code', activeWorkspaceId: null });
 });

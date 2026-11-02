@@ -1039,7 +1039,10 @@ pub(crate) const ORPHAN_ROUND_DETAIL: &str =
 /// Sessão do layout Code? Nativo (`mode == "code"`) ou sessão do Chat
 /// explicitamente adicionada ao Code (`codeLinked`) — PLAN D18.
 pub(crate) fn is_code_session(conversation: &Conversation) -> bool {
-    conversation.mode == crate::domain::CONVERSATION_MODE_CODE || conversation.code_linked
+    conversation.mode == crate::domain::CONVERSATION_MODE_CODE
+        || conversation.code_linked
+        || (conversation.mode == crate::domain::CONVERSATION_MODE_AGENT
+            && conversation.workspace_id.is_some())
 }
 
 /// O objetivo só existe no layout Code (PLAN D18); o código estável no prefixo

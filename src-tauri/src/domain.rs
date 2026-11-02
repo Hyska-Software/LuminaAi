@@ -12,6 +12,7 @@ use serde_json::Value;
 /// Layout onde a sessão nasceu: o Chat ou o Code.
 pub const CONVERSATION_MODE_CHAT: &str = "chat";
 pub const CONVERSATION_MODE_CODE: &str = "code";
+pub const CONVERSATION_MODE_AGENT: &str = "agent";
 
 fn default_conversation_mode() -> String {
     CONVERSATION_MODE_CHAT.to_string()
@@ -23,6 +24,7 @@ fn default_conversation_mode() -> String {
 pub fn conversation_mode_or_default(mode: Option<&str>) -> String {
     match mode.map(str::trim) {
         Some(value) if value == CONVERSATION_MODE_CODE => CONVERSATION_MODE_CODE.to_string(),
+        Some(value) if value == CONVERSATION_MODE_AGENT => CONVERSATION_MODE_AGENT.to_string(),
         _ => CONVERSATION_MODE_CHAT.to_string(),
     }
 }
@@ -68,6 +70,12 @@ pub struct Conversation {
     /// Subagent kind (`explore`, `review`, `general`).
     #[serde(default)]
     pub subagent_type: Option<String>,
+    /// Persona dona desta conversa (`mode == "agent"`); `None` em Chat/Code.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    /// Shared channel that owns this hidden agent thread (`None` = normal thread).
+    #[serde(default)]
+    pub channel_id: Option<String>,
 }
 
 fn default_agent_kind() -> String {
@@ -616,6 +624,20 @@ pub struct TurnOptions {
     /// `conversation_id`.
     #[serde(skip)]
     pub wire_session_id: Option<String>,
+    /// Agent capability allowlists. Internal: the harness resolves them from
+    /// the persona bound to the conversation, never from the renderer.
+    #[serde(skip)]
+    pub allowed_tools: Option<Vec<String>>,
+    #[serde(skip)]
+    pub allowed_skills: Option<Vec<String>>,
+    #[serde(skip)]
+    pub allowed_mcp_servers: Option<Vec<String>>,
+    /// Agent turn with durable memory enabled (`memory` tool available).
+    #[serde(skip)]
+    pub agent_memory: bool,
+    /// Persona bound to the turn (internal, used by the `memory` tool).
+    #[serde(skip)]
+    pub agent_id: Option<String>,
 }
 
 impl Default for TurnOptions {
@@ -630,6 +652,11 @@ impl Default for TurnOptions {
             regenerate: false,
             delegation_depth: 0,
             wire_session_id: None,
+            allowed_tools: None,
+            allowed_skills: None,
+            allowed_mcp_servers: None,
+            agent_memory: false,
+            agent_id: None,
         }
     }
 }
@@ -1026,6 +1053,14 @@ impl Default for CacheSettings {
     }
 }
 
+fn default_execution_environment() -> String {
+    "local".to_string()
+}
+
+fn default_docker_image() -> String {
+    "node:22-bookworm".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -1066,6 +1101,16 @@ pub struct Settings {
     pub code_max_steps: u32,
     /// Permite ao agente executar comandos de shell (`run_command`).
     pub shell_enabled: bool,
+    /// Onde os comandos do perfil Code rodam: `local` (máquina do usuário) ou
+    /// `docker` (contêiner com o workspace montado em `/workspace`).
+    #[serde(default = "default_execution_environment")]
+    pub execution_environment: String,
+    /// Imagem usada quando `execution_environment == "docker"`.
+    #[serde(default = "default_docker_image")]
+    pub docker_image: String,
+    /// Permite rede no contêiner Docker (desligado = `--network none`).
+    #[serde(default)]
+    pub docker_network: bool,
     /// Compacta o contexto automaticamente quando a janela aperta.
     pub auto_compact: bool,
     /// Retenção dos arquivos de spill (saída completa de tools), em dias.
@@ -1115,6 +1160,9 @@ impl Default for Settings {
             disabled_skills: Vec::new(),
             code_max_steps: 120,
             shell_enabled: true,
+            execution_environment: default_execution_environment(),
+            docker_image: default_docker_image(),
+            docker_network: false,
             auto_compact: true,
             spill_retention_days: 30,
             approval_timeout_secs: 600,
@@ -2285,6 +2333,8 @@ mod tests {
             parent_conversation_id: None,
             subagent_task_call_id: None,
             subagent_type: None,
+            agent_id: None,
+            channel_id: None,
         };
         let json = serde_json::to_value(&conversation).expect("serialize conversation");
         assert_eq!(json["mode"], "code");
@@ -2340,6 +2390,10 @@ mod tests {
             conversation_mode_or_default(Some(" code ")),
             CONVERSATION_MODE_CODE,
             "espaços em volta do modo são tolerados"
+        );
+        assert_eq!(
+            conversation_mode_or_default(Some("agent")),
+            CONVERSATION_MODE_AGENT
         );
         for invalid in ["Chat", "CODE", "codex", "workspace", "projeto"] {
             assert_eq!(

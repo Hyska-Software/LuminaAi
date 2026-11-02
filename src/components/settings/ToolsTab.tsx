@@ -10,7 +10,7 @@ import type {
 } from '@/lib/types';
 import { MAX_STEPS_LIMIT, useAppStore, useUiStore } from '@/lib/store';
 import { cn, copyText } from '@/lib/utils';
-import { Badge, Button, IconButton, NativeSelect, Slider, Spinner, Switch } from '@/components/ui';
+import { Badge, Button, IconButton, Input, NativeSelect, Slider, Spinner, Switch } from '@/components/ui';
 import { countSkillsByOrigin, skillSourceMeta } from '@/components/skills/sources';
 import { SettingRow, SettingsBlock, SettingsSection } from './shared';
 
@@ -62,6 +62,7 @@ export function ToolsTab() {
   const [maxSteps, setMaxSteps] = useState(settings.maxSteps);
   const [temperature, setTemperature] = useState(settings.temperature ?? 0.7);
   const [timeoutSecs, setTimeoutSecs] = useState(settings.codeTimeoutSecs);
+  const [dockerImage, setDockerImage] = useState(settings.dockerImage ?? 'node:22-bookworm');
   const [environment, setEnvironment] = useState<CodeEnvironmentStatus | null>(null);
   const [environmentLoading, setEnvironmentLoading] = useState(true);
   const [environmentError, setEnvironmentError] = useState<string | null>(null);
@@ -73,6 +74,10 @@ export function ToolsTab() {
     if (settings.temperature != null) setTemperature(settings.temperature);
   }, [settings.temperature]);
   useEffect(() => setTimeoutSecs(settings.codeTimeoutSecs), [settings.codeTimeoutSecs]);
+  useEffect(
+    () => setDockerImage(settings.dockerImage ?? 'node:22-bookworm'),
+    [settings.dockerImage],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -97,6 +102,7 @@ export function ToolsTab() {
   }, [environmentAttempt]);
 
   const temperatureEnabled = settings.temperature != null;
+  const executionEnvironment = settings.executionEnvironment ?? 'local';
   const codeDefaultPermissionMode: PermissionMode =
     settings.codeDefaultPermissionMode ?? CODE_DEFAULT_PERMISSION_FALLBACK;
   const cacheSettings: CacheSettings = {
@@ -319,6 +325,81 @@ export function ToolsTab() {
             aria-label="Tempo limite de execução"
           />
         </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Sandbox de comandos"
+        description="Onde os comandos do agente de código rodam. O padrão executa nesta máquina; Docker isola o processo com o workspace montado em /workspace."
+      >
+        <SettingRow
+          label="Ambiente"
+          description="O terminal interativo do painel continua local; esta opção vale para as ferramentas run_command/run_checks e jobs do agente."
+        >
+          <NativeSelect
+            value={executionEnvironment}
+            aria-label="Ambiente de execução dos comandos do agente"
+            onChange={(event) =>
+              void saveSettings({
+                executionEnvironment: event.target.value === 'docker' ? 'docker' : 'local',
+              })
+            }
+          >
+            <option value="local">Este computador</option>
+            <option value="docker">Docker</option>
+          </NativeSelect>
+        </SettingRow>
+
+        {executionEnvironment === 'docker' ? (
+          <>
+            <SettingRow
+              vertical
+              label="Imagem Docker"
+              description="Precisa existir no Docker local (o app não baixa imagens automaticamente). Ex.: node:22-bookworm, python:3.12, ubuntu:24.04."
+            >
+              <Input
+                value={dockerImage}
+                maxLength={200}
+                aria-label="Imagem Docker dos comandos do agente"
+                placeholder="node:22-bookworm"
+                onChange={(event) => setDockerImage(event.target.value)}
+                onBlur={() => {
+                  const value = dockerImage.trim();
+                  if (value && value !== settings.dockerImage) {
+                    void saveSettings({ dockerImage: value });
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    const value = dockerImage.trim();
+                    if (value && value !== settings.dockerImage) {
+                      void saveSettings({ dockerImage: value });
+                    }
+                  }
+                }}
+              />
+            </SettingRow>
+            <SettingRow
+              label="Rede no contêiner"
+              description="Desligado, o comando roda com --network none. Ligue apenas quando a tarefa precisar baixar dependências ou acessar a internet."
+            >
+              <Switch
+                checked={settings.dockerNetwork ?? false}
+                onCheckedChange={(checked) => void saveSettings({ dockerNetwork: checked })}
+                aria-label="Permitir rede no contêiner Docker"
+              />
+            </SettingRow>
+            <SettingsBlock>
+              <div className="flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft p-3">
+                <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
+                <p className="text-[11px] leading-relaxed text-warning">
+                  Docker Desktop/Engine precisa estar instalado e rodando. O workspace é montado
+                  em <code>/workspace</code>; o contêiner pode ler e alterar esses arquivos, mas
+                  não tem acesso ao resto do computador. Ainda assim, revise o que o agente executa.
+                </p>
+              </div>
+            </SettingsBlock>
+          </>
+        ) : null}
       </SettingsSection>
 
       <SettingsSection

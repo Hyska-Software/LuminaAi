@@ -10,6 +10,7 @@
 //! - `db`:        SQLite persistence
 //! - `commands`:  Tauri command surface used by the React app
 
+mod agents;
 mod catalog;
 mod commands;
 mod config;
@@ -67,6 +68,15 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             let data_dir = crate::config::data_dir(app.handle())
                 .expect("failed to resolve the app data directory");
             app.manage(crate::update::UpdateState::new(data_dir));
+            // Agent routines run only while the app is open. A tick every 30s
+            // keeps the schedule responsive without a cloud worker.
+            let scheduler = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    crate::commands::routines::scheduler_tick(scheduler.clone()).await;
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -81,6 +91,39 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::oauth::openai_login_cancel,
             commands::oauth::openai_sign_out,
             commands::oauth::openai_auth_status,
+            commands::agents::list_agents,
+            commands::agents::get_agent,
+            commands::agents::create_agent,
+            commands::agents::update_agent,
+            commands::agents::set_agent_pinned,
+            commands::agents::archive_agent,
+            commands::agents::restore_agent,
+            commands::agents::delete_agent,
+            commands::agents::list_agent_threads,
+            commands::agents::list_agent_memories,
+            commands::agents::create_agent_memory,
+            commands::agents::update_agent_memory,
+            commands::agents::delete_agent_memory,
+            commands::agents::clear_agent_memories,
+            commands::agents::get_agent_usage,
+            commands::agents::list_agent_usage,
+            commands::agents::duplicate_agent,
+            commands::agents::export_agent,
+            commands::agents::import_agent,
+            commands::agents::suggest_agent,
+            commands::agents::revise_agent,
+            commands::routines::list_agent_routines,
+            commands::routines::create_agent_routine,
+            commands::routines::update_agent_routine,
+            commands::routines::set_agent_routine_enabled,
+            commands::routines::delete_agent_routine,
+            commands::routines::run_agent_routine_now,
+            commands::channels::list_agent_channels,
+            commands::channels::create_agent_channel,
+            commands::channels::update_agent_channel,
+            commands::channels::delete_agent_channel,
+            commands::channels::list_agent_channel_messages,
+            commands::channels::post_agent_channel_message,
             commands::conversations::list_conversations,
             commands::conversations::list_subagent_conversations,
             commands::conversations::create_conversation,

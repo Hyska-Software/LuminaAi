@@ -18,7 +18,9 @@ export interface GoalContinuationInput {
   streaming: boolean;
   activeId: string | null;
   conversationId: string;
-  layoutMode: 'chat' | 'code';
+  layoutMode: 'chat' | 'code' | 'agent';
+  /** Agentes só rodam o loop de objetivo quando a thread tem workspace. */
+  hasWorkspace?: boolean;
 }
 
 /**
@@ -32,7 +34,10 @@ export interface GoalContinuationInput {
 export function shouldContinueGoal(input: GoalContinuationInput): boolean {
   const { goal } = input;
   if (!goal) return false;
-  if (input.layoutMode !== 'code') return false;
+  const codeCapable =
+    input.layoutMode === 'code' ||
+    (input.layoutMode === 'agent' && input.hasWorkspace === true);
+  if (!codeCapable) return false;
   if (input.activeId !== input.conversationId) return false;
   if (input.streaming) return false;
   if (input.planMode) return false;

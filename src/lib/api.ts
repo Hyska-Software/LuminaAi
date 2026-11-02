@@ -3,6 +3,20 @@
  */
 import { Channel, invoke } from '@tauri-apps/api/core';
 import type {
+  Agent,
+  AgentChannel,
+  AgentChannelInput,
+  AgentChannelMessage,
+  AgentChannelPostResult,
+  AgentInput,
+  AgentMemory,
+  AgentMemoryInput,
+  AgentRevision,
+  AgentRoutine,
+  AgentRoutineInput,
+  AgentThreadCursor,
+  AgentUsage,
+  AgentThreadPage,
   AppInfo,
   ApprovalDecision,
   ApprovalRule,
@@ -13,6 +27,7 @@ import type {
   ArtifactPreview,
   ArtifactThumbnail,
   AskUserAnswer,
+  McpStatus,
   AttachmentInfo,
   CatalogView,
   CacheStatsView,
@@ -126,13 +141,80 @@ export const api = {
     providerId?: string,
     modelId?: string,
     mode?: ConversationMode,
+    agentId?: string,
   ) =>
     invoke<Conversation>('create_conversation', {
       title: title ?? null,
       providerId: providerId ?? null,
       modelId: modelId ?? null,
       mode: mode ?? null,
+      agentId: agentId ?? null,
     }),
+  listAgents: (includeArchived = false) =>
+    invoke<Agent[]>('list_agents', { includeArchived }),
+  getAgent: (agentId: string) => invoke<Agent>('get_agent', { agentId }),
+  createAgent: (input: AgentInput) => invoke<Agent>('create_agent', { input }),
+  updateAgent: (agentId: string, input: AgentInput) =>
+    invoke<Agent>('update_agent', { agentId, input }),
+  setAgentPinned: (agentId: string, pinned: boolean) =>
+    invoke<Agent>('set_agent_pinned', { agentId, pinned }),
+  archiveAgent: (agentId: string) => invoke<Agent>('archive_agent', { agentId }),
+  restoreAgent: (agentId: string) => invoke<Agent>('restore_agent', { agentId }),
+  deleteAgent: (agentId: string) => invoke<void>('delete_agent', { agentId }),
+  duplicateAgent: (agentId: string) => invoke<Agent>('duplicate_agent', { agentId }),
+  exportAgent: (agentId: string) => invoke<string | null>('export_agent', { agentId }),
+  importAgent: () => invoke<Agent | null>('import_agent'),
+  suggestAgent: (prompt: string, providerId: string, modelId: string) =>
+    invoke<AgentInput>('suggest_agent', { prompt, providerId, modelId }),
+  reviseAgent: (agentId: string, prompt: string, providerId: string, modelId: string) =>
+    invoke<AgentRevision>('revise_agent', { agentId, prompt, providerId, modelId }),
+  listAgentThreads: (
+    agentId: string,
+    cursor?: AgentThreadCursor | null,
+    limit?: number,
+  ) =>
+    invoke<AgentThreadPage>('list_agent_threads', {
+      agentId,
+      cursor: cursor ?? null,
+      limit: limit ?? null,
+    }),
+  listAgentMemories: (agentId: string) =>
+    invoke<AgentMemory[]>('list_agent_memories', { agentId }),
+  createAgentMemory: (agentId: string, input: AgentMemoryInput) =>
+    invoke<AgentMemory>('create_agent_memory', { agentId, input }),
+  updateAgentMemory: (agentId: string, memoryId: string, input: AgentMemoryInput) =>
+    invoke<AgentMemory>('update_agent_memory', { agentId, memoryId, input }),
+  deleteAgentMemory: (agentId: string, memoryId: string) =>
+    invoke<void>('delete_agent_memory', { agentId, memoryId }),
+  clearAgentMemories: (agentId: string) =>
+    invoke<number>('clear_agent_memories', { agentId }),
+  getAgentUsage: (agentId: string) =>
+    invoke<AgentUsage>('get_agent_usage', { agentId }),
+  listAgentUsage: () => invoke<AgentUsage[]>('list_agent_usage'),
+  listAgentRoutines: (agentId: string) =>
+    invoke<AgentRoutine[]>('list_agent_routines', { agentId }),
+  createAgentRoutine: (agentId: string, input: AgentRoutineInput) =>
+    invoke<AgentRoutine>('create_agent_routine', { agentId, input }),
+  updateAgentRoutine: (routineId: string, input: AgentRoutineInput) =>
+    invoke<AgentRoutine>('update_agent_routine', { routineId, input }),
+  setAgentRoutineEnabled: (routineId: string, enabled: boolean) =>
+    invoke<AgentRoutine>('set_agent_routine_enabled', { routineId, enabled }),
+  deleteAgentRoutine: (routineId: string) =>
+    invoke<void>('delete_agent_routine', { routineId }),
+  runAgentRoutineNow: (routineId: string) =>
+    invoke<AgentRoutine>('run_agent_routine_now', { routineId }),
+  listAgentChannels: () => invoke<AgentChannel[]>('list_agent_channels'),
+  createAgentChannel: (input: AgentChannelInput) =>
+    invoke<AgentChannel>('create_agent_channel', { input }),
+  updateAgentChannel: (channelId: string, input: AgentChannelInput) =>
+    invoke<AgentChannel>('update_agent_channel', { channelId, input }),
+  deleteAgentChannel: (channelId: string) =>
+    invoke<void>('delete_agent_channel', { channelId }),
+  listAgentChannelMessages: (channelId: string) =>
+    invoke<AgentChannelMessage[]>('list_agent_channel_messages', { channelId }),
+  postAgentChannelMessage: (channelId: string, content: string) =>
+    invoke<AgentChannelPostResult>('post_agent_channel_message', { channelId, content }),
+  mcpStatus: () => invoke<McpStatus>('mcp_status'),
   getConversation: (id: string) =>
     invoke<ConversationDetail | null>('get_conversation', { id }),
   /** Cache telemetry aggregate for the context-meter indicator. */

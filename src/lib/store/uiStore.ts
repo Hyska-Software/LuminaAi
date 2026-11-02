@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_SETTINGS_TAB, isSettingsTabId, type SettingsTabId } from '../settingsTabs';
-import type { Artifact, ThemeMode } from '../types';
+import type { AgentInput, Artifact, ThemeMode } from '../types';
 
 /**
  * Main content surface. `skills` and `library` replace the chat column (the
@@ -16,7 +16,12 @@ export type MainView = 'chat' | 'skills' | 'library';
  * docs/goals/chat-code-layout/PLAN.md. The mode is persisted and switched from
  * the title bar.
  */
-export type LayoutMode = 'chat' | 'code';
+export type LayoutMode = 'chat' | 'code' | 'agent';
+
+/** Dialog de criação/edição de agente (volátil). */
+export type AgentEditorState =
+  | { mode: 'create'; draft?: AgentInput }
+  | { mode: 'edit'; agentId: string };
 
 /**
  * Surface shown inside the Code layout's center column. The Code workbench has
@@ -165,8 +170,14 @@ export function clampSidePanelWidth(width: number): number {
 
 interface UiState {
   theme: ThemeMode;
-  /** Active application layout (Chat | Code) — persisted (PLAN §2). */
+  /** Active application layout (Chat | Code | Agentes) — persisted (PLAN §2). */
   layoutMode: LayoutMode;
+  /** Agente selecionado no layout Agentes (persistido). */
+  activeAgentId: string | null;
+  /** Canal compartilhado selecionado (`null` = nenhum). */
+  activeChannelId: string | null;
+  /** Diálogo de criação/edição de agente (volátil). */
+  agentEditor: AgentEditorState | null;
   /** Center surface inside the Code layout; reset to `session` on demand. */
   codeView: CodeView;
   /** Diff aberto como aba central (`null` = nenhum; pode ficar em segundo plano). */
@@ -222,8 +233,12 @@ interface UiState {
   artifacts: Artifact[];
 
   setTheme: (theme: ThemeMode) => void;
-  /** Switches the whole application between the Chat and Code layouts. */
+  /** Switches the whole application between the Chat, Code and Agentes layouts. */
   setLayoutMode: (mode: LayoutMode) => void;
+  setActiveAgentId: (agentId: string | null) => void;
+  setActiveChannelId: (channelId: string | null) => void;
+  openAgentEditor: (target: AgentEditorState) => void;
+  closeAgentEditor: () => void;
   /** Switches the Code center between the agent session and the Skills page. */
   setCodeView: (view: CodeView) => void;
   /** Abre o diff de um arquivo como aba central (codeView vira diff). */
@@ -351,6 +366,9 @@ export const useUiStore = create<UiState>()(
     (set, get) => ({
       theme: 'system',
       layoutMode: 'chat',
+      activeAgentId: null,
+      activeChannelId: null,
+      agentEditor: null,
       codeView: 'session',
       codeDiffTab: null,
       codeFileTabs: [],
@@ -386,7 +404,22 @@ export const useUiStore = create<UiState>()(
         get().applyTheme();
       },
       setLayoutMode: (layoutMode) =>
-        set({ layoutMode: layoutMode === 'code' ? 'code' : 'chat' }),
+        set({
+          layoutMode:
+            layoutMode === 'code' ? 'code' : layoutMode === 'agent' ? 'agent' : 'chat',
+        }),
+      setActiveAgentId: (activeAgentId) =>
+        set((state) => ({
+          activeAgentId,
+          activeChannelId: activeAgentId ? null : state.activeChannelId,
+        })),
+      setActiveChannelId: (activeChannelId) =>
+        set((state) => ({
+          activeChannelId,
+          activeAgentId: activeChannelId ? null : state.activeAgentId,
+        })),
+      openAgentEditor: (agentEditor) => set({ agentEditor }),
+      closeAgentEditor: () => set({ agentEditor: null }),
       setCodeView: (codeView) =>
         set({
           codeView:
@@ -655,6 +688,8 @@ export const useUiStore = create<UiState>()(
       partialize: (state) => ({
         theme: state.theme,
         layoutMode: state.layoutMode,
+        activeAgentId: state.activeAgentId,
+        activeChannelId: state.activeChannelId,
         codePanelOpen: state.codePanelOpen,
         sidebarOpen: state.sidebarOpen,
         sidebarWidth: state.sidebarWidth,
@@ -686,7 +721,16 @@ export const useUiStore = create<UiState>()(
         return {
           ...current,
           ...stored,
-          layoutMode: stored.layoutMode === 'code' ? 'code' : 'chat',
+          layoutMode:
+            stored.layoutMode === 'code'
+              ? 'code'
+              : stored.layoutMode === 'agent'
+                ? 'agent'
+                : 'chat',
+          activeAgentId: validWorkspaceId(stored.activeChannelId)
+            ? null
+            : validWorkspaceId(stored.activeAgentId),
+          activeChannelId: validWorkspaceId(stored.activeChannelId),
           codePanelOpen:
             typeof stored.codePanelOpen === 'boolean' ? stored.codePanelOpen : current.codePanelOpen,
           sidebarWidth: clampSidebarWidth(stored.sidebarWidth ?? current.sidebarWidth),

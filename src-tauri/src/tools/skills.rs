@@ -760,9 +760,13 @@ pub fn run_list(rt: &ToolRuntime) -> ToolOutcome {
     match catalog_with_roots(&rt.data_dir, &rt.skills_roots) {
         Ok(skills) => {
             let disabled = rt.settings.disabled_skills.as_slice();
+            let allowed = rt.options.allowed_skills.as_deref();
             let active: Vec<&Skill> = skills
                 .iter()
                 .filter(|skill| is_enabled(&skill.name, disabled))
+                .filter(|skill| {
+                    allowed.map_or(true, |names| names.iter().any(|name| name == &skill.name))
+                })
                 .collect();
             let hidden = skills.len() - active.len();
             let items: Vec<Value> = active
@@ -819,8 +823,12 @@ pub fn run_read(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
                     &rt.skills_roots,
                 )
                 .map(|skills| {
+                    let allowed = rt.options.allowed_skills.as_deref();
                     skills
                         .iter()
+                        .filter(|skill| {
+                            allowed.map_or(true, |names| names.iter().any(|name| name == &skill.name))
+                        })
                         .map(|skill| skill.name.clone())
                         .collect::<Vec<_>>()
                         .join(", ")
@@ -849,6 +857,14 @@ pub fn run_read(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
              somente as skills ativas.",
             skill.name
         ));
+    }
+    if let Some(allowed) = rt.options.allowed_skills.as_deref() {
+        if !allowed.iter().any(|name| name == &skill.name) {
+            return ToolOutcome::error(format!(
+                "a skill `{}` não está autorizada para este agente",
+                skill.name
+            ));
+        }
     }
 
     let files = match skill.files() {

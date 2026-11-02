@@ -1,11 +1,11 @@
-import { Code, MessageSquare, type LucideIcon } from 'lucide-react';
+import { Bot, Code, MessageSquare, type LucideIcon } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useUiStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { useReduceMotion } from './hooks';
 
 interface LayoutModeOption {
-  value: 'chat' | 'code';
+  value: 'chat' | 'code' | 'agent';
   label: string;
   title: string;
   icon: LucideIcon;
@@ -14,6 +14,7 @@ interface LayoutModeOption {
 const MODES: readonly LayoutModeOption[] = [
   { value: 'chat', label: 'Chat', title: 'Layout de conversa', icon: MessageSquare },
   { value: 'code', label: 'Code', title: 'Layout de código', icon: Code },
+  { value: 'agent', label: 'Agentes', title: 'Layout de agentes', icon: Bot },
 ];
 
 /**

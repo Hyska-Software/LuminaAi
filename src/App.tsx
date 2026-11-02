@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { Toaster, toast } from 'sonner';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { listen } from '@tauri-apps/api/event';
 import { AppShell } from '@/components/layout/AppShell';
 import { WorkspaceCenter } from '@/components/layout/WorkspaceCenter';
+import { AgentSidebar } from '@/components/agents/AgentSidebar';
 import { CodePanel, CodeSidebar } from '@/components/code';
 import { SettingsDialog } from '@/components/settings/SettingsDialog';
 import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
@@ -10,11 +12,12 @@ import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
 import { SourcesPanel } from '@/components/chat/SourcesPanel';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { TooltipProvider } from '@/components/ui';
-import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { useAgentStore, useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel';
 import { resolveHotkey, type HotkeyCommand } from '@/lib/hotkeys';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { SplashScreen } from '@/components/SplashScreen';
+import type { AgentRoutineRunEvent } from '@/lib/types';
 import { useUpdateCheck } from '@/components/layout/useUpdateCheck';
 
 /** Ensures bootstrap runs once even under React StrictMode double-effects. */
@@ -32,6 +35,11 @@ function bootstrap(): Promise<void> {
     }
     applyFontScale(settings.fontScale);
     await useChatStore.getState().init();
+    await useAgentStore.getState().initialize();
+    // Persisted agent FIFOs resume when the app opens straight into Agentes.
+    if (useUiStore.getState().layoutMode === 'agent') {
+      await useChatStore.getState().drainAgentQueues();
+    }
   })();
   return bootstrapPromise;
 }
@@ -54,7 +62,12 @@ function runHotkey(command: HotkeyCommand, event: KeyboardEvent): void {
       ui.toggleSidebar();
       break;
     case 'new-conversation':
-      void chat.startNewConversation();
+      if (ui.layoutMode === 'agent') {
+        const agentId = ui.activeAgentId;
+        if (agentId) void chat.startNewConversation('agent', { agentId });
+      } else {
+        void chat.startNewConversation();
+      }
       break;
     case 'open-settings':
       ui.openSettings();
@@ -69,6 +82,14 @@ function runHotkey(command: HotkeyCommand, event: KeyboardEvent): void {
       // Chat layout is a separate surface the user switches explicitly.
       if (ui.layoutMode === 'code' && ui.codeView === 'skills') {
         ui.setCodeView('session');
+        break;
+      }
+      if (ui.layoutMode === 'agent') {
+        if (chat.activeId) {
+          chat.clearActiveConversation();
+        } else {
+          ui.setActiveAgentId(null);
+        }
         break;
       }
       ui.setLayoutMode('chat');
@@ -93,6 +114,16 @@ export default function App() {
   const theme = useUiStore((state) => state.theme);
   const layoutMode = useUiStore((state) => state.layoutMode);
   const codePanelOpen = useUiStore((state) => state.codePanelOpen);
+  const artifactPanelOpen = useUiStore((state) => state.artifactPanelOpen);
+  const sourcesPanelOpen = useUiStore((state) => state.sourcesPanelOpen);
+  const activeConversation = useChatStore((state) => {
+    const id = state.activeId;
+    return id ? state.conversations.find((conversation) => conversation.id === id) : undefined;
+  });
+  const agentWorkspaceSession =
+    layoutMode === 'agent' &&
+    activeConversation?.mode === 'agent' &&
+    Boolean(activeConversation.workspaceId);
   const viewportWidth = useViewportWidth();
   const settingsTheme = useAppStore((state) => state.settings.theme);
   const fontScale = useAppStore((state) => state.settings.fontScale);
@@ -129,6 +160,44 @@ export default function App() {
   // Automatic update checks (hydrate the cached release immediately, check
   // once the bootstrap is done and then once per day while the app is open).
   useUpdateCheck(ready);
+
+  // Routine runs happen in the Rust scheduler, outside the renderer. Refresh
+  // the conversation list and surface the outcome without stealing the active
+  // thread.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<AgentRoutineRunEvent>('lumina:agent-routine-run', (event) => {
+      if (disposed) return;
+      const run = event.payload;
+      if (run.status === 'ok') {
+        toast.success(`Rotina concluída: ${run.title}`, {
+          description: 'O resultado está na conversa da rotina.',
+        });
+      } else if (run.status === 'error' || run.status === 'blocked') {
+        toast.error(`Rotina falhou: ${run.title}`, {
+          description: run.error ?? undefined,
+        });
+      }
+      window.dispatchEvent(new CustomEvent('lumina:agent-routine-run', { detail: run }));
+      void useChatStore.getState().refreshConversations();
+      void useAgentStore.getState().refresh();
+      if (run.conversationId && useChatStore.getState().activeId === run.conversationId) {
+        void useChatStore.getState().openConversation(run.conversationId);
+      }
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* event bridge unavailable outside Tauri */
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Chat and Code have separate session lists; switching layouts restores each
   // layout's own active session instead of leaking the other one.
@@ -237,11 +306,19 @@ export default function App() {
       <ErrorBoundary>
         <AppShell
           sidebar={
-            layoutMode === 'code' ? (context) => <CodeSidebar {...context} /> : undefined
+            layoutMode === 'code' ? (
+              (context) => <CodeSidebar {...context} />
+            ) : layoutMode === 'agent' ? (
+              (context) => <AgentSidebar {...context} />
+            ) : undefined
           }
-          sidebarLabel={layoutMode === 'code' ? 'Sessões' : 'Conversas'}
+          sidebarLabel={
+            layoutMode === 'code' ? 'Sessões' : layoutMode === 'agent' ? 'Agentes' : 'Conversas'
+          }
           rightPanel={
             layoutMode === 'code' ? (
+              <CodePanel />
+            ) : agentWorkspaceSession && !artifactPanelOpen && !sourcesPanelOpen ? (
               <CodePanel />
             ) : (
               <>
@@ -253,7 +330,8 @@ export default function App() {
           // The Code panel only docks from this width up (see CodePanel); the
           // chat mirrors that with its top-right corner.
           rightPanelOpen={
-            layoutMode === 'code' &&
+            (layoutMode === 'code' ||
+              (agentWorkspaceSession && !artifactPanelOpen && !sourcesPanelOpen)) &&
             codePanelOpen &&
             viewportWidth >= SIDE_PANEL_DOCK_MIN_VIEWPORT
           }

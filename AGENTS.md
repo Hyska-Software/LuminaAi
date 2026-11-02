@@ -1,6 +1,6 @@
 # AGENTS.md — como trabalhar neste repositório
 
-> Leia `docs/ARCHITECTURE.md` (visão técnica), `docs/FILES.md` (arquivos, execução de código e skills), `docs/DESIGN.md` (UI/UX), `docs/GENUI.md` (UI generativa/interativa do agente) e `docs/MODELS.md` (provedores/raciocínio) antes de implementar.
+> Leia `docs/ARCHITECTURE.md` (visão técnica), `docs/AGENTS.md` (layout Agentes: memória, workspace, fila, rotinas e canais), `docs/FILES.md` (arquivos, execução de código e skills), `docs/DESIGN.md` (UI/UX), `docs/GENUI.md` (UI generativa/interativa do agente) e `docs/MODELS.md` (provedores/raciocínio) antes de implementar.
 
 # COMENTARIOS E ANOTAÇÕES DEVEM SER SEMPRE EM INGLES, O CÓDIGO TAMBEM DEVE SER SEMPRE EM INGLES PARA CONSISTENCIA COM O PADRÃO DA INDUSTRIA
 
@@ -35,6 +35,7 @@ Observação: `cargo` usa um target dir compartilhado. Se aparecer `Blocking wai
 | UI núcleo | `src/components/layout/**`, `src/components/chat/**`, `src/components/composer/**` | ui-core |
 | Code workbench | `src/components/code/**` | ui-code |
 | Cards do agente (harness) | `src/components/agent/**` | ui-agent |
+| Layout Agentes | `src/components/agents/**`, `src/lib/store/agentStore.ts`, `src/lib/store/agentQueueStore.ts`, `src-tauri/src/agents/**`, `src-tauri/src/commands/{agents,routines,channels}.rs`, `docs/AGENTS.md` | ui-agent + Lead |
 | UI sistemas | `src/components/ui/**`, `src/components/models/**`, `src/components/settings/**`, `src/components/artifacts/**`, `src/components/skills/**`, `src/components/genui/**`, `src/components/palette/**` | ui-systems |
 | Atualizações | `src-tauri/src/update/**`, `src-tauri/src/commands/update.rs`, `src/lib/store/updateStore.ts` | Lead |
 

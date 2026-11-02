@@ -153,6 +153,19 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     // `code_default_permission_mode` é enum tipado: valores inválidos no JSON
     // são tratados na leitura (`parse_settings_json`).
     settings.code_max_steps = settings.code_max_steps.clamp(1, MAX_STEPS_LIMIT);
+    settings.execution_environment = match settings
+        .execution_environment
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "docker" => "docker".to_string(),
+        _ => "local".to_string(),
+    };
+    settings.docker_image = settings.docker_image.trim().to_string();
+    if settings.docker_image.is_empty() || settings.docker_image.chars().count() > 200 {
+        settings.docker_image = defaults.docker_image;
+    }
     settings.spill_retention_days = settings
         .spill_retention_days
         .clamp(SPILL_RETENTION_MIN_DAYS, SPILL_RETENTION_MAX_DAYS);
@@ -1764,6 +1777,9 @@ mod tests {
         // Shell é opt-in por sessão, mas o default do app já vem ligado: cada
         // comando fora do workspace continua passando pela política de aprovação.
         assert!(defaults.shell_enabled);
+        assert_eq!(defaults.execution_environment, "local");
+        assert_eq!(defaults.docker_image, "node:22-bookworm");
+        assert!(!defaults.docker_network);
         assert!(defaults.auto_compact);
         assert_eq!(defaults.spill_retention_days, 30);
         assert_eq!(defaults.approval_timeout_secs, 600);
@@ -1867,6 +1883,23 @@ mod tests {
         assert!(!normalized.trust_workspaces_by_default);
         assert_eq!(normalized.diff_open_mode, "tab");
     }
+    #[test]
+    fn execution_environment_and_docker_image_are_normalized() {
+        let mut settings = Settings::default();
+        settings.execution_environment = " DOCKER ".into();
+        settings.docker_image = "  python:3.12  ".into();
+        let normalized = normalize_settings(settings);
+        assert_eq!(normalized.execution_environment, "docker");
+        assert_eq!(normalized.docker_image, "python:3.12");
+
+        let mut invalid = Settings::default();
+        invalid.execution_environment = "cloud".into();
+        invalid.docker_image = "   ".into();
+        let normalized = normalize_settings(invalid);
+        assert_eq!(normalized.execution_environment, "local");
+        assert_eq!(normalized.docker_image, "node:22-bookworm");
+    }
+
     #[test]
     fn diff_open_mode_normalizes_to_tab_or_panel() {
         let mut settings = Settings::default();

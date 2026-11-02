@@ -17,6 +17,7 @@ pub mod code_exec;
 pub mod create_file;
 pub mod fetch_url;
 pub mod genui;
+pub mod memory;
 pub mod pipeline;
 pub mod registry;
 pub mod skills;
@@ -71,6 +72,14 @@ impl ToolOutcome {
     }
 }
 
+/// `None` inherits every tool; `Some(list)` is the agent allowlist.
+pub fn tool_allowed(options: &TurnOptions, name: &str) -> bool {
+    options
+        .allowed_tools
+        .as_ref()
+        .map_or(true, |list| list.iter().any(|allowed| allowed == name))
+}
+
 /// Tool definitions exposed to the model for the current turn.
 pub fn definitions(options: &TurnOptions) -> Vec<ToolDefinition> {
     let mut tools = Vec::new();
@@ -97,11 +106,23 @@ pub fn definitions(options: &TurnOptions) -> Vec<ToolDefinition> {
     tools.push(artifact_library::read_definition());
     // Sempre disponível: o agente valida o JSON do bloco `ui` antes de emitir.
     tools.push(genui::definition());
+    if options.agent_memory {
+        tools.push(memory::definition());
+    }
+    // Agent capabilities restrict the catalog **after** the global gates: a
+    // persona can remove tools, never add ones the app disabled globally.
+    tools.retain(|tool| tool_allowed(options, &tool.name));
     tools
 }
 
 /// Execute a tool call. Must never panic: failures are returned as `ToolOutcome::error`.
 pub async fn execute(rt: &ToolRuntime, call: &ToolCallRecord) -> ToolOutcome {
+    if !tool_allowed(&rt.options, &call.name) {
+        return ToolOutcome::error(format!(
+            "a ferramenta `{}` não está autorizada para este agente",
+            call.name
+        ));
+    }
     let arguments = match parse_arguments(&call.arguments) {
         Ok(arguments) => arguments,
         Err(error) => return ToolOutcome::error(error),
@@ -130,6 +151,8 @@ pub async fn execute(rt: &ToolRuntime, call: &ToolCallRecord) -> ToolOutcome {
         "read_artifact" => artifact_library::run_read(rt, &arguments).await,
         // Validação local do bloco `ui`; não depende de flags do turno.
         "validate_ui" => genui::run(&arguments),
+        // Durable agent memory (only for agent turns with memory enabled).
+        "memory" => memory::run(rt, &arguments),
         other => ToolOutcome::error(format!("ferramenta desconhecida: {other}")),
     };
     truncate_outcome(outcome)
@@ -276,6 +299,23 @@ mod tests {
                 "validate_ui"
             ]
         );
+    }
+
+    #[test]
+    fn agent_allowlist_filters_the_catalog_and_blocks_hallucinated_calls() {
+        let mut options = TurnOptions::default();
+        options.allowed_tools = Some(vec!["web_search".to_string()]);
+        let names: Vec<String> = definitions(&options).into_iter().map(|tool| tool.name).collect();
+        assert_eq!(names, vec!["web_search"]);
+
+        options.allowed_tools = Some(Vec::new());
+        assert!(definitions(&options).is_empty());
+
+        options.allowed_tools = None;
+        options.agent_memory = true;
+        assert!(definitions(&options)
+            .iter()
+            .any(|tool| tool.name == "memory"));
     }
 
     #[tokio::test]

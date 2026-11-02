@@ -1,0 +1,187 @@
+import { useEffect, useState } from 'react';
+import { ArrowUpRight, MessageSquarePlus, Pencil, Sparkles } from 'lucide-react';
+
+import { AgentAvatar } from './AgentAvatar';
+import {
+  formatUsageCost,
+  formatUsageTokens,
+  modelLabel,
+  relativeTime,
+} from './agentUtils';
+import { ChatView } from '@/components/chat/ChatView';
+import { Button } from '@/components/ui';
+import { api } from '@/lib/api';
+import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import type { Agent, AgentUsage, Conversation } from '@/lib/types';
+
+const PERMISSION_LABELS: Record<string, string> = {
+  read_only: 'Leitura',
+  review: 'Revisar',
+  edit: 'Editar',
+  autonomous: 'Autônomo',
+};
+
+function fillComposer(text: string) {
+  window.dispatchEvent(new CustomEvent<string>('lumina:suggest', { detail: text }));
+}
+
+/** Billing snapshot of the persona; refreshed after edits and agent switches. */
+function useAgentUsage(agentId: string, updatedAt: number): AgentUsage | null {
+  const [usage, setUsage] = useState<AgentUsage | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    void api
+      .getAgentUsage(agentId)
+      .then((value) => {
+        if (!disposed) setUsage(value);
+      })
+      .catch(() => {
+        if (!disposed) setUsage(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [agentId, updatedAt]);
+  return usage;
+}
+
+export function AgentWelcome({
+  agent,
+  threads,
+  onNewConversation,
+  onEdit,
+  onOpenThread,
+}: {
+  agent: Agent;
+  threads: Conversation[];
+  onNewConversation: () => void;
+  onEdit: () => void;
+  onOpenThread: (id: string) => void;
+}) {
+  const providers = useAppStore((state) => state.providers);
+  const usage = useAgentUsage(agent.id, agent.updatedAt);
+  return (
+    <div className="mx-auto flex w-full max-w-2xl flex-col items-center px-6 pb-6 pt-10 text-center sm:pt-14">
+      <AgentAvatar emoji={agent.emoji} size="lg" className="rounded-2xl" />
+      <h1 className="mt-4 text-2xl font-semibold tracking-tight text-foreground">{agent.name}</h1>
+      <p className="mt-1 text-[13px] text-foreground-muted">
+        {agent.role}
+        {agent.department ? ` · ${agent.department}` : ''}
+      </p>
+      {agent.description ? (
+        <p className="mt-4 max-w-lg text-[14px] leading-relaxed text-foreground-muted">
+          {agent.description}
+        </p>
+      ) : null}
+      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+        <span className="rounded-full border border-border bg-surface-raised px-3 py-1 text-[11px] text-foreground-muted">
+          {modelLabel(providers, agent.providerId, agent.modelId)}
+        </span>
+        {agent.workspaceId ? (
+          <span className="rounded-full border border-accent/30 bg-accent-soft px-3 py-1 text-[11px] text-accent">
+            Workspace · {PERMISSION_LABELS[agent.permissionMode] ?? agent.permissionMode}
+          </span>
+        ) : null}
+        {usage && usage.turns > 0 ? (
+          <span className="rounded-full border border-border bg-surface-raised px-3 py-1 text-[11px] text-foreground-muted">
+            {formatUsageTokens(usage.totalTokens)} tokens · {formatUsageCost(usage.cost)}
+          </span>
+        ) : null}
+        <Button size="sm" onClick={onNewConversation}>
+          <MessageSquarePlus className="mr-1.5 size-4" />
+          Nova conversa
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onEdit}>
+          <Pencil className="mr-1.5 size-3.5" />
+          Editar agente
+        </Button>
+      </div>
+
+      {agent.starters.length > 0 ? (
+        <div className="mt-8 w-full">
+          <p className="mb-2 flex items-center justify-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-foreground-subtle">
+            <Sparkles className="size-3.5" />
+            Comece com
+          </p>
+          <div className="flex flex-wrap justify-center gap-2">
+            {agent.starters.map((starter) => (
+              <button
+                key={starter}
+                type="button"
+                onClick={() => fillComposer(starter)}
+                className="max-w-full rounded-full border border-border bg-surface-raised px-3 py-1.5 text-left text-[12px] text-foreground-muted transition-colors hover:border-border-strong hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+              >
+                <span className="line-clamp-1">{starter}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {threads.length > 0 ? (
+        <div className="mt-8 w-full text-left">
+          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-foreground-subtle">
+            Conversas recentes
+          </p>
+          <div className="overflow-hidden rounded-xl border border-border bg-surface-raised/40">
+            {threads.slice(0, 4).map((thread) => (
+              <button
+                key={thread.id}
+                type="button"
+                onClick={() => onOpenThread(thread.id)}
+                className="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left last:border-b-0 hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] text-foreground">{thread.title}</span>
+                  {thread.preview ? (
+                    <span className="mt-0.5 block truncate text-[11px] text-foreground-subtle">
+                      {thread.preview}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 text-[11px] text-foreground-subtle">
+                  {relativeTime(thread.updatedAt)}
+                </span>
+                <ArrowUpRight className="size-3.5 shrink-0 text-foreground-subtle" />
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Home surface: the same ChatView/composer, with the agent hero as welcome. */
+export function AgentHome({ agent }: { agent: Agent }) {
+  const conversations = useChatStore((state) => state.conversations);
+  const startNewConversation = useChatStore((state) => state.startNewConversation);
+  const openConversation = useChatStore((state) => state.openConversation);
+  const openEditor = useUiStore((state) => state.openAgentEditor);
+  const threads = conversations
+    .filter(
+      (conversation) =>
+        conversation.mode === 'agent' &&
+        conversation.agentId === agent.id &&
+        !conversation.channelId,
+    )
+    .sort(
+      (left, right) =>
+        Number(right.pinned) - Number(left.pinned) || right.updatedAt - left.updatedAt,
+    );
+
+  return (
+    <ChatView
+      key={`agent-home-${agent.id}`}
+      welcome={
+        <AgentWelcome
+          agent={agent}
+          threads={threads}
+          onNewConversation={() => void startNewConversation('agent', { agentId: agent.id })}
+          onEdit={() => openEditor({ mode: 'edit', agentId: agent.id })}
+          onOpenThread={(id) => void openConversation(id)}
+        />
+      }
+    />
+  );
+}

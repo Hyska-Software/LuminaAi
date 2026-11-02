@@ -4,6 +4,7 @@ import {
   chatConversationsAvailableToLink,
   conversationMode,
   filterConversationsForLayout,
+  isAgentConversation,
   isChatConversation,
   isCodeConversation,
   isSharedChatConversation,
@@ -61,6 +62,34 @@ describe('conversations — separação Chat/Code', () => {
     expect(filterConversationsForLayout(list, 'code').map((entry) => entry.id)).toEqual([
       'code-1',
       'shared-1',
+    ]);
+  });
+
+  it('classifies agent sessions and scopes them to their persona', () => {
+    const agents = [
+      conversation({ id: 'a-1', mode: 'agent', agentId: 'agent-a', updatedAt: 30 }),
+      conversation({ id: 'a-2', mode: 'agent', agentId: 'agent-b', updatedAt: 20 }),
+      conversation({ id: 'chat-1', updatedAt: 10 }),
+      conversation({ id: 'code-1', mode: 'code', updatedAt: 5 }),
+    ];
+    expect(conversationMode(agents[0])).toBe('agent');
+    expect(isAgentConversation(agents[0])).toBe(true);
+    expect(isChatConversation(agents[0])).toBe(false);
+    expect(isCodeConversation(agents[0])).toBe(false);
+    expect(
+      filterConversationsForLayout(agents, 'agent', { agentId: 'agent-a' }).map(
+        (entry) => entry.id,
+      ),
+    ).toEqual(['a-1']);
+    expect(filterConversationsForLayout(agents, 'agent').map((entry) => entry.id)).toEqual([
+      'a-1',
+      'a-2',
+    ]);
+    expect(filterConversationsForLayout(agents, 'chat').map((entry) => entry.id)).toEqual([
+      'chat-1',
+    ]);
+    expect(filterConversationsForLayout(agents, 'code').map((entry) => entry.id)).toEqual([
+      'code-1',
     ]);
   });
 

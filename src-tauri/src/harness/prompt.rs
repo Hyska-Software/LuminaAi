@@ -52,6 +52,38 @@ pub fn build_system_prompt(
     skills: &[Skill],
     session_date: &str,
 ) -> String {
+    build_system_prompt_inner(model, options, settings, skills, session_date, None)
+}
+
+/// Chat prompt with a user-configured agent block inserted before the global
+/// user instructions. Chat/Code keep calling [`build_system_prompt`], so their
+/// bytes (and prompt snapshots) are unchanged.
+pub fn build_system_prompt_with_agent(
+    model: &ModelInfo,
+    options: &TurnOptions,
+    settings: &Settings,
+    skills: &[Skill],
+    session_date: &str,
+    agent_section: &str,
+) -> String {
+    build_system_prompt_inner(
+        model,
+        options,
+        settings,
+        skills,
+        session_date,
+        Some(agent_section),
+    )
+}
+
+fn build_system_prompt_inner(
+    model: &ModelInfo,
+    options: &TurnOptions,
+    settings: &Settings,
+    skills: &[Skill],
+    session_date: &str,
+    agent_section: Option<&str>,
+) -> String {
     let model_name = model.name.as_str();
     let extra = extra_instructions(settings, options);
 
@@ -136,6 +168,9 @@ pub fn build_system_prompt(
          - When creating HTML/SVG, do not include external scripts or tracking code.\n",
     );
 
+    if let Some(agent_section) = agent_section {
+        prompt.push_str(agent_section);
+    }
     if !extra.is_empty() {
         prompt.push_str("\n# Additional user instructions\n");
         prompt.push_str(&extra);

@@ -623,15 +623,49 @@ pub async fn summarize_manual_for_conversation(
         .map_err(|error| anyhow::anyhow!("credencial indisponível: {error}"))?;
     let protocols = resolve_protocols(&provider, &model)?;
     // Mesma configuração de um turno Code normal (gates do snapshot).
-    let options = crate::domain::TurnOptions::default();
+    let mut options = crate::domain::TurnOptions::default();
+    let agent = if conversation.mode == crate::domain::CONVERSATION_MODE_AGENT {
+        conversation
+            .agent_id
+            .as_deref()
+            .and_then(|id| deps.db.get_agent(id).ok().flatten())
+    } else {
+        None
+    };
+    if let Some(agent) = agent.as_ref() {
+        options.allowed_tools = agent.capabilities.tools.clone();
+        options.allowed_skills = agent.capabilities.skills.clone();
+        options.allowed_mcp_servers = agent.capabilities.mcp_servers.clone();
+        options.agent_memory = agent.memory_enabled;
+        options.agent_id = Some(agent.id.clone());
+    }
     let ctx = crate::harness::code::context::build(&deps.db, conversation).await;
-    let mcp_tools = deps
+    let mcp_tools: Vec<_> = deps
         .mcp
         .as_ref()
         .map(|mcp| mcp.cached_tools())
-        .unwrap_or_default();
-    let tool_definitions =
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|tool| {
+            agent
+                .as_ref()
+                .map_or(true, |agent| agent.capabilities.allows_mcp_server(&tool.server))
+        })
+        .collect();
+    if let Some(agent) = agent.as_ref() {
+        options.allowed_tools = Some(crate::harness::code_agent_allowed_tools(agent, &mcp_tools));
+    }
+    let mut tool_definitions =
         code_tool_definitions_with_mcp(&ctx, settings, options.delegation_depth, &mcp_tools);
+    tool_definitions.retain(|tool| crate::tools::tool_allowed(&options, &tool.name));
+    if agent
+        .as_ref()
+        .is_some_and(|agent| agent.memory_enabled)
+        && crate::tools::tool_allowed(&options, "memory")
+        && !tool_definitions.iter().any(|tool| tool.name == "memory")
+    {
+        tool_definitions.push(crate::tools::memory::definition());
+    }
     let mcp_prompt_section = mcp_tools_prompt_section(&mcp_tools, options.delegation_depth);
     let snapshot = code_prompt_snapshot(
         &deps.db,
@@ -643,6 +677,7 @@ pub async fn summarize_manual_for_conversation(
         &options,
         &tool_definitions,
         &mcp_prompt_section,
+        agent.as_ref(),
     );
 
     // Histórico normal do perfil Code (resumo persistido + superfície + replay).

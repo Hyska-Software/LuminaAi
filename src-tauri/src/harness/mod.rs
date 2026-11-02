@@ -964,12 +964,13 @@ fn chat_prompt_snapshot(
     options: &TurnOptions,
     settings: &Settings,
     skills: &[crate::tools::skills::Skill],
+    agent: Option<&crate::agents::Agent>,
 ) -> FrozenPromptSnapshot {
     // 1) Catálogo canônico (ordem fixa) antes da identidade/hashes.
     let tool_definitions = cache::snapshot::canonical_tools(&tools::definitions(options));
     let config_hash =
         cache::snapshot::config_hash(model, options, settings, skills, &tool_definitions);
-    let snapshot_key = cache::snapshot::snapshot_key(
+    let base_key = cache::snapshot::snapshot_key(
         &provider.id,
         &model.id,
         cache::snapshot::PROFILE_CHAT,
@@ -977,6 +978,16 @@ fn chat_prompt_snapshot(
         prompt::PROMPT_VERSION,
         &config_hash,
     );
+    // Chat/Code keep the old key byte-for-byte. Agent conversations add the
+    // persona id + prompt version, so editing instructions causes exactly one
+    // cache miss and never reuses another agent's prompt.
+    let snapshot_key = match agent {
+        Some(agent) => format!(
+            "{base_key}|agent:{}:v{}",
+            agent.id, agent.prompt_version
+        ),
+        None => base_key,
+    };
 
     // 2) Reusa o snapshot congelado quando a config é a mesma.
     match db.get_prompt_snapshot(&conversation.id, &snapshot_key) {
@@ -1001,8 +1012,20 @@ fn chat_prompt_snapshot(
 
     // 3) Constrói uma única vez (data de sessão congelada) e persiste.
     let session_date = prompt::session_date(conversation.created_at);
-    let system_prompt =
-        prompt::build_system_prompt(model, options, settings, skills, &session_date);
+    let system_prompt = match agent {
+        Some(agent) => {
+            let section = crate::agents::prompt_section(agent);
+            prompt::build_system_prompt_with_agent(
+                model,
+                options,
+                settings,
+                skills,
+                &session_date,
+                &section,
+            )
+        }
+        None => prompt::build_system_prompt(model, options, settings, skills, &session_date),
+    };
     let stable_hash = cache::snapshot::stable_hash(&system_prompt);
     let tools_json = cache::snapshot::tools_json(&tool_definitions);
     if let Err(error) = db.upsert_prompt_snapshot(&crate::db::PromptSnapshotRecord {
@@ -1048,6 +1071,7 @@ fn code_prompt_snapshot(
     options: &TurnOptions,
     tool_definitions: &[crate::providers::ToolDefinition],
     mcp_prompt_section: &str,
+    agent: Option<&crate::agents::Agent>,
 ) -> FrozenPromptSnapshot {
     let prompt_ctx = ctx.prompt_context();
     let config_hash = cache::snapshot::code_config_hash(
@@ -1062,7 +1086,7 @@ fn code_prompt_snapshot(
         options.system_prompt_override.as_deref(),
         tool_definitions,
     );
-    let snapshot_key = cache::snapshot::snapshot_key(
+    let base_key = cache::snapshot::snapshot_key(
         &provider.id,
         &model.id,
         cache::snapshot::PROFILE_CODE,
@@ -1070,6 +1094,10 @@ fn code_prompt_snapshot(
         code::prompt::PROMPT_VERSION,
         &config_hash,
     );
+    let snapshot_key = match agent {
+        Some(agent) => format!("{base_key}|agent:{}:v{}", agent.id, agent.prompt_version),
+        None => base_key,
+    };
 
     // Reusa o snapshot congelado quando a config é a mesma.
     match db.get_prompt_snapshot(&conversation.id, &snapshot_key) {
@@ -1094,7 +1122,8 @@ fn code_prompt_snapshot(
 
     // Constrói uma única vez (data da sessão congelada; sem relógio) e persiste.
     let session_date = prompt::session_date(conversation.created_at);
-    let tool_prompts = code_tool_prompts(ctx, settings, options.delegation_depth);
+    let mut tool_prompts = code_tool_prompts(ctx, settings, options.delegation_depth);
+    tool_prompts.retain(|prompt| tools::tool_allowed(options, prompt.name));
     let mut system_prompt = code::prompt::build_system_prompt(
         model,
         &prompt_ctx,
@@ -1102,6 +1131,11 @@ fn code_prompt_snapshot(
         std::env::consts::OS,
         &session_date,
     );
+    // Agent persona on top of the coding profile: identity, instructions and
+    // the optional memory guidance. It never grants permissions.
+    if let Some(agent) = agent {
+        system_prompt.push_str(&crate::agents::prompt_section(agent));
+    }
     // Tools de servidores MCP entram no prompt com nome wire e descrição (fazem
     // parte do snapshot: mudam a key via tools_hash das definições).
     if !mcp_prompt_section.is_empty() {
@@ -1205,6 +1239,8 @@ const SURFACE_KIND_RUNTIME: &str = "runtime";
 /// Kind do `surface_item` com a nota de mudança de plano/permissão do turno
 /// (F3b: o modo não vai mais para o system prompt).
 const SURFACE_KIND_MODE: &str = "mode";
+/// Kind do `surface_item` com a memória durável do agente.
+const SURFACE_KIND_MEMORY: &str = "memory";
 
 /// Renderiza um `surface_item` como mensagem de **user marcada** (nunca
 /// `system`: o provedor hoista mensagens de system para o head cacheável).
@@ -1283,7 +1319,20 @@ fn insert_mode_surface_note(
 /// turno continua sem a superfície antiga.
 fn load_surface_items(db: &Db, conversation_id: &str) -> Vec<crate::db::SurfaceItemRecord> {
     match db.list_surface_items(conversation_id) {
-        Ok(items) => items,
+        Ok(mut items) => {
+            // Memory is a snapshot: only the newest `memory` item may remain in
+            // history. Otherwise a deleted/updated fact would survive in older
+            // append-only blocks and still reach the model.
+            let newest_memory = items
+                .iter()
+                .filter(|item| item.kind == SURFACE_KIND_MEMORY)
+                .max_by_key(|item| (item.created_at, item.seq))
+                .map(|item| item.id.clone());
+            if let Some(newest) = newest_memory {
+                items.retain(|item| item.kind != SURFACE_KIND_MEMORY || item.id == newest);
+            }
+            items
+        }
         Err(error) => {
             eprintln!("lumina: falha ao ler a superfície da sessão: {error:#}");
             Vec::new()
@@ -1444,41 +1493,97 @@ pub async fn run_turn(
         .db
         .get_conversation(&payload.conversation_id)?
         .ok_or_else(|| anyhow!("conversa não encontrada: {}", payload.conversation_id))?;
+    // Agentes: a conversa é a autoridade do vínculo e do modelo congelado. O
+    // renderer não escolhe o prompt nem troca o modelo no meio da thread.
+    let agent = if conversation.mode == crate::domain::CONVERSATION_MODE_AGENT {
+        let agent_id = conversation
+            .agent_id
+            .as_deref()
+            .ok_or_else(|| anyhow!("AGENT_VALIDATION: a conversa não tem agente vinculado"))?;
+        let agent = deps
+            .db
+            .get_agent(agent_id)?
+            .ok_or_else(|| anyhow!("AGENT_NOT_FOUND: agente `{agent_id}` não existe"))?;
+        if agent.is_archived() {
+            return Err(anyhow!(
+                "AGENT_ARCHIVED: restaure o agente antes de continuar a conversa"
+            ));
+        }
+        payload.provider_id = conversation.provider_id.clone();
+        payload.model_id = conversation.model_id.clone();
+        payload.reasoning = agent.reasoning.clone();
+        payload.options.web_search &= agent.capabilities.web_search;
+        payload.options.create_files &= agent.capabilities.file_access;
+        payload.options.run_code &= agent.capabilities.code_execution;
+        payload.options.allowed_tools = agent.capabilities.tools.clone();
+        payload.options.allowed_skills = agent.capabilities.skills.clone();
+        payload.options.allowed_mcp_servers = agent.capabilities.mcp_servers.clone();
+        payload.options.agent_memory = agent.memory_enabled;
+        payload.options.agent_id = Some(agent.id.clone());
+        Some(agent)
+    } else {
+        None
+    };
     // Perfil do turno: o Code exige uma sessão do layout Code (nativa ou
     // compartilhada do Chat). Não deixamos o renderer transformar uma conversa
     // do Chat em sessão de código por engano.
     let profile = payload.profile;
-    if profile == TurnProfile::Code
-        && conversation.mode != crate::domain::CONVERSATION_MODE_CODE
-        && !conversation.code_linked
-    {
+    let is_code_session = conversation.mode == crate::domain::CONVERSATION_MODE_CODE
+        || conversation.code_linked;
+    // An agent conversation may run the Code profile only when it is bound to a
+    // workspace. Agent threads without a workspace stay chat-only.
+    let is_agent_workspace = conversation.mode == crate::domain::CONVERSATION_MODE_AGENT
+        && conversation.workspace_id.is_some();
+    if profile == TurnProfile::Code && !is_code_session && !is_agent_workspace {
         return Err(anyhow!(
-            "CONVERSATION_NOT_CODE: a sessão `{}` não pertence ao layout Code",
+            "CONVERSATION_NOT_CODE: a sessão `{}` não tem workspace para o perfil Code",
             conversation.id
         ));
     }
-    let provider = deps
-        .catalog
-        .provider(&payload.provider_id)
-        .cloned()
-        .ok_or_else(|| anyhow!("provedor desconhecido: {}", payload.provider_id))?;
-    let model_id = if payload.model_id.trim().is_empty() {
-        provider.default_model_id.clone()
-    } else {
-        payload.model_id.trim().to_string()
+    // Agent threads keep the workspace they were created with (like a Code
+    // session). Changing the persona's default workspace later does not
+    // invalidate old threads.
+    let primary_provider_id = payload.provider_id.clone();
+    let primary_model_id = payload.model_id.clone();
+    let route = resolve_turn_route(&deps, &primary_provider_id, &primary_model_id).await;
+    let (provider, model, mut credential, protocols) = match route {
+        Ok(route) => route,
+        Err(primary_error) => {
+            let fallback = agent.as_ref().and_then(|agent| {
+                match (
+                    agent.fallback_provider_id.as_deref(),
+                    agent.fallback_model_id.as_deref(),
+                ) {
+                    (Some(provider_id), Some(model_id))
+                        if provider_id != primary_provider_id
+                            || model_id != primary_model_id =>
+                    {
+                        Some((provider_id.to_string(), model_id.to_string()))
+                    }
+                    _ => None,
+                }
+            });
+            let Some((fallback_provider_id, fallback_model_id)) = fallback else {
+                return Err(primary_error);
+            };
+            match resolve_turn_route(&deps, &fallback_provider_id, &fallback_model_id).await {
+                Ok(route) => {
+                    // The turn continues with the agent's backup route. The
+                    // reasoning selection may not exist there; let the provider
+                    // choose a safe default instead of sending an invalid effort.
+                    payload.provider_id = fallback_provider_id;
+                    payload.model_id = fallback_model_id;
+                    payload.reasoning = None;
+                    route
+                }
+                Err(fallback_error) => {
+                    return Err(anyhow!(
+                        "{primary_error:#}; o modelo de reserva também falhou: {fallback_error:#}"
+                    ));
+                }
+            }
+        }
     };
-    // Account/merged model source first, bundled catalog as fallback: an
-    // account-only slug (or a slug that changed) must still resolve.
-    let model = resolve_model(&deps, &provider, &model_id).ok_or_else(|| {
-        anyhow!(
-            "modelo `{model_id}` não está disponível no provedor `{}`",
-            provider.id
-        )
-    })?;
-    // Resolve the credential BEFORE persisting the user message: a turn without
-    // a usable credential must not create a broken assistant message.
-    let mut credential = resolve_credential(&deps, &provider).await?;
-    let protocols = resolve_protocols(&provider, &model)?;
 
     /* ---------------------------------------------------------------- */
     /* 1b. Goal round: validate and open **before** persisting anything   */
@@ -1647,13 +1752,17 @@ pub async fn run_turn(
     // Estado persistido da conversa: watermark do histórico do Chat (F2b) +
     // seed do tracker de cache (F1.1). Uma leitura por turno.
     let persisted_cache_state = load_persisted_cache_state(&deps.db, &conversation.id);
-    // Superfície append-only do Code (F3a): contexto volátil dos turnos
-    // anteriores, posicionado pelo `after_message_id` no replay. O Chat ainda
-    // não usa surface items.
+    // Superfície append-only: o Code carrega o contexto volátil completo; o
+    // Chat carrega apenas a memória durável do agente (ninguém mais usa
+    // `surface_items` nesse perfil). Sem isso o bloco de memória não sobrevive
+    // ao turno seguinte por causa do dedupe por digest.
     let stored_surface_items = if profile == TurnProfile::Code {
         load_surface_items(&deps.db, &conversation.id)
     } else {
-        Vec::new()
+        load_surface_items(&deps.db, &conversation.id)
+            .into_iter()
+            .filter(|item| item.kind == SURFACE_KIND_MEMORY)
+            .collect()
     };
     // Watermark do histórico do Chat: só vale quando provider/modelo batem com
     // o estado persistido. Rota diferente (ou watermark fora de fronteira)
@@ -1719,7 +1828,7 @@ pub async fn run_turn(
                     &settings,
                     &model,
                     supports_images,
-                    &[],
+                    &stored_surface_items,
                     visible_from.saturating_add(1),
                 )
             } else {
@@ -1770,7 +1879,14 @@ pub async fn run_turn(
         // repositories (agents/codex/claude/opencode + bundled).
         None => tools::skills::catalog_enabled(&data_dir, &settings.disabled_skills),
     }
-    .unwrap_or_default();
+    .unwrap_or_default()
+    .into_iter()
+    .filter(|skill| {
+        agent
+            .as_ref()
+            .map_or(true, |agent| agent.capabilities.allows_skill(&skill.name))
+    })
+    .collect::<Vec<_>>();
     // Perfil Code: contexto do workspace (git/projeto/AGENTS.md/árvore) e as
     // regras de aprovação aplicáveis à sessão. O Chat não paga esse custo.
     let mut code_context = match profile {
@@ -1824,9 +1940,25 @@ pub async fn run_turn(
             .as_ref()
             .map(|mcp| mcp.cached_tools())
             .unwrap_or_default()
+            .into_iter()
+            .filter(|tool| {
+                agent
+                    .as_ref()
+                    .map_or(true, |agent| agent.capabilities.allows_mcp_server(&tool.server))
+            })
+            .collect()
     } else {
         Vec::new()
     };
+    // Code-profile agents: the simple capability switches are deny filters on
+    // top of the tool registry. Build the effective allowlist once; it drives
+    // wire definitions, prompt guidance and the execution boundary.
+    if profile == TurnProfile::Code {
+        if let Some(agent) = agent.as_ref() {
+            let allowed = code_agent_allowed_tools(agent, &mcp_tools);
+            options.allowed_tools = Some(allowed);
+        }
+    }
     // F2a/F3a: system prompt + catálogo de tools congelados por sessão em
     // `prompt_snapshots`. No Chat o texto tem data de sessão fixa; no Code ele
     // carrega só o que é estável (sem relógio/git/árvore/plano/modo) — o
@@ -1841,16 +1973,18 @@ pub async fn run_turn(
             &options,
             &settings,
             &skills,
+            agent.as_ref(),
         ))
     } else {
         None
     };
     // Definições/prompts de tools do Code: entram na key/hashes do snapshot.
-    let code_tool_prompts_list = code_context
+    let mut code_tool_prompts_list = code_context
         .as_ref()
         .map(|ctx| code_tool_prompts(ctx, &settings, options.delegation_depth))
         .unwrap_or_default();
-    let code_tool_definitions_canonical: Vec<crate::providers::ToolDefinition> =
+    code_tool_prompts_list.retain(|prompt| tools::tool_allowed(&options, prompt.name));
+    let mut code_tool_definitions_canonical: Vec<crate::providers::ToolDefinition> =
         match code_context.as_ref() {
             Some(code_ctx) if profile == TurnProfile::Code => code_tool_definitions_with_mcp(
                 code_ctx,
@@ -1860,6 +1994,25 @@ pub async fn run_turn(
             ),
             _ => Vec::new(),
         };
+    code_tool_definitions_canonical
+        .retain(|tool| tools::tool_allowed(&options, &tool.name));
+    // Durable memory is a dynamic tool: it exists only for an agent with memory
+    // enabled and only if the capability allowlist permits it.
+    if agent
+        .as_ref()
+        .is_some_and(|agent| agent.memory_enabled)
+        && tools::tool_allowed(&options, "memory")
+        && !code_tool_definitions_canonical
+            .iter()
+            .any(|tool| tool.name == "memory")
+    {
+        code_tool_definitions_canonical.push(crate::tools::memory::definition());
+        code_tool_prompts_list.push(code::prompt::ToolPrompt {
+            name: "memory",
+            guidance: "Use `memory` to save stable facts, preferences and procedures shared by \
+                       every conversation of this agent. Never store secrets or transient state.",
+        });
+    }
     // Seção MCP do system prompt (faz parte do snapshot congelado).
     let mcp_prompt_section =
         mcp_tools_prompt_section(&mcp_tools, options.delegation_depth);
@@ -1874,6 +2027,7 @@ pub async fn run_turn(
             &options,
             &code_tool_definitions_canonical,
             &mcp_prompt_section,
+            agent.as_ref(),
         )),
         _ => None,
     };
@@ -1930,6 +2084,26 @@ pub async fn run_turn(
             ) {
                 history.push(render_surface_item(&item));
             }
+        }
+    }
+    // Durable agent memory goes to the volatile tail as a `surface_item`, never
+    // into the cached system prompt. The revision in the text makes a changed
+    // memory set produce a new item while an unchanged set stays in the older
+    // history item (no cache churn).
+    if let Some(agent) = agent.as_ref().filter(|agent| agent.memory_enabled) {
+        let memories = deps
+            .db
+            .list_agent_memories(&agent.id)
+            .unwrap_or_default();
+        let memory_text = crate::agents::render_memory_context(agent, &memories);
+        if let Some(item) = insert_surface_item_kind(
+            &deps.db,
+            &conversation.id,
+            &user_message.id,
+            SURFACE_KIND_MEMORY,
+            &memory_text,
+        ) {
+            history.push(render_surface_item(&item));
         }
     }
     let reasoning = reasoning_request(payload.reasoning.as_ref(), &model);
@@ -3647,6 +3821,45 @@ fn tool_call_record(call: StreamingToolCall) -> ToolCallRecord {
     }
 }
 
+/// Effective built-in tool allowlist for an agent running the Code profile.
+/// Capability switches are deny filters; `tools` is an additional allowlist.
+/// MCP wire names are appended because they are governed by `mcpServers`.
+pub(crate) fn code_agent_allowed_tools(
+    agent: &crate::agents::Agent,
+    mcp_tools: &[crate::mcp::McpToolInfo],
+) -> Vec<String> {
+    let file_tools = [
+        "read_file",
+        "list_dir",
+        "search_files",
+        "search_text",
+        "read_tool_output",
+        "write_file",
+        "edit_file",
+        "git_status",
+        "git_diff",
+        "git_log",
+        "task",
+    ];
+    let exec_tools = ["run_command", "run_checks", "job_list", "job_output", "job_kill"];
+    let web_tools = ["web_search", "fetch_url"];
+    let mut allowed: Vec<String> = crate::tools::registry::code_spec_refs()
+        .into_iter()
+        .map(|spec| spec.name.to_string())
+        .filter(|name| {
+            (agent.capabilities.file_access || !file_tools.contains(&name.as_str()))
+                && (agent.capabilities.code_execution || !exec_tools.contains(&name.as_str()))
+                && (agent.capabilities.web_search || !web_tools.contains(&name.as_str()))
+        })
+        .collect();
+    allowed.retain(|name| agent.capabilities.allows_tool(name));
+    if agent.memory_enabled && agent.capabilities.allows_tool("memory") {
+        allowed.push("memory".to_string());
+    }
+    allowed.extend(mcp_tools.iter().map(|tool| tool.wire_name.clone()));
+    allowed
+}
+
 /// Tools habilitadas no perfil Code para este turno (workspace confiável e
 /// `shell_enabled` aplicam-se antes de gerar prompt/definições).
 fn code_enabled_specs(
@@ -3726,6 +3939,39 @@ async fn execute_tools(runtime: &ToolRuntime, calls: &[ToolCallRecord]) -> Vec<T
 /* ------------------------------------------------------------------ */
 /* Misc helpers                                                        */
 /* ------------------------------------------------------------------ */
+
+/// Resolves the full request route (provider, model, credential, protocols)
+/// before anything is persisted. Used by the primary route and by the agent's
+/// fallback route, so both fail for the same reasons.
+async fn resolve_turn_route(
+    deps: &HarnessDeps,
+    provider_id: &str,
+    model_id: &str,
+) -> anyhow::Result<(ProviderInfo, ModelInfo, Credential, Vec<WireProtocol>)> {
+    let provider = deps
+        .catalog
+        .provider(provider_id)
+        .cloned()
+        .ok_or_else(|| anyhow!("provedor desconhecido: {provider_id}"))?;
+    let model_id = if model_id.trim().is_empty() {
+        provider.default_model_id.clone()
+    } else {
+        model_id.trim().to_string()
+    };
+    // Account/merged model source first, bundled catalog as fallback: an
+    // account-only slug (or a slug that changed) must still resolve.
+    let model = resolve_model(deps, &provider, &model_id).ok_or_else(|| {
+        anyhow!(
+            "modelo `{model_id}` não está disponível no provedor `{}`",
+            provider.id
+        )
+    })?;
+    // Resolve the credential BEFORE persisting the user message: a turn without
+    // a usable credential must not create a broken assistant message.
+    let credential = resolve_credential(deps, &provider).await?;
+    let protocols = resolve_protocols(&provider, &model)?;
+    Ok((provider, model, credential, protocols))
+}
 
 fn resolve_protocols(
     provider: &ProviderInfo,
@@ -4646,6 +4892,80 @@ mod agent_loop_tests {
     fn text_stream(sink: &EventSink, text: &str) {
         emit(sink, ProviderEvent::TextDelta(text.to_string()));
         emit(sink, ProviderEvent::Done);
+    }
+
+    #[tokio::test]
+    async fn agent_turn_uses_the_fallback_route_when_the_primary_is_unavailable() {
+        let temp = TempDb::new();
+        let input = crate::agents::normalize_input(crate::agents::AgentInput {
+            name: "Reserva".to_string(),
+            role: "Engenheiro".to_string(),
+            description: String::new(),
+            emoji: "🧭".to_string(),
+            department: "Geral".to_string(),
+            provider_id: "missing-provider".to_string(),
+            model_id: "missing-model".to_string(),
+            fallback_provider_id: Some("opencode-go".to_string()),
+            fallback_model_id: Some("deepseek-v4.1-flash".to_string()),
+            reasoning: None,
+            instructions: String::new(),
+            starters: Vec::new(),
+            capabilities: crate::agents::AgentCapabilities::default(),
+            memory_enabled: false,
+            workspace_id: None,
+            permission_mode: crate::domain::PermissionMode::Edit,
+        })
+        .expect("agent input");
+        let agent = temp.db.create_agent(&input).expect("agent");
+        let conversation = temp
+            .db
+            .create_agent_conversation(&agent.id, "Thread")
+            .expect("conversation");
+        let used_model: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let streamer: ProviderStreamer = {
+            let used_model = used_model.clone();
+            Arc::new(move |request, sink| {
+                *used_model.lock().expect("model lock") = Some(request.config.model.id.clone());
+                Box::pin(async move {
+                    text_stream(&sink, "Resposta pela rota de reserva.");
+                    Ok(())
+                })
+            })
+        };
+        let (channel, _events) = channel();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            TurnPayload {
+                conversation_id: conversation.id.clone(),
+                content: "Continue".to_string(),
+                attachment_ids: Vec::new(),
+                provider_id: conversation.provider_id.clone(),
+                model_id: conversation.model_id.clone(),
+                reasoning: None,
+                options: TurnOptions {
+                    max_steps: 2,
+                    ..Default::default()
+                },
+                profile: TurnProfile::Chat,
+                turn_kind: crate::domain::TurnKind::User,
+                goal_request: false,
+                turn_id: Some(uuid::Uuid::new_v4().to_string()),
+            },
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("fallback turn should complete");
+
+        assert_eq!(
+            used_model.lock().expect("model lock").as_deref(),
+            Some("deepseek-v4.1-flash")
+        );
+        assert_eq!(
+            result.assistant_message.content,
+            "Resposta pela rota de reserva."
+        );
     }
 
     /* ---------------------------------------------------------------- */

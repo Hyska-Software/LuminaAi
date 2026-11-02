@@ -1872,7 +1872,7 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             Ok(path) => path,
             Err(outcome) => return outcome,
         },
-        None => root,
+        None => root.clone(),
     };
     let workdir_relative = relative_path(ctx, &workdir);
     let destructive = exec::is_destructive_command(&command);
@@ -1907,7 +1907,21 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         .map(|value| value.clamp(1_000, 600_000))
         .unwrap_or(120_000);
     let background = opt_bool(args, "run_in_background").unwrap_or(false);
-    let (program, program_args) = exec::shell_for(&command);
+    let (program, program_args) =
+        if ctx.settings.execution_environment == "docker" && !ctx.settings.docker_image.trim().is_empty()
+        {
+            exec::docker_shell_for(
+                &exec::SandboxConfig {
+                    image: ctx.settings.docker_image.clone(),
+                    network: ctx.settings.docker_network,
+                },
+                &root,
+                &workdir,
+                &command,
+            )
+        } else {
+            exec::shell_for(&command)
+        };
     let request = exec::ExecRequest {
         program,
         args: program_args,

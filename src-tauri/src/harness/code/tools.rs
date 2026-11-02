@@ -82,6 +82,9 @@ pub async fn execute(ctx: &ToolCtx, call: &ToolCallRecord) -> ToolOutcome {
     if call.name.starts_with("mcp__") {
         return crate::tools::code::exec::run_mcp(&call_ctx, &call.name, args).await;
     }
+    if call.name == "memory" {
+        return run_memory(&call_ctx, args);
+    }
     let Some(exec) = ToolExec::for_tool(&call.name) else {
         return ToolOutcome::error(format!(
             "TOOL_UNKNOWN: ferramenta desconhecida: {}",
@@ -106,6 +109,33 @@ pub async fn execute(ctx: &ToolCtx, call: &ToolCallRecord) -> ToolOutcome {
         }
         None => exec.execute(&call_ctx, args).await,
     }
+}
+
+/// Durable memory tool for Code-profile agent turns. The conversation is the
+/// authority for the persona; a normal Code session has no `agent_id` and the
+/// tool is not exposed to the model.
+fn run_memory(ctx: &ToolCtx, args: Value) -> ToolOutcome {
+    let conversation = match ctx.db.get_conversation(&ctx.conversation_id) {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return ToolOutcome::error("MEMORY_NO_CONVERSATION: conversa não encontrada"),
+        Err(error) => {
+            return ToolOutcome::error(format!("MEMORY_DB_ERROR: {error:#}"));
+        }
+    };
+    let Some(agent_id) = conversation.agent_id.as_deref() else {
+        return ToolOutcome::error("a memória durável só existe em conversas de um agente");
+    };
+    let agent = match ctx.db.get_agent(agent_id) {
+        Ok(Some(agent)) => agent,
+        Ok(None) => return ToolOutcome::error("MEMORY_NO_AGENT: agente não encontrado"),
+        Err(error) => {
+            return ToolOutcome::error(format!("MEMORY_DB_ERROR: {error:#}"));
+        }
+    };
+    if !agent.memory_enabled {
+        return ToolOutcome::error("a memória deste agente está desativada");
+    }
+    crate::tools::memory::run_with(&ctx.db, agent_id, &ctx.conversation_id, &args)
 }
 
 /// Executa um lote de chamadas respeitando o scheduler do registry

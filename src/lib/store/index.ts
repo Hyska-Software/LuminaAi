@@ -11,12 +11,24 @@ export type {
   UpdateUiState,
   UpdateStore,
 } from './updateStore';
+export {
+  useAgentStore,
+  selectAgent,
+  selectActiveAgents,
+  selectPinnedAgents,
+  selectArchivedAgents,
+  selectAgentsByDepartment,
+} from './agentStore';
 export { useCodeStore, emptyCodeSession, applyCodeEvent, isCodeEvent } from './codeStore';
 export type { CodeSessionUi } from './codeStore';
+export { useAgentQueueStore, compactAgentQueue } from './agentQueueStore';
+export type { AgentQueueItem } from './agentQueueStore';
 export {
   useChatStore,
   selectActiveConversation,
   selectActiveMessages,
+  selectActiveStream,
+  selectConversationStream,
   selectActiveConversationStarted,
   modelLockReason,
   modelLockCopy,
@@ -44,6 +56,7 @@ export {
   SIDE_PANEL_WIDTH_STEP,
 } from './uiStore';
 export type {
+  AgentEditorState,
   ArtifactPanelView,
   CodeDiffTab,
   CodeFileTab,

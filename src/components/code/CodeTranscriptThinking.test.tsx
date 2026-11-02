@@ -147,7 +147,7 @@ function seed(active: Conversation = conversation()): Conversation {
   useChatStore.setState({
     conversations: [active],
     activeId: active.id,
-    activeIdByLayout: { chat: null, code: active.id },
+    activeIdByLayout: { chat: null, code: active.id, agent: null },
     messagesByConversation: {
       [active.id]: [userMessage(active.id), assistantMessage(active.id)],
     },
@@ -236,7 +236,7 @@ afterEach(() => {
   useChatStore.setState({
     conversations: [],
     activeId: null,
-    activeIdByLayout: { chat: null, code: null },
+    activeIdByLayout: { chat: null, code: null, agent: null },
     messagesByConversation: {},
     streaming: null,
     loadingConversationId: null,

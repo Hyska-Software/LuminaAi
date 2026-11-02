@@ -22,7 +22,7 @@ import {
   Tooltip,
 } from '@/components/ui';
 import { api } from '@/lib/api';
-import { useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
+import { selectAgent, useAgentStore, useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { AttachmentChips } from './AttachmentChips';
 import { CacheMeterChip } from './CacheMeterChip';
@@ -88,25 +88,36 @@ export function Composer() {
   // signed-in ChatGPT plan) before a turn can start. Only enforced when the
   // provider exists in the merged list, so an empty catalog (boot/unit tests)
   // keeps the composer usable — `chatStore.send` still guards the real send.
-  const selectedProvider = useAppStore((state) =>
-    state.providers.find((provider) => provider.id === state.selection.providerId),
-  );
-  const providerReady = useAppStore((state) => state.providerReady(state.selection.providerId));
   const setModelPickerOpen = useUiStore((state) => state.setModelPickerOpen);
   const openSettings = useUiStore((state) => state.openSettings);
   // Only the copy changes in the Code layout; sending/attachments/streaming are shared.
   const layoutMode = useUiStore((state) => state.layoutMode);
   const activeWorkspaceId = useUiStore((state) => state.activeWorkspaceId);
+  const activeAgentId = useUiStore((state) => state.activeAgentId);
+  const activeAgent = useAgentStore((state) => selectAgent(state, activeAgentId));
   const isCodeLayout = layoutMode === 'code';
+  const isAgentLayout = layoutMode === 'agent';
+  // D9 gate: an agent owns its provider, so the global composer selection is
+  // irrelevant in that layout.
+  const globalProviderId = useAppStore((state) => state.selection.providerId);
+  const effectiveProviderId =
+    isAgentLayout && activeAgent ? activeAgent.providerId : globalProviderId;
+  const selectedProvider = useAppStore((state) =>
+    state.providers.find((provider) => provider.id === effectiveProviderId),
+  );
+  const providerReady = useAppStore((state) => state.providerReady(effectiveProviderId));
 
   const activeConversation = activeConversationId
     ? conversations.find((conversation) => conversation.id === activeConversationId)
     : undefined;
-  /** Sessão do Code (nativa ou compartilhada do Chat): hospeda os controles de sessão. */
+  /** Sessão do Code (nativa, compartilhada ou agente com workspace). */
   const codeSessionConversation =
-    isCodeLayout &&
     activeConversation &&
-    (activeConversation.mode === 'code' || activeConversation.codeLinked)
+    ((isCodeLayout &&
+      (activeConversation.mode === 'code' || activeConversation.codeLinked)) ||
+      (isAgentLayout &&
+        activeConversation.mode === 'agent' &&
+        Boolean(activeConversation.workspaceId)))
       ? activeConversation
       : undefined;
   /**
@@ -121,8 +132,8 @@ export function Composer() {
   /** A linha de chips acima do textarea existe quando há `/goal` e/ou Plano. */
   const showComposerChips = goalIntent || planModeActive;
   const workspaceId = activeConversation?.workspaceId || activeWorkspaceId || null;
-  /** `@` menções e `/` comandos só existem no modo Code com workspace. */
-  const codeMenusEnabled = isCodeLayout && Boolean(workspaceId);
+  /** `@` menções e `/` comandos existem no Code e em agentes com workspace. */
+  const codeMenusEnabled = (isCodeLayout || isAgentLayout) && Boolean(workspaceId);
 
   const isStreaming = streaming !== null;
   const providerBlocked = selectedProvider !== undefined && !providerReady;
@@ -544,11 +555,13 @@ export function Composer() {
 
   const placeholder = goalIntent
     ? 'Descreva o objetivo e o trabalho a fazer…'
-    : !isCodeLayout
-      ? 'Pergunte alguma coisa…'
-      : codeMenusEnabled
-        ? 'Descreva a tarefa… @ para arquivos, / para comandos'
-        : 'Descreva a tarefa para o agente…';
+    : isAgentLayout
+      ? `Converse com ${activeAgent?.name ?? 'o agente'}…`
+      : !isCodeLayout
+        ? 'Pergunte alguma coisa…'
+        : codeMenusEnabled
+          ? 'Descreva a tarefa… @ para arquivos, / para comandos'
+          : 'Descreva a tarefa para o agente…';
 
   const menuControls = menu
     ? menu.kind === 'mention'
@@ -660,7 +673,13 @@ export function Composer() {
                 onKeyDown={handleKeyDown}
                 rows={1}
                 placeholder={placeholder}
-                aria-label={isCodeLayout ? 'Tarefa para o agente' : 'Mensagem para o Lumina'}
+                aria-label={
+                  isAgentLayout
+                    ? `Mensagem para ${activeAgent?.name ?? 'o agente'}`
+                    : isCodeLayout
+                      ? 'Tarefa para o agente'
+                      : 'Mensagem para o Lumina'
+                }
                 aria-describedby={providerBlocked ? 'composer-credential-notice' : undefined}
                 aria-expanded={menu ? true : undefined}
                 aria-controls={menuControls}
@@ -730,7 +749,7 @@ export function Composer() {
               goalIntent={goalIntent}
               onToggleGoalIntent={() => setGoalIntent((current) => !current)}
             />
-          ) : isCodeLayout ? null : (
+          ) : isCodeLayout || isAgentLayout ? null : (
             <>
               <ToolsToggle
                 icon={Globe}
@@ -751,7 +770,9 @@ export function Composer() {
             {!isCodeLayout && activeConversationId ? (
               <CacheMeterChip conversationId={activeConversationId} />
             ) : null}
-            <ModelPill onClick={() => setModelPickerOpen(true)} />
+            {isAgentLayout ? null : (
+              <ModelPill onClick={() => setModelPickerOpen(true)} />
+            )}
 
             {isStreaming ? (
               <button
