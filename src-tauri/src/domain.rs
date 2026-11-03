@@ -1126,7 +1126,7 @@ fn default_docker_read_only_root() -> bool {
 }
 
 fn default_max_concurrent_turns() -> u32 {
-    3
+    10
 }
 
 fn default_max_concurrent_turns_per_agent() -> u32 {

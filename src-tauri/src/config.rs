@@ -189,7 +189,7 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     settings.docker_memory_mb = settings.docker_memory_mb.clamp(256, 16_384);
     settings.docker_cpus = settings.docker_cpus.clamp(0.25, 16.0);
     settings.docker_pids_limit = settings.docker_pids_limit.clamp(32, 4_096);
-    settings.max_concurrent_turns = settings.max_concurrent_turns.clamp(1, 8);
+    settings.max_concurrent_turns = settings.max_concurrent_turns.clamp(1, 32);
     settings.max_concurrent_turns_per_agent = settings.max_concurrent_turns_per_agent.clamp(1, 4);
     settings.max_queue_length_per_thread = settings.max_queue_length_per_thread.clamp(1, 100);
     match settings.agent_daily_cost_limit_usd {
@@ -1860,6 +1860,21 @@ mod tests {
         );
         // Pasta nova pede confirmação explícita.
         assert!(!defaults.trust_workspaces_by_default);
+    }
+
+    #[test]
+    fn concurrent_turn_limit_defaults_to_10_and_clamps_to_32() {
+        assert_eq!(Settings::default().max_concurrent_turns, 10);
+        let normalized = normalize_settings(Settings {
+            max_concurrent_turns: 64,
+            ..Settings::default()
+        });
+        assert_eq!(normalized.max_concurrent_turns, 32);
+        let normalized = normalize_settings(Settings {
+            max_concurrent_turns: 0,
+            ..Settings::default()
+        });
+        assert_eq!(normalized.max_concurrent_turns, 1);
     }
 
     #[test]

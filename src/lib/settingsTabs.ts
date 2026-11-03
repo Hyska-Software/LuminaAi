@@ -12,6 +12,7 @@ export type SettingsTabId =
   | 'model'
   | 'instructions'
   | 'tools'
+  | 'agents'
   | 'data'
   | 'about';
 
@@ -26,6 +27,7 @@ export const SETTINGS_TABS: readonly SettingsTabDefinition[] = [
   { id: 'model', label: 'Modelo padrão' },
   { id: 'instructions', label: 'Instruções' },
   { id: 'tools', label: 'Ferramentas' },
+  { id: 'agents', label: 'Agentes' },
   { id: 'data', label: 'Dados' },
   { id: 'about', label: 'Sobre' },
 ];

@@ -67,7 +67,7 @@ export function ComputerDockerHelp({
           <p className="mt-0.5 text-[11px] leading-relaxed text-foreground-muted">
             A imagem gráfica <code className="font-mono text-[10px] text-foreground">{image}</code>{' '}
             não foi encontrada no Docker local. Baixe a imagem publicada ou configure outra em
-            Configurações → Ferramentas.
+            Configurações → Agentes.
           </p>
         </div>
       </div>
@@ -87,8 +87,8 @@ export function ComputerDockerHelp({
         <li className="flex gap-2">
           <span className="font-medium text-foreground">3.</span>
           <span>
-            Se preferir outra imagem, informe o nome em Configurações → Ferramentas → Imagem do
-            computer use e faça o download.
+            Se preferir outra imagem, informe o nome em Configurações → Agentes →
+            Desktop privado → Imagem do computer use e faça o download.
           </span>
         </li>
       </ol>

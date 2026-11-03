@@ -184,7 +184,7 @@ describe('AgentPanel — Tela', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Configurar Docker' }));
     expect(useUiStore.getState().settingsOpen).toBe(true);
-    expect(useUiStore.getState().settingsTab).toBe('tools');
+    expect(useUiStore.getState().settingsTab).toBe('agents');
 
     fireEvent.click(screen.getByRole('button', { name: 'Baixar imagem' }));
     await waitFor(() =>

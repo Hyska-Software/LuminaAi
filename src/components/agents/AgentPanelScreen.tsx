@@ -317,7 +317,7 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
                   setPreviewEnabled(true);
                   void loadPreview();
                 }}
-                onOpenSettings={() => openSettings('tools')}
+                onOpenSettings={() => openSettings('agents')}
               />
             ) : (
               <div className="flex aspect-video flex-col items-center justify-center gap-2 p-5 text-center">

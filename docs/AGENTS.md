@@ -176,9 +176,10 @@ com erro — o fallback é de rota, não um retry infinito.
   thread, um toast in-app avisa (respeita `notificationsEnabled`).
 - O erro visível (`error`/`errorCode`/`errorHint`) é da thread ativa: uma falha
   em segundo plano não pinta o banner por cima de outra conversa.
-- O backend aplica `ConcurrencyGovernor`: `maxConcurrentTurns` global e
-  `maxConcurrentTurnsPerAgent` por agente; turnos além do limite aguardam com o
-  token de cancelamento (Stop/Cancelar libera).
+- O backend aplica `ConcurrencyGovernor`: `maxConcurrentTurns` global (padrão
+  10, faixa 1–32) e `maxConcurrentTurnsPerAgent` por agente (padrão 1, faixa
+  1–4); turnos além do limite aguardam com o token de cancelamento
+  (Stop/Cancelar libera).
 - `agentDailyCostLimitUsd` bloqueia novos turnos com `BUDGET_EXCEEDED` quando o
   custo do dia atinge o limite.
 - Sidebar tem Stop por thread; o diálogo **Atividade** lista todos os streams
@@ -303,6 +304,11 @@ Contrato completo: `docs/DOCKER.md`.
 
 ## 9.4 Painel direito do agente
 
+- Configurações → **Agentes** reúne as preferências globais do layout:
+  concorrência/fila, orçamento diário, notificações de threads, política de
+  navegador, apps do desktop e imagem/limites do Desktop privado. Modelo,
+  instruções, workspace, permissões e capabilities continuam por persona no
+  editor do agente.
 - `AgentPanel` é a sidebar direita do layout Agentes, com abas **Tela**,
   **Rotinas**, **Navegador** e **Dados**. Docked acima de 1120 px; overlay com
   backdrop/Escape abaixo disso.
@@ -391,6 +397,7 @@ Testes específicos deste contrato:
 - `src-tauri/src/harness/mod.rs` (imagens de tool para modelos com visão)
 - `src/lib/__tests__/chatStore.test.ts` (reattach e notificações)
 - `src/components/agents/AgentPanel.test.tsx` (Tela/Navegador)
+- `src/components/settings/AgentsTab.test.tsx` (concorrência, notificações, navegador e computer use)
 - `src/components/agents/AgentTaskBoardDialog.test.tsx`
 - `src/components/agents/AgentActivityDialog.test.tsx`
 - `docs/TASKS.md`, `docs/COMPUTER.md`, `docs/DOCKER.md`

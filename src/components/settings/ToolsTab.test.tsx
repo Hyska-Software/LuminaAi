@@ -223,29 +223,6 @@ describe('ToolsTab — sandbox de comandos', () => {
       ),
     );
   });
-
-  it('mostra a imagem do computer use mesmo com comandos locais', () => {
-    useAppStore.setState({ settings: settings({ executionEnvironment: 'local' }) });
-
-    render(<ToolsTab />);
-
-    expect(screen.getByLabelText('Imagem Docker do computer use')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Baixar imagem do computer use' })).toBeTruthy();
-  });
-
-  it('baixa a imagem gráfica do computer use informada no campo', async () => {
-    const image = 'ghcr.io/hyska-software/lumina-computer:latest';
-    useAppStore.setState({
-      settings: settings({ executionEnvironment: 'docker', computerDockerImage: image }),
-    });
-    mocks.dockerPullImage.mockResolvedValue(image);
-
-    render(<ToolsTab />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Baixar imagem do computer use' }));
-
-    await waitFor(() => expect(mocks.dockerPullImage).toHaveBeenCalledWith(image));
-  });
 });
 
 describe('ToolsTab — ambiente de código', () => {

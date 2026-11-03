@@ -67,8 +67,8 @@ não há grant persistente. Sem canal de aprovação a tool falha fechada
 - Imagem padrão publicada em `ghcr.io/hyska-software/lumina-computer:latest`
   (workflow `computer-image.yml`); também funciona uma imagem local de
   `docker/computer/` (Xvfb + openbox + Chromium + xdotool + scrot + noVNC).
-  O app oferece **Baixar imagem** em Configurações → Ferramentas e no erro do
-  painel Tela; não faz pull automático.
+  O app oferece **Baixar imagem** em Configurações → Agentes → Desktop privado e
+  no erro do painel Tela; não faz pull automático.
 - Container `<computerDockerContainer>-<conversationId>` iniciado no primeiro
   screenshot, com `--cap-drop ALL`, `no-new-privileges`, limites e
   `--network none`.

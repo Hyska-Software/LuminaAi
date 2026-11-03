@@ -62,6 +62,7 @@ const SETTINGS_TAB_DESCRIPTIONS: Record<SettingsTabId, string> = {
   model: 'Modelo e modo de pensamento padrão',
   instructions: 'Instruções do sistema',
   tools: 'Busca web, criação de arquivos, execução e passos',
+  agents: 'Concorrência, orçamento, notificações e computer use',
   data: 'Pasta de dados, exportação e limpeza',
   about: 'Versão e informações do aplicativo',
 };

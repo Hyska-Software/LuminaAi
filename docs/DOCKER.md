@@ -16,7 +16,7 @@
 - `computerDockerImage` / `computerDockerContainer`: computer use gráfico. O
   default é a imagem publicada `ghcr.io/hyska-software/lumina-computer:latest`
   (publicada pelo workflow `computer-image.yml`). O app não faz pull
-  automático: a UI oferece **Baixar imagem** em Configurações → Ferramentas e
+  automático: a UI oferece **Baixar imagem** em Configurações → Agentes e
   no estado de erro do painel Tela. Também aceita uma imagem local construída
   com `docker build -t lumina/computer:latest docker/computer`. O nome
   configurado é um **prefixo**; cada conversa usa
@@ -125,4 +125,4 @@ passando por timeout/cancelamento/spill do runner.
 - Windows usa Docker Desktop (containers Linux); não há suporte a containers
   Windows.
 - Não há pull automático: o download da imagem gráfica é explícito na UI
-  (Configurações → Ferramentas ou erro do painel Tela).
+  (Configurações → Agentes ou erro do painel Tela).

@@ -25,8 +25,8 @@ multi-arquitetura (`linux/amd64` e `linux/arm64`).
 docker build -t lumina/computer:latest docker/computer
 ```
 
-No app, informe `lumina/computer:latest` em Configurações → Ferramentas → Imagem
-do computer use.
+No app, informe `lumina/computer:latest` em Configurações → Agentes → Desktop
+privado → Imagem do computer use.
 
 O app inicia o container automaticamente com:
 
