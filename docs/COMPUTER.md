@@ -60,7 +60,8 @@ não há grant persistente. Sem canal de aprovação a tool falha fechada
 - Input via `user32` `SetCursorPos`/`mouse_event` e `SendKeys`.
 - Janelas via `Get-Process`; foco via `WScript.Shell.AppActivate`.
 - UI tree via UI Automation (`UIAutomationClient`).
-- Requer workspace confiável (a política de aprovação exige `ToolCtx.workspace`).
+- Requer um workspace confiável no runtime (pasta escolhida pelo usuário ou
+  pasta interna criada pelo aplicativo por conversa).
 
 ### Docker
 
@@ -114,9 +115,15 @@ Segurança do navegador:
 - página nunca compartilha origem com o WebView do app;
 - Docker gráfico continua sendo operado por screenshot/xdotool nesta fase.
 - As tools de desktop/navegador são do **perfil Code**: o agente precisa ter um
-  workspace vinculado para receber o catálogo e o canal de aprovação. O painel
-  Tela/Navegador pode abrir a sessão para inspeção mesmo sem workspace, mas o
-  agente não executa input até vincular um workspace.
+  workspace no runtime para receber o catálogo e o canal de aprovação. Quando
+  não há pasta vinculada, o aplicativo cria uma pasta interna por conversa;
+  isso não dispensa capabilities, políticas ou aprovação para ações.
+
+- O painel e `browser_open` resolvem a mesma pasta de downloads da conversa:
+  `<workspace>/downloads`, inclusive quando o workspace é interno. A troca de
+  pasta atualiza a sessão existente antes de confirmar a alteração. Se o destino
+  não puder ser confirmado, a sessão é encerrada e a troca não é salva, pois
+  uma resposta perdida pode ter aplicado a alteração mesmo após um erro.
 
 ## Painel do agente (sidebar direita)
 

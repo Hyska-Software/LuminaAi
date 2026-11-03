@@ -1,7 +1,5 @@
 //! Local CDP browser commands used by the agent right sidebar.
 
-use std::path::PathBuf;
-
 use tauri::{AppHandle, State};
 
 use crate::computer::browser::{
@@ -53,16 +51,18 @@ fn ensure_browser_capability(
     state: &AppState,
     conversation_id: &str,
 ) -> Result<(), String> {
-    let conversation = state
-        .db
+    ensure_browser_capability_in_db(&state.db, conversation_id)
+}
+
+fn ensure_browser_capability_in_db(db: &crate::db::Db, conversation_id: &str) -> Result<(), String> {
+    let conversation = db
         .get_conversation(conversation_id)
         .map_err(to_error)?
         .ok_or_else(|| format!("BROWSER_CONVERSATION_NOT_FOUND: `{conversation_id}`"))?;
     let Some(agent_id) = conversation.agent_id.as_deref() else {
         return Ok(());
     };
-    let agent = state
-        .db
+    let agent = db
         .get_agent(agent_id)
         .map_err(to_error)?
         .ok_or_else(|| "BROWSER_AGENT_NOT_FOUND".to_string())?;
@@ -72,13 +72,6 @@ fn ensure_browser_capability(
         );
     }
     Ok(())
-}
-
-fn download_dir(state: &AppState, conversation_id: &str) -> Option<PathBuf> {
-    let conversation = state.db.get_conversation(conversation_id).ok().flatten()?;
-    let workspace_id = conversation.workspace_id?;
-    let workspace = state.db.get_workspace(&workspace_id).ok().flatten()?;
-    Some(PathBuf::from(workspace.path).join("downloads"))
 }
 
 #[tauri::command]
@@ -97,34 +90,44 @@ pub async fn browser_session_open(
     conversation_id: String,
     url: Option<String>,
 ) -> Result<BrowserStatus, String> {
-    ensure_browser_capability(&state, &conversation_id)?;
+    let settings = crate::config::load_settings(&app);
+    let data_dir = crate::config::data_dir(&app).map_err(to_error)?;
+    open_browser_session(&state.db, &settings, &data_dir, manager()?, &conversation_id, url.as_deref(), || {
+        crate::commands::computer::emit_control_status(&app, &state, &conversation_id);
+    }).await
+}
+
+pub(crate) async fn open_browser_session<F: FnOnce()>(
+    db: &crate::db::Db, settings: &crate::domain::Settings, data_dir: &std::path::Path,
+    manager: &browser::BrowserManager, conversation_id: &str, url: Option<&str>,
+    on_control_changed: F,
+) -> Result<BrowserStatus, String> {
+    ensure_browser_capability_in_db(db, conversation_id)?;
+    let workspace_gate = crate::agents::workspace_gate(&conversation_id);
+    let _workspace_guard = workspace_gate.read().await;
     let gate = crate::computer::control::gate(&conversation_id);
     let _action = gate.action.lock().await;
-    let starting = !manager()?.is_active(&conversation_id);
-    let settings = crate::config::load_settings(&app);
+    let starting = !manager.is_active(&conversation_id);
     let target = url
-        .as_deref()
         .filter(|value| !value.trim().is_empty())
-        .map(|value| browser::validate_with_policy(&settings, value))
+        .map(|value| browser::validate_with_policy(settings, value))
         .transpose()?;
-    let control = state.db.computer_control(&conversation_id).map_err(to_error)?;
+    let control = db.computer_control(&conversation_id).map_err(to_error)?;
     if target.is_some() && (!starting || control == (true, true)) {
         return Err("BROWSER_HUMAN_CONTROL_REQUIRED: use a barra de endereço durante o controle".into());
     }
-    let status = manager()?
-        .ensure(&conversation_id, download_dir(&state, &conversation_id))
-        .await?;
+    let status = browser::ensure_for_conversation(manager, db, data_dir, &conversation_id).await?;
     if starting && control == (true, true)
-        && state.db.computer_control_target(&conversation_id).map_err(to_error)? == "browser" {
+        && db.computer_control_target(&conversation_id).map_err(to_error)? == "browser" {
         gate.start_browser_generation();
-        crate::commands::computer::emit_control_status(&app, &state, &conversation_id);
+        on_control_changed();
     }
     if let Some(target) = target {
-        manager()?
+        manager
             .navigate(&conversation_id, status.active_tab.as_deref(), &target)
             .await?;
     }
-    Ok(manager()?.status(&conversation_id).await)
+    Ok(manager.status(&conversation_id).await)
 }
 
 #[tauri::command]

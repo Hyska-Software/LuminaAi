@@ -10,6 +10,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{PermissionMode, ReasoningSelection};
 
+/// Serializes workspace changes with every running turn of an agent thread.
+pub(crate) fn workspace_gate(conversation_id: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, OnceLock, Weak};
+    static GATES: OnceLock<parking_lot::Mutex<HashMap<String, Weak<tokio::sync::RwLock<()>>>>> = OnceLock::new();
+    let mut gates = GATES.get_or_init(Default::default).lock();
+    if let Some(gate) = gates.get(conversation_id).and_then(Weak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(tokio::sync::RwLock::new(()));
+    gates.insert(conversation_id.to_owned(), Arc::downgrade(&gate));
+    gate
+}
+
 /// Upper bound for one stored memory. Keeps the volatile context block small
 /// and prevents a runaway model from dumping an entire transcript into memory.
 pub const AGENT_MEMORY_MAX_CHARS: usize = 4 * 1024;
@@ -1080,6 +1094,16 @@ pub fn render_memory_context(_agent: &Agent, memories: &[AgentMemory]) -> String
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn workspace_change_waits_until_every_turn_finishes() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let first = super::workspace_gate(&id);
+        let second = super::workspace_gate(&id);
+        let turn = first.read().await;
+        assert!(second.try_write().is_err());
+        drop(turn);
+        assert!(second.try_write().is_ok());
+    }
     use super::*;
 
     fn input() -> AgentInput {

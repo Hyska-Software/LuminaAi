@@ -28,6 +28,7 @@ import type { AgentPanelContext } from './AgentPanel';
 import { inputFromAgent } from './agentUtils';
 import { ComputerActivity } from './ComputerActivity';
 import { useComputerControlEvents } from './useComputerControlEvents';
+import { AgentWorkspaceNotice } from './AgentWorkspaceNotice';
 import { Badge, Button, Input, Switch } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAgentStore } from '@/lib/store';
@@ -466,12 +467,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
             aria-label={`Deixar ${agent.name} usar um navegador`}
           />
         </div>
-        {!agent.workspaceId ? (
-          <p className="rounded-lg border border-warning/30 bg-warning-soft px-2 py-1 text-[10px] text-warning">
-            As tools de navegador rodam no perfil Code. Vincule um workspace ao agente para ele
-            operar a página; o painel ainda pode ser usado para inspecionar a sessão.
-          </p>
-        ) : null}
+        <AgentWorkspaceNotice agent={agent} conversation={conversation} />
         {!enabled ? null : (
           <>
             <div className="flex items-center gap-1">

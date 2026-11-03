@@ -2144,6 +2144,17 @@ describe('chatStore — reattach de turnos', () => {  it('reconstrói um turno a
     expect(useChatStore.getState().streaming).toBeNull();
   });
 
+  it('loads pending session state when opening an agent thread without a selected workspace', async () => {
+    const thread = conversation({ id: 'agent-thread', mode: 'agent', agentId: 'agent-1', workspaceId: null });
+    mocks.api.getConversation.mockResolvedValue({ conversation: thread, messages: [] });
+    useChatStore.setState({ conversations: [thread], activeId: null });
+    useUiStore.setState({ layoutMode: 'agent' });
+
+    await useChatStore.getState().openConversation(thread.id);
+
+    expect(mocks.api.getCodeSessionState).toHaveBeenCalledWith(thread.id);
+  });
+
   it('não cria stream fantasma para turnos internos sem eventos', async () => {
     mocks.api.listActiveTurns.mockResolvedValue([
       { turnId: 'task-turn', conversationId: 'conv-task', startedAt: 1 },

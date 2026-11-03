@@ -27,6 +27,7 @@ use crate::providers::{
 };
 use crate::tools::{self, ToolOutcome, ToolRuntime};
 
+pub(crate) mod agent_workspace;
 pub mod batch;
 pub mod cache;
 pub mod code;
@@ -1473,6 +1474,14 @@ fn emit_context_stats(
 /// 2. builds context (system prompt + attachments + history),
 /// 3. loops `model -> tool calls -> tool results` until a final answer,
 /// 4. streams every phase through `on_event` and persists the assistant message.
+fn agent_turn_profile(is_agent: bool, requested: TurnProfile) -> TurnProfile {
+    if is_agent { TurnProfile::Code } else { requested }
+}
+
+fn restrict_implicit_agent_workspace(tools: &mut Vec<String>) {
+    tools.retain(|name| !matches!(name.as_str(), "run_command" | "run_checks" | "task"));
+}
+
 pub async fn run_turn(
     deps: HarnessDeps,
     mut payload: TurnPayload,
@@ -1488,6 +1497,10 @@ pub async fn run_turn(
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     // O id do turno também é chave do journal/eventos do harness de código.
     let tool_turn_id = turn_id.clone();
+
+    // Workspace selection and the turn's workspace snapshot must not race.
+    let workspace_gate = crate::agents::workspace_gate(&payload.conversation_id);
+    let _workspace_guard = workspace_gate.read().await;
 
     /* ---------------------------------------------------------------- */
     /* 1. Setup: conversation, provider, model and credential            */
@@ -1549,16 +1562,13 @@ pub async fn run_turn(
             }
         }
     }
-    // Perfil do turno: o Code exige uma sessão do layout Code (nativa ou
-    // compartilhada do Chat). Não deixamos o renderer transformar uma conversa
-    // do Chat em sessão de código por engano.
-    let profile = payload.profile;
+    // Agent threads use the Code runtime; ordinary Chat conversations cannot
+    // be converted to Code by the renderer without linking the session.
+    let profile = agent_turn_profile(agent.is_some(), payload.profile);
     let is_code_session = conversation.mode == crate::domain::CONVERSATION_MODE_CODE
         || conversation.code_linked;
-    // An agent conversation may run the Code profile only when it is bound to a
-    // workspace. Agent threads without a workspace stay chat-only.
-    let is_agent_workspace = conversation.mode == crate::domain::CONVERSATION_MODE_AGENT
-        && conversation.workspace_id.is_some();
+    // A workspace-less agent thread gets an app-owned workspace below.
+    let is_agent_workspace = conversation.mode == crate::domain::CONVERSATION_MODE_AGENT;
     if profile == TurnProfile::Code && !is_code_session && !is_agent_workspace {
         return Err(anyhow!(
             "CONVERSATION_NOT_CODE: a sessão `{}` não tem workspace para o perfil Code",
@@ -1922,6 +1932,13 @@ pub async fn run_turn(
         ),
         TurnProfile::Chat => None,
     };
+    if agent.is_some() && conversation.workspace_id.is_none() {
+        let root = agent_workspace::prepare(&data_dir, &conversation.id)?;
+        if let Some(context) = code_context.as_mut() {
+            context.root = Some(root);
+            context.trusted = true;
+        }
+    }
     if let Some(context) = code_context.as_mut() {
         context.goal_request = payload.goal_request;
         context.subagent = options.delegation_depth > 0;
@@ -1953,14 +1970,15 @@ pub async fn run_turn(
     // connect and discover tools (later turns use the cache). Subagents are
     // read-only: they neither connect MCP nor receive its tools.
     let subagent_turn = options.delegation_depth > 0;
-    if profile == TurnProfile::Code && !subagent_turn {
+    let implicit_agent_workspace = agent.is_some() && conversation.workspace_id.is_none();
+    if profile == TurnProfile::Code && !subagent_turn && !implicit_agent_workspace {
         if let Some(mcp) = deps.mcp.as_ref() {
             if mcp.has_servers() && mcp.cached_tools().is_empty() {
                 mcp.refresh_tools().await;
             }
         }
     }
-    let mcp_tools = if profile == TurnProfile::Code && !subagent_turn {
+    let mcp_tools = if profile == TurnProfile::Code && !subagent_turn && !implicit_agent_workspace {
         deps.mcp
             .as_ref()
             .map(|mcp| mcp.cached_tools())
@@ -1980,7 +1998,20 @@ pub async fn run_turn(
     // wire definitions, prompt guidance and the execution boundary.
     if profile == TurnProfile::Code {
         if let Some(agent) = agent.as_ref() {
-            let allowed = code_agent_allowed_tools(agent, &mcp_tools);
+            let mut allowed = code_agent_allowed_tools(agent, &mcp_tools);
+            if implicit_agent_workspace {
+                // A private working directory is not consent to execute host
+                // commands, which are not restricted to the working directory.
+                restrict_implicit_agent_workspace(&mut allowed);
+                if !options.web_search {
+                    allowed.retain(|name| name != "web_search");
+                }
+                for name in ["create_file", "run_code", "list_artifacts", "read_artifact"] {
+                    if agent.capabilities.allows_tool(name) {
+                        allowed.push(name.to_string());
+                    }
+                }
+            }
             options.allowed_tools = Some(allowed);
         }
     }
@@ -2021,6 +2052,13 @@ pub async fn run_turn(
         };
     code_tool_definitions_canonical
         .retain(|tool| tools::tool_allowed(&options, &tool.name));
+    if implicit_agent_workspace {
+        for definition in tools::definitions(&options) {
+            if matches!(definition.name.as_str(), "create_file" | "run_code" | "list_artifacts" | "read_artifact") {
+                code_tool_definitions_canonical.push(definition);
+            }
+        }
+    }
     // Durable memory is a dynamic tool: it exists only for an agent with memory
     // enabled and only if the capability allowlist permits it.
     if agent
@@ -2062,15 +2100,10 @@ pub async fn run_turn(
             || agent.capabilities.screen_capture
             || agent.capabilities.browser_use
     }) {
-        let read_only = ["computer_screenshot", "computer_windows", "computer_ui_tree"];
         for definition in crate::tools::code::computer::definitions() {
             let allowed_by_capability = agent.as_ref().is_some_and(|agent| {
-                if crate::tools::code::computer::is_browser_tool(&definition.name) {
-                    agent.capabilities.browser_use
-                } else {
-                    agent.capabilities.computer_use
-                        || read_only.contains(&definition.name.as_str())
-                }
+                agent_computer_tool_allowed(&definition.name, agent.capabilities.computer_use,
+                    agent.capabilities.screen_capture, agent.capabilities.browser_use, &agent.computer_environment)
             });
             if allowed_by_capability
                 && tools::tool_allowed(&options, &definition.name)
@@ -2773,6 +2806,9 @@ pub async fn run_turn(
         // deliverables must never be lost. A forced final-answer pass (below)
         // then summarizes what was collected.
         let outcomes = match (&code_tool_ctx, profile) {
+            (Some(ctx), TurnProfile::Code) if agent.is_some() => {
+                execute_agent_tools(ctx, &runtime, &step_calls).await
+            }
             (Some(ctx), TurnProfile::Code) => code::tools::execute_batch(ctx, &step_calls).await,
             _ => execute_tools(&runtime, &step_calls).await,
         };
@@ -4021,6 +4057,16 @@ fn tool_call_record(call: StreamingToolCall) -> ToolCallRecord {
 /// Effective built-in tool allowlist for an agent running the Code profile.
 /// Capability switches are deny filters; `tools` is an additional allowlist.
 /// MCP wire names are appended because they are governed by `mcpServers`.
+fn agent_computer_tool_allowed(name: &str, computer_use: bool, screen_capture: bool, browser_use: bool, environment: &str) -> bool {
+    if crate::tools::code::computer::is_browser_tool(name) {
+        return environment != "off" && browser_use;
+    }
+    if matches!(environment, "off" | "browser") {
+        return false;
+    }
+    computer_use || (screen_capture && ["computer_screenshot", "computer_windows", "computer_ui_tree"].contains(&name))
+}
+
 pub(crate) fn code_agent_allowed_tools(
     agent: &crate::agents::Agent,
     mcp_tools: &[crate::mcp::McpToolInfo],
@@ -4065,16 +4111,12 @@ pub(crate) fn code_agent_allowed_tools(
         || agent.capabilities.screen_capture
         || agent.capabilities.browser_use
     {
-        let read_only = ["computer_screenshot", "computer_windows", "computer_ui_tree"];
         allowed.extend(
             crate::tools::code::computer::tool_names()
                 .iter()
                 .filter(|name| {
-                    let capability_ok = if crate::tools::code::computer::is_browser_tool(name) {
-                        agent.capabilities.browser_use
-                    } else {
-                        agent.capabilities.computer_use || read_only.contains(name)
-                    };
+                    let capability_ok = agent_computer_tool_allowed(name, agent.capabilities.computer_use,
+                        agent.capabilities.screen_capture, agent.capabilities.browser_use, &agent.computer_environment);
                     capability_ok && agent.capabilities.allows_tool(name)
                 })
                 .map(|name| (*name).to_string()),
@@ -4158,6 +4200,26 @@ async fn execute_tools(runtime: &ToolRuntime, calls: &[ToolCallRecord]) -> Vec<T
         }
     });
     join_all(futures).await
+}
+
+async fn execute_agent_tools(ctx: &crate::tools::registry::ToolCtx, runtime: &ToolRuntime, calls: &[ToolCallRecord]) -> Vec<ToolOutcome> {
+    // Preserve request order across desktop/browser actions, filesystem writes,
+    // and Chat tools. Running a mixed batch concurrently can race approvals and
+    // make the observed state differ from the state an action operates on.
+    let mut outcomes = Vec::with_capacity(calls.len());
+    for call in calls {
+        let outcome = if matches!(call.name.as_str(), "create_file" | "run_code" | "list_artifacts" | "read_artifact") {
+            if !ctx.is_tool_enabled(&call.name) {
+                ToolOutcome::error(format!("TOOL_NOT_ENABLED: a ferramenta `{}` não está habilitada neste turno", call.name))
+            } else {
+                tools::execute(runtime, call).await
+            }
+        } else {
+            code::tools::execute(ctx, call).await
+        };
+        outcomes.push(outcome);
+    }
+    outcomes
 }
 
 /* ------------------------------------------------------------------ */
@@ -5240,6 +5302,59 @@ mod agent_loop_tests {
             result.assistant_message.content,
             "Resposta pela rota de reserva."
         );
+    }
+
+    #[tokio::test]
+    async fn agent_without_explicit_workspace_receives_desktop_and_browser_tools() {
+        let temp = TempDb::new();
+        let input = crate::agents::normalize_input(crate::agents::AgentInput {
+            name: "Assistant".into(), role: "Assistant".into(), description: String::new(),
+            emoji: String::new(), department: "General".into(), provider_id: "opencode-go".into(),
+            model_id: "deepseek-v4.1-flash".into(), fallback_provider_id: None, fallback_model_id: None,
+            reasoning: None, instructions: String::new(), starters: Vec::new(),
+            capabilities: crate::agents::AgentCapabilities {
+                computer_use: true, browser_use: true, ..Default::default()
+            },
+            memory_enabled: false, workspace_id: None, permission_mode: crate::domain::PermissionMode::Edit,
+            docker_image: None, computer_environment: "auto".into(),
+        }).expect("input");
+        let agent = temp.db.create_agent(&input).expect("agent");
+        let conversation = temp.db.create_agent_conversation(&agent.id, "Thread").expect("conversation");
+        let definitions = Arc::new(Mutex::new(Vec::<String>::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let definitions = definitions.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                *definitions.lock().expect("lock") = request.tools.iter().map(|tool| tool.name.clone()).collect();
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    if current == 0 { tool_call_stream(&sink, "browser-call", "browser_open"); }
+                    else { text_stream(&sink, "Ready"); }
+                    Ok(())
+                })
+            })
+        };
+        let data = tempfile::tempdir().expect("app data");
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.data_dir = Some(data.path().to_path_buf());
+        let (channel, _) = channel();
+        let result = run_turn(harness, TurnPayload {
+            conversation_id: conversation.id.clone(), content: "Hello".into(), attachment_ids: Vec::new(),
+            provider_id: conversation.provider_id, model_id: conversation.model_id, reasoning: None,
+            options: TurnOptions::default(), profile: TurnProfile::Chat, turn_kind: TurnKind::User,
+            goal_request: false, turn_id: None,
+        }, Settings::default(), channel, CancellationToken::new()).await.expect("agent turn");
+        let definitions = definitions.lock().expect("lock");
+        assert!(definitions.iter().any(|name| name == "computer_screenshot"));
+        assert!(definitions.iter().any(|name| name == "browser_snapshot"));
+        assert!(!definitions.iter().any(|name| name == "run_command"));
+        let browser_call = result.assistant_message.tool_calls.iter().find(|call| call.name == "browser_open").expect("browser call");
+        let response = browser_call.result.as_deref().expect("browser result");
+        assert!(!response.contains("TOOL_UNKNOWN"), "{response}");
+        assert!(!response.contains("TOOL_NOT_ENABLED"), "{response}");
+        assert!(data.path().join("agent-workspaces").is_dir());
+        assert!(temp.db.get_conversation(&conversation.id).expect("lookup").expect("conversation").workspace_id.is_none());
     }
 
     /* ---------------------------------------------------------------- */

@@ -130,6 +130,14 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('AgentPanel — Tela', () => {
+  it('shows the app workspace when the conversation has no selected folder', () => {
+    const agentWithWorkspace = { ...agent, workspaceId: 'new-default' };
+    const { rerender } = render(<AgentPanelScreen context={{ ...context, agent: agentWithWorkspace, conversation: { id: 'conv-1', workspaceId: null } as never }} />);
+    expect(screen.getByText(/pasta interna do aplicativo/i)).toBeTruthy();
+
+    rerender(<AgentPanelScreen context={{ ...context, agent, conversation: { id: 'conv-1', workspaceId: 'existing' } as never }} />);
+    expect(screen.queryByText(/pasta interna do aplicativo/i)).toBeNull();
+  });
   it('mostra os ambientes e mantém a nuvem desabilitada como Em breve', async () => {
     render(<AgentPanelScreen context={context} />);
 
@@ -208,6 +216,14 @@ describe('AgentPanel — Tela', () => {
 });
 
 describe('AgentPanel — Navegador', () => {
+  it('shows the app workspace for browser sessions without a selected folder', () => {
+    const agentWithWorkspace = { ...agent, workspaceId: 'new-default' };
+    const { rerender } = render(<AgentPanelBrowser context={{ ...context, agent: agentWithWorkspace, conversation: { id: 'conv-1', workspaceId: null } as never }} />);
+    expect(screen.getByText(/pasta interna do aplicativo/i)).toBeTruthy();
+
+    rerender(<AgentPanelBrowser context={{ ...context, agent, conversation: { id: 'conv-1', workspaceId: 'existing' } as never }} />);
+    expect(screen.queryByText(/pasta interna do aplicativo/i)).toBeNull();
+  });
   it('ativa browserUse pelo switch', async () => {
     render(<AgentPanelBrowser context={context} />);
 

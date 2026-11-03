@@ -3,6 +3,7 @@ import { Bot, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { AgentMemoryPanel } from './AgentMemoryPanel';
+import { AgentWorkspacePicker } from './AgentWorkspacePicker';
 import { inputFromAgent } from './agentUtils';
 import {
   Button,
@@ -693,8 +694,8 @@ export function AgentEditorDialog() {
                 <div>
                   <p className="text-[12px] font-medium text-foreground">Workspace e permissões</p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-foreground-subtle">
-                    Com um workspace, o agente usa o perfil de código (arquivos, terminal,
-                    alterações e aprovações). Sem workspace, ele conversa e cria artefatos.
+                    Escolha uma pasta para o agente ou deixe o aplicativo criar uma pasta interna
+                    separada para cada conversa. As permissões continuam aplicáveis.
                   </p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -706,7 +707,7 @@ export function AgentEditorDialog() {
                       disabled={workspacesLoading}
                       onChange={(event) => set('workspaceId', event.target.value)}
                     >
-                      <option value="">Nenhum workspace</option>
+                      <option value="">Pasta interna do aplicativo</option>
                       {workspaces.map((workspace) => (
                         <option key={workspace.id} value={workspace.id}>
                           {workspace.name}
@@ -714,13 +715,16 @@ export function AgentEditorDialog() {
                         </option>
                       ))}
                     </NativeSelect>
+                    <AgentWorkspacePicker onSelected={(workspace) => {
+                      setWorkspaces((current) => [...current.filter((item) => item.id !== workspace.id), workspace]);
+                      set('workspaceId', workspace.id);
+                    }} />
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="agent-permission">Permissões</Label>
                     <NativeSelect
                       id="agent-permission"
                       value={form.permissionMode}
-                      disabled={!form.workspaceId}
                       onChange={(event) =>
                         set('permissionMode', event.target.value as PermissionMode)
                       }
@@ -774,7 +778,7 @@ export function AgentEditorDialog() {
                 ) : null}
                 {!form.workspaceId ? (
                   <p className="text-[11px] text-foreground-subtle">
-                    Abra uma pasta no layout Code para criar workspaces.
+                    Uma pasta interna será usada automaticamente se nenhuma for selecionada.
                   </p>
                 ) : null}
               </div>

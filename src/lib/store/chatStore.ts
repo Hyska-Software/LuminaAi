@@ -543,7 +543,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       conversation &&
         (conversation.mode === 'code' ||
           conversation.codeLinked ||
-          (conversation.mode === 'agent' && conversation.workspaceId)),
+          conversation.mode === 'agent'),
     );
 
   /** Carrega/atualiza o estado da sessão de código quando ela é do Code. */

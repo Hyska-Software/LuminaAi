@@ -131,7 +131,7 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
           <div className="mt-2 flex flex-wrap gap-1.5">
             <Badge tone="neutral">{PERMISSION_LABELS[agent.permissionMode] ?? agent.permissionMode}</Badge>
             <Badge tone={agent.workspaceId ? 'accent' : 'neutral'}>
-              {agent.workspaceId ? 'Workspace' : 'Chat'}
+              {agent.workspaceId ? 'Pasta selecionada' : 'Pasta interna'}
             </Badge>
             <Badge tone="neutral">
               {agent.computerEnvironment === 'this_computer'

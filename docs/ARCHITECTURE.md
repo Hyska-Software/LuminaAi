@@ -88,8 +88,9 @@ Eventos (`TurnEvent`): `turn_started`, `step_started`, `reasoning_delta`, `reaso
 `job_updated`, `profile_changed`.
 
 **Perfis de turno.** `TurnPayload.profile` (`chat` | `code`, default `chat`) seleciona o perfil do
-mesmo loop: prompt, catálogo de tools, política e orçamentos. O perfil `code` só é aceito em sessão
-do Code (nativa ou `code_linked`) e, a cada passo, passa por: compactação de contexto (se
+mesmo loop: prompt, catálogo de tools, política e orçamentos. O perfil `code` é aceito em sessão
+do Code (nativa ou `code_linked`) e em threads de agente. Threads de agente usam o runtime Code
+mesmo quando o pedido chega como Chat e, a cada passo, passam por: compactação de contexto (se
 necessário), política/aprovação por tool, journal de arquivos e emissão de eventos de sessão.
 No layout Code o par `provider_id`/`model_id` é uma **propriedade da sessão** e pode ser trocado
 entre turnos (comando `set_conversation_model`); cada resposta persiste o modelo que a produziu e
@@ -192,6 +193,7 @@ envio).
   secrets.json         # API keys (nunca enviadas ao renderer)
   attachments/<id>.<ext>
   artifacts/<id>/<nome>
+  agent-workspaces/<sha256 da conversa>/  # pasta interna de agente sem workspace escolhido
   checkpoints/objects/<sha256>   # journal do harness de código (conteúdo por hash)
   spill/<conversa>/<id>.txt      # saída completa de tool acima do limite inline
   lumina.db
@@ -477,10 +479,12 @@ Contrato completo: **`docs/AGENTS.md`**. Resumo:
   item de memória mais recente é renderizado.
 - **Capabilities**: allowlists de tools/skills/MCP são aplicadas no catálogo,
   na execução e no conteúdo; `Some([])` nega tudo.
-- **Workspace**: persona com `workspace_id` roda o perfil Code (FS/shell/git/
-  jobs/plano/aprovações) com o bloco de identidade do agente; sem workspace é
-  chat-only. `executionEnvironment` alterna `run_command`/jobs entre a máquina
-  local e Docker (workspace em `/workspace`, rede desligada por padrão).
+- **Workspace**: threads de agente usam o runtime Code com pasta explícita
+  confiável ou pasta interna isolada por conversa. Sem pasta explícita,
+  `run_command`, `run_checks`, `task` e MCP não são liberados; ferramentas de
+  artefatos e `run_code` seguem os gates do Chat. A escolha pode ser alterada
+  em Agentes entre turnos. `executionEnvironment` alterna `run_command`/jobs
+  entre a máquina local e Docker (workspace em `/workspace`, rede desligada por padrão).
 - **Concorrência**: `chatStore.streamsByConversation` mantém um stream por
   conversa; `streaming` é a fatia visível de `activeId`. Várias threads de agente
   rodam ao mesmo tempo, com erro/notificação por thread.

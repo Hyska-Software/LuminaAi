@@ -29,7 +29,7 @@ Arquivos principais:
   canais e documento de export.
 - `src-tauri/src/commands/agents.rs`, `routines.rs`, `channels.rs` — comandos.
 - `src-tauri/src/harness/mod.rs` — composição de prompt/tools, memória volátil,
-  perfil de código para agentes com workspace.
+  runtime de ferramentas de agentes com workspace explícito ou interno.
 - `src-tauri/src/tools/memory.rs` — ferramenta `memory` (Chat e Code).
 - `src-tauri/src/tools/registry.rs` + `harness/code/tools.rs` — execução das
   tools do perfil Code e fronteira de execução.
@@ -48,7 +48,7 @@ starters, `capabilities_json`, `memory_enabled`, `workspace_id`,
   descrição, instruções, memória). A snapshot key do Chat/Code inclui
   `agent.id` + `prompt_version`, então editar o prompt causa **exatamente um**
   cache miss e nunca reutiliza o prompt de outra persona.
-- `workspace_id` é opcional; sem ele a persona é chat-only.
+- `workspace_id` é opcional; sem ele cada conversa usa uma pasta interna própria.
 - `permission_mode` é herdado pela conversa criada e pode ser trocado na sessão
   pelo chip do Code.
 
@@ -117,20 +117,29 @@ persona vinculada à conversa. `TurnOptions` carrega esses campos com
 
 ## 5. Workspace e perfil Code
 
-Uma persona com `workspace_id` roda o **perfil Code** nas suas threads:
+Threads de agentes usam o runtime de ferramentas do **Code**, inclusive quando
+o renderer envia o perfil Chat e a conversa não tem pasta selecionada:
 
-- `run_turn` aceita `profile=code` para `mode=agent` apenas quando a conversa
-  tem workspace. A conversa mantém o workspace com que foi criada: mudar o
-  workspace padrão da persona depois não invalida threads antigas.
+- Sem workspace explícito, o backend cria e reutiliza
+  `<app-data>/agent-workspaces/<sha256 do id da conversa>`, sem registrar essa
+  pasta como workspace visível no Code. Conversas diferentes usam pastas distintas.
+- O editor do agente e o cabeçalho da conversa permitem escolher uma pasta sem
+  abrir o Code; uma pasta externa precisa estar marcada como confiável. A troca
+  da pasta da conversa é recusada enquanto qualquer turno dela estiver ativo.
+- A conversa mantém o workspace com que foi criada: mudar o workspace padrão
+  da persona depois não altera threads existentes. Selecionar a pasta interna
+  novamente não move nem apaga arquivos.
 - A conversa herda `workspace_id` e `permission_mode` do agente na criação.
 - O prompt do Code recebe o bloco `# Agent profile` (identidade/instruções/
   memória) e a snapshot key inclui `agent.id` + `prompt_version`.
-- Tools de FS/shell/git/jobs/plano/objetivo/subagente, política de aprovação,
-  journal/diff e jobs são os mesmos do Code.
+- Com pasta explícita, tools de FS/shell/git/jobs/plano/objetivo/subagente,
+  política de aprovação, journal/diff e jobs seguem o Code.
 - O layout Agentes mostra o painel Arquivos/Alterações e as abas centrais de
   diff/arquivo/plano/commits/objetivo; aprovações continuam inline.
-- Sem workspace, a persona usa o perfil Chat (web, arquivos/artefatos,
-  `run_code` opcional) e não tem shell/FS.
+- A pasta interna não concede `run_command`, `run_checks`, `task` ou MCP.
+  Artefatos e `run_code` do Chat continuam disponíveis conforme suas opções e
+  capabilities; `run_code` continua sujeito ao opt-in global e não é sandbox.
+  Navegador e desktop dependem de suas próprias capabilities e aprovações.
 
 **Computer use local**: o agente pode usar o computador do usuário quando a
 capability `computerUse`/`screenCapture` está ligada: screenshot, clique,

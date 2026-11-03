@@ -34,6 +34,42 @@ pub fn global() -> Option<&'static BrowserManager> {
     GLOBAL.get()
 }
 
+/// Resolves the same conversation-owned download directory for UI and tools.
+pub(crate) fn conversation_download_dir(
+    db: &crate::db::Db,
+    data_dir: &Path,
+    conversation_id: &str,
+) -> Result<Option<PathBuf>, String> {
+    let conversation = db.get_conversation(conversation_id)
+        .map_err(|error| format!("{error:#}"))?
+        .ok_or_else(|| format!("BROWSER_CONVERSATION_NOT_FOUND: `{conversation_id}`"))?;
+    download_dir_for_binding(db, data_dir, conversation_id, conversation.mode == crate::domain::CONVERSATION_MODE_AGENT, conversation.workspace_id.as_deref())
+}
+
+fn download_dir_for_binding(db: &crate::db::Db, data_dir: &Path, conversation_id: &str, is_agent: bool, workspace_id: Option<&str>) -> Result<Option<PathBuf>, String> {
+    if let Some(id) = workspace_id {
+        let workspace = db.get_workspace(id).map_err(|error| format!("{error:#}"))?
+            .ok_or_else(|| format!("BROWSER_WORKSPACE_NOT_FOUND: `{id}`"))?;
+        return Ok(Some(PathBuf::from(workspace.path).join("downloads")));
+    }
+    if is_agent {
+        let root = crate::harness::agent_workspace::prepare(data_dir, conversation_id)
+            .map_err(|error| format!("{error:#}"))?;
+        return Ok(Some(root.join("downloads")));
+    }
+    Ok(None)
+}
+
+pub(crate) async fn ensure_for_conversation(
+    manager: &BrowserManager,
+    db: &crate::db::Db,
+    data_dir: &Path,
+    conversation_id: &str,
+) -> Result<BrowserStatus, String> {
+    let downloads = conversation_download_dir(db, data_dir, conversation_id)?;
+    manager.ensure(conversation_id, downloads).await
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserTab {
@@ -176,9 +212,24 @@ pub struct BrowserManager {
     sessions: Mutex<HashMap<String, BrowserSession>>,
     start_lock: tokio::sync::Mutex<()>,
     http: reqwest::Client,
+    #[cfg(test)]
+    test_start_port: Option<u16>,
 }
 
 impl BrowserManager {
+    /// Update a live browser before committing a workspace change.
+    /// A lost CDP reply is ambiguous, so terminate the session on any failure.
+    pub(crate) async fn prepare_workspace_change(&self, db: &crate::db::Db, conversation_id: &str, workspace_id: Option<&str>) -> Result<bool, String> {
+        if !self.is_active(conversation_id) { return Ok(false); }
+        let downloads = match download_dir_for_binding(db, &self.data_dir, conversation_id, true, workspace_id) {
+            Ok(path) => path,
+            Err(error) => { self.close(conversation_id); return Err(error); }
+        };
+        match self.ensure(conversation_id, downloads).await {
+            Ok(_) => Ok(true),
+            Err(error) => { self.close(conversation_id); Err(error) }
+        }
+    }
     /// Streams CDP screencast frames until the subscriber cancels or disconnects.
     pub async fn stream_frames(
         &self,
@@ -237,6 +288,8 @@ impl BrowserManager {
                 .timeout(Duration::from_secs(10))
                 .build()
                 .unwrap_or_default(),
+            #[cfg(test)]
+            test_start_port: None,
         }
     }
 
@@ -380,6 +433,17 @@ impl BrowserManager {
         }
     }
 
+    async fn configure_download_dir(&self, port: u16, downloads: &std::path::Path) -> Result<(), String> {
+        std::fs::create_dir_all(downloads)
+            .map_err(|error| format!("BROWSER_DOWNLOAD_DIR: {error}"))?;
+        let version = self.endpoint_json(port, "/json/version").await?;
+        let ws = version.get("webSocketDebuggerUrl").and_then(Value::as_str)
+            .ok_or_else(|| "BROWSER_CDP_INVALID: browser websocket ausente".to_string())?;
+        cdp_call(ws, "Browser.setDownloadBehavior", json!({
+            "behavior": "allow", "downloadPath": downloads.to_string_lossy()
+        })).await.map(|_| ())
+    }
+
     /// Starts the isolated browser if needed and returns its current status.
     pub async fn ensure(
         &self,
@@ -387,7 +451,42 @@ impl BrowserManager {
         download_dir: Option<PathBuf>,
     ) -> Result<BrowserStatus, String> {
         let _guard = self.start_lock.lock().await;
+        let downloads = download_dir
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| self.default_download_dir(conversation_id));
         if self.is_active(conversation_id) {
+            let (port, previous) = {
+                let sessions = self.sessions.lock();
+                let session = sessions.get(conversation_id)
+                    .ok_or_else(|| "BROWSER_NOT_RUNNING".to_string())?;
+                (session.port, session.download_dir.clone())
+            };
+            if previous != downloads {
+                self.configure_download_dir(port, &downloads).await?;
+                let mut sessions = self.sessions.lock();
+                let session = sessions.get_mut(conversation_id)
+                    .filter(|session| session.port == port)
+                    .ok_or_else(|| "BROWSER_NOT_RUNNING".to_string())?;
+                session.download_dir = downloads;
+            }
+            return Ok(self.status(conversation_id).await);
+        }
+        #[cfg(test)]
+        if let Some(port) = self.test_start_port {
+            let child = Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
+                .args(["--exact", "computer::browser::tests::cdp_stub_lifetime_child"])
+                .env("LUMINA_CDP_STUB_CHILD", "1")
+                .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+                .spawn().map_err(|e| e.to_string())?;
+            self.sessions.lock().insert(conversation_id.to_owned(), BrowserSession {
+                child, port, executable: "cdp-protocol-stub".into(), profile_dir: self.profile_dir(conversation_id),
+                download_dir: downloads.clone(), active_tab: Mutex::new(None), refs: Mutex::new(HashMap::new()),
+                held_input: Mutex::new(HashMap::new()),
+            });
+            if let Err(error) = self.configure_download_dir(port, &downloads).await {
+                self.close(conversation_id);
+                return Err(error);
+            }
             return Ok(self.status(conversation_id).await);
         }
         let executable = find_browser_executable()
@@ -395,9 +494,6 @@ impl BrowserManager {
         let profile = self.profile_dir(conversation_id);
         std::fs::create_dir_all(&profile)
             .map_err(|error| format!("BROWSER_PROFILE: {error}"))?;
-        let downloads = download_dir
-            .filter(|path| !path.as_os_str().is_empty())
-            .unwrap_or_else(|| self.default_download_dir(conversation_id));
         std::fs::create_dir_all(&downloads)
             .map_err(|error| format!("BROWSER_DOWNLOAD_DIR: {error}"))?;
         let port = free_port()?;
@@ -458,15 +554,9 @@ impl BrowserManager {
             }
             tokio::time::sleep(Duration::from_millis(150)).await;
         }
-        if let Some(version) = self.endpoint_json(port, "/json/version").await.ok() {
-            if let Some(ws) = version.get("webSocketDebuggerUrl").and_then(Value::as_str) {
-                let _ = cdp_call(
-                    ws,
-                    "Browser.setDownloadBehavior",
-                    json!({ "behavior": "allow", "downloadPath": downloads.to_string_lossy() }),
-                )
-                .await;
-            }
+        if let Err(error) = self.configure_download_dir(port, &downloads).await {
+            self.close(conversation_id);
+            return Err(error);
         }
         let _ = pid;
         Ok(self.status(conversation_id).await)
@@ -1743,6 +1833,133 @@ async fn focus_process(pid: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn conversation_download_directory_is_shared_across_opening_orders_and_rebinding() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let db = Arc::new(crate::db::Db::open_in_memory().expect("database"));
+        let input = crate::agents::normalize_input(crate::agents::AgentInput {
+            name: "Agent".into(), role: "Assistant".into(), description: String::new(), emoji: String::new(),
+            department: "General".into(), provider_id: "provider".into(), model_id: "model".into(),
+            fallback_provider_id: None, fallback_model_id: None, reasoning: None, instructions: String::new(),
+            starters: Vec::new(), capabilities: crate::agents::AgentCapabilities { browser_use: true, ..Default::default() }, memory_enabled: false, workspace_id: None,
+            permission_mode: crate::domain::PermissionMode::Edit, docker_image: None, computer_environment: "auto".into(),
+        }).expect("input");
+        let agent = db.create_agent(&input).expect("agent");
+        let recorded = Arc::new(Mutex::new(Vec::<String>::new()));
+        let fail_next = Arc::new(AtomicBool::new(false));
+        let ws_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("CDP listener");
+        let ws_address = ws_listener.local_addr().expect("CDP address");
+        let ws_recorded = recorded.clone();
+        let ws_fail = fail_next.clone();
+        let ws_server = tokio::spawn(async move {
+            while let Ok((socket, _)) = ws_listener.accept().await {
+                let recorded = ws_recorded.clone();
+                let fail = ws_fail.clone();
+                tokio::spawn(async move {
+                    let Ok(mut ws) = tokio_tungstenite::accept_async(socket).await else { return };
+                    let Some(Ok(Message::Text(text))) = ws.next().await else { return };
+                    let request: Value = serde_json::from_str(&text).expect("request");
+                    let method = request["method"].as_str().unwrap_or("");
+                    if method == "Browser.setDownloadBehavior" {
+                        recorded.lock().push(request["params"]["downloadPath"].as_str().expect("download path").to_string());
+                    }
+                    let response = if method == "Browser.setDownloadBehavior" && fail.swap(false, Ordering::SeqCst) {
+                        json!({"id":request["id"],"error":{"message":"rejected"}})
+                    } else if method == "Runtime.evaluate" {
+                        json!({"id":request["id"],"result":{"result":{"value":"complete"}}})
+                    } else { json!({"id":request["id"],"result":{}}) };
+                    let _ = ws.send(Message::Text(response.to_string().into())).await;
+                });
+            }
+        });
+        let http_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("HTTP listener");
+        let port = http_listener.local_addr().expect("HTTP address").port();
+        let http_server = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = http_listener.accept().await {
+                tokio::spawn(async move {
+                    let mut request = [0u8; 4096];
+                    let Ok(count) = socket.read(&mut request).await else { return };
+                    let request = String::from_utf8_lossy(&request[..count]);
+                    let body = if request.contains("/json/version") {
+                        json!({"webSocketDebuggerUrl":format!("ws://{ws_address}")}).to_string()
+                    } else if request.contains("/json/list") {
+                        json!([{"id":"tab-1","type":"page","url":"about:blank", "webSocketDebuggerUrl":format!("ws://{ws_address}")}]).to_string()
+                    } else { "{}".to_string() };
+                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+                    let _ = socket.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+        let mut manager = BrowserManager::new(temp.path().to_path_buf());
+        manager.test_start_port = Some(port);
+        let settings = crate::domain::Settings { computer_allow_unattended_browser: true, ..Default::default() };
+        for order in ["panel-first", "agent-first"] {
+            let conversation = db.create_agent_conversation(&agent.id, order).expect("conversation");
+            let internal = conversation_download_dir(&db, temp.path(), &conversation.id).expect("resolve").expect("directory");
+            let ctx = crate::tools::registry::ToolCtx {
+                db: db.clone(), http: reqwest::Client::new(), conversation_id: conversation.id.clone(),
+                message_id: "message".into(), tool_call_id: "call".into(), turn_id: "turn".into(),
+                workspace: None, settings: settings.clone(), cancel: tokio_util::sync::CancellationToken::new(),
+                data_dir: temp.path().to_path_buf(), approval: None, observed: None, emit: None, rules: Vec::new(),
+                jobs: None, questions: None, turn_kind: crate::domain::TurnKind::User, mcp: None, subagent: None,
+                enabled_tools: Arc::new(Default::default()), subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                subagent_slots: Arc::new(tokio::sync::Semaphore::new(1)), skills_roots: Vec::new(),
+            };
+            for entry in if order == "panel-first" { ["panel", "agent"] } else { ["agent", "panel"] } {
+                if entry == "panel" {
+                    crate::commands::browser::open_browser_session(&db, &settings, temp.path(), &manager, &conversation.id, None, || {}).await.expect("panel open");
+                } else {
+                    let outcome = crate::tools::code::computer::run_with_browser_manager(&ctx, "browser_open", &json!({"url":"https://example.com"}), Some(&manager)).await;
+                    assert!(!outcome.is_error, "{}", outcome.content);
+                }
+                let status = manager.status(&conversation.id).await;
+                assert_eq!(status.download_dir.as_deref(), Some(internal.to_string_lossy().as_ref()), "{order}: {entry}");
+            }
+            let folder = temp.path().join(order);
+            std::fs::create_dir(&folder).expect("folder");
+            let workspace = db.create_workspace(order, &folder.to_string_lossy()).expect("workspace");
+            db.set_workspace_trusted(&workspace.id, true).expect("trust");
+            if order == "panel-first" {
+                let control = crate::computer::control::gate(&conversation.id);
+                let action = control.action.lock().await;
+                let bind = crate::commands::workspace::bind_conversation_workspace(&db, &conversation.id, Some(&workspace.id), Some(&manager));
+                tokio::pin!(bind);
+                assert!(tokio::time::timeout(Duration::from_millis(50), &mut bind).await.is_err());
+                assert!(db.get_conversation(&conversation.id).expect("lookup").expect("conversation").workspace_id.is_none());
+                drop(action);
+                bind.await.expect("bind after input completes");
+            } else {
+                crate::commands::workspace::bind_conversation_workspace(&db, &conversation.id, Some(&workspace.id), Some(&manager)).await.expect("bind");
+            }
+            let status = manager.status(&conversation.id).await;
+            assert_eq!(status.download_dir.as_deref(), Some(folder.join("downloads").to_string_lossy().as_ref()));
+            let configured = recorded.lock().last().cloned().expect("configured download path");
+            assert_eq!(PathBuf::from(&configured), folder.join("downloads"));
+            // Simulate an independent human download using the destination the
+            // protocol server accepted, without opening a panel or agent tool.
+            std::fs::write(PathBuf::from(&configured).join("manual.txt"), b"download").expect("manual download");
+            assert!(folder.join("downloads/manual.txt").is_file());
+            assert!(!internal.join("manual.txt").exists());
+            crate::commands::workspace::bind_conversation_workspace(&db, &conversation.id, None, Some(&manager)).await.expect("reset");
+            let status = manager.status(&conversation.id).await;
+            assert_eq!(status.download_dir.as_deref(), Some(internal.to_string_lossy().as_ref()));
+            if order == "panel-first" {
+                fail_next.store(true, Ordering::SeqCst);
+                assert!(crate::commands::workspace::bind_conversation_workspace(&db, &conversation.id, Some(&workspace.id), Some(&manager)).await.is_err());
+                assert!(!manager.is_active(&conversation.id), "ambiguous reconfiguration closes the browser");
+                assert!(db.get_conversation(&conversation.id).expect("lookup").expect("conversation").workspace_id.is_none());
+            }
+            manager.close(&conversation.id);
+        }
+        assert_eq!(recorded.lock().len(), 7, "one initial configuration per session, plus changes and one rejected change");
+        ws_server.abort();
+        http_server.abort();
+    }
 
     // The integration fixture needs a harmless live child owned by BrowserManager.
     #[test]

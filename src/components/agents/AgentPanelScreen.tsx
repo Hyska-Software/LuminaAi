@@ -25,6 +25,7 @@ import { ComputerDockerHelp, isComputerDockerError } from './ComputerDockerHelp'
 import { PrivateDesktopViewer } from './PrivateDesktopViewer';
 import { ComputerActivity } from './ComputerActivity';
 import { useComputerControlEvents } from './useComputerControlEvents';
+import { AgentWorkspaceNotice } from './AgentWorkspaceNotice';
 import { Badge, Button, Spinner } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAgentStore, useChatStore, useUiStore } from '@/lib/store';
@@ -477,12 +478,7 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
               Escolha onde este agente pode trabalhar. A permissão de cada ação continua separada.
             </p>
             {turnActive ? <p className="text-[11px] text-foreground-muted">Aguarde o fim do turno para trocar de ambiente.</p> : null}
-            {!agent.workspaceId ? (
-              <p className="mt-1 rounded-lg border border-warning/30 bg-warning-soft px-2 py-1 text-[10px] text-warning">
-                As tools de controle rodam no perfil Code. Vincule um workspace ao agente no editor
-                para ele executar mouse/teclado/navegador.
-              </p>
-            ) : null}
+            <AgentWorkspaceNotice agent={agent} conversation={conversation} />
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             {ENVIRONMENTS.map((entry) => {              const Icon = entry.icon;

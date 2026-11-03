@@ -544,7 +544,7 @@ fn ensure_agent_control(ctx: &ToolCtx) -> Result<(), ToolOutcome> {
     }
 }
 
-async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
+async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&crate::computer::browser::BrowserManager>) -> ToolOutcome {
     match tool {
         "computer_screenshot" => match crate::computer::screenshot(
             &ctx.settings,
@@ -594,7 +594,10 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
         "browser_open" | "browser_navigate" | "browser_snapshot" | "browser_click"
         | "browser_type" | "browser_press" | "browser_scroll" | "browser_hover"
         | "browser_select" | "browser_upload" | "browser_wait" | "browser_extract"
-        | "browser_tabs" | "browser_download" => run_browser(ctx, tool, args).await,
+        | "browser_tabs" | "browser_download" => match browser {
+            Some(manager) => run_browser_with_manager(ctx, tool, args, manager).await,
+            None => run_browser(ctx, tool, args).await,
+        },
         "computer_click" => {
             let Some(x) = int_arg(args, "x") else {
                 return ToolOutcome::error("o argumento `x` é obrigatório");
@@ -937,11 +940,18 @@ async fn run_browser(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
     let Some(manager) = crate::computer::browser::global() else {
         return ToolOutcome::error("BROWSER_NOT_INITIALIZED: sessão de navegador indisponível");
     };
+    run_browser_with_manager(ctx, tool, args, manager).await
+}
+
+pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &Value, manager: &crate::computer::browser::BrowserManager) -> ToolOutcome {
     let tab = str_arg(args, "tabId");
-    let downloads = ctx
-        .workspace
-        .as_ref()
-        .map(|workspace| workspace.root.join("downloads"));
+    if tool == "browser_download" && manager.is_active(&ctx.conversation_id) {
+        if let Err(error) = crate::computer::browser::ensure_for_conversation(
+            manager, &ctx.db, &ctx.data_dir, &ctx.conversation_id,
+        ).await {
+            return ToolOutcome::error(error);
+        }
+    }
     match tool {
         "browser_open" => {
             let Some(url) = str_arg(args, "url") else {
@@ -960,8 +970,9 @@ async fn run_browser(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             if let Err(outcome) = approve(ctx, tool, detail).await {
                 return outcome;
             }
-            match manager
-                .ensure(&ctx.conversation_id, downloads.clone())
+            match crate::computer::browser::ensure_for_conversation(
+                manager, &ctx.db, &ctx.data_dir, &ctx.conversation_id,
+            )
                 .await
             {
                 Ok(status) => match manager
@@ -1402,6 +1413,10 @@ fn decision_of(outcome: &ToolOutcome) -> Option<String> {
 }
 
 pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
+    run_with_browser_manager(ctx, tool, args, None).await
+}
+
+pub(crate) async fn run_with_browser_manager(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&crate::computer::browser::BrowserManager>) -> ToolOutcome {
     if !is_browser_tool(tool) && !crate::computer::desktop_enabled(&ctx.settings) {
         return ToolOutcome::error(
             "COMPUTER_DISABLED: o ambiente de computador está desligado ou em modo navegador",
@@ -1493,7 +1508,7 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             ));
         }
     };
-    let outcome = run_inner(ctx, tool, args).await;
+    let outcome = run_inner(ctx, tool, args, browser).await;
     if !outcome.is_error && matches!(tool, "computer_screenshot" | "browser_snapshot") {
         if let Err(error) = ctx.db.set_computer_needs_observation(&ctx.conversation_id, false) {
             return ToolOutcome::error(format!("COMPUTER_CONTROL_UNAVAILABLE: {error:#}"));

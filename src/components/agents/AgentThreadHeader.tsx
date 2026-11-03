@@ -1,10 +1,11 @@
 import { ArrowLeft, FolderKanban, PanelRight, Pencil } from 'lucide-react';
 
 import { AgentAvatar } from './AgentAvatar';
+import { AgentConversationWorkspace } from './AgentConversationWorkspace';
 import { modelLabel } from './agentUtils';
 import { CodeContextMeterChip } from '@/components/code/CodeAgentWidgets';
 import { Button, IconButton } from '@/components/ui';
-import { useAppStore, useUiStore } from '@/lib/store';
+import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import type { Agent, Conversation } from '@/lib/types';
 
 export function AgentThreadHeader({
@@ -17,6 +18,7 @@ export function AgentThreadHeader({
   onBack: () => void;
 }) {
   const providers = useAppStore((state) => state.providers);
+  const turnActive = useChatStore((state) => Boolean(state.streamsByConversation[conversation.id]));
   const openEditor = useUiStore((state) => state.openAgentEditor);
   const panelOpen = useUiStore((state) => state.agentPanelOpen);
   const setPanelOpen = useUiStore((state) => state.setAgentPanelOpen);
@@ -38,6 +40,11 @@ export function AgentThreadHeader({
           {conversation.title} · {modelLabel(providers, conversation.providerId, conversation.modelId)}
         </p>
       </div>
+      <AgentConversationWorkspace conversation={conversation} busy={turnActive} onChanged={(updated) => {
+        useChatStore.setState((state) => ({
+          conversations: state.conversations.map((item) => item.id === updated.id ? updated : item),
+        }));
+      }} />
       {conversation.workspaceId ? (
         <CodeContextMeterChip conversationId={conversation.id} />
       ) : null}
