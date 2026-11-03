@@ -309,6 +309,10 @@ Contrato completo: `docs/DOCKER.md`.
 - O `CodePanel` (Arquivos/Alterações/Terminal) continua **separado**: os botões
   do header alternam qual painel ocupa o dock; não há aba "Código" dentro do
   `AgentPanel`.
+- Reabertura: o toggle `PanelRight` da sidebar esquerda, do header da thread e do
+  canal, e o botão flutuante (`AgentPanelOpener`) das superfícies sem header
+  (home e agente arquivado) trazem o painel de volta; recolhê-lo nunca deixa a
+  tela sem um controle para reabri-lo.
 - Estado em `uiStore` (`agentPanelOpen`, `agentPanelTab`, `agentRightPanel`) e
   largura em `sidePanelWidth`.
 - Tela: `computer_preview` (só UI, sem modelo/DB), `computer_set_paused`,

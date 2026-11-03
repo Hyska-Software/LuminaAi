@@ -3,6 +3,7 @@ import { ArrowLeft, Loader2, Send, Settings2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { AgentAvatar } from './AgentAvatar';
+import { AgentPanelButton, AgentPanelOpener } from './AgentPanelToggle';
 import { Markdown } from '@/components/chat/Markdown';
 import { Button, IconButton, Textarea } from '@/components/ui';
 import { api } from '@/lib/api';
@@ -125,16 +126,18 @@ export function AgentChannelView({
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-[13px] text-foreground-muted">
+      <div className="relative flex h-full items-center justify-center text-[13px] text-foreground-muted">
         <Loader2 className="mr-2 size-4 animate-spin" />
         Carregando canal…
+        <AgentPanelOpener />
       </div>
     );
   }
   if (!channel) {
     return (
-      <div className="flex h-full items-center justify-center px-6 text-center text-[13px] text-foreground-muted">
+      <div className="relative flex h-full items-center justify-center px-6 text-center text-[13px] text-foreground-muted">
         Canal indisponível.
+        <AgentPanelOpener />
       </div>
     );
   }
@@ -158,6 +161,7 @@ export function AgentChannelView({
               .join(', ') || 'Nenhum participante'}
           </p>
         </div>
+        <AgentPanelButton />
         <IconButton
           label="Editar canal"
           size="sm"

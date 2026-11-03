@@ -5,6 +5,7 @@ import { AgentChannelDialog } from './AgentChannelDialog';
 import { AgentChannelView } from './AgentChannelView';
 import { AgentEditorDialog } from './AgentEditorDialog';
 import { AgentHome, AgentWelcome } from './AgentHome';
+import { AgentPanelOpener } from './AgentPanelToggle';
 import { AgentThreadHeader } from './AgentThreadHeader';
 import { TeamView } from './TeamView';
 import { ChatView } from '@/components/chat/ChatView';
@@ -215,10 +216,11 @@ export function AgentWorkspace() {
   }
   if (agent.archivedAt !== null) {
     return (
-      <>
+      <div className="relative h-full min-h-0">
         <ArchivedAgentHome agent={agent} />
+        <AgentPanelOpener />
         <AgentEditorDialog />
-      </>
+      </div>
     );
   }
 
@@ -274,9 +276,10 @@ export function AgentWorkspace() {
   }
 
   return (
-    <>
+    <div className="relative h-full min-h-0">
       <AgentHome agent={agent} />
+      <AgentPanelOpener />
       <AgentEditorDialog />
-    </>
+    </div>
   );
 }
