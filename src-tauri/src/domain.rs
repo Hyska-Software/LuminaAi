@@ -1099,6 +1099,10 @@ fn default_docker_image() -> String {
     "node:22-bookworm".to_string()
 }
 
+fn default_computer_environment_setting() -> String {
+    "auto".to_string()
+}
+
 fn default_docker_memory_mb() -> u32 {
     2_048
 }
@@ -1190,6 +1194,30 @@ pub struct Settings {
     /// Imagem usada quando `execution_environment == "docker"`.
     #[serde(default = "default_docker_image")]
     pub docker_image: String,
+    /// Where computer use runs: `auto`, `private_desktop`, `this_computer`,
+    /// `browser` or `off`. Agent turns override this from the persona.
+    #[serde(default = "default_computer_environment_setting")]
+    pub computer_environment: String,
+    /// Browser origin allowlist (host or suffix). Empty means all public hosts.
+    #[serde(default)]
+    pub browser_allowed_domains: Vec<String>,
+    /// Browser origin denylist (host or suffix), evaluated before allow.
+    #[serde(default)]
+    pub browser_blocked_domains: Vec<String>,
+    /// Allowlist of desktop apps (process/window class). Empty means all apps
+    /// except the denylist.
+    #[serde(default)]
+    pub computer_allowed_apps: Vec<String>,
+    /// Apps always denied before the allowlist.
+    #[serde(default)]
+    pub computer_blocked_apps: Vec<String>,
+    /// Allow localhost/RFC1918/link-local browser targets (local dev).
+    #[serde(default = "default_true")]
+    pub browser_allow_private_hosts: bool,
+    /// Allow browser actions in unattended routines/tasks when no approval
+    /// channel exists. Domain policy still applies. Default false.
+    #[serde(default)]
+    pub computer_allow_unattended_browser: bool,
     /// Permite rede no contêiner Docker (desligado = `--network none`).
     #[serde(default)]
     pub docker_network: bool,
@@ -1295,6 +1323,13 @@ impl Default for Settings {
             shell_enabled: true,
             execution_environment: default_execution_environment(),
             docker_image: default_docker_image(),
+            computer_environment: default_computer_environment_setting(),
+            browser_allowed_domains: Vec::new(),
+            browser_blocked_domains: Vec::new(),
+            browser_allow_private_hosts: true,
+            computer_allowed_apps: Vec::new(),
+            computer_blocked_apps: Vec::new(),
+            computer_allow_unattended_browser: false,
             docker_network: false,
             docker_memory_mb: default_docker_memory_mb(),
             docker_cpus: default_docker_cpus(),

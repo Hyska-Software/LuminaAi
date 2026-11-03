@@ -505,6 +505,7 @@ mod tests {
             workspace_id: None,
             permission_mode: PermissionMode::Edit,
             docker_image: None,
+            computer_environment: "auto".to_string(),
         })
         .expect("agent")
     }

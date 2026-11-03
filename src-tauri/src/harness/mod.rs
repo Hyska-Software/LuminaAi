@@ -1525,9 +1525,14 @@ pub async fn run_turn(
         payload.options.agent_memory = agent.memory_enabled;
         payload.options.agent_id = Some(agent.id.clone());
         payload.options.agent_delegation = agent.capabilities.delegation;
-        payload.options.agent_computer = agent.capabilities.computer_use
+        let desktop_capable = agent.capabilities.computer_use
             || agent.capabilities.screen_capture;
-        payload.options.agent_browser = agent.capabilities.browser_use;
+        payload.options.agent_computer = match agent.computer_environment.as_str() {
+            "off" | "browser" => false,
+            _ => desktop_capable,
+        };
+        payload.options.agent_browser = agent.computer_environment != "off"
+            && agent.capabilities.browser_use;
         payload.options.agent_docker = agent.capabilities.docker_execution;
         Some(agent)
     } else {
@@ -1536,6 +1541,7 @@ pub async fn run_turn(
     // Per-agent Docker image override. It is a deny-only capability gate: the
     // renderer cannot force Docker when the persona did not opt in.
     if let Some(agent) = agent.as_ref() {
+        settings.computer_environment = agent.computer_environment.clone();
         if agent.capabilities.docker_execution {
             if let Some(image) = agent.docker_image.as_deref() {
                 settings.execution_environment = "docker".to_string();
@@ -2059,7 +2065,7 @@ pub async fn run_turn(
         let read_only = ["computer_screenshot", "computer_windows", "computer_ui_tree"];
         for definition in crate::tools::code::computer::definitions() {
             let allowed_by_capability = agent.as_ref().is_some_and(|agent| {
-                if definition.name == "browser_open" {
+                if crate::tools::code::computer::is_browser_tool(&definition.name) {
                     agent.capabilities.browser_use
                 } else {
                     agent.capabilities.computer_use
@@ -4064,7 +4070,7 @@ pub(crate) fn code_agent_allowed_tools(
             crate::tools::code::computer::tool_names()
                 .iter()
                 .filter(|name| {
-                    let capability_ok = if **name == "browser_open" {
+                    let capability_ok = if crate::tools::code::computer::is_browser_tool(name) {
                         agent.capabilities.browser_use
                     } else {
                         agent.capabilities.computer_use || read_only.contains(name)
@@ -5181,6 +5187,7 @@ mod agent_loop_tests {
             workspace_id: None,
             permission_mode: crate::domain::PermissionMode::Edit,
             docker_image: None,
+            computer_environment: "auto".to_string(),
         })
         .expect("agent input");
         let agent = temp.db.create_agent(&input).expect("agent");

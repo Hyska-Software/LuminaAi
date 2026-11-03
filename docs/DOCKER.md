@@ -13,7 +13,14 @@
   e `dockerPidsLimit` (32–4096, default 256);
 - `dockerReadOnlyRoot` (default `true`; `/workspace` e `/tmp` continuam
   graváveis);
-- `computerDockerImage` / `computerDockerContainer`: computer use gráfico;
+- `computerDockerImage` / `computerDockerContainer`: computer use gráfico. O
+  nome configurado é um **prefixo**; cada conversa usa
+  `<nome>-<conversationId>`, com porta noVNC loopback aleatória;
+- `browserAllowedDomains` / `browserBlockedDomains` /
+  `browserAllowPrivateHosts`: política de hosts do navegador;
+- `computerAllowedApps` / `computerBlockedApps`: allow/deny de apps desktop;
+- `computerAllowUnattendedBrowser`: navegador em rotinas sem card (desktop
+  continua fail-closed);
 - limites de concorrência/orçamento em `maxConcurrentTurns`,
   `maxConcurrentTurnsPerAgent`, `maxQueueLengthPerThread`,
   `agentDailyCostLimitUsd`.

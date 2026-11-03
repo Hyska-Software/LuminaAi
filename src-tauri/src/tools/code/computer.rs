@@ -17,10 +17,28 @@ const TOOL_NAMES: &[&str] = &[
     "computer_windows",
     "computer_ui_tree",
     "computer_click",
+    "computer_drag",
+    "computer_scroll",
+    "computer_move",
+    "computer_wait",
+    "computer_clipboard",
     "computer_type",
     "computer_key",
     "computer_focus",
     "browser_open",
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_press",
+    "browser_scroll",
+    "browser_hover",
+    "browser_select",
+    "browser_upload",
+    "browser_wait",
+    "browser_extract",
+    "browser_tabs",
+    "browser_download",
 ];
 
 pub fn tool_names() -> &'static [&'static str] {
@@ -29,6 +47,10 @@ pub fn tool_names() -> &'static [&'static str] {
 
 pub fn is_computer_tool(name: &str) -> bool {
     TOOL_NAMES.contains(&name)
+}
+
+pub fn is_browser_tool(name: &str) -> bool {
+    name.starts_with("browser_")
 }
 
 pub fn definitions() -> Vec<ToolDefinition> {
@@ -80,6 +102,73 @@ pub fn definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "computer_drag".to_string(),
+            description: "Drag from one screen coordinate to another. Requires explicit approval."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "fromX": { "type": "integer" },
+                    "fromY": { "type": "integer" },
+                    "toX": { "type": "integer" },
+                    "toY": { "type": "integer" },
+                    "button": { "type": "string", "enum": ["left", "right"] }
+                },
+                "required": ["fromX", "fromY", "toX", "toY"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "computer_scroll".to_string(),
+            description: "Scroll at a screen coordinate. Positive delta scrolls up, negative down. Requires explicit approval."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "x": { "type": "integer" },
+                    "y": { "type": "integer" },
+                    "delta": { "type": "integer", "minimum": -2400, "maximum": 2400 }
+                },
+                "required": ["x", "y", "delta"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "computer_move".to_string(),
+            description: "Move the pointer without clicking. Requires explicit approval."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } },
+                "required": ["x", "y"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "computer_wait".to_string(),
+            description: "Wait 50–5000 ms for the UI to settle. No approval required."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "ms": { "type": "integer", "minimum": 50, "maximum": 5000 } },
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "computer_clipboard".to_string(),
+            description: "Read or write the clipboard. Requires explicit approval; write shows only the length, read returns the text to the model."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["read", "write"] },
+                    "text": { "type": "string" }
+                },
+                "required": ["action"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
             name: "computer_type".to_string(),
             description: "Type text into the focused window. Requires explicit approval; the \
                           approval shows only the length, never the text."
@@ -116,14 +205,183 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "browser_open".to_string(),
-            description: "Open an http(s) URL in the local default browser or in Chromium inside \
-                          the Docker desktop. The page is then controlled with computer_screenshot/\
-                          computer_ui_tree/computer_click/computer_type. Requires explicit approval."
+            description: "Open an http(s) URL in the controlled local Chromium/Edge session. The \
+                          session uses an isolated profile and a loopback CDP port. Requires explicit \
+                          approval."
                 .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": { "url": { "type": "string" } },
                 "required": ["url"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "browser_navigate".to_string(),
+            description: "Navigate the controlled browser to an http(s) URL. Requires explicit approval."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string" },
+                    "tabId": { "type": "string", "description": "Target tab; defaults to the active one." }
+                },
+                "required": ["url"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "browser_snapshot".to_string(),
+            description: "Read the active page: URL, title, accessibility elements with stable refs \
+                          (e1, e2, …) and a screenshot. Use a ref with browser_click/browser_type."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "tabId": { "type": "string" } },
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "browser_click".to_string(),
+            description: "Click an element by ref from the latest browser_snapshot. Requires explicit approval."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "ref": { "type": "string" },
+                    "tabId": { "type": "string" }
+                },
+                "required": ["ref"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "browser_type".to_string(),
+            description: "Type text into an element by ref. Requires explicit approval; the card \
+                          shows only the text length."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "ref": { "type": "string" },
+                    "text": { "type": "string" },
+                    "tabId": { "type": "string" }
+                },
+                "required": ["ref", "text"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "browser_press".to_string(),
+            description: "Press Enter/Tab/Escape/Backspace/arrow/Space in the controlled browser. \
+                          Requires explicit approval."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string" },
+                    "tabId": { "type": "string" }
+                },
+                "required": ["key"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "browser_scroll".to_string(),
+            description: "Scroll the controlled page by delta pixels (negative scrolls down)."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "delta": { "type": "integer", "minimum": -5000, "maximum": 5000 },
+                    "tabId": { "type": "string" }
+                },
+                "required": ["delta"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "browser_hover".to_string(),
+            description: "Move the mouse over an element by ref (read-only interaction)."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "ref": { "type": "string" },
+                    "tabId": { "type": "string" }
+                },
+                "required": ["ref"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "browser_select".to_string(),
+            description: "Set the value of a select/input by ref. Requires explicit approval."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "ref": { "type": "string" },
+                    "value": { "type": "string" },
+                    "tabId": { "type": "string" }
+                },
+                "required": ["ref", "value"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "browser_upload".to_string(),
+            description: "Attach a workspace file to a file input by ref. Requires explicit approval."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "ref": { "type": "string" },
+                    "path": { "type": "string" },
+                    "tabId": { "type": "string" }
+                },
+                "required": ["ref", "path"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "browser_wait".to_string(),
+            description: "Wait 50–5000 ms for the page to settle. No approval required."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "ms": { "type": "integer", "minimum": 50, "maximum": 5000 } },
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "browser_extract".to_string(),
+            description: "Extract the visible text and metadata of the active page (read-only)."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "tabId": { "type": "string" } },
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "browser_tabs".to_string(),
+            description: "List open browser tabs (read-only)."
+                .to_string(),
+            parameters: json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+        },
+        ToolDefinition {
+            name: "browser_download".to_string(),
+            description: "Click an element that starts a download and wait for the file in the \
+                          session download folder. Requires explicit approval."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "ref": { "type": "string" },
+                    "tabId": { "type": "string" }
+                },
+                "required": ["ref"],
                 "additionalProperties": false
             }),
         },
@@ -143,18 +401,50 @@ fn str_arg(args: &Value, key: &str) -> Option<String> {
 }
 
 async fn guard_sensitive(ctx: &ToolCtx) -> Result<(), ToolOutcome> {
-    match crate::computer::active_window_title(&ctx.settings, &ctx.data_dir).await {
-        Ok(title) if crate::computer::is_sensitive_title(&title) => Err(ToolOutcome::error(
-            format!(
-                "COMPUTER_SENSITIVE_WINDOW: a janela ativa (`{}`) está na denylist e não pode receber automação",
-                title
-            ),
-        )),
-        Ok(_) => Ok(()),
-        Err(error) => Err(ToolOutcome::error(format!(
-            "COMPUTER_SENSITIVE_CHECK_FAILED: {error:#}"
-        ))),
+    let title = match crate::computer::active_window_title(
+        &ctx.settings,
+        &ctx.data_dir,
+        &ctx.conversation_id,
+    )
+    .await
+    {
+        Ok(title) => title,
+        Err(error) => {
+            return Err(ToolOutcome::error(format!(
+                "COMPUTER_SENSITIVE_CHECK_FAILED: {error:#}"
+            )))
+        }
+    };
+    if crate::computer::is_sensitive_title(&title) {
+        return Err(ToolOutcome::error(format!(
+            "COMPUTER_SENSITIVE_WINDOW: a janela ativa (`{title}`) está na denylist e não pode receber automação"
+        )));
     }
+    let app = crate::computer::active_window_app(
+        &ctx.settings,
+        &ctx.data_dir,
+        &ctx.conversation_id,
+    )
+    .await
+    .unwrap_or_default()
+    .to_ascii_lowercase();
+    let matches = |rule: &String| {
+        let rule = rule.to_ascii_lowercase();
+        !rule.is_empty() && (app.contains(&rule) || title.to_ascii_lowercase().contains(&rule))
+    };
+    if ctx.settings.computer_blocked_apps.iter().any(matches) {
+        return Err(ToolOutcome::error(format!(
+            "COMPUTER_APP_FORBIDDEN: `{app}` está na denylist de apps"
+        )));
+    }
+    if !ctx.settings.computer_allowed_apps.is_empty()
+        && !ctx.settings.computer_allowed_apps.iter().any(matches)
+    {
+        return Err(ToolOutcome::error(format!(
+            "COMPUTER_APP_FORBIDDEN: `{app}` não está na allowlist de apps"
+        )));
+    }
+    Ok(())
 }
 
 async fn approval_preview(ctx: &ToolCtx) -> Option<String> {
@@ -164,11 +454,25 @@ async fn approval_preview(ctx: &ToolCtx) -> Option<String> {
         .map(|shot| shot.path)
 }
 
+fn can_skip_browser_approval(has_approval: bool, allow_unattended: bool, tool: &str) -> bool {
+    !has_approval && allow_unattended && is_browser_tool(tool)
+}
+
 async fn approve(
     ctx: &ToolCtx,
     tool: &str,
     detail: ApprovalDetail,
 ) -> Result<(), ToolOutcome> {
+    // Unattended routines/tasks have no approval card. Browser actions can be
+    // explicitly pre-authorized (domain policy still applies) while desktop
+    // input remains fail-closed.
+    if can_skip_browser_approval(
+        ctx.approval.is_some(),
+        ctx.settings.computer_allow_unattended_browser,
+        tool,
+    ) {
+        return Ok(());
+    }
     super::exec::policy_check(
         ctx,
         tool,
@@ -208,17 +512,19 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             }
             Err(error) => ToolOutcome::error(format!("{error:#}")),
         },
-        "computer_windows" => match crate::computer::windows(&ctx.settings, &ctx.data_dir).await {
-            Ok(windows) => ToolOutcome {
+        "computer_windows" => {
+            match crate::computer::windows(&ctx.settings, &ctx.data_dir, &ctx.conversation_id).await {
+                Ok(windows) => ToolOutcome {
                 content: serde_json::to_string_pretty(&windows)
                     .unwrap_or_else(|_| "[]".to_string()),
                 summary: Some(format!("{} janela(s)", windows.len())),
                 ..Default::default()
             },
             Err(error) => ToolOutcome::error(format!("{error:#}")),
+            }
         },
         "computer_ui_tree" => {
-            match crate::computer::ui_tree(&ctx.settings, &ctx.data_dir).await {
+            match crate::computer::ui_tree(&ctx.settings, &ctx.data_dir, &ctx.conversation_id).await {
                 Ok(value) => ToolOutcome {
                     content: serde_json::to_string_pretty(&value)
                         .unwrap_or_else(|_| "[]".to_string()),
@@ -228,29 +534,10 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
-        "browser_open" => {
-            let Some(url_value) = str_arg(args, "url") else {
-                return ToolOutcome::error("o argumento `url` é obrigatório");
-            };
-            let detail = ApprovalDetail::ComputerAction {
-                action: "browser_open".to_string(),
-                target: url_value.clone(),
-                screenshot_path: approval_preview(ctx).await,
-                text_length: None,
-                sensitive: false,
-            };
-            if let Err(outcome) = approve(ctx, tool, detail).await {
-                return outcome;
-            }
-            match crate::computer::open_url(&ctx.settings, &ctx.data_dir, &url_value).await {
-                Ok(()) => ToolOutcome {
-                    content: format!("opened {url_value} in the controlled browser"),
-                    summary: Some("Navegador aberto".to_string()),
-                    ..Default::default()
-                },
-                Err(error) => ToolOutcome::error(format!("{error:#}")),
-            }
-        }
+        "browser_open" | "browser_navigate" | "browser_snapshot" | "browser_click"
+        | "browser_type" | "browser_press" | "browser_scroll" | "browser_hover"
+        | "browser_select" | "browser_upload" | "browser_wait" | "browser_extract"
+        | "browser_tabs" | "browser_download" => run_browser(ctx, tool, args).await,
         "computer_click" => {
             let Some(x) = int_arg(args, "x") else {
                 return ToolOutcome::error("o argumento `x` é obrigatório");
@@ -276,6 +563,7 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             match crate::computer::click(
                 &ctx.settings,
                 &ctx.data_dir,
+                &ctx.conversation_id,
                 x as i32,
                 y as i32,
                 &button,
@@ -289,6 +577,197 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
+            }
+        }
+        "computer_drag" => {
+            let (Some(from_x), Some(from_y), Some(to_x), Some(to_y)) = (
+                int_arg(args, "fromX"),
+                int_arg(args, "fromY"),
+                int_arg(args, "toX"),
+                int_arg(args, "toY"),
+            ) else {
+                return ToolOutcome::error(
+                    "os argumentos `fromX`, `fromY`, `toX` e `toY` são obrigatórios",
+                );
+            };
+            let button = str_arg(args, "button").unwrap_or_else(|| "left".to_string());
+            if let Err(outcome) = guard_sensitive(ctx).await {
+                return outcome;
+            }
+            let detail = ApprovalDetail::ComputerAction {
+                action: "drag".to_string(),
+                target: format!("({from_x}, {from_y}) → ({to_x}, {to_y}) botão {button}"),
+                screenshot_path: approval_preview(ctx).await,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
+                return outcome;
+            }
+            match crate::computer::drag(
+                &ctx.settings,
+                &ctx.data_dir,
+                &ctx.conversation_id,
+                from_x as i32,
+                from_y as i32,
+                to_x as i32,
+                to_y as i32,
+                &button,
+            )
+            .await
+            {
+                Ok(()) => ToolOutcome {
+                    content: format!("dragged ({from_x}, {from_y}) to ({to_x}, {to_y})"),
+                    summary: Some("Arrasto executado".to_string()),
+                    ..Default::default()
+                },
+                Err(error) => ToolOutcome::error(format!("{error:#}")),
+            }
+        }
+        "computer_scroll" => {
+            let (Some(x), Some(y), Some(delta)) = (
+                int_arg(args, "x"),
+                int_arg(args, "y"),
+                int_arg(args, "delta"),
+            ) else {
+                return ToolOutcome::error(
+                    "os argumentos `x`, `y` e `delta` são obrigatórios",
+                );
+            };
+            if let Err(outcome) = guard_sensitive(ctx).await {
+                return outcome;
+            }
+            let detail = ApprovalDetail::ComputerAction {
+                action: "scroll".to_string(),
+                target: format!("({x}, {y}) delta {delta}"),
+                screenshot_path: approval_preview(ctx).await,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
+                return outcome;
+            }
+            match crate::computer::scroll(
+                &ctx.settings,
+                &ctx.data_dir,
+                &ctx.conversation_id,
+                x as i32,
+                y as i32,
+                delta as i32,
+            )
+            .await
+            {
+                Ok(()) => ToolOutcome {
+                    content: format!("scrolled at ({x}, {y}) by {delta}"),
+                    summary: Some("Scroll executado".to_string()),
+                    ..Default::default()
+                },
+                Err(error) => ToolOutcome::error(format!("{error:#}")),
+            }
+        }
+        "computer_move" => {
+            let (Some(x), Some(y)) = (int_arg(args, "x"), int_arg(args, "y")) else {
+                return ToolOutcome::error("os argumentos `x` e `y` são obrigatórios");
+            };
+            if let Err(outcome) = guard_sensitive(ctx).await {
+                return outcome;
+            }
+            let detail = ApprovalDetail::ComputerAction {
+                action: "move".to_string(),
+                target: format!("({x}, {y})"),
+                screenshot_path: approval_preview(ctx).await,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
+                return outcome;
+            }
+            match crate::computer::move_pointer(
+                &ctx.settings,
+                &ctx.data_dir,
+                &ctx.conversation_id,
+                x as i32,
+                y as i32,
+            )
+            .await
+            {
+                Ok(()) => ToolOutcome {
+                    content: format!("moved pointer to ({x}, {y})"),
+                    summary: Some("Ponteiro movido".to_string()),
+                    ..Default::default()
+                },
+                Err(error) => ToolOutcome::error(format!("{error:#}")),
+            }
+        }
+        "computer_wait" => {
+            let ms = int_arg(args, "ms").unwrap_or(500).clamp(50, 5_000) as u64;
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+            ToolOutcome {
+                content: format!("waited {ms} ms"),
+                summary: Some(format!("Espera de {ms} ms")),
+                ..Default::default()
+            }
+        }
+        "computer_clipboard" => {
+            let Some(action) = str_arg(args, "action") else {
+                return ToolOutcome::error("o argumento `action` é obrigatório");
+            };
+            if action == "read" {
+                let detail = ApprovalDetail::ComputerAction {
+                    action: "clipboard_read".to_string(),
+                    target: "clipboard".to_string(),
+                    screenshot_path: None,
+                    text_length: None,
+                    sensitive: true,
+                };
+                if let Err(outcome) = approve(ctx, tool, detail).await {
+                    return outcome;
+                }
+                match crate::computer::clipboard_read(
+                    &ctx.settings,
+                    &ctx.data_dir,
+                    &ctx.conversation_id,
+                )
+                .await
+                {
+                    Ok(text) => ToolOutcome {
+                        content: text.chars().take(20_000).collect(),
+                        summary: Some("Clipboard lido".to_string()),
+                        ..Default::default()
+                    },
+                    Err(error) => ToolOutcome::error(format!("{error:#}")),
+                }
+            } else if action == "write" {
+                let Some(text) = args.get("text").and_then(Value::as_str) else {
+                    return ToolOutcome::error("o argumento `text` é obrigatório para write");
+                };
+                let detail = ApprovalDetail::ComputerAction {
+                    action: "clipboard_write".to_string(),
+                    target: "clipboard".to_string(),
+                    screenshot_path: None,
+                    text_length: Some(text.chars().count() as u32),
+                    sensitive: true,
+                };
+                if let Err(outcome) = approve(ctx, tool, detail).await {
+                    return outcome;
+                }
+                match crate::computer::clipboard_write(
+                    &ctx.settings,
+                    &ctx.data_dir,
+                    &ctx.conversation_id,
+                    text,
+                )
+                .await
+                {
+                    Ok(()) => ToolOutcome {
+                        content: format!("wrote {} characters to the clipboard", text.chars().count()),
+                        summary: Some("Clipboard atualizado".to_string()),
+                        ..Default::default()
+                    },
+                    Err(error) => ToolOutcome::error(format!("{error:#}")),
+                }
+            } else {
+                ToolOutcome::error("action inválida: use read ou write")
             }
         }
         "computer_type" => {
@@ -308,7 +787,14 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             if let Err(outcome) = approve(ctx, tool, detail).await {
                 return outcome;
             }
-            match crate::computer::type_text(&ctx.settings, &ctx.data_dir, &text).await {
+            match crate::computer::type_text(
+                &ctx.settings,
+                &ctx.data_dir,
+                &ctx.conversation_id,
+                &text,
+            )
+            .await
+            {
                 Ok(()) => ToolOutcome {
                     content: format!(
                         "typed {} character(s) into the focused window",
@@ -337,7 +823,14 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             if let Err(outcome) = approve(ctx, tool, detail).await {
                 return outcome;
             }
-            match crate::computer::key(&ctx.settings, &ctx.data_dir, &combo).await {
+            match crate::computer::key(
+                &ctx.settings,
+                &ctx.data_dir,
+                &ctx.conversation_id,
+                &combo,
+            )
+            .await
+            {
                 Ok(()) => ToolOutcome {
                     content: format!("pressed {combo}"),
                     summary: Some("Tecla pressionada".to_string()),
@@ -363,7 +856,14 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             if let Err(outcome) = approve(ctx, tool, detail).await {
                 return outcome;
             }
-            match crate::computer::focus(&ctx.settings, &ctx.data_dir, &window_id).await {
+            match crate::computer::focus(
+                &ctx.settings,
+                &ctx.data_dir,
+                &ctx.conversation_id,
+                &window_id,
+            )
+            .await
+            {
                 Ok(()) => ToolOutcome {
                     content: format!("focused window {window_id}"),
                     summary: Some("Janela focada".to_string()),
@@ -373,6 +873,373 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             }
         }
         other => ToolOutcome::error(format!("ferramenta de computador desconhecida: {other}")),
+    }
+}
+
+async fn run_browser(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
+    let Some(manager) = crate::computer::browser::global() else {
+        return ToolOutcome::error("BROWSER_NOT_INITIALIZED: sessão de navegador indisponível");
+    };
+    let tab = str_arg(args, "tabId");
+    let downloads = ctx
+        .workspace
+        .as_ref()
+        .map(|workspace| workspace.root.join("downloads"));
+    match tool {
+        "browser_open" => {
+            let Some(url) = str_arg(args, "url") else {
+                return ToolOutcome::error("o argumento `url` é obrigatório");
+            };
+            let Ok(url) = crate::computer::browser::validate_with_policy(&ctx.settings, &url) else {
+                return ToolOutcome::error("BROWSER_URL_FORBIDDEN: URL inválida ou não http(s)");
+            };
+            let detail = ApprovalDetail::ComputerAction {
+                action: "browser_open".to_string(),
+                target: url.clone(),
+                screenshot_path: None,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
+                return outcome;
+            }
+            match manager
+                .ensure(&ctx.conversation_id, downloads.clone())
+                .await
+            {
+                Ok(status) => match manager
+                    .navigate(&ctx.conversation_id, status.active_tab.as_deref(), &url)
+                    .await
+                {
+                    Ok(target) => ToolOutcome {
+                        content: format!("opened {target} in the controlled browser"),
+                        summary: Some("Navegador controlado".to_string()),
+                        ..Default::default()
+                    },
+                    Err(error) => ToolOutcome::error(error),
+                },
+                Err(error) => ToolOutcome::error(error.to_string()),
+            }
+        }
+        "browser_navigate" => {
+            let Some(url) = str_arg(args, "url") else {
+                return ToolOutcome::error("o argumento `url` é obrigatório");
+            };
+            let Ok(url) = crate::computer::browser::validate_with_policy(&ctx.settings, &url) else {
+                return ToolOutcome::error("BROWSER_URL_FORBIDDEN: URL inválida ou não http(s)");
+            };
+            let detail = ApprovalDetail::ComputerAction {
+                action: "browser_navigate".to_string(),
+                target: url.clone(),
+                screenshot_path: None,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
+                return outcome;
+            }
+            match manager
+                .navigate(&ctx.conversation_id, tab.as_deref(), &url)
+                .await
+            {
+                Ok(target) => ToolOutcome {
+                    content: format!("navigated to {target}"),
+                    summary: Some("Página navegada".to_string()),
+                    ..Default::default()
+                },
+                Err(error) => ToolOutcome::error(error),
+            }
+        }
+        "browser_snapshot" => match manager.snapshot(&ctx.conversation_id, tab.as_deref()).await {
+            Ok(snapshot) => {
+                let mut content = String::new();
+                content.push_str(&format!("URL: {}\nTitle: {}\n\n", snapshot.url, snapshot.title));
+                for element in &snapshot.elements {
+                    content.push_str(&format!(
+                        "[{}] {} \"{}\"{}{}\n",
+                        element.reference,
+                        element.role,
+                        element.name,
+                        if element.value.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" value=\"{}\"", element.value)
+                        },
+                        if element.disabled { " (disabled)" } else { "" }
+                    ));
+                }
+                let image = snapshot.screenshot.map(|data| ToolImage {
+                    mime_type: "image/jpeg".to_string(),
+                    data_base64: data,
+                    width: snapshot.width,
+                    height: snapshot.height,
+                });
+                ToolOutcome {
+                    content,
+                    summary: Some(format!(
+                        "{} · {} elemento(s)",
+                        snapshot.title,
+                        snapshot.elements.len()
+                    )),
+                    images: image.into_iter().collect(),
+                    ..Default::default()
+                }
+            }
+            Err(error) => ToolOutcome::error(error),
+        },
+        "browser_click" => {
+            let Some(reference) = str_arg(args, "ref") else {
+                return ToolOutcome::error("o argumento `ref` é obrigatório");
+            };
+            let detail = ApprovalDetail::ComputerAction {
+                action: "browser_click".to_string(),
+                target: reference.clone(),
+                screenshot_path: None,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
+                return outcome;
+            }
+            match manager
+                .click(&ctx.conversation_id, tab.as_deref(), &reference)
+                .await
+            {
+                Ok(element) => ToolOutcome {
+                    content: format!("clicked {} \"{}\"", element.role, element.name),
+                    summary: Some(format!("Clique: {}", element.name)),
+                    ..Default::default()
+                },
+                Err(error) => ToolOutcome::error(error),
+            }
+        }
+        "browser_type" => {
+            let Some(reference) = str_arg(args, "ref") else {
+                return ToolOutcome::error("o argumento `ref` é obrigatório");
+            };
+            let Some(text) = args.get("text").and_then(Value::as_str) else {
+                return ToolOutcome::error("o argumento `text` é obrigatório");
+            };
+            let detail = ApprovalDetail::ComputerAction {
+                action: "browser_type".to_string(),
+                target: reference.clone(),
+                screenshot_path: None,
+                text_length: Some(text.chars().count() as u32),
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
+                return outcome;
+            }
+            match manager
+                .type_text(&ctx.conversation_id, tab.as_deref(), &reference, text)
+                .await
+            {
+                Ok(element) => ToolOutcome {
+                    content: format!(
+                        "typed {} characters into {} \"{}\"",
+                        text.chars().count(),
+                        element.role,
+                        element.name
+                    ),
+                    summary: Some(format!("Texto em {}", element.name)),
+                    ..Default::default()
+                },
+                Err(error) => ToolOutcome::error(error),
+            }
+        }
+        "browser_press" => {
+            let Some(key) = str_arg(args, "key") else {
+                return ToolOutcome::error("o argumento `key` é obrigatório");
+            };
+            let detail = ApprovalDetail::ComputerAction {
+                action: "browser_press".to_string(),
+                target: key.clone(),
+                screenshot_path: None,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
+                return outcome;
+            }
+            match manager
+                .press(&ctx.conversation_id, tab.as_deref(), &key)
+                .await
+            {
+                Ok(()) => ToolOutcome {
+                    content: format!("pressed {key}"),
+                    summary: Some(format!("Tecla {key}")),
+                    ..Default::default()
+                },
+                Err(error) => ToolOutcome::error(error),
+            }
+        }
+        "browser_scroll" => {
+            let delta = int_arg(args, "delta").unwrap_or(0).clamp(-5_000, 5_000) as i32;
+            match manager
+                .scroll(&ctx.conversation_id, tab.as_deref(), delta)
+                .await
+            {
+                Ok(()) => ToolOutcome {
+                    content: format!("scrolled the page by {delta}"),
+                    summary: Some(format!("Scroll {delta}")),
+                    ..Default::default()
+                },
+                Err(error) => ToolOutcome::error(error),
+            }
+        }
+        "browser_hover" => {
+            let Some(reference) = str_arg(args, "ref") else {
+                return ToolOutcome::error("o argumento `ref` é obrigatório");
+            };
+            match manager
+                .hover(&ctx.conversation_id, tab.as_deref(), &reference)
+                .await
+            {
+                Ok(element) => ToolOutcome {
+                    content: format!("hovered {} \"{}\"", element.role, element.name),
+                    summary: Some(format!("Hover: {}", element.name)),
+                    ..Default::default()
+                },
+                Err(error) => ToolOutcome::error(error),
+            }
+        }
+        "browser_select" => {
+            let Some(reference) = str_arg(args, "ref") else {
+                return ToolOutcome::error("o argumento `ref` é obrigatório");
+            };
+            let Some(value) = args.get("value").and_then(Value::as_str) else {
+                return ToolOutcome::error("o argumento `value` é obrigatório");
+            };
+            let detail = ApprovalDetail::ComputerAction {
+                action: "browser_select".to_string(),
+                target: reference.clone(),
+                screenshot_path: None,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
+                return outcome;
+            }
+            match manager
+                .select(&ctx.conversation_id, tab.as_deref(), &reference, value)
+                .await
+            {
+                Ok(element) => ToolOutcome {
+                    content: format!("selected {value} in {} \"{}\"", element.role, element.name),
+                    summary: Some(format!("Seleção em {}", element.name)),
+                    ..Default::default()
+                },
+                Err(error) => ToolOutcome::error(error),
+            }
+        }
+        "browser_upload" => {
+            let Some(reference) = str_arg(args, "ref") else {
+                return ToolOutcome::error("o argumento `ref` é obrigatório");
+            };
+            let Some(path) = str_arg(args, "path") else {
+                return ToolOutcome::error("o argumento `path` é obrigatório");
+            };
+            let Some(workspace) = ctx.workspace.as_ref() else {
+                return ToolOutcome::error(
+                    "BROWSER_UPLOAD_NO_WORKSPACE: vincule um workspace para enviar arquivos",
+                );
+            };
+            let root = match workspace.root.canonicalize() {
+                Ok(root) => root,
+                Err(error) => {
+                    return ToolOutcome::error(format!("BROWSER_UPLOAD_WORKSPACE: {error}"))
+                }
+            };
+            let file = match std::fs::canonicalize(&path) {
+                Ok(file) => file,
+                Err(error) => {
+                    return ToolOutcome::error(format!("BROWSER_UPLOAD_FILE: {error}"))
+                }
+            };
+            if !file.starts_with(&root) || !file.is_file() {
+                return ToolOutcome::error(
+                    "BROWSER_UPLOAD_FORBIDDEN: o arquivo precisa estar dentro do workspace",
+                );
+            }
+            let detail = ApprovalDetail::ComputerAction {
+                action: "browser_upload".to_string(),
+                target: path.clone(),
+                screenshot_path: None,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
+                return outcome;
+            }
+            match manager
+                .upload(
+                    &ctx.conversation_id,
+                    tab.as_deref(),
+                    &reference,
+                    &file.to_string_lossy(),
+                )
+                .await
+            {
+                Ok(element) => ToolOutcome {
+                    content: format!("uploaded {path} into {} \"{}\"", element.role, element.name),
+                    summary: Some("Arquivo anexado".to_string()),
+                    ..Default::default()
+                },
+                Err(error) => ToolOutcome::error(error),
+            }
+        }
+        "browser_wait" => {
+            let ms = int_arg(args, "ms").unwrap_or(500).clamp(50, 5_000) as u64;
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+            ToolOutcome {
+                content: format!("waited {ms} ms"),
+                summary: Some(format!("Espera de {ms} ms")),
+                ..Default::default()
+            }
+        }
+        "browser_extract" => match manager.extract(&ctx.conversation_id, tab.as_deref()).await {
+            Ok(value) => ToolOutcome {
+                content: serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string()),
+                summary: Some("Conteúdo extraído".to_string()),
+                ..Default::default()
+            },
+            Err(error) => ToolOutcome::error(error),
+        },
+        "browser_tabs" => match manager.tabs(&ctx.conversation_id).await {
+            Ok(tabs) => ToolOutcome {
+                content: serde_json::to_string_pretty(&tabs).unwrap_or_else(|_| "[]".to_string()),
+                summary: Some(format!("{} aba(s)", tabs.len())),
+                ..Default::default()
+            },
+            Err(error) => ToolOutcome::error(error),
+        },
+        "browser_download" => {
+            let Some(reference) = str_arg(args, "ref") else {
+                return ToolOutcome::error("o argumento `ref` é obrigatório");
+            };
+            let detail = ApprovalDetail::ComputerAction {
+                action: "browser_download".to_string(),
+                target: reference.clone(),
+                screenshot_path: None,
+                text_length: None,
+                sensitive: false,
+            };
+            if let Err(outcome) = approve(ctx, tool, detail).await {
+                return outcome;
+            }
+            match manager
+                .wait_download(&ctx.conversation_id, tab.as_deref(), &reference)
+                .await
+            {
+                Ok(value) => ToolOutcome {
+                    content: serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string()),
+                    summary: Some("Download concluído".to_string()),
+                    ..Default::default()
+                },
+                Err(error) => ToolOutcome::error(error),
+            }
+        }
+        other => ToolOutcome::error(format!("ferramenta de navegador desconhecida: {other}")),
     }
 }
 
@@ -392,8 +1259,59 @@ fn audit_target(tool: &str, args: &Value) -> Value {
             "clicks": args.get("clicks"),
         }),
         "computer_key" => json!({ "key": args.get("key") }),
+        "computer_drag" => json!({
+            "fromX": args.get("fromX"),
+            "fromY": args.get("fromY"),
+            "toX": args.get("toX"),
+            "toY": args.get("toY"),
+            "button": args.get("button"),
+        }),
+        "computer_scroll" => json!({
+            "x": args.get("x"),
+            "y": args.get("y"),
+            "delta": args.get("delta"),
+        }),
+        "computer_move" => json!({
+            "x": args.get("x"),
+            "y": args.get("y"),
+        }),
+        "computer_clipboard" => json!({
+            "action": args.get("action"),
+            "textLength": if args.get("action").and_then(Value::as_str) == Some("write") {
+                args.get("text")
+                    .and_then(Value::as_str)
+                    .map(|text| text.chars().count())
+                    .unwrap_or(0)
+            } else {
+                0
+            },
+        }),
         "computer_focus" => json!({ "windowId": args.get("windowId") }),
-        "browser_open" => json!({ "url": args.get("url") }),
+        "browser_open" | "browser_navigate" => json!({ "url": args.get("url") }),
+        "browser_type" => json!({
+            "ref": args.get("ref"),
+            "textLength": args
+                .get("text")
+                .and_then(Value::as_str)
+                .map(|text| text.chars().count())
+                .unwrap_or(0),
+        }),
+        "browser_click" | "browser_download" => json!({ "ref": args.get("ref") }),
+        "browser_hover" => json!({ "ref": args.get("ref") }),
+        "browser_select" => json!({
+            "ref": args.get("ref"),
+            "valueLength": args
+                .get("value")
+                .and_then(Value::as_str)
+                .map(|value| value.chars().count())
+                .unwrap_or(0),
+        }),
+        "browser_scroll" => json!({ "delta": args.get("delta") }),
+        "browser_upload" => json!({
+            "ref": args.get("ref"),
+            "path": args.get("path"),
+        }),
+        "browser_press" => json!({ "key": args.get("key") }),
         "computer_screenshot" => json!({ "display": args.get("display") }),
         _ => json!({}),
     }
@@ -427,6 +1345,20 @@ fn decision_of(outcome: &ToolOutcome) -> Option<String> {
 }
 
 pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
+    if !is_browser_tool(tool) && !crate::computer::desktop_enabled(&ctx.settings) {
+        return ToolOutcome::error(
+            "COMPUTER_DISABLED: o ambiente de computador está desligado ou em modo navegador",
+        );
+    }
+    if tool != "browser_open" {
+        if let Ok((paused, taken_over)) = ctx.db.computer_control(&ctx.conversation_id) {
+            if paused || taken_over {
+                return ToolOutcome::error(
+                    "COMPUTER_PAUSED: o usuário assumiu o controle do computador",
+                );
+            }
+        }
+    }
     let conversation = ctx.db.get_conversation(&ctx.conversation_id).ok().flatten();
     let agent_id = conversation.as_ref().and_then(|value| value.agent_id.clone());
     let now = crate::domain::now_ms();
@@ -454,10 +1386,9 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             }
         }
     }
-    let backend = if ctx.settings.execution_environment == "docker" {
-        "docker"
-    } else {
-        "local"
+    let backend = match crate::computer::backend(&ctx.settings) {
+        crate::computer::ComputerBackend::Docker => "docker",
+        crate::computer::ComputerBackend::Local => "local",
     };
     let session = match ctx.db.get_or_create_computer_session(
         agent_id.as_deref(),
@@ -468,13 +1399,15 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
         Ok(session) => session,
         Err(error) => return ToolOutcome::error(format!("{error:#}")),
     };
-    let outcome = run_inner(ctx, tool, args).await;
     let redacted_text_len = args
         .get("text")
         .and_then(Value::as_str)
         .map(|text| text.chars().count() as i64);
-    let decision = decision_of(&outcome);
-    let _ = ctx.db.insert_computer_action(
+    let initiator = match ctx.turn_kind {
+        crate::domain::TurnKind::GoalRound => "goal_round",
+        _ => "human",
+    };
+    let pending = match ctx.db.begin_computer_action(
         &session.id,
         agent_id.as_deref(),
         &ctx.conversation_id,
@@ -482,15 +1415,31 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
         tool,
         tool,
         &audit_target(tool, args),
-        Some(if decision.is_some() { "once" } else { "read" }),
-        decision.as_deref(),
+        redacted_text_len,
+        initiator,
+        now,
+    ) {
+        Ok(action) => action,
+        Err(error) => {
+            // Audit failure is a hard stop: never execute an action without a
+            // durable pending row.
+            return ToolOutcome::error(format!(
+                "COMPUTER_AUDIT_FAILED: não foi possível registrar a ação antes de executar: {error:#}"
+            ));
+        }
+    };
+    let outcome = run_inner(ctx, tool, args).await;
+    let decision = decision_of(&outcome);
+    let _ = ctx.db.finish_computer_action(
+        &pending.id,
         if outcome.is_error { "error" } else { "ok" },
         error_code_of(&outcome).as_deref(),
         outcome
             .is_error
             .then(|| outcome.content.chars().take(300).collect::<String>())
             .as_deref(),
-        redacted_text_len,
+        decision.as_deref(),
+        Some(if decision.is_some() { "once" } else { "read" }),
         crate::domain::now_ms(),
     );
     outcome
@@ -540,5 +1489,48 @@ mod tests {
         assert_eq!(target["textLength"], json!(13));
         let serialized = target.to_string();
         assert!(!serialized.contains("senha"));
+
+        let browser = audit_target(
+            "browser_type",
+            &json!({ "ref": "e1", "text": "cartao-1234" }),
+        );
+        assert_eq!(browser["textLength"], json!(11));
+        assert!(!browser.to_string().contains("cartao"));
+
+        let clipboard = audit_target(
+            "computer_clipboard",
+            &json!({ "action": "write", "text": "segredo-123" }),
+        );
+        assert_eq!(clipboard["textLength"], json!(11));
+        assert!(!clipboard.to_string().contains("segredo"));
+    }
+
+    #[test]
+    fn browser_tools_are_separate_from_desktop_tools() {
+        assert!(is_browser_tool("browser_navigate"));
+        assert!(is_browser_tool("browser_snapshot"));
+        assert!(!is_browser_tool("computer_click"));
+        assert!(is_computer_tool("computer_drag"));
+        assert!(is_computer_tool("computer_clipboard"));
+    }
+
+    #[test]
+    fn unattended_browser_policy_only_skips_browser_actions() {
+        assert!(can_skip_browser_approval(
+            false,
+            true,
+            "browser_navigate"
+        ));
+        assert!(!can_skip_browser_approval(
+            true,
+            true,
+            "browser_navigate"
+        ));
+        assert!(!can_skip_browser_approval(
+            false,
+            false,
+            "browser_navigate"
+        ));
+        assert!(!can_skip_browser_approval(false, true, "computer_click"));
     }
 }

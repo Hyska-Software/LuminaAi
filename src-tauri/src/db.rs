@@ -18,8 +18,8 @@ use sha2::{Digest, Sha256};
 
 use crate::agents::{
     Agent, AgentChannel, AgentChannelInput, AgentChannelMessage, AgentInput, AgentMemory,
-    AgentMemoryInput, AgentRoutine, AgentRoutineInput, AgentTask, AgentTaskEvent, AgentTaskInput,
-    AgentThreadCursor, AgentThreadPage, AgentUsage,
+    AgentMemoryInput, AgentRoutine, AgentRoutineInput, AgentRoutineRun, AgentTask, AgentTaskEvent,
+    AgentTaskInput, AgentThreadCursor, AgentThreadPage, AgentUsage,
 };
 use crate::computer::{ComputerActionRecord, ComputerSession};
 use crate::domain::{
@@ -43,7 +43,7 @@ const AGENT_COLUMNS: &str = "a.id, a.name, a.role, a.description, a.emoji, a.dep
      a.pinned, a.sort_order, a.provider_id, a.model_id, a.fallback_provider_id, \
      a.fallback_model_id, a.reasoning_json, a.instructions, a.prompt_version, a.starters_json, \
      a.capabilities_json, a.memory_enabled, a.workspace_id, a.permission_mode, a.docker_image, \
-     a.archived_at, a.created_at, a.updated_at";
+     a.computer_environment, a.archived_at, a.created_at, a.updated_at";
 
 const AGENT_TASK_COLUMNS: &str = "id, channel_id, parent_task_id, owner_agent_id, \
      created_by_agent_id, created_by_user, title, brief, acceptance, status, priority, \
@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS agents (
   workspace_id      TEXT,
   permission_mode   TEXT NOT NULL DEFAULT 'edit',
   docker_image      TEXT,
+  computer_environment TEXT NOT NULL DEFAULT 'auto',
   archived_at       INTEGER,
   created_at        INTEGER NOT NULL,
   updated_at        INTEGER NOT NULL
@@ -148,6 +149,19 @@ CREATE INDEX IF NOT EXISTS idx_agent_routines_due
   ON agent_routines(enabled, next_run_at);
 CREATE INDEX IF NOT EXISTS idx_agent_routines_agent
   ON agent_routines(agent_id, created_at);
+
+-- One row per routine execution (panel log). Aditive/idempotent.
+CREATE TABLE IF NOT EXISTS agent_routine_runs (
+  id              TEXT PRIMARY KEY,
+  routine_id      TEXT NOT NULL REFERENCES agent_routines(id) ON DELETE CASCADE,
+  conversation_id TEXT,
+  status          TEXT NOT NULL DEFAULT 'running',
+  error           TEXT,
+  started_at      INTEGER NOT NULL,
+  ended_at        INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_agent_routine_runs_routine
+  ON agent_routine_runs(routine_id, started_at DESC);
 
 -- Shared team channels: several agents read/write one thread (v1.14).
 CREATE TABLE IF NOT EXISTS agent_channels (
@@ -245,7 +259,10 @@ CREATE TABLE IF NOT EXISTS computer_actions (
   error_code        TEXT,
   error_message     TEXT,
   redacted_text_len INTEGER,
-  created_at        INTEGER NOT NULL
+  policy_rule       TEXT,
+  initiator         TEXT,
+  created_at        INTEGER NOT NULL,
+  ended_at          INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_computer_actions_turn
   ON computer_actions(turn_id, created_at);
@@ -253,6 +270,14 @@ CREATE INDEX IF NOT EXISTS idx_computer_actions_agent
   ON computer_actions(agent_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_computer_actions_conv
   ON computer_actions(conversation_id, created_at DESC);
+
+-- Live human-control state for a conversation (never persisted history).
+CREATE TABLE IF NOT EXISTS computer_control (
+  conversation_id TEXT PRIMARY KEY,
+  paused          INTEGER NOT NULL DEFAULT 0,
+  taken_over      INTEGER NOT NULL DEFAULT 0,
+  updated_at      INTEGER NOT NULL
+);
 
 -- Persisted turn events for renderer reattach after reload (v1.16).
 CREATE TABLE IF NOT EXISTS turn_events (
@@ -1149,6 +1174,28 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         "docker_image",
         "ALTER TABLE agents ADD COLUMN docker_image TEXT",
     )?;
+    ensure_column(
+        conn,
+        "agents",
+        "computer_environment",
+        "ALTER TABLE agents ADD COLUMN computer_environment TEXT NOT NULL DEFAULT 'auto'",
+    )?;
+    for (column, ddl) in [
+        (
+            "policy_rule",
+            "ALTER TABLE computer_actions ADD COLUMN policy_rule TEXT",
+        ),
+        (
+            "initiator",
+            "ALTER TABLE computer_actions ADD COLUMN initiator TEXT",
+        ),
+        (
+            "ended_at",
+            "ALTER TABLE computer_actions ADD COLUMN ended_at INTEGER",
+        ),
+    ] {
+        ensure_column(conn, "computer_actions", column, ddl)?;
+    }
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_agent_memories_agent \
          ON agent_memories(agent_id, pinned DESC, updated_at DESC);",
@@ -1531,11 +1578,14 @@ fn agent_from_row(row: &Row<'_>) -> rusqlite::Result<Agent> {
         workspace_id: row.get(18)?,
         permission_mode: PermissionMode::from_str(&row.get::<_, String>(19)?),
         docker_image: row.get(20)?,
-        archived_at: row.get(21)?,
-        created_at: row.get(22)?,
-        updated_at: row.get(23)?,
-        thread_count: row.get(24)?,
-        last_active_at: row.get(25)?,
+        computer_environment: crate::agents::normalize_computer_environment(
+            &row.get::<_, String>(21)?,
+        ),
+        archived_at: row.get(22)?,
+        created_at: row.get(23)?,
+        updated_at: row.get(24)?,
+        thread_count: row.get(25)?,
+        last_active_at: row.get(26)?,
     })
 }
 
@@ -1613,7 +1663,10 @@ fn computer_action_from_row(row: &Row<'_>) -> rusqlite::Result<ComputerActionRec
         error_code: row.get(11)?,
         error_message: row.get(12)?,
         redacted_text_len: row.get(13)?,
-        created_at: row.get(14)?,
+        policy_rule: row.get(14)?,
+        initiator: row.get(15)?,
+        created_at: row.get(16)?,
+        ended_at: row.get(17)?,
     })
 }
 
@@ -2246,9 +2299,9 @@ impl Db {
                 "INSERT INTO agents (id, name, role, description, emoji, department, pinned, \
                  sort_order, provider_id, model_id, fallback_provider_id, fallback_model_id, \
                  reasoning_json, instructions, prompt_version, starters_json, capabilities_json, \
-                 memory_enabled, workspace_id, permission_mode, docker_image, archived_at, \
-                 created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?15, ?16, ?17, ?18, ?19, NULL, ?20, ?20)",
+                 memory_enabled, workspace_id, permission_mode, docker_image, \
+                 computer_environment, archived_at, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?15, ?16, ?17, ?18, ?19, ?20, NULL, ?21, ?21)",
                 params![
                     &id,
                     &input.name,
@@ -2269,6 +2322,7 @@ impl Db {
                     &input.workspace_id,
                     input.permission_mode.as_str(),
                     &input.docker_image,
+                    &input.computer_environment,
                     now,
                 ],
             )
@@ -2306,7 +2360,7 @@ impl Db {
              fallback_model_id = ?10, reasoning_json = ?11, instructions = ?12, \
              prompt_version = ?13, starters_json = ?14, capabilities_json = ?15, \
              memory_enabled = ?16, workspace_id = ?17, permission_mode = ?18, \
-             docker_image = ?19, updated_at = ?20 WHERE id = ?1",
+             docker_image = ?19, computer_environment = ?20, updated_at = ?21 WHERE id = ?1",
             params![
                 id,
                 &input.name,
@@ -2327,6 +2381,7 @@ impl Db {
                 &input.workspace_id,
                 input.permission_mode.as_str(),
                 &input.docker_image,
+                &input.computer_environment,
                 now_ms(),
             ],
         )
@@ -2752,6 +2807,49 @@ impl Db {
         Ok(changed as u64)
     }
 
+    /// Live pause/takeover state. Missing row means "not paused".
+    pub fn computer_control(&self, conversation_id: &str) -> Result<(bool, bool)> {
+        let conn = self.conn.lock();
+        let row = conn
+            .query_row(
+                "SELECT paused, taken_over FROM computer_control WHERE conversation_id = ?1",
+                [conversation_id],
+                |row| Ok((row.get::<_, i64>(0)? != 0, row.get::<_, i64>(1)? != 0)),
+            )
+            .optional()?;
+        Ok(row.unwrap_or((false, false)))
+    }
+
+    pub fn set_computer_control(
+        &self,
+        conversation_id: &str,
+        paused: Option<bool>,
+        taken_over: Option<bool>,
+        now: i64,
+    ) -> Result<()> {
+        let (current_paused, current_taken) = self.computer_control(conversation_id)?;
+        let paused = paused.unwrap_or(current_paused);
+        let taken_over = taken_over.unwrap_or(current_taken);
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO computer_control (conversation_id, paused, taken_over, updated_at) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(conversation_id) DO UPDATE SET paused = excluded.paused, \
+             taken_over = excluded.taken_over, updated_at = excluded.updated_at",
+            params![conversation_id, paused as i64, taken_over as i64, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn reset_all_computer_controls(&self) -> Result<u64> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE computer_control SET paused = 0, taken_over = 0, updated_at = ?1",
+            [crate::domain::now_ms()],
+        )?;
+        Ok(changed as u64)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn insert_computer_action(
         &self,
@@ -2776,8 +2874,8 @@ impl Db {
         conn.execute(
             "INSERT INTO computer_actions (id, session_id, agent_id, conversation_id, turn_id, \
              tool, action, target_json, approval_scope, decision, result, error_code, \
-             error_message, redacted_text_len, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             error_message, redacted_text_len, policy_rule, initiator, created_at, ended_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, NULL, NULL, ?15, ?15)",
             params![
                 id,
                 session_id,
@@ -2812,8 +2910,107 @@ impl Db {
             error_code: error_code.map(str::to_string),
             error_message: error_message.map(str::to_string),
             redacted_text_len,
+            policy_rule: None,
+            initiator: None,
             created_at: now,
+            ended_at: Some(now),
         })
+    }
+
+    /// Inserts the pending audit row *before* the action runs. A crash leaves a
+    /// visible `pending` row instead of losing the action; boot marks stale
+    /// pending rows as `interrupted`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_computer_action(
+        &self,
+        session_id: &str,
+        agent_id: Option<&str>,
+        conversation_id: &str,
+        turn_id: &str,
+        tool: &str,
+        action: &str,
+        target: &serde_json::Value,
+        redacted_text_len: Option<i64>,
+        initiator: &str,
+        now: i64,
+    ) -> Result<ComputerActionRecord> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let target_json = serde_json::to_string(target)?;
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO computer_actions (id, session_id, agent_id, conversation_id, turn_id, \
+             tool, action, target_json, approval_scope, decision, result, error_code, \
+             error_message, redacted_text_len, policy_rule, initiator, created_at, ended_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, 'pending', NULL, NULL, ?9, \
+             'computer.risk', ?10, ?11, NULL)",
+            params![
+                id,
+                session_id,
+                agent_id,
+                conversation_id,
+                turn_id,
+                tool,
+                action,
+                target_json,
+                redacted_text_len,
+                initiator,
+                now,
+            ],
+        )?;
+        drop(conn);
+        Ok(ComputerActionRecord {
+            id,
+            session_id: session_id.to_string(),
+            agent_id: agent_id.map(str::to_string),
+            conversation_id: conversation_id.to_string(),
+            turn_id: turn_id.to_string(),
+            tool: tool.to_string(),
+            action: action.to_string(),
+            target: target.clone(),
+            approval_scope: None,
+            decision: None,
+            result: "pending".to_string(),
+            error_code: None,
+            error_message: None,
+            redacted_text_len,
+            policy_rule: Some("computer.risk".to_string()),
+            initiator: Some(initiator.to_string()),
+            created_at: now,
+            ended_at: None,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn finish_computer_action(
+        &self,
+        id: &str,
+        result: &str,
+        error_code: Option<&str>,
+        error_message: Option<&str>,
+        decision: Option<&str>,
+        approval_scope: Option<&str>,
+        now: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE computer_actions SET result = ?2, error_code = ?3, error_message = ?4, \
+             decision = ?5, approval_scope = COALESCE(?6, approval_scope), ended_at = ?7 \
+             WHERE id = ?1",
+            params![id, result, error_code, error_message, decision, approval_scope, now],
+        )?;
+        Ok(())
+    }
+
+    /// Boot reconciliation: rows left `pending` by a killed process are marked
+    /// interrupted so the audit never hides an unknown outcome.
+    pub fn interrupt_pending_computer_actions(&self, now: i64) -> Result<u64> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE computer_actions SET result = 'interrupted', ended_at = ?1 \
+             WHERE result = 'pending'",
+            [now],
+        )?;
+        Ok(changed as u64)
     }
 
     pub fn count_computer_actions_for_turn(&self, turn_id: &str) -> Result<i64> {
@@ -2850,7 +3047,7 @@ impl Db {
         let mut stmt = conn.prepare(
             "SELECT id, session_id, agent_id, conversation_id, turn_id, tool, action, \
              target_json, approval_scope, decision, result, error_code, error_message, \
-             redacted_text_len, created_at FROM computer_actions \
+             redacted_text_len, policy_rule, initiator, created_at, ended_at FROM computer_actions \
              WHERE (?1 IS NULL OR conversation_id = ?1) \
              ORDER BY created_at DESC, id DESC LIMIT ?2",
         )?;
@@ -3507,6 +3704,62 @@ impl Db {
             params![id, conversation_id, now, status, error, next_run_at],
         )?;
         Ok(())
+    }
+
+    pub fn start_agent_routine_run(
+        &self,
+        routine_id: &str,
+        conversation_id: Option<&str>,
+        now: i64,
+    ) -> Result<String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO agent_routine_runs (id, routine_id, conversation_id, status, started_at) \
+             VALUES (?1, ?2, ?3, 'running', ?4)",
+            params![id, routine_id, conversation_id, now],
+        )?;
+        Ok(id)
+    }
+
+    pub fn finish_agent_routine_run(
+        &self,
+        run_id: &str,
+        status: &str,
+        error: Option<&str>,
+        now: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE agent_routine_runs SET status = ?2, error = ?3, ended_at = ?4 WHERE id = ?1",
+            params![run_id, status, error, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_agent_routine_runs(
+        &self,
+        routine_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<AgentRoutineRun>> {
+        let limit = limit.unwrap_or(50).clamp(1, 200) as i64;
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, routine_id, conversation_id, status, error, started_at, ended_at \
+             FROM agent_routine_runs WHERE routine_id = ?1 ORDER BY started_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![routine_id, limit], |row| {
+            Ok(AgentRoutineRun {
+                id: row.get(0)?,
+                routine_id: row.get(1)?,
+                conversation_id: row.get(2)?,
+                status: row.get(3)?,
+                error: row.get(4)?,
+                started_at: row.get(5)?,
+                ended_at: row.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /* ---------------- agent channels ---------------- */
@@ -5740,6 +5993,7 @@ mod tests {
             workspace_id: None,
             permission_mode: crate::domain::PermissionMode::Edit,
             docker_image: None,
+            computer_environment: "auto".to_string(),
         }
     }
 
@@ -6114,6 +6368,111 @@ mod tests {
             2
         );
         assert!(db.list_turn_events("turn-1", None).expect("empty").is_empty());
+    }
+
+    #[test]
+    fn agent_computer_environment_roundtrips_and_routine_runs_are_logged() {
+        let db = test_db();
+        let created = db.create_agent(&agent_input("Navegador")).expect("agent");
+        assert_eq!(created.computer_environment, "auto");
+        let mut input = agent_input("Navegador");
+        input.computer_environment = "private_desktop".to_string();
+        let updated = db.update_agent(&created.id, &input).expect("update");
+        assert_eq!(updated.computer_environment, "private_desktop");
+
+        let routine = db
+            .create_agent_routine(
+                &created.id,
+                &crate::agents::AgentRoutineInput {
+                    title: "Olhar o dia".to_string(),
+                    prompt: "Resuma o dia.".to_string(),
+                    schedule_kind: "interval".to_string(),
+                    interval_minutes: 15,
+                    hour: 9,
+                    minute: 0,
+                    enabled: true,
+                }
+                .normalize()
+                .expect("routine input"),
+                now_ms(),
+            )
+            .expect("routine");
+        let run_id = db
+            .start_agent_routine_run(&routine.id, None, now_ms())
+            .expect("run");
+        db.finish_agent_routine_run(&run_id, "error", Some("falhou"), now_ms())
+            .expect("finish");
+        let runs = db
+            .list_agent_routine_runs(&routine.id, Some(10))
+            .expect("runs");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, "error");
+        assert_eq!(runs[0].error.as_deref(), Some("falhou"));
+        assert!(runs[0].ended_at.is_some());
+    }
+
+    #[test]
+    fn computer_audit_pending_action_is_finished_or_interrupted() {
+        let db = test_db();
+        let now = now_ms();
+        let session = db
+            .get_or_create_computer_session(None, "conv-2", "local", now)
+            .expect("session");
+        let pending = db
+            .begin_computer_action(
+                &session.id,
+                None,
+                "conv-2",
+                "turn-2",
+                "computer_click",
+                "computer_click",
+                &serde_json::json!({ "x": 10, "y": 20 }),
+                None,
+                "human",
+                now,
+            )
+            .expect("begin");
+        assert_eq!(pending.result, "pending");
+        assert_eq!(pending.initiator.as_deref(), Some("human"));
+        assert!(pending.ended_at.is_none());
+        db.finish_computer_action(
+            &pending.id,
+            "ok",
+            None,
+            None,
+            Some("approved"),
+            Some("once"),
+            now + 1,
+        )
+        .expect("finish");
+        let actions = db.list_computer_actions(Some("conv-2"), Some(10)).expect("list");
+        assert_eq!(actions[0].result, "ok");
+        assert_eq!(actions[0].decision.as_deref(), Some("approved"));
+        assert!(actions[0].ended_at.is_some());
+
+        let stale = db
+            .begin_computer_action(
+                &session.id,
+                None,
+                "conv-2",
+                "turn-3",
+                "computer_type",
+                "computer_type",
+                &serde_json::json!({ "textLength": 4 }),
+                Some(4),
+                "goal_round",
+                now,
+            )
+            .expect("begin stale");
+        assert_eq!(
+            db.interrupt_pending_computer_actions(now + 2)
+                .expect("interrupt"),
+            1
+        );
+        let actions = db.list_computer_actions(Some("conv-2"), Some(10)).expect("list");
+        assert!(actions
+            .iter()
+            .any(|action| action.id == stale.id && action.result == "interrupted"));
     }
 
     #[test]

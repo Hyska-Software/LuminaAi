@@ -13,7 +13,7 @@ O aplicativo tem três layouts, persistidos em `uiStore.layoutMode`:
 | --- | --- | --- | --- |
 | `chat` | `conversations.mode = 'chat'` | conversas, Biblioteca, Skills | `ChatView` |
 | `code` | `mode = 'code'` + sessões do Chat com `code_linked` | workspaces/sessões | workbench de código |
-| `agent` | `mode = 'agent'` de uma persona | agentes, canais, threads | home/thread do agente ou canal |
+| `agent` | `mode = 'agent'` de uma persona | agentes, canais, threads | home/thread do agente ou canal + `AgentPanel` à direita |
 
 Uma sessão nasce em um layout e não vaza para os outros. A única exceção é
 `code_linked` (sessão do Chat adicionada ao Code). Threads de canal têm
@@ -205,6 +205,9 @@ com erro — o fallback é de rota, não um retry infinito.
 - Frequência: intervalo mínimo de 5 min (máx. 7 dias) ou horário diário local.
 - Status/erro ficam na rotina; o evento `lumina:agent-routine-run` atualiza a
   lista de conversas e mostra um toast.
+- Cada execução grava uma linha em `agent_routine_runs` (status, início/fim,
+  erro, conversa); o painel do agente lista esse histórico em **Rotinas →
+  Registros de execução**.
 - Execuções não assistidas não têm card de aprovação/pergunta: tools que exigem
   interação falham fechado imediatamente (sem esperar o timeout).
 
@@ -264,9 +267,12 @@ Contrato completo: `docs/TASKS.md`.
 
 Contrato completo: `docs/COMPUTER.md`.
 
-- Capabilities `computerUse`, `screenCapture`, `browserUse` (reservado).
+- Capabilities `computerUse`, `screenCapture`, `browserUse`.
 - Windows local: screenshot, clique, teclado, janelas, foco e árvore de
   acessibilidade; Docker gráfico via `docker/computer/` (Xvfb + noVNC).
+- `browserUse` usa o navegador local controlado por CDP (abas, endereço,
+  snapshot com refs, click/type, wait, extract e download) em um perfil isolado
+  por conversa; apenas http/https.
 - `RiskClass::Computer` sempre pede aprovação, inclusive em Autônomo; o card
   mostra screenshot/alvo e só oferece permitir uma vez/negar; sem canal de
   aprovação a tool falha fechada.
@@ -274,8 +280,9 @@ Contrato completo: `docs/COMPUTER.md`.
   texto digitado ou bytes de screenshot; rate limit por turno/hora.
 - `computer_screenshot` vira imagem para modelos com visão (máx. 2/turno,
   1280 px) e texto/UI tree para modelos sem visão.
-- Browser CDP e macOS/Linux local ainda não implementados; a denylist de apps
-  sensíveis está ativa.
+- macOS/Linux local ainda não implementados; a denylist de apps sensíveis está
+  ativa. O navegador CDP desta fase é local (Windows); no Docker o navegador
+  gráfico continua via screenshot/xdotool.
 
 ## 9.3 Docker de produção
 
@@ -293,6 +300,42 @@ Contrato completo: `docs/DOCKER.md`.
   `docker_cleanup`; imagem do computer use é separada.
 - Perfil por workspace, compose/devcontainer e containers gráficos por sessão
   ainda não implementados.
+
+## 9.4 Painel direito do agente
+
+- `AgentPanel` é a sidebar direita do layout Agentes, com abas **Tela**,
+  **Rotinas**, **Navegador** e **Dados**. Docked acima de 1120 px; overlay com
+  backdrop/Escape abaixo disso.
+- O `CodePanel` (Arquivos/Alterações/Terminal) continua **separado**: os botões
+  do header alternam qual painel ocupa o dock; não há aba "Código" dentro do
+  `AgentPanel`.
+- Estado em `uiStore` (`agentPanelOpen`, `agentPanelTab`, `agentRightPanel`) e
+  largura em `sidePanelWidth`.
+- Tela: `computer_preview` (só UI, sem modelo/DB), `computer_set_paused`,
+  `computer_take_control`/`release_computer_control`; pausa bloqueia input no
+  backend (`COMPUTER_PAUSED`).
+- Toda ação grava `computer_actions` como `pending` antes de executar e fecha em
+  `ok`/`error`; boot marca pendentes como `interrupted`.
+- Container gráfico por conversa (não global), porta noVNC loopback aleatória e
+  cleanup no Stop/boot.
+- Ações CUA: drag, scroll, move, wait e clipboard read/write.
+- Política de apps (`computerAllowedApps`/`BlockedApps`) e hosts
+  (`browserAllowedDomains`/`BlockedDomains`, private hosts e metadata).
+- Navegador: clique/digitação reais via `Input.dispatchMouseEvent`/
+  `Input.insertText`, scroll/hover/select/upload e takeover interativo no
+  preview (clique + teclado quando o humano assume).
+- `computerAllowUnattendedBrowser` permite navegador em rotinas sem card;
+  desktop continua fail-closed.
+- Rotinas/Tarefas: execuções em `agent_routine_runs`; navegador não assistido é
+  opt-in e continua sujeito à política de hosts.
+- Ambiente por agente em `agents.computer_environment` (`auto`,
+  `private_desktop`, `this_computer`, `browser`, `off`). “Desktop na nuvem” fica
+  desabilitado como **Em breve**.
+- Navegador: sessão CDP local, abas/endereço/voltar/avançar/reload, frame ao
+  vivo, “Assumir o controle” e encerramento. Downloads vão para
+  `<workspace>/downloads` (ou pasta do app).
+- Dados: identidade/modelo/capabilities, uso, memória, tarefas, fila, conversa e
+  auditoria recente de computer use.
 
 ## 10. Cache e segurança
 
@@ -335,11 +378,15 @@ Testes específicos deste contrato:
   computer use; `turn_events`)
 - `src-tauri/src/commands/tasks.rs` (runner multi-turno/cancelamento/heartbeat)
 - `src-tauri/src/commands/turn.rs` (eventos persistidos/reattach)
-- `src-tauri/src/computer/mod.rs` (backend local/Docker)
+- `src-tauri/src/computer/mod.rs` (backend local/Docker e ambiente por agente)
+- `src-tauri/src/computer/browser.rs` (CDP local, URL policy, perfil/refs)
+- `src-tauri/src/commands/routines.rs` (runs/logs de rotina)
+- `src-tauri/src/tools/code/computer.rs` (browser tools/auditoria)
 - `src-tauri/src/tools/code_exec.rs` (`run_code` Docker, teste `#[ignore]`)
 - `src-tauri/src/terminal/mod.rs` (terminal Docker hardening)
 - `src-tauri/src/harness/mod.rs` (imagens de tool para modelos com visão)
 - `src/lib/__tests__/chatStore.test.ts` (reattach e notificações)
+- `src/components/agents/AgentPanel.test.tsx` (Tela/Navegador)
 - `src/components/agents/AgentTaskBoardDialog.test.tsx`
 - `src/components/agents/AgentActivityDialog.test.tsx`
 - `docs/TASKS.md`, `docs/COMPUTER.md`, `docs/DOCKER.md`

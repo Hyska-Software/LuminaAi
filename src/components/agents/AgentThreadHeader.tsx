@@ -1,4 +1,4 @@
-import { ArrowLeft, PanelRight, Pencil } from 'lucide-react';
+import { ArrowLeft, FolderKanban, PanelRight, Pencil } from 'lucide-react';
 
 import { AgentAvatar } from './AgentAvatar';
 import { modelLabel } from './agentUtils';
@@ -18,8 +18,14 @@ export function AgentThreadHeader({
 }) {
   const providers = useAppStore((state) => state.providers);
   const openEditor = useUiStore((state) => state.openAgentEditor);
-  const panelOpen = useUiStore((state) => state.codePanelOpen);
-  const setPanelOpen = useUiStore((state) => state.setCodePanelOpen);
+  const panelOpen = useUiStore((state) => state.agentPanelOpen);
+  const setPanelOpen = useUiStore((state) => state.setAgentPanelOpen);
+  const rightPanel = useUiStore((state) => state.agentRightPanel);
+  const setRightPanel = useUiStore((state) => state.setAgentRightPanel);
+  const codePanelOpen = useUiStore((state) => state.codePanelOpen);
+  const setCodePanelOpen = useUiStore((state) => state.setCodePanelOpen);
+  const agentPanelActive = panelOpen && rightPanel === 'agent';
+  const workspacePanelActive = codePanelOpen && rightPanel === 'workspace';
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/70 px-3">
       <IconButton label="Voltar para o agente" size="sm" variant="ghost" onClick={onBack}>
@@ -35,15 +41,36 @@ export function AgentThreadHeader({
       {conversation.workspaceId ? (
         <CodeContextMeterChip conversationId={conversation.id} />
       ) : null}
+      <IconButton
+        label={agentPanelActive ? 'Recolher painel do agente' : 'Abrir painel do agente'}
+        size="sm"
+        variant="ghost"
+        active={agentPanelActive}
+        onClick={() => {
+          setRightPanel('agent');
+          setPanelOpen(!agentPanelActive);
+          if (!agentPanelActive) setCodePanelOpen(false);
+        }}
+      >
+        <PanelRight className="size-4" />
+      </IconButton>
       {conversation.workspaceId ? (
         <IconButton
-          label={panelOpen ? 'Recolher painel do workspace' : 'Abrir painel do workspace'}
+          label={
+            workspacePanelActive
+              ? 'Recolher ferramentas do workspace'
+              : 'Abrir ferramentas do workspace'
+          }
           size="sm"
           variant="ghost"
-          active={panelOpen}
-          onClick={() => setPanelOpen(!panelOpen)}
+          active={workspacePanelActive}
+          onClick={() => {
+            setRightPanel('workspace');
+            setCodePanelOpen(!workspacePanelActive);
+            if (!workspacePanelActive) setPanelOpen(false);
+          }}
         >
-          <PanelRight className="size-4" />
+          <FolderKanban className="size-4" />
         </IconButton>
       ) : null}
       <Button

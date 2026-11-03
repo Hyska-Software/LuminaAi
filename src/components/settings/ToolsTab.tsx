@@ -446,6 +446,118 @@ export function ToolsTab() {
       </SettingsSection>
 
       <SettingsSection
+        title="Navegador controlado"
+        description="Política de hosts do navegador CDP. A denylist vence a allowlist; metadata de nuvem é sempre bloqueado."
+      >
+        <SettingRow
+          vertical
+          label="Hosts permitidos"
+          description="Lista separada por vírgula (ex.: github.com, notion.so). Vazio libera hosts públicos."
+        >
+          <Input
+            defaultValue={(settings.browserAllowedDomains ?? []).join(', ')}
+            aria-label="Hosts permitidos no navegador"
+            placeholder="github.com, notion.so"
+            onBlur={(event) =>
+              void saveSettings({
+                browserAllowedDomains: event.target.value
+                  .split(',')
+                  .map((value) => value.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+        </SettingRow>
+        <SettingRow
+          vertical
+          label="Hosts bloqueados"
+          description="Sempre negados; avaliados antes da allowlist."
+        >
+          <Input
+            defaultValue={(settings.browserBlockedDomains ?? []).join(', ')}
+            aria-label="Hosts bloqueados no navegador"
+            placeholder="banco.com, admin.interno"
+            onBlur={(event) =>
+              void saveSettings({
+                browserBlockedDomains: event.target.value
+                  .split(',')
+                  .map((value) => value.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+        </SettingRow>
+        <SettingRow
+          label="Permitir hosts privados"
+          description="Localhost, 127.0.0.1 e redes RFC1918. Desligue para evitar SSRF; necessário para dev servers locais."
+        >
+          <Switch
+            checked={settings.browserAllowPrivateHosts ?? true}
+            onCheckedChange={(checked) =>
+              void saveSettings({ browserAllowPrivateHosts: checked })
+            }
+            aria-label="Permitir hosts privados no navegador"
+          />
+        </SettingRow>
+        <SettingRow
+          label="Navegador em rotinas"
+          description="Permite ações de navegador em tarefas/rotinas sem card de aprovação. A allowlist/denylist de hosts continua valendo; desktop continua fail-closed."
+        >
+          <Switch
+            checked={settings.computerAllowUnattendedBrowser ?? false}
+            onCheckedChange={(checked) =>
+              void saveSettings({ computerAllowUnattendedBrowser: checked })
+            }
+            aria-label="Permitir navegador em rotinas não assistidas"
+          />
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Apps do desktop"
+        description="Allowlist/denylist por processo ou título da janela, aplicada antes de qualquer clique/teclado. A denylist vence."
+      >
+        <SettingRow
+          vertical
+          label="Apps permitidos"
+          description="Separados por vírgula (ex.: notepad, chrome, code). Vazio libera todos, exceto a denylist."
+        >
+          <Input
+            defaultValue={(settings.computerAllowedApps ?? []).join(', ')}
+            aria-label="Apps permitidos no computador"
+            placeholder="notepad, chrome"
+            onBlur={(event) =>
+              void saveSettings({
+                computerAllowedApps: event.target.value
+                  .split(',')
+                  .map((value) => value.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+        </SettingRow>
+        <SettingRow
+          vertical
+          label="Apps bloqueados"
+          description="Sempre negados; avaliados antes da allowlist."
+        >
+          <Input
+            defaultValue={(settings.computerBlockedApps ?? []).join(', ')}
+            aria-label="Apps bloqueados no computador"
+            placeholder="1password, banking"
+            onBlur={(event) =>
+              void saveSettings({
+                computerBlockedApps: event.target.value
+                  .split(',')
+                  .map((value) => value.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection
         title="Sandbox de comandos"
         description="Onde os comandos do agente de código rodam. O padrão executa nesta máquina; Docker isola o processo com o workspace montado em /workspace."
       >

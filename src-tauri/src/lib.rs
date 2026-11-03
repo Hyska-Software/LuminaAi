@@ -98,6 +98,19 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
                 let _ = state
                     .db
                     .end_all_computer_sessions("stopped", crate::domain::now_ms());
+                let _ = state.db.reset_all_computer_controls();
+                let _ = state
+                    .db
+                    .interrupt_pending_computer_actions(crate::domain::now_ms());
+                let retention = crate::domain::now_ms() - 24 * 60 * 60 * 1000;
+                let _ = crate::computer::prune_old_screenshots(
+                    &state.data_dir.join("computer"),
+                    retention,
+                );
+                let _ = crate::computer::prune_old_screenshots(
+                    &state.data_dir.join("tool-images"),
+                    retention,
+                );
                 if let Err(error) = crate::commands::docker::cleanup_containers(&state).await {
                     eprintln!("lumina: limpeza de containers no boot falhou: {error}");
                 }
@@ -121,6 +134,26 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::computer::stop_computer_session,
             commands::computer::stop_all_computer_sessions,
             commands::computer::computer_screenshot_preview,
+            commands::computer::tool_image_preview,
+            commands::computer::computer_preview,
+            commands::computer::set_computer_paused,
+            commands::computer::computer_take_control,
+            commands::computer::release_computer_control,
+            commands::browser::browser_session_status,
+            commands::browser::browser_session_open,
+            commands::browser::browser_session_close,
+            commands::browser::browser_tabs,
+            commands::browser::browser_new_tab,
+            commands::browser::browser_close_tab,
+            commands::browser::browser_activate_tab,
+            commands::browser::browser_navigate,
+            commands::browser::browser_history,
+            commands::browser::browser_frame,
+            commands::browser::browser_click_at,
+            commands::browser::browser_press_key,
+            commands::browser::browser_insert_text,
+            commands::browser::browser_snapshot,
+            commands::browser::browser_take_control,
             commands::diagnostics::platform_diagnostics,
             commands::models::get_catalog,
             commands::models::refresh_catalog,
@@ -153,6 +186,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::agents::suggest_agent,
             commands::agents::revise_agent,
             commands::routines::list_agent_routines,
+            commands::routines::list_agent_routine_runs,
             commands::routines::create_agent_routine,
             commands::routines::update_agent_routine,
             commands::routines::set_agent_routine_enabled,
@@ -293,6 +327,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             if let Some(state) = app_handle.try_state::<state::AppState>() {
                 state.terminals.close_all();
             }
+            crate::computer::browser::global().map(|browser| browser.close_all());
         }
     });
 }

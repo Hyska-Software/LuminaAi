@@ -50,6 +50,18 @@ pub struct AgentRoutine {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoutineRun {
+    pub id: String,
+    pub routine_id: String,
+    pub conversation_id: Option<String>,
+    pub status: String,
+    pub error: Option<String>,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRoutineInput {
@@ -179,6 +191,7 @@ impl AgentExportDocument {
                 workspace_id: agent.workspace_id.clone(),
                 permission_mode: agent.permission_mode,
                 docker_image: agent.docker_image.clone(),
+                computer_environment: agent.computer_environment.clone(),
             },
             memories: memories
                 .iter()
@@ -334,6 +347,7 @@ impl From<&Agent> for AgentInput {
             workspace_id: agent.workspace_id.clone(),
             permission_mode: agent.permission_mode,
             docker_image: agent.docker_image.clone(),
+            computer_environment: agent.computer_environment.clone(),
         }
     }
 }
@@ -642,6 +656,23 @@ fn default_true() -> bool {
     true
 }
 
+fn default_computer_environment() -> String {
+    "auto".to_string()
+}
+
+/// Normalizes the per-agent computer environment. Unknown values fall back to
+/// `auto` so an old/hand-edited DB never disables the agent silently.
+pub fn normalize_computer_environment(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "private_desktop" => "private_desktop",
+        "this_computer" => "this_computer",
+        "browser" => "browser",
+        "off" => "off",
+        _ => "auto",
+    }
+    .to_string()
+}
+
 /// Restrictions applied on top of the global tool/skill/MCP configuration.
 ///
 /// Capabilities can only remove access. `None` inherits everything globally
@@ -738,6 +769,10 @@ pub struct AgentInput {
     /// Optional per-agent Docker image override (requires `dockerExecution`).
     #[serde(default)]
     pub docker_image: Option<String>,
+    /// Where this persona uses the computer: `auto`, `private_desktop`,
+    /// `this_computer`, `browser` or `off`.
+    #[serde(default = "default_computer_environment")]
+    pub computer_environment: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -764,6 +799,9 @@ pub struct Agent {
     pub workspace_id: Option<String>,
     pub permission_mode: PermissionMode,
     pub docker_image: Option<String>,
+    /// Where this persona uses the computer (see `AgentInput`).
+    #[serde(default = "default_computer_environment")]
+    pub computer_environment: String,
     pub archived_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -880,6 +918,7 @@ pub fn normalize_input(mut input: AgentInput) -> Result<AgentInput, String> {
     {
         return Err("AGENT_VALIDATION: a imagem Docker passa de 200 caracteres.".to_string());
     }
+    input.computer_environment = normalize_computer_environment(&input.computer_environment);
 
     if input.name.is_empty() || input.name.chars().count() > 40 {
         return Err("AGENT_VALIDATION: o nome deve ter de 1 a 40 caracteres.".to_string());
@@ -1062,6 +1101,7 @@ mod tests {
             workspace_id: None,
             permission_mode: PermissionMode::Edit,
             docker_image: None,
+            computer_environment: "auto".to_string(),
         }
     }
 
@@ -1088,6 +1128,7 @@ mod tests {
             workspace_id: None,
             permission_mode: PermissionMode::Edit,
             docker_image: None,
+            computer_environment: "auto".to_string(),
             archived_at: None,
             created_at: 0,
             updated_at: 0,

@@ -57,6 +57,8 @@ export {
 } from './uiStore';
 export type {
   AgentEditorState,
+  AgentPanelTab,
+  AgentRightPanel,
   ArtifactPanelView,
   CodeDiffTab,
   CodeFileTab,

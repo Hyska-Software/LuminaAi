@@ -2,6 +2,7 @@
 //! module is owned by one subsystem.
 
 pub mod agents;
+pub mod browser;
 pub mod channels;
 pub mod computer;
 pub mod diagnostics;

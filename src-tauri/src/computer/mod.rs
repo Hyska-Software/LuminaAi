@@ -14,6 +14,8 @@ use tokio_util::sync::CancellationToken;
 use crate::domain::Settings;
 use crate::workspace::exec::{self, ExecRequest};
 
+pub mod browser;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ComputerSession {
@@ -43,7 +45,10 @@ pub struct ComputerActionRecord {
     pub error_code: Option<String>,
     pub error_message: Option<String>,
     pub redacted_text_len: Option<i64>,
+    pub policy_rule: Option<String>,
+    pub initiator: Option<String>,
     pub created_at: i64,
+    pub ended_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,11 +76,83 @@ pub enum ComputerBackend {
 }
 
 pub fn backend(settings: &Settings) -> ComputerBackend {
-    if settings.execution_environment == "docker" {
-        ComputerBackend::Docker
-    } else {
-        ComputerBackend::Local
+    match settings.computer_environment.trim() {
+        "this_computer" => ComputerBackend::Local,
+        "private_desktop" => ComputerBackend::Docker,
+        // `browser`/`off` have no desktop backend; tools are not injected in
+        // those modes. Keep Local as a safe default for direct callers.
+        "browser" | "off" => ComputerBackend::Local,
+        _ => {
+            if settings.execution_environment == "docker" {
+                ComputerBackend::Docker
+            } else {
+                ComputerBackend::Local
+            }
+        }
     }
+}
+
+/// Desktop computer use is available in `auto`, `this_computer` and
+/// `private_desktop`; the browser/off modes deliberately disable it.
+pub fn desktop_enabled(settings: &Settings) -> bool {
+    !matches!(
+        settings.computer_environment.trim(),
+        "browser" | "off"
+    )
+}
+
+/// Per-conversation graphical container. The configured base name is kept as a
+/// prefix so users can still find it, but two threads never share a desktop.
+pub fn container_for(settings: &Settings, conversation_id: &str) -> String {
+    let base = settings.computer_docker_container.trim();
+    let base = if base.is_empty() { "lumina-computer" } else { base };
+    let safe: String = conversation_id
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '-' })
+        .collect();
+    format!("{base}-{safe}")
+}
+
+pub fn prune_old_screenshots(root: &Path, cutoff_ms: i64) -> u64 {
+    let mut removed = 0;
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return 0;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if metadata.is_dir() {
+            removed += prune_old_screenshots(&path, cutoff_ms);
+            if std::fs::read_dir(&path)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false)
+            {
+                let _ = std::fs::remove_dir(&path);
+            }
+            continue;
+        }
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as i64)
+            .unwrap_or(0);
+        if modified < cutoff_ms && std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+fn free_host_port() -> anyhow::Result<u16> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| anyhow::anyhow!("COMPUTER_PORT: {error}"))?;
+    listener
+        .local_addr()
+        .map(|address| address.port())
+        .map_err(|error| anyhow::anyhow!("COMPUTER_PORT: {error}"))
 }
 
 fn screenshot_dir(data_dir: &Path, conversation_id: &str) -> PathBuf {
@@ -173,14 +250,14 @@ pub async fn screenshot(
             }
         }
         ComputerBackend::Docker => {
-            ensure_container(settings, data_dir).await?;
+            ensure_container(settings, data_dir, conversation_id).await?;
             let docker_path = "/tmp/lumina-shot.png";
             let shot = sh(
                 data_dir,
                 "docker",
                 vec![
                     "exec".into(),
-                    settings.computer_docker_container.clone(),
+                    container_for(settings, conversation_id),
                     "sh".into(),
                     "-lc".into(),
                     format!("DISPLAY=:99 scrot -o {docker_path}"),
@@ -201,7 +278,8 @@ pub async fn screenshot(
                     "cp".into(),
                     format!(
                         "{}:{}",
-                        settings.computer_docker_container, docker_path
+                        container_for(settings, conversation_id),
+                        docker_path
                     ),
                     path.to_string_lossy().to_string(),
                 ],
@@ -258,6 +336,7 @@ pub fn is_sensitive_title(title: &str) -> bool {
 pub async fn active_window_title(
     settings: &Settings,
     data_dir: &Path,
+    conversation_id: &str,
 ) -> anyhow::Result<String> {
     match backend(settings) {
         ComputerBackend::Local => {
@@ -280,14 +359,57 @@ pub async fn active_window_title(
             }
         }
         ComputerBackend::Docker => {
-            ensure_container(settings, data_dir).await?;
+            ensure_container(settings, data_dir, conversation_id).await?;
             let output = docker_exec(
                 settings,
                 data_dir,
+                conversation_id,
                 "DISPLAY=:99 xdotool getactivewindow getwindowname",
             )
             .await?;
             Ok(output.stdout.trim().to_string())
+        }
+    }
+}
+
+/// Application/process of the foreground window. Used for app allow/deny
+/// policy before any input action.
+pub async fn active_window_app(
+    settings: &Settings,
+    data_dir: &Path,
+    conversation_id: &str,
+) -> anyhow::Result<String> {
+    match backend(settings) {
+        ComputerBackend::Local => {
+            #[cfg(windows)]
+            {
+                let script = "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class LuminaApp { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); }\n'@; \
+                              $h=[LuminaApp]::GetForegroundWindow(); $pid=0; [void][LuminaApp]::GetWindowThreadProcessId($h,[ref]$pid); (Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName";
+                let output = sh(
+                    data_dir,
+                    "powershell",
+                    powershell(script),
+                    Duration::from_secs(10),
+                )
+                .await?;
+                Ok(output.stdout.trim().to_string())
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = (data_dir, conversation_id);
+                Ok(String::new())
+            }
+        }
+        ComputerBackend::Docker => {
+            ensure_container(settings, data_dir, conversation_id).await?;
+            let output = docker_exec(
+                settings,
+                data_dir,
+                conversation_id,
+                "id=$(DISPLAY=:99 xdotool getactivewindow); DISPLAY=:99 xprop -id $id WM_CLASS 2>/dev/null | sed 's/.*= //'",
+            )
+            .await?;
+            Ok(output.stdout.trim().replace('"', ""))
         }
     }
 }
@@ -299,6 +421,7 @@ pub async fn active_window_title(
 pub async fn open_url(
     settings: &Settings,
     data_dir: &Path,
+    conversation_id: &str,
     raw_url: &str,
 ) -> anyhow::Result<()> {
     let parsed = url::Url::parse(raw_url.trim())
@@ -342,10 +465,11 @@ pub async fn open_url(
             }
         }
         ComputerBackend::Docker => {
-            ensure_container(settings, data_dir).await?;
+            ensure_container(settings, data_dir, conversation_id).await?;
             let output = docker_exec(
                 settings,
                 data_dir,
+                conversation_id,
                 &format!(
                     "DISPLAY=:99 chromium --no-sandbox --no-first-run --user-data-dir=/tmp/chrome {} >/tmp/chrome.log 2>&1 &",
                     sh_quote(parsed.as_str())
@@ -363,6 +487,7 @@ pub async fn open_url(
 pub async fn click(
     settings: &Settings,
     data_dir: &Path,
+    conversation_id: &str,
     x: i32,
     y: i32,
     button: &str,
@@ -397,15 +522,13 @@ pub async fn click(
             }
         }
         ComputerBackend::Docker => {
-            ensure_container(settings, data_dir).await?;
+            ensure_container(settings, data_dir, conversation_id).await?;
             let button = match button {
                 "right" => "3",
                 "middle" => "2",
                 _ => "1",
             };
-            let output = docker_exec(
-                settings,
-                data_dir,
+            let output = docker_exec(                settings,                data_dir,                conversation_id,
                 &format!(
                     "DISPLAY=:99 xdotool mousemove {x} {y} click --repeat {} {button}",
                     clicks.clamp(1, 3)
@@ -423,6 +546,7 @@ pub async fn click(
 pub async fn type_text(
     settings: &Settings,
     data_dir: &Path,
+    conversation_id: &str,
     text: &str,
 ) -> anyhow::Result<()> {
     if text.chars().count() > 4_000 {
@@ -454,10 +578,8 @@ pub async fn type_text(
             }
         }
         ComputerBackend::Docker => {
-            ensure_container(settings, data_dir).await?;
-            let output = docker_exec(
-                settings,
-                data_dir,
+            ensure_container(settings, data_dir, conversation_id).await?;
+            let output = docker_exec(                settings,                data_dir,                conversation_id,
                 &format!(
                     "DISPLAY=:99 xdotool type --clearmodifiers --delay 20 -- {}",
                     sh_quote(text)
@@ -475,6 +597,7 @@ pub async fn type_text(
 pub async fn key(
     settings: &Settings,
     data_dir: &Path,
+    conversation_id: &str,
     combo: &str,
 ) -> anyhow::Result<()> {
     let combo = combo.trim();
@@ -507,10 +630,8 @@ pub async fn key(
             }
         }
         ComputerBackend::Docker => {
-            ensure_container(settings, data_dir).await?;
-            let output = docker_exec(
-                settings,
-                data_dir,
+            ensure_container(settings, data_dir, conversation_id).await?;
+            let output = docker_exec(                settings,                data_dir,                conversation_id,
                 &format!("DISPLAY=:99 xdotool key --clearmodifiers {}", sh_quote(combo)),
             )
             .await?;
@@ -525,6 +646,7 @@ pub async fn key(
 pub async fn windows(
     settings: &Settings,
     data_dir: &Path,
+    conversation_id: &str,
 ) -> anyhow::Result<Vec<ComputerWindow>> {
     match backend(settings) {
         ComputerBackend::Local => {
@@ -566,8 +688,8 @@ pub async fn windows(
             }
         }
         ComputerBackend::Docker => {
-            ensure_container(settings, data_dir).await?;
-            let output = docker_exec(settings, data_dir, "DISPLAY=:99 wmctrl -l").await?;
+            ensure_container(settings, data_dir, conversation_id).await?;
+            let output = docker_exec(settings, data_dir, conversation_id, "DISPLAY=:99 wmctrl -l").await?;
             if output.exit_code != Some(0) {
                 anyhow::bail!("COMPUTER_WINDOWS_FAILED: {}", output.stderr.trim());
             }
@@ -592,6 +714,7 @@ pub async fn windows(
 pub async fn ui_tree(
     settings: &Settings,
     data_dir: &Path,
+    conversation_id: &str,
 ) -> anyhow::Result<serde_json::Value> {
     match backend(settings) {
         ComputerBackend::Local => {
@@ -622,16 +745,273 @@ pub async fn ui_tree(
                 Ok(serde_json::Value::Array(Vec::new()))
             }
         }
-        ComputerBackend::Docker => Ok(serde_json::to_value(windows(settings, data_dir).await?)?),
+        ComputerBackend::Docker => Ok(serde_json::to_value(
+            windows(settings, data_dir, conversation_id).await?,
+        )?),
     }
+}
+
+pub async fn drag(
+    settings: &Settings,
+    data_dir: &Path,
+    conversation_id: &str,
+    from_x: i32,
+    from_y: i32,
+    to_x: i32,
+    to_y: i32,
+    button: &str,
+) -> anyhow::Result<()> {
+    match backend(settings) {
+        ComputerBackend::Local => {
+            #[cfg(windows)]
+            {
+                let (down, up) = if button == "right" {
+                    (0x0008, 0x0010)
+                } else {
+                    (0x0002, 0x0004)
+                };
+                let script = format!(
+                    "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class LuminaDrag {{ [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X,int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,IntPtr e); }}\n'@; \
+                     [LuminaDrag]::SetCursorPos({from_x},{from_y}); [LuminaDrag]::mouse_event({down},0,0,0,[IntPtr]::Zero); \
+                     [LuminaDrag]::SetCursorPos({to_x},{to_y}); [LuminaDrag]::mouse_event({up},0,0,0,[IntPtr]::Zero)"
+                );
+                let output = sh(
+                    data_dir,
+                    "powershell",
+                    powershell(&script),
+                    Duration::from_secs(10),
+                )
+                .await?;
+                if output.exit_code != Some(0) {
+                    anyhow::bail!("COMPUTER_DRAG_FAILED: {}", output.stderr.trim());
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                anyhow::bail!("COMPUTER_UNSUPPORTED: use Docker neste sistema");
+            }
+        }
+        ComputerBackend::Docker => {
+            ensure_container(settings, data_dir, conversation_id).await?;
+            let button = if button == "right" { "3" } else { "1" };
+            let output = docker_exec(
+                settings,
+                data_dir,
+                conversation_id,
+                &format!(
+                    "DISPLAY=:99 xdotool mousemove {from_x} {from_y} mousedown {button} mousemove {to_x} {to_y} mouseup {button}"
+                ),
+            )
+            .await?;
+            if output.exit_code != Some(0) {
+                anyhow::bail!("COMPUTER_DRAG_FAILED: {}", output.stderr.trim());
+            }
+        }
+    }
+    Ok(())
+}
+
+pub async fn scroll(
+    settings: &Settings,
+    data_dir: &Path,
+    conversation_id: &str,
+    x: i32,
+    y: i32,
+    delta: i32,
+) -> anyhow::Result<()> {
+    let delta = delta.clamp(-2_400, 2_400);
+    if delta == 0 {
+        return Ok(());
+    }
+    match backend(settings) {
+        ComputerBackend::Local => {
+            #[cfg(windows)]
+            {
+                let script = format!(
+                    "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class LuminaScroll {{ [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X,int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,IntPtr e); }}\n'@; \
+                     [LuminaScroll]::SetCursorPos({x},{y}); [LuminaScroll]::mouse_event(0x0800,0,0,{delta},[IntPtr]::Zero)"
+                );
+                let output = sh(
+                    data_dir,
+                    "powershell",
+                    powershell(&script),
+                    Duration::from_secs(10),
+                )
+                .await?;
+                if output.exit_code != Some(0) {
+                    anyhow::bail!("COMPUTER_SCROLL_FAILED: {}", output.stderr.trim());
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                anyhow::bail!("COMPUTER_UNSUPPORTED: use Docker neste sistema");
+            }
+        }
+        ComputerBackend::Docker => {
+            ensure_container(settings, data_dir, conversation_id).await?;
+            let button = if delta > 0 { "4" } else { "5" };
+            let clicks = (delta.unsigned_abs() / 120).max(1).min(20);
+            let output = docker_exec(
+                settings,
+                data_dir,
+                conversation_id,
+                &format!(
+                    "DISPLAY=:99 xdotool mousemove {x} {y} click --repeat {clicks} {button}"
+                ),
+            )
+            .await?;
+            if output.exit_code != Some(0) {
+                anyhow::bail!("COMPUTER_SCROLL_FAILED: {}", output.stderr.trim());
+            }
+        }
+    }
+    Ok(())
+}
+
+pub async fn move_pointer(
+    settings: &Settings,
+    data_dir: &Path,
+    conversation_id: &str,
+    x: i32,
+    y: i32,
+) -> anyhow::Result<()> {
+    match backend(settings) {
+        ComputerBackend::Local => {
+            #[cfg(windows)]
+            {
+                let script = format!(
+                    "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class LuminaMove {{ [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X,int Y); }}\n'@; [LuminaMove]::SetCursorPos({x},{y})"
+                );
+                let output = sh(
+                    data_dir,
+                    "powershell",
+                    powershell(&script),
+                    Duration::from_secs(10),
+                )
+                .await?;
+                if output.exit_code != Some(0) {
+                    anyhow::bail!("COMPUTER_MOVE_FAILED: {}", output.stderr.trim());
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                anyhow::bail!("COMPUTER_UNSUPPORTED: use Docker neste sistema");
+            }
+        }
+        ComputerBackend::Docker => {
+            ensure_container(settings, data_dir, conversation_id).await?;
+            let output = docker_exec(
+                settings,
+                data_dir,
+                conversation_id,
+                &format!("DISPLAY=:99 xdotool mousemove {x} {y}"),
+            )
+            .await?;
+            if output.exit_code != Some(0) {
+                anyhow::bail!("COMPUTER_MOVE_FAILED: {}", output.stderr.trim());
+            }
+        }
+    }
+    Ok(())
+}
+
+pub async fn clipboard_read(
+    settings: &Settings,
+    data_dir: &Path,
+    conversation_id: &str,
+) -> anyhow::Result<String> {
+    match backend(settings) {
+        ComputerBackend::Local => {
+            #[cfg(windows)]
+            {
+                let output = sh(
+                    data_dir,
+                    "powershell",
+                    powershell("Get-Clipboard -Raw"),
+                    Duration::from_secs(10),
+                )
+                .await?;
+                if output.exit_code != Some(0) {
+                    anyhow::bail!("COMPUTER_CLIPBOARD_FAILED: {}", output.stderr.trim());
+                }
+                Ok(output.stdout)
+            }
+            #[cfg(not(windows))]
+            {
+                anyhow::bail!("COMPUTER_UNSUPPORTED: clipboard local implementado no Windows");
+            }
+        }
+        ComputerBackend::Docker => {
+            ensure_container(settings, data_dir, conversation_id).await?;
+            let output = docker_exec(settings, data_dir, conversation_id, "xclip -selection clipboard -o")
+                .await?;
+            if output.exit_code != Some(0) {
+                anyhow::bail!(
+                    "COMPUTER_CLIPBOARD_FAILED: {}",
+                    output.stderr.trim()
+                );
+            }
+            Ok(output.stdout)
+        }
+    }
+}
+
+pub async fn clipboard_write(
+    settings: &Settings,
+    data_dir: &Path,
+    conversation_id: &str,
+    text: &str,
+) -> anyhow::Result<()> {
+    if text.chars().count() > 20_000 {
+        anyhow::bail!("COMPUTER_CLIPBOARD_TOO_LARGE: o texto passa de 20.000 caracteres");
+    }
+    match backend(settings) {
+        ComputerBackend::Local => {
+            #[cfg(windows)]
+            {
+                let script = format!("Set-Clipboard -Value '{}'", ps_quote(text));
+                let output = sh(
+                    data_dir,
+                    "powershell",
+                    powershell(&script),
+                    Duration::from_secs(10),
+                )
+                .await?;
+                if output.exit_code != Some(0) {
+                    anyhow::bail!("COMPUTER_CLIPBOARD_FAILED: {}", output.stderr.trim());
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                anyhow::bail!("COMPUTER_UNSUPPORTED: clipboard local implementado no Windows");
+            }
+        }
+        ComputerBackend::Docker => {
+            ensure_container(settings, data_dir, conversation_id).await?;
+            let output = docker_exec(
+                settings,
+                data_dir,
+                conversation_id,
+                &format!("printf '%s' {} | xclip -selection clipboard", sh_quote(text)),
+            )
+            .await?;
+            if output.exit_code != Some(0) {
+                anyhow::bail!(
+                    "COMPUTER_CLIPBOARD_FAILED: {}",
+                    output.stderr.trim()
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 pub async fn focus(
     settings: &Settings,
     data_dir: &Path,
+    conversation_id: &str,
     window_id: &str,
-) -> anyhow::Result<()> {
-    match backend(settings) {
+) -> anyhow::Result<()> {    match backend(settings) {
         ComputerBackend::Local => {
             #[cfg(windows)]
             {
@@ -658,10 +1038,8 @@ pub async fn focus(
             }
         }
         ComputerBackend::Docker => {
-            ensure_container(settings, data_dir).await?;
-            let output = docker_exec(
-                settings,
-                data_dir,
+            ensure_container(settings, data_dir, conversation_id).await?;
+            let output = docker_exec(                settings,                data_dir,                conversation_id,
                 &format!("DISPLAY=:99 wmctrl -ia {}", sh_quote(window_id)),
             )
             .await?;
@@ -676,6 +1054,7 @@ pub async fn focus(
 async fn docker_exec(
     settings: &Settings,
     data_dir: &Path,
+    conversation_id: &str,
     command: &str,
 ) -> anyhow::Result<exec::ExecOutput> {
     sh(
@@ -683,7 +1062,7 @@ async fn docker_exec(
         "docker",
         vec![
             "exec".into(),
-            settings.computer_docker_container.clone(),
+            container_for(settings, conversation_id),
             "sh".into(),
             "-lc".into(),
             command.to_string(),
@@ -693,8 +1072,64 @@ async fn docker_exec(
     .await
 }
 
-async fn ensure_container(settings: &Settings, data_dir: &Path) -> anyhow::Result<()> {
-    let name = &settings.computer_docker_container;
+pub async fn remove_container(
+    settings: &Settings,
+    data_dir: &Path,
+    conversation_id: &str,
+) -> anyhow::Result<()> {
+    let _ = sh(
+        data_dir,
+        "docker",
+        vec![
+            "rm".into(),
+            "-f".into(),
+            container_for(settings, conversation_id),
+        ],
+        Duration::from_secs(30),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Resolves the loopback noVNC URL of a conversation's container.
+pub async fn vnc_url(
+    settings: &Settings,
+    data_dir: &Path,
+    conversation_id: &str,
+) -> anyhow::Result<String> {
+    let output = sh(
+        data_dir,
+        "docker",
+        vec![
+            "port".into(),
+            container_for(settings, conversation_id),
+            "6080/tcp".into(),
+        ],
+        Duration::from_secs(10),
+    )
+    .await?;
+    if output.exit_code != Some(0) {
+        anyhow::bail!(
+            "COMPUTER_CONTROL_UNAVAILABLE: noVNC não está publicado ({})",
+            output.stderr.trim()
+        );
+    }
+    let port = output
+        .stdout
+        .lines()
+        .next()
+        .and_then(|line| line.rsplit(':').next())
+        .and_then(|value| value.trim().parse::<u16>().ok())
+        .ok_or_else(|| anyhow::anyhow!("COMPUTER_CONTROL_UNAVAILABLE: porta noVNC inválida"))?;
+    Ok(format!("http://127.0.0.1:{port}/vnc.html"))
+}
+
+async fn ensure_container(
+    settings: &Settings,
+    data_dir: &Path,
+    conversation_id: &str,
+) -> anyhow::Result<()> {
+    let name = container_for(settings, conversation_id);
     let inspect = sh(
         data_dir,
         "docker",
@@ -749,9 +1184,10 @@ async fn ensure_container(settings: &Settings, data_dir: &Path) -> anyhow::Resul
     if settings.docker_network {
         // noVNC is human-only and bound to loopback. It needs a network
         // namespace, so it is only published when the user enables Docker
-        // networking explicitly.
+        // networking explicitly. Each conversation gets its own host port.
+        let port = free_host_port()?;
         args.push("-p".to_string());
-        args.push("127.0.0.1:6080:6080".to_string());
+        args.push(format!("127.0.0.1:{port}:6080"));
     }
     args.push(settings.computer_docker_image.clone());
     let run = sh(data_dir, "docker", args, Duration::from_secs(120)).await?;
@@ -826,11 +1262,56 @@ mod tests {
     use super::*;
 
     #[test]
+    fn screenshot_retention_removes_old_files_and_empty_dirs() {
+        let root = std::env::temp_dir().join(format!(
+            "lumina-screenshot-prune-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let nested = root.join("conv-1");
+        std::fs::create_dir_all(&nested).expect("dir");
+        let file = nested.join("old.png");
+        std::fs::write(&file, b"x").expect("file");
+        let removed = prune_old_screenshots(&root, crate::domain::now_ms() + 60_000);
+        assert_eq!(removed, 1);
+        assert!(!file.exists());
+        assert!(!nested.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn graphical_container_is_isolated_per_conversation() {
+        let settings = Settings::default();
+        let first = container_for(&settings, "conv-1");
+        let second = container_for(&settings, "conv-2");
+        assert_ne!(first, second);
+        assert!(first.starts_with(&settings.computer_docker_container));
+        assert!(first.ends_with("conv-1"));
+    }
+
+    #[test]
     fn backend_follows_execution_environment() {
         let mut settings = Settings::default();
         assert_eq!(backend(&settings), ComputerBackend::Local);
         settings.execution_environment = "docker".into();
         assert_eq!(backend(&settings), ComputerBackend::Docker);
+    }
+
+    #[test]
+    fn per_agent_environment_overrides_the_global_execution_environment() {
+        let mut settings = Settings::default();
+        settings.execution_environment = "docker".into();
+        settings.computer_environment = "this_computer".into();
+        assert_eq!(backend(&settings), ComputerBackend::Local);
+        settings.computer_environment = "private_desktop".into();
+        assert_eq!(backend(&settings), ComputerBackend::Docker);
+        settings.computer_environment = "auto".into();
+        assert_eq!(backend(&settings), ComputerBackend::Docker);
+        settings.computer_environment = "browser".into();
+        assert!(!desktop_enabled(&settings));
+        settings.computer_environment = "off".into();
+        assert!(!desktop_enabled(&settings));
+        settings.computer_environment = "this_computer".into();
+        assert!(desktop_enabled(&settings));
     }
 
     #[test]
@@ -861,22 +1342,26 @@ mod tests {
             computer_docker_container: container.clone(),
             ..Settings::default()
         };
-        ensure_container(&settings, temp.path())
+        ensure_container(&settings, temp.path(), "it")
             .await
             .expect("start graphical container");
         let shot = screenshot(&settings, temp.path(), "it")
             .await
             .expect("screenshot");
         assert!(shot.width >= 1024 && shot.height >= 700);
-        click(&settings, temp.path(), 20, 20, "left", 1)
+        click(&settings, temp.path(), "it", 20, 20, "left", 1)
             .await
             .expect("click");
-        let windows = windows(&settings, temp.path()).await.expect("windows");
+        let windows = windows(&settings, temp.path(), "it").await.expect("windows");
         let _ = windows;
         let _ = sh(
             temp.path(),
             "docker",
-            vec!["rm".into(), "-f".into(), container],
+            vec![
+                "rm".into(),
+                "-f".into(),
+                crate::computer::container_for(&settings, "it"),
+            ],
             Duration::from_secs(30),
         )
         .await;

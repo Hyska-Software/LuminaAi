@@ -149,6 +149,13 @@ export type MessageRole = 'user' | 'assistant' | 'system';
 export type MessageStatus = 'streaming' | 'complete' | 'error' | 'cancelled';
 export type ToolCallStatus = 'running' | 'done' | 'error';
 
+export interface ToolImageRef {
+  mimeType: string;
+  path: string;
+  width?: number;
+  height?: number;
+}
+
 export interface ToolCallRecord {
   id: string;
   name: string;
@@ -161,9 +168,11 @@ export interface ToolCallRecord {
   /**
    * Apresentação estruturada do resultado (diff, lista de tarefas, plano, job,
    * aprovação) usada pelos cards do harness de código e persistida no DB.
-   * JSON opaco versionado por `kind` — ver docs/goals/code-harness/TOOLS.md §1.1.
+   * JSON opaco versionado por `kind` - ver docs/goals/code-harness/TOOLS.md §1.1.
    */
   presentation?: ToolPresentation | null;
+  /** Screenshots devolvidos pela tool (caminho no app-data, sem base64 no DB). */
+  images?: ToolImageRef[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -858,6 +867,13 @@ export interface AgentCapabilities {
   mcpServers: string[] | null;
 }
 
+export type ComputerEnvironment =
+  | 'auto'
+  | 'private_desktop'
+  | 'this_computer'
+  | 'browser'
+  | 'off';
+
 export interface Agent {
   id: string;
   name: string;
@@ -883,6 +899,8 @@ export interface Agent {
   permissionMode: PermissionMode;
   /** Optional Docker image override (requires capability dockerExecution). */
   dockerImage?: string | null;
+  /** Where this persona uses the computer/browser. */
+  computerEnvironment?: ComputerEnvironment;
   archivedAt: number | null;
   createdAt: number;
   updatedAt: number;
@@ -908,6 +926,7 @@ export interface AgentInput {
   workspaceId: string | null;
   permissionMode: PermissionMode;
   dockerImage?: string | null;
+  computerEnvironment?: ComputerEnvironment;
 }
 
 export interface AgentChange {
@@ -1108,6 +1127,16 @@ export interface AgentRoutineRunEvent {
   error: string | null;
 }
 
+export interface AgentRoutineRun {
+  id: string;
+  routineId: string;
+  conversationId: string | null;
+  status: string;
+  error: string | null;
+  startedAt: number;
+  endedAt: number | null;
+}
+
 export interface McpServerSummary {
   name: string;
   enabled?: boolean;
@@ -1246,6 +1275,68 @@ export interface ComputerSession {
   endedAt: number | null;
 }
 
+export interface ComputerPreview {
+  dataUrl: string;
+  width: number;
+  height: number;
+  backend: 'local' | 'docker';
+  activeWindow: string;
+  paused: boolean;
+  takenOver: boolean;
+  sessionId: string | null;
+  capturedAt: number;
+}
+
+export interface ComputerControlTarget {
+  kind: 'local' | 'vnc' | 'browser';
+  url: string | null;
+}
+
+export interface BrowserTab {
+  id: string;
+  title: string;
+  url: string;
+  active: boolean;
+}
+
+export interface BrowserStatus {
+  running: boolean;
+  port: number | null;
+  executable: string | null;
+  profileDir: string | null;
+  downloadDir: string | null;
+  tabs: BrowserTab[];
+  activeTab: string | null;
+}
+
+export interface BrowserFrame {
+  dataUrl: string;
+  url: string;
+  title: string;
+  width: number;
+  height: number;
+  capturedAt: number;
+}
+
+export interface BrowserElement {
+  ref: string;
+  role: string;
+  name: string;
+  value: string;
+  disabled: boolean;
+  backendNodeId: number;
+}
+
+export interface BrowserSnapshot {
+  url: string;
+  title: string;
+  elements: BrowserElement[];
+  screenshot: string | null;
+  width: number;
+  height: number;
+  capturedAt: number;
+}
+
 export interface ComputerActionRecord {
   id: string;
   sessionId: string;
@@ -1261,7 +1352,10 @@ export interface ComputerActionRecord {
   errorCode: string | null;
   errorMessage: string | null;
   redactedTextLen: number | null;
+  policyRule: string | null;
+  initiator: string | null;
   createdAt: number;
+  endedAt: number | null;
 }
 
 export interface TurnResult {
@@ -1560,6 +1654,20 @@ export interface Settings {
   executionEnvironment?: 'local' | 'docker';
   /** Imagem usada quando `executionEnvironment === 'docker'`. */
   dockerImage?: string;
+  /** Onde o computer use roda (`auto` por padrão; o agente pode sobrescrever). */
+  computerEnvironment?: ComputerEnvironment;
+  /** Allowlist de hosts do navegador (vazio = todos os hosts públicos). */
+  browserAllowedDomains?: string[];
+  /** Denylist de hosts do navegador. */
+  browserBlockedDomains?: string[];
+  /** Allowlist de apps do desktop (processo/classe). Vazio = todos. */
+  computerAllowedApps?: string[];
+  /** Apps do desktop sempre negados. */
+  computerBlockedApps?: string[];
+  /** Permite localhost/RFC1918 no navegador (desenvolvimento local). */
+  browserAllowPrivateHosts?: boolean;
+  /** Permite navegador em rotinas/tarefas sem canal de aprovação. */
+  computerAllowUnattendedBrowser?: boolean;
   /** Permite rede no contêiner Docker (padrão: desligado). */
   dockerNetwork?: boolean;
   /** Limite de memória do sandbox Docker (MB). */

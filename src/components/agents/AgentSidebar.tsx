@@ -11,6 +11,7 @@ import {
   Copy,
   Download,
   Ellipsis,
+  Globe2,
   Hash,
   ListChecks,
   ListTree,
@@ -18,10 +19,13 @@ import {
   MessageCircleQuestion,
   MessageSquare,
   MessageSquarePlus,
+  Monitor,
   Pencil,
   Pin,
   PinOff,
+  PanelRight,
   Plus,
+  Power,
   Search,
   Settings,
   ShieldAlert,
@@ -305,6 +309,27 @@ function AgentRow({
                 <Loader2 aria-label="Respondendo" className="size-3 shrink-0 animate-spin text-accent" />
               ) : null}
               {agent.pinned ? <Pin className="size-2.5 shrink-0 text-foreground-subtle" /> : null}
+              {agent.computerEnvironment !== 'auto' ||
+              agent.capabilities.computerUse ||
+              agent.capabilities.screenCapture ||
+              agent.capabilities.browserUse ? (
+                agent.computerEnvironment === 'off' ? (
+                  <Power
+                    aria-label="Computador desligado"
+                    className="size-3 shrink-0 text-foreground-subtle"
+                  />
+                ) : agent.computerEnvironment === 'browser' ? (
+                  <Globe2
+                    aria-label="Somente navegador"
+                    className="size-3 shrink-0 text-foreground-subtle"
+                  />
+                ) : (
+                  <Monitor
+                    aria-label="Acesso ao computador"
+                    className="size-3 shrink-0 text-foreground-subtle"
+                  />
+                )
+              ) : null}
             </span>
             <span className="block truncate text-[11px] text-foreground-muted">{agent.role}</span>
           </span>
@@ -475,6 +500,10 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const activeTurnCount = useChatStore(
     (state) => Object.keys(state.streamsByConversation).length,
   );
+  const agentPanelOpen = useUiStore((state) => state.agentPanelOpen);
+  const agentRightPanel = useUiStore((state) => state.agentRightPanel);
+  const setAgentPanelOpen = useUiStore((state) => state.setAgentPanelOpen);
+  const setAgentRightPanel = useUiStore((state) => state.setAgentRightPanel);
   const [channels, setChannels] = useState<AgentChannel[]>([]);
   const [channelDialogOpen, setChannelDialogOpen] = useState(false);
   const [editingChannel, setEditingChannel] = useState<AgentChannel | null>(null);
@@ -764,6 +793,22 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
               {activeTurnCount}
             </button>
           ) : null}
+          <IconButton
+            label={
+              agentPanelOpen && agentRightPanel === 'agent'
+                ? 'Recolher painel do agente'
+                : 'Abrir painel do agente'
+            }
+            size="sm"
+            variant="ghost"
+            active={agentPanelOpen && agentRightPanel === 'agent'}
+            onClick={() => {
+              setAgentRightPanel('agent');
+              setAgentPanelOpen(!(agentPanelOpen && agentRightPanel === 'agent'));
+            }}
+          >
+            <PanelRight className="size-4" />
+          </IconButton>
           <IconButton
             label="Quadro de tarefas"
             size="sm"

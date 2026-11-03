@@ -13,6 +13,7 @@ import type {
   AgentMemoryInput,
   AgentRevision,
   AgentRoutine,
+  AgentRoutineRun,
   AgentTask,
   AgentTaskDetail,
   AgentTaskInput,
@@ -23,7 +24,13 @@ import type {
   ActiveTurnInfo,
   AppInfo,
   ComputerActionRecord,
+  ComputerControlTarget,
+  ComputerPreview,
   ComputerSession,
+  BrowserFrame,
+  BrowserSnapshot,
+  BrowserStatus,
+  BrowserTab,
   ApprovalDecision,
   ApprovalRule,
   ApprovalRuleInput,
@@ -209,6 +216,11 @@ export const api = {
   listAgentUsage: () => invoke<AgentUsage[]>('list_agent_usage'),
   listAgentRoutines: (agentId: string) =>
     invoke<AgentRoutine[]>('list_agent_routines', { agentId }),
+  listAgentRoutineRuns: (routineId: string, limit?: number) =>
+    invoke<AgentRoutineRun[]>('list_agent_routine_runs', {
+      routineId,
+      limit: limit ?? null,
+    }),
   createAgentRoutine: (agentId: string, input: AgentRoutineInput) =>
     invoke<AgentRoutine>('create_agent_routine', { agentId, input }),
   updateAgentRoutine: (routineId: string, input: AgentRoutineInput) =>
@@ -330,6 +342,67 @@ export const api = {
   stopAllComputerSessions: () => invoke<number>('stop_all_computer_sessions'),
   computerScreenshotPreview: (path: string) =>
     invoke<string>('computer_screenshot_preview', { path }),
+  toolImagePreview: (path: string) =>
+    invoke<string>('tool_image_preview', { path }),
+  computerPreview: (conversationId: string) =>
+    invoke<ComputerPreview>('computer_preview', { conversationId }),
+  setComputerPaused: (conversationId: string, paused: boolean) =>
+    invoke<void>('set_computer_paused', { conversationId, paused }),
+  computerTakeControl: (conversationId: string) =>
+    invoke<ComputerControlTarget>('computer_take_control', { conversationId }),
+  releaseComputerControl: (conversationId: string) =>
+    invoke<void>('release_computer_control', { conversationId }),
+  browserSessionStatus: (conversationId: string) =>
+    invoke<BrowserStatus>('browser_session_status', { conversationId }),
+  browserSessionOpen: (conversationId: string, url?: string | null) =>
+    invoke<BrowserStatus>('browser_session_open', { conversationId, url: url ?? null }),
+  browserSessionClose: (conversationId: string) =>
+    invoke<boolean>('browser_session_close', { conversationId }),
+  browserTabs: (conversationId: string) =>
+    invoke<BrowserTab[]>('browser_tabs', { conversationId }),
+  browserNewTab: (conversationId: string, url?: string | null) =>
+    invoke<BrowserTab>('browser_new_tab', { conversationId, url: url ?? null }),
+  browserCloseTab: (conversationId: string, tabId: string) =>
+    invoke<void>('browser_close_tab', { conversationId, tabId }),
+  browserActivateTab: (conversationId: string, tabId: string) =>
+    invoke<void>('browser_activate_tab', { conversationId, tabId }),
+  browserNavigate: (conversationId: string, url: string, tabId?: string | null) =>
+    invoke<string>('browser_navigate', { conversationId, tabId: tabId ?? null, url }),
+  browserHistory: (
+    conversationId: string,
+    action: 'back' | 'forward' | 'reload',
+    tabId?: string | null,
+  ) => invoke<void>('browser_history', { conversationId, tabId: tabId ?? null, action }),
+  browserFrame: (conversationId: string, tabId?: string | null) =>
+    invoke<BrowserFrame>('browser_frame', { conversationId, tabId: tabId ?? null }),
+  browserClickAt: (
+    conversationId: string,
+    x: number,
+    y: number,
+    tabId?: string | null,
+  ) =>
+    invoke<void>('browser_click_at', {
+      conversationId,
+      tabId: tabId ?? null,
+      x,
+      y,
+    }),
+  browserPressKey: (conversationId: string, key: string, tabId?: string | null) =>
+    invoke<void>('browser_press_key', {
+      conversationId,
+      tabId: tabId ?? null,
+      key,
+    }),
+  browserInsertText: (conversationId: string, text: string, tabId?: string | null) =>
+    invoke<void>('browser_insert_text', {
+      conversationId,
+      tabId: tabId ?? null,
+      text,
+    }),
+  browserSnapshot: (conversationId: string, tabId?: string | null) =>
+    invoke<BrowserSnapshot>('browser_snapshot', { conversationId, tabId: tabId ?? null }),
+  browserTakeControl: (conversationId: string) =>
+    invoke<ComputerControlTarget>('browser_take_control', { conversationId }),
   platformDiagnostics: () =>
     invoke<{
       version: string;

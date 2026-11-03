@@ -117,3 +117,15 @@ multi-usuário com papéis.
       configuráveis na UI.
 - [ ] Perfil por workspace, compose/devcontainer e containers gráficos por
       sessão.
+
+### Etapa 5 — painel direito do agente (2026-11-02)
+
+- [x] `AgentPanel` com Tela/Rotinas/Navegador/Dados, dock/overlay e resize.
+- [x] Tela: preview ao vivo, “Trabalha em” por agente, “Desktop na nuvem” Em
+      breve, pausa/assumir controle.
+- [x] Rotinas no painel + `agent_routine_runs`.
+- [x] Navegador CDP local completo (abas, endereço, snapshot/refs, click/type,
+      press, wait, extract, download).
+- [x] Dados: identidade, uso, memória, tarefas, fila e auditoria.
+- [x] `CodePanel` continua separado; header alterna os dois painéis.
+- [ ] macOS/Linux local; containers gráficos por sessão; compose/devcontainer.

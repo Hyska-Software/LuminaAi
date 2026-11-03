@@ -166,6 +166,21 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     if settings.docker_image.is_empty() || settings.docker_image.chars().count() > 200 {
         settings.docker_image = defaults.docker_image;
     }
+    settings.computer_environment =
+        crate::agents::normalize_computer_environment(&settings.computer_environment);
+    for field in [
+        &mut settings.browser_allowed_domains,
+        &mut settings.browser_blocked_domains,
+        &mut settings.computer_allowed_apps,
+        &mut settings.computer_blocked_apps,
+    ] {
+        *field = field
+            .iter()
+            .map(|domain| domain.trim().to_ascii_lowercase())
+            .filter(|domain| !domain.is_empty() && domain.chars().count() <= 253)
+            .take(200)
+            .collect();
+    }
     settings.docker_memory_mb = settings.docker_memory_mb.clamp(256, 16_384);
     settings.docker_cpus = settings.docker_cpus.clamp(0.25, 16.0);
     settings.docker_pids_limit = settings.docker_pids_limit.clamp(32, 4_096);
@@ -1939,6 +1954,30 @@ mod tests {
         assert_eq!(normalized.docker_memory_mb, 256);
         assert_eq!(normalized.docker_cpus, 16.0);
         assert_eq!(normalized.docker_pids_limit, 32);
+
+        let mut computer = Settings::default();
+        computer.computer_environment = " PRIVATE_DESKTOP ".into();
+        assert_eq!(
+            normalize_settings(computer).computer_environment,
+            "private_desktop"
+        );
+        let mut invalid_computer = Settings::default();
+        invalid_computer.computer_environment = "cloud".into();
+        assert_eq!(
+            normalize_settings(invalid_computer).computer_environment,
+            "auto"
+        );
+
+        let mut lists = Settings::default();
+        lists.browser_allowed_domains = vec![" Example.COM ".into(), "  ".into()];
+        lists.browser_blocked_domains = vec!["BAD.test".into()];
+        lists.computer_allowed_apps = vec![" Notepad ".into()];
+        lists.computer_blocked_apps = vec!["1Password".into()];
+        let normalized = normalize_settings(lists);
+        assert_eq!(normalized.browser_allowed_domains, vec!["example.com"]);
+        assert_eq!(normalized.browser_blocked_domains, vec!["bad.test"]);
+        assert_eq!(normalized.computer_allowed_apps, vec!["notepad"]);
+        assert_eq!(normalized.computer_blocked_apps, vec!["1password"]);
     }
 
     #[test]

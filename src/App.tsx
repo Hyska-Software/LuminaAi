@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { AppShell } from '@/components/layout/AppShell';
 import { WorkspaceCenter } from '@/components/layout/WorkspaceCenter';
 import { AgentSidebar } from '@/components/agents/AgentSidebar';
+import { AgentPanel } from '@/components/agents/AgentPanel';
 import { CodePanel, CodeSidebar } from '@/components/code';
 import { SettingsDialog } from '@/components/settings/SettingsDialog';
 import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
@@ -122,6 +123,10 @@ export default function App() {
   const theme = useUiStore((state) => state.theme);
   const layoutMode = useUiStore((state) => state.layoutMode);
   const codePanelOpen = useUiStore((state) => state.codePanelOpen);
+  const agentPanelOpen = useUiStore((state) => state.agentPanelOpen);
+  const agentRightPanel = useUiStore((state) => state.agentRightPanel);
+  const activeAgentId = useUiStore((state) => state.activeAgentId);
+  const activeChannelId = useUiStore((state) => state.activeChannelId);
   const artifactPanelOpen = useUiStore((state) => state.artifactPanelOpen);
   const sourcesPanelOpen = useUiStore((state) => state.sourcesPanelOpen);
   const activeConversation = useChatStore((state) => {
@@ -132,6 +137,13 @@ export default function App() {
     layoutMode === 'agent' &&
     activeConversation?.mode === 'agent' &&
     Boolean(activeConversation.workspaceId);
+  const agentPanelVisible =
+    layoutMode === 'agent' &&
+    (Boolean(activeAgentId) || Boolean(activeChannelId)) &&
+    !artifactPanelOpen &&
+    !sourcesPanelOpen;
+  const agentWorkspacePanel =
+    agentPanelVisible && agentWorkspaceSession && agentRightPanel === 'workspace';
   const viewportWidth = useViewportWidth();
   const settingsTheme = useAppStore((state) => state.settings.theme);
   const fontScale = useAppStore((state) => state.settings.fontScale);
@@ -437,8 +449,12 @@ export default function App() {
           rightPanel={
             layoutMode === 'code' ? (
               <CodePanel />
-            ) : agentWorkspaceSession && !artifactPanelOpen && !sourcesPanelOpen ? (
-              <CodePanel />
+            ) : agentPanelVisible ? (
+              agentWorkspacePanel ? (
+                <CodePanel />
+              ) : (
+                <AgentPanel />
+              )
             ) : (
               <>
                 <ArtifactPanel />
@@ -450,8 +466,8 @@ export default function App() {
           // chat mirrors that with its top-right corner.
           rightPanelOpen={
             (layoutMode === 'code' ||
-              (agentWorkspaceSession && !artifactPanelOpen && !sourcesPanelOpen)) &&
-            codePanelOpen &&
+              (agentPanelVisible &&
+                (agentWorkspacePanel ? codePanelOpen : agentPanelOpen))) &&
             viewportWidth >= SIDE_PANEL_DOCK_MIN_VIEWPORT
           }
         >

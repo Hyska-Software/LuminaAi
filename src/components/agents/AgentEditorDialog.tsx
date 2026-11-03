@@ -29,6 +29,7 @@ import { selectAgent, useAgentStore, useAppStore, useUiStore } from '@/lib/store
 import type {
   AgentCapabilities,
   AgentInput,
+  ComputerEnvironment,
   McpServerSummary,
   PermissionMode,
   ReasoningSelection,
@@ -123,6 +124,7 @@ interface FormState {
   workspaceId: string;
   permissionMode: PermissionMode;
   dockerImage: string;
+  computerEnvironment: ComputerEnvironment;
 }
 
 function emptyForm(providerId: string, modelId: string): FormState {
@@ -144,6 +146,7 @@ function emptyForm(providerId: string, modelId: string): FormState {
     workspaceId: '',
     permissionMode: 'edit',
     dockerImage: '',
+    computerEnvironment: 'auto',
   };
 }
 
@@ -208,6 +211,7 @@ export function AgentEditorDialog() {
         workspaceId: input.workspaceId ?? '',
         permissionMode: input.permissionMode,
         dockerImage: input.dockerImage ?? '',
+        computerEnvironment: input.computerEnvironment ?? 'auto',
       });
     } else if (editor.mode === 'create' && editor.draft) {
       const draft = editor.draft;
@@ -229,6 +233,7 @@ export function AgentEditorDialog() {
         workspaceId: draft.workspaceId ?? '',
         permissionMode: draft.permissionMode,
         dockerImage: draft.dockerImage ?? '',
+        computerEnvironment: draft.computerEnvironment ?? 'auto',
       });
     } else {
       setForm(emptyForm(fallbackProvider?.id ?? '', fallbackProvider?.defaultModelId ?? ''));
@@ -354,6 +359,7 @@ export function AgentEditorDialog() {
       workspaceId: form.workspaceId.trim() || null,
       permissionMode: form.permissionMode,
       dockerImage: form.dockerImage.trim() || null,
+      computerEnvironment: form.computerEnvironment,
     };
     setError(null);
     setSubmitting(true);
@@ -728,6 +734,26 @@ export function AgentEditorDialog() {
                   <p className="text-[11px] text-foreground-subtle">
                     Requer “Override de Docker” nas capacidades. Sem imagem, usa a configuração
                     global.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="agent-computer-environment">Ambiente de computador</Label>
+                  <NativeSelect
+                    id="agent-computer-environment"
+                    value={form.computerEnvironment}
+                    onChange={(event) =>
+                      set('computerEnvironment', event.target.value as ComputerEnvironment)
+                    }
+                  >
+                    <option value="auto">Automático</option>
+                    <option value="private_desktop">Desktop privado (Docker)</option>
+                    <option value="this_computer">Este computador</option>
+                    <option value="browser">Navegador</option>
+                    <option value="off">Desligado</option>
+                  </NativeSelect>
+                  <p className="text-[11px] text-foreground-subtle">
+                    O painel do agente também altera esta opção. “Desktop na nuvem” fica para uma
+                    versão futura.
                   </p>
                 </div>
                 {form.workspaceId && workspaces.find((workspace) => workspace.id === form.workspaceId)?.trusted === false ? (

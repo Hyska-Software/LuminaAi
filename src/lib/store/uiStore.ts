@@ -110,6 +110,12 @@ export function codeSubagentTabKey(tab: CodeSubagentTab): string {
 /** Tabs of the Code right panel (Arquivos | Alterações). */
 export type CodePanelTab = 'files' | 'changes' | 'terminal';
 
+/** Tabs of the agent right sidebar. */
+export type AgentPanelTab = 'screen' | 'routines' | 'browser' | 'data';
+
+/** Which panel owns the agent layout's right dock. */
+export type AgentRightPanel = 'agent' | 'workspace';
+
 /**
  * Diálogo de criação/edição do objetivo (docs/goals/code-goals/PLAN.md §10.4).
  * Volátil: abre pelo pill do composer, pelo card de atenção ou por `/goal`.
@@ -204,6 +210,12 @@ interface UiState {
   codePanelOpen: boolean;
   /** Active tab of the Code right panel. */
   codePanelTab: CodePanelTab;
+  /** Whether the agent layout shows its right sidebar. */
+  agentPanelOpen: boolean;
+  /** Active tab of the agent right sidebar. */
+  agentPanelTab: AgentPanelTab;
+  /** Which panel owns the agent right dock (agent sidebar or workspace tools). */
+  agentRightPanel: AgentRightPanel;
   /** Workspace ativo do layout Code (`null` = nenhum/nenhuma pasta aberta). */
   activeWorkspaceId: string | null;
   /**
@@ -282,6 +294,10 @@ interface UiState {
   setCodePanelOpen: (open: boolean) => void;
   toggleCodePanel: () => void;
   setCodePanelTab: (tab: CodePanelTab) => void;
+  setAgentPanelOpen: (open: boolean) => void;
+  toggleAgentPanel: () => void;
+  setAgentPanelTab: (tab: AgentPanelTab) => void;
+  setAgentRightPanel: (panel: AgentRightPanel) => void;
   /** Define o workspace ativo do layout Code (persistido). */
   setActiveWorkspace: (workspaceId: string | null) => void;
   /** Abre (ou ativa) uma aba de sessão dentro de um workspace. */
@@ -382,6 +398,9 @@ export const useUiStore = create<UiState>()(
       codeCommitsTab: null,
       codePanelOpen: true,
       codePanelTab: 'changes',
+      agentPanelOpen: true,
+      agentPanelTab: 'screen',
+      agentRightPanel: 'agent',
       activeWorkspaceId: null,
       openSessionsByWorkspace: {},
       sidebarOpen: true,
@@ -575,6 +594,18 @@ export const useUiStore = create<UiState>()(
                 ? 'terminal'
                 : 'changes',
         }),
+      setAgentPanelOpen: (agentPanelOpen) => set({ agentPanelOpen }),
+      toggleAgentPanel: () => set((state) => ({ agentPanelOpen: !state.agentPanelOpen })),
+      setAgentPanelTab: (agentPanelTab) =>
+        set({
+          agentPanelTab: ['screen', 'routines', 'browser', 'data'].includes(agentPanelTab)
+            ? agentPanelTab
+            : 'screen',
+        }),
+      setAgentRightPanel: (agentRightPanel) =>
+        set({
+          agentRightPanel: agentRightPanel === 'workspace' ? 'workspace' : 'agent',
+        }),
       setActiveWorkspace: (activeWorkspaceId) => set({ activeWorkspaceId }),
       openWorkspaceSession: (workspaceId, conversationId) =>
         set((state) => {
@@ -691,6 +722,9 @@ export const useUiStore = create<UiState>()(
         activeAgentId: state.activeAgentId,
         activeChannelId: state.activeChannelId,
         codePanelOpen: state.codePanelOpen,
+        agentPanelOpen: state.agentPanelOpen,
+        agentPanelTab: state.agentPanelTab,
+        agentRightPanel: state.agentRightPanel,
         sidebarOpen: state.sidebarOpen,
         sidebarWidth: state.sidebarWidth,
         sidePanelWidth: state.sidePanelWidth,
@@ -733,6 +767,17 @@ export const useUiStore = create<UiState>()(
           activeChannelId: validWorkspaceId(stored.activeChannelId),
           codePanelOpen:
             typeof stored.codePanelOpen === 'boolean' ? stored.codePanelOpen : current.codePanelOpen,
+          agentPanelOpen:
+            typeof stored.agentPanelOpen === 'boolean'
+              ? stored.agentPanelOpen
+              : current.agentPanelOpen,
+          agentPanelTab: ['screen', 'routines', 'browser', 'data'].includes(
+            stored.agentPanelTab as string,
+          )
+            ? (stored.agentPanelTab as AgentPanelTab)
+            : current.agentPanelTab,
+          agentRightPanel:
+            stored.agentRightPanel === 'workspace' ? 'workspace' : current.agentRightPanel,
           sidebarWidth: clampSidebarWidth(stored.sidebarWidth ?? current.sidebarWidth),
           sidePanelWidth: clampSidePanelWidth(stored.sidePanelWidth ?? current.sidePanelWidth),
           sidePanelMode: stored.sidePanelMode === 'docked' ? 'docked' : 'overlay',

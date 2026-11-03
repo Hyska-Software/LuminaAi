@@ -11,7 +11,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio_util::sync::CancellationToken;
 
-use crate::agents::{routine_next_run_at, AgentRoutine, AgentRoutineInput};
+use crate::agents::{routine_next_run_at, AgentRoutine, AgentRoutineInput, AgentRoutineRun};
 use crate::domain::{TurnKind, TurnOptions, TurnPayload, TurnProfile};
 use crate::events::TurnEvent;
 use crate::harness::{self, EventEmitter, HarnessDeps};
@@ -93,6 +93,18 @@ pub fn delete_agent_routine(
     routine_id: String,
 ) -> Result<(), String> {
     state.db.delete_agent_routine(&routine_id).map_err(to_error)
+}
+
+#[tauri::command]
+pub fn list_agent_routine_runs(
+    state: State<'_, AppState>,
+    routine_id: String,
+    limit: Option<u32>,
+) -> Result<Vec<AgentRoutineRun>, String> {
+    state
+        .db
+        .list_agent_routine_runs(&routine_id, limit)
+        .map_err(to_error)
 }
 
 /// Runs one routine immediately, in its dedicated thread.
@@ -202,6 +214,9 @@ async fn execute_routine(app: &AppHandle, routine: &AgentRoutine) -> Result<(), 
         next,
         now_ms(),
     );
+    let run_id = db
+        .start_agent_routine_run(&routine.id, Some(&conversation.id), now_ms())
+        .ok();
 
     let profile = if conversation.workspace_id.is_some() {
         TurnProfile::Code
@@ -264,6 +279,9 @@ async fn execute_routine(app: &AppHandle, routine: &AgentRoutine) -> Result<(), 
         next,
         now_ms(),
     );
+    if let Some(run_id) = run_id.as_deref() {
+        let _ = db.finish_agent_routine_run(run_id, status, error.as_deref(), now_ms());
+    }
     emit_run(app, routine, Some(&conversation.id), status, error.clone());
     if let Some(error) = error {
         Err(error)

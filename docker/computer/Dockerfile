@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       xvfb openbox x11vnc novnc websockify chromium xdotool scrot wmctrl \
+       xvfb openbox x11vnc novnc websockify chromium xdotool scrot wmctrl xclip x11-utils \
        fonts-dejavu-core ca-certificates tini \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 --shell /bin/bash lumina

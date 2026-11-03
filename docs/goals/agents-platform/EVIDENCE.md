@@ -10,14 +10,18 @@ pnpm typecheck
 (sem erros)
 
 pnpm test (suíte completa final)
-Test Files  149 passed (149)
-Tests       2553 passed (2553)
+Test Files  150 passed (150)
+Tests       2559 passed (2559)
 
 pnpm build
-✓ built in 11.82s
+✓ built in 5.84s
 
 cd src-tauri && cargo test --lib
-test result: ok. 1140 passed; 0 failed; 16 ignored; 0 measured; 0 filtered out
+test result: ok. 1151 passed; 0 failed; 17 ignored; 0 measured; 0 filtered out
+
+# CDP local completo (abre Chromium/Edge real em teste ignorado)
+cargo test --lib local_cdp_browser_navigates_snapshots_and_types -- --ignored
+test result: ok. 1 passed; 0 failed
 
 # integração real do backend gráfico (requer Docker + imagem)
 docker build -t lumina/computer:test docker/computer
@@ -25,6 +29,8 @@ docker run ... lumina/computer:test
 docker exec ... xdotool getdisplaygeometry   -> 1440 900
 docker exec ... scrot -o /tmp/shot.png       -> PNG 17077 bytes
 docker exec ... chromium ... about:blank     -> wmctrl: "about:blank - Chromium"
+docker exec ... xclip ... clipboard          -> "hello"
+docker run ... which xprop/xclip              -> /usr/bin/xprop, /usr/bin/xclip
 cargo test --lib docker_graphical_backend_screenshot_and_click -- --ignored
 test result: ok. 1 passed; 0 failed
 
@@ -45,6 +51,75 @@ ripgrep 13.0.0
 ```
 
 ## Cobertura nova (2026-11-02)
+
+- `src-tauri/src/computer/mod.rs` + `db.rs` + `commands/computer.rs`
+  - container gráfico **por conversa** (`<base>-<conversationId>`), labels,
+    noVNC em porta loopback aleatória, cleanup no Stop/boot;
+  - pré-auditoria: `begin_computer_action` grava `pending` antes da execução,
+    `finish_computer_action` fecha e o boot marca `interrupted`;
+  - `computer_drag/scroll/move/wait/clipboard` (clipboard com aprovação e sem
+    texto no audit);
+  - retenção de screenshots (`prune_old_screenshots`, 24 h);
+  - allow/deny de apps (`computerAllowedApps/BlockedApps`);
+  - `browserAllowedDomains/BlockedDomains`, private-host switch e bloqueio de
+    metadata de nuvem;
+  - `computerAllowUnattendedBrowser` para rotinas sem card (desktop fail-closed);
+  - testes: `graphical_container_is_isolated_per_conversation`,
+    `screenshot_retention_removes_old_files_and_empty_dirs`,
+    `computer_audit_pending_action_is_finished_or_interrupted`,
+    `backend_follows_execution_environment`.
+- `src-tauri/src/computer/browser.rs` + `commands/browser.rs`
+  - clique por `Input.dispatchMouseEvent` (box model/scroll into view) e
+    digitação por `Input.insertText` (eventos confiáveis);
+  - `browser_scroll`, `browser_hover`, `browser_select`, `browser_upload`;
+  - takeover do painel: `browser_click_at`, `browser_press_key`,
+    `browser_insert_text`, restritos a controle humano;
+  - política de hosts aplicada em `browser_open`/navigate/new tab.
+- `src/components/chat/ToolCallRow.tsx`
+  - screenshots persistidos em `tool-images` aparecem no transcript, com
+    `tool_image_preview` restrito ao app-data;
+  - teste renderiza a imagem e verifica a chamada restrita.
+- `src/components/settings/ToolsTab.tsx`
+  - UI de hosts permitidos/bloqueados, private hosts, apps permitidos/bloqueados
+    e navegador em rotinas.
+- `src/components/agents/AgentPanelBrowser.tsx` + teste
+  - clique/digitação no preview quando o humano assume;
+  - `AgentPanel.test` cobre toggle, preview/click e dados.
+- `src-tauri/src/commands/routines.rs` + `db.rs`
+  - `agent_routine_runs`/`list_agent_routine_runs` (histórico de execuções).
+- `src-tauri/src/computer/browser.rs` (testes)
+  - URL policy + allow/deny/private/metadata;
+  - CDP real `#[ignore]` navega, clica/digita e captura frame.
+- `src/components/agents/AgentPanel.tsx` + `AgentPanelScreen/Routines/Browser/Data`
+  - sidebar direita do layout Agentes (Tela/Rotinas/Navegador/Dados), dock/overlay,
+    resize persistido, abas por teclado, sino de atividade;
+  - Tela: preview via `computer_preview`, cards “Trabalha em”, “Desktop na nuvem”
+    desabilitado como **Em breve**, pausa/assumir controle;
+  - Dados: uso, memória, tarefas, fila, conversa e auditoria.
+- `src/components/agents/AgentPanel.test.tsx`
+  - renderiza ambientes, valida nuvem desabilitada e salva
+    `computerEnvironment`/`browserUse`.
+- `src-tauri/src/computer/browser.rs` + `commands/browser.rs`
+  - sessão Chromium/Edge isolada por conversa, porta CDP loopback, abas,
+    navegação/voltar/avançar/reload, screenshot, snapshot com refs, click/type,
+    press, extract, tabs, download e take-control;
+  - URL policy http/https, bloqueio de `file:`/`chrome:`/`devtools:`/`javascript:`;
+  - teste `local_cdp_browser_navigates_snapshots_and_types` (ignorado) abre
+    navegador real, navega, clica, digita e captura frame.
+- `src-tauri/src/tools/code/computer.rs`
+  - tools `browser_navigate/snapshot/click/type/press/wait/extract/tabs/download`;
+  - auditoria de browser_type sem texto e gate `is_browser_tool`.
+- `src-tauri/src/commands/computer.rs`
+  - `computer_preview`, `set_computer_paused`, `computer_take_control`,
+    `release_computer_control`; pausa no backend (`COMPUTER_PAUSED`).
+- `src-tauri/src/agents/mod.rs` + `db.rs` + `harness/mod.rs`
+  - `agents.computer_environment` (`auto`, `private_desktop`, `this_computer`,
+    `browser`, `off`) e override por turno.
+- `src-tauri/src/commands/routines.rs` + `db.rs`
+  - `agent_routine_runs`/`list_agent_routine_runs` para o histórico de execuções.
+- `src/components/agents/AgentSidebar.tsx` + `AgentThreadHeader.tsx`
+  - alternância entre painel do agente e ferramentas do workspace, ícone de
+    ambiente por agente.
 
 - `src-tauri/src/db.rs`
   - auditoria de computer use (`computer_audit_records_actions_without_text_and_counts_limits`):

@@ -61,5 +61,6 @@ export function inputFromAgent(agent: Agent) {
     workspaceId: agent.workspaceId,
     permissionMode: agent.permissionMode,
     dockerImage: agent.dockerImage ?? null,
+    computerEnvironment: agent.computerEnvironment ?? 'auto',
   };
 }

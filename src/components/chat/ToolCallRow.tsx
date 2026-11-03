@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
   ChevronDown,
   Copy,
@@ -12,7 +12,8 @@ import { DiffView } from '@/components/code/DiffView';
 import { Spinner } from '@/components/ui';
 import { describeCodeTool, type CodeToolLabel } from '@/lib/agentTrace';
 import { useChatStore, useUiStore, type CodeSubagentTab } from '@/lib/store';
-import type { ToolCallRecord } from '@/lib/types';
+import { api } from '@/lib/api';
+import type { ToolCallRecord, ToolImageRef } from '@/lib/types';
 import { cn, copyText, formatDuration } from '@/lib/utils';
 
 export interface ToolCallRowProps {
@@ -114,6 +115,62 @@ function ExpandedOutput({
   );
 }
 
+function ToolImageThumb({ image, index }: { image: ToolImageRef; index: number }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    void api
+      .toolImagePreview(image.path)
+      .then((value) => {
+        if (!disposed) setSrc(value);
+      })
+      .catch(() => {
+        if (!disposed) setFailed(true);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [image.path]);
+  if (failed) {
+    return (
+      <span className="flex h-24 items-center justify-center rounded-lg border border-border bg-surface px-2 text-[10px] text-foreground-subtle">
+        Imagem indisponível
+      </span>
+    );
+  }
+  return src ? (
+    <a
+      href={src}
+      target="_blank"
+      rel="noreferrer"
+      className="block overflow-hidden rounded-lg border border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+      aria-label={`Abrir screenshot ${index + 1}`}
+    >
+      <img
+        src={src}
+        alt={`Screenshot retornado pela tool (${index + 1})`}
+        className="max-h-48 w-full object-contain"
+      />
+    </a>
+  ) : (
+    <span className="flex h-24 items-center justify-center rounded-lg border border-border bg-surface">
+      <Spinner size="sm" />
+    </span>
+  );
+}
+
+function ToolImages({ images }: { images: ToolImageRef[] }) {
+  if (images.length === 0) return null;
+  return (
+    <div className="mt-1 grid gap-2 sm:grid-cols-2">
+      {images.map((image, index) => (
+        <ToolImageThumb key={`${image.path}-${index}`} image={image} index={index} />
+      ))}
+    </div>
+  );
+}
+
 /**
  * Uma linha da timeline de execução do agente (WORKBENCH §5.2).
  *
@@ -131,7 +188,7 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
   const duration = durationMs(tool);
   const running = tool.status === 'running';
   const failed = tool.status === 'error' || (exitCode !== null && exitCode !== 0);
-  const hasDetails = Boolean(diff) || Boolean(body);
+  const hasDetails = Boolean(diff) || Boolean(body) || (tool.images?.length ?? 0) > 0;
   const [expanded, setExpanded] = useState(
     () => hasDetails && (tool.status === 'error' || (exitCode !== null && exitCode !== 0)),
   );
@@ -294,6 +351,7 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
 
       {expanded && hasDetails ? (
         <div className="ml-[26px]">
+          <ToolImages images={tool.images ?? []} />
           {diff ? (
             <div
               id={detailsId}
@@ -301,9 +359,9 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
             >
               <DiffView path={change?.path ?? meta.detail ?? 'diff'} diff={diff} />
             </div>
-          ) : (
+          ) : body ? (
             <ExpandedOutput id={detailsId} body={body} error={failed} />
-          )}
+          ) : null}
         </div>
       ) : null}
     </li>
