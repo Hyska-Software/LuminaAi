@@ -30,6 +30,7 @@ export {
   selectActiveStream,
   selectConversationStream,
   selectActiveConversationStarted,
+  agentSelectionForLayout,
   modelLockReason,
   modelLockCopy,
   MODEL_LOCKED_TITLE,

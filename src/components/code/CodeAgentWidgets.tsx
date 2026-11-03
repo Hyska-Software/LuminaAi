@@ -263,16 +263,23 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
  * requisito é mostrar em tempo real, então ele encolhe/reserva largura em vez
  * de sumir.
  */
-export function CodeContextMeterChip({ conversationId }: { conversationId: string }) {
+export function CodeContextMeterChip({
+  conversationId,
+  showCache = true,
+}: {
+  conversationId: string;
+  /** The Agents layout only needs context, not the prompt-cache segment. */
+  showCache?: boolean;
+}) {
   const stats = useCodeStore((state) => state.byConversation[conversationId]?.context);
   const cache = useCacheStore((state) => state.byConversation[conversationId] ?? null);
   const showCacheIndicator = useAppStore(
     (state) => state.settings.cache?.showIndicator !== false,
   );
-  const showCache = showCacheIndicator && cache != null;
+  const cacheVisible = showCache && showCacheIndicator && cache != null;
 
   if (!stats) {
-    if (!showCache) return null;
+    if (!cacheVisible) return null;
     return (
       <div className="hidden sm:block">
         <CacheHitChip cache={cache} />
@@ -282,7 +289,7 @@ export function CodeContextMeterChip({ conversationId }: { conversationId: strin
 
   return (
     <div className="hidden sm:block">
-      <ContextMeter stats={stats} cache={showCache ? cache : undefined} />
+      <ContextMeter stats={stats} cache={cacheVisible ? cache : undefined} />
     </div>
   );
 }

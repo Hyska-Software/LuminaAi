@@ -211,8 +211,8 @@ export function ModelPill({
   const keys = useAppStore((state) => state.keys);
   const auth = useAppStore((state) => state.auth);
   const storeProviders = useAppStore((state) => state.providers);
-  const setReasoning = useAppStore((state) => state.setReasoning);
   const toggleFavorite = useAppStore((state) => state.toggleFavorite);
+  const setReasoning = useChatStore((state) => state.setReasoning);
   // Chat locks the model once the conversation starts; a Code session keeps it
   // switchable between turns (a running turn always locks it).
   const layoutMode = useUiStore((state) => state.layoutMode);

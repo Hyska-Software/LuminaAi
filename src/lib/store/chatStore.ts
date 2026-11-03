@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { toast } from 'sonner';
 import { api } from '../api';
 import type {
+  Agent,
+  AgentInput,
   Artifact,
   AttachmentInfo,
   ChatMessage,
@@ -19,6 +21,7 @@ import type {
   TurnKind,
 } from '../types';
 import { deriveTitle, newId } from '../utils';
+import { inputFromAgent } from '../agentInput';
 import { defaultSelection, findModelIn, getModel } from '../catalog';
 import { filterConversationsForLayout } from '../conversations';
 import { reasoningForModel } from '../modelMenu';
@@ -113,6 +116,12 @@ interface ChatState {
    * same copy the selector surfaces show.
    */
   chooseModel: (selection: ModelSelection) => Promise<boolean>;
+  /**
+   * Applies a thinking-mode choice. Agent turns read the reasoning from the
+   * persona (the backend freezes it per thread), so the Agents layout persists
+   * the change on the agent instead of the global selection.
+   */
+  setReasoning: (reasoning: ReasoningSelection | null) => void;
   addAttachments: (paths: string[]) => Promise<void>;
   removeAttachment: (id: string) => Promise<void>;
   clearAttachments: () => void;
@@ -279,6 +288,70 @@ export function modelLockReason(state: ChatState, layout: LayoutMode): ModelLock
   // into the request).
   if (selectActiveStream(state) ?? state.streaming) return 'streaming';
   return null;
+}
+
+/**
+ * Route of the active agent surface. Agent conversations own their frozen pair
+ * (`conversations.provider_id/model_id`, resolved by the harness), while the
+ * thinking mode always comes from the persona.
+ */
+export function agentSelectionForLayout(
+  state: ChatState,
+  layout: LayoutMode,
+): ModelSelection | null {
+  if (layout !== 'agent') return null;
+  const activeAgentId = useUiStore.getState().activeAgentId;
+  const agent = activeAgentId
+    ? useAgentStore.getState().agentsById[activeAgentId]
+    : undefined;
+  if (!agent) return null;
+  const conversation = state.activeId
+    ? state.conversations.find((entry) => entry.id === state.activeId)
+    : undefined;
+  const linked =
+    conversation?.mode === 'agent' && conversation.agentId === agent.id
+      ? conversation
+      : undefined;
+  return {
+    providerId: linked?.providerId ?? agent.providerId,
+    modelId: linked?.modelId ?? agent.modelId,
+    reasoning: agent.reasoning ?? null,
+  };
+}
+
+/** Agent that owns the active agent surface (the open thread wins over the sidebar). */
+function activeAgentForState(state: ChatState): Agent | undefined {
+  const conversation = state.activeId
+    ? state.conversations.find((entry) => entry.id === state.activeId)
+    : undefined;
+  const agentId =
+    conversation?.mode === 'agent' ? conversation.agentId : undefined;
+  const resolvedId = agentId ?? useUiStore.getState().activeAgentId;
+  return resolvedId ? useAgentStore.getState().agentsById[resolvedId] : undefined;
+}
+
+/**
+ * Serializes route edits on personas: picking a model moves the pill straight
+ * to the thinking step, so the reasoning choice must not clobber the model
+ * update (or vice versa) through a stale `AgentInput` snapshot.
+ */
+let agentRouteQueue: Promise<unknown> = Promise.resolve();
+
+function patchAgentRoute(
+  agentId: string,
+  patch: Partial<Pick<AgentInput, 'providerId' | 'modelId' | 'reasoning'>>,
+): Promise<Agent> {
+  const next = agentRouteQueue.then(() => {
+    const agent = useAgentStore.getState().agentsById[agentId];
+    if (!agent) throw new Error('o agente não existe mais');
+    return useAgentStore.getState().update(agentId, {
+      ...inputFromAgent(agent),
+      ...patch,
+    });
+  });
+  // A failed edit must not poison the next queued edit.
+  agentRouteQueue = next.catch(() => undefined);
+  return next;
 }
 
 /** Copy shared by every surface that blocks model switching. */
@@ -1649,18 +1722,66 @@ export const useChatStore = create<ChatState>()((set, get) => {
         toast.info(copy.title, { description: copy.description });
         return false;
       }
-      const app = useAppStore.getState();
-      const previous = app.selection;
       const conversationId = state.activeId;
       const conversation = conversationId
         ? state.conversations.find((entry) => entry.id === conversationId)
         : undefined;
-      if (conversation?.mode === 'agent') {
-        toast.info('O modelo é definido pelo agente', {
-          description: 'Abra “Editar agente” para trocar o modelo deste agente.',
-        });
-        return false;
+      if (layout === 'agent') {
+        const agent = activeAgentForState(state);
+        if (!agent) {
+          toast.info('Selecione um agente para trocar o modelo');
+          return false;
+        }
+        try {
+          await patchAgentRoute(agent.id, {
+            providerId: selection.providerId,
+            modelId: selection.modelId,
+            reasoning: selection.reasoning ?? null,
+          });
+          // Agent turns resolve the pair from the conversation (frozen at
+          // creation). An empty thread must follow the persona edit so its
+          // first message uses the model the user just picked.
+          const current = get();
+          const liveConversation = conversationId
+            ? current.conversations.find((entry) => entry.id === conversationId)
+            : undefined;
+          if (
+            liveConversation &&
+            liveConversation.mode === 'agent' &&
+            liveConversation.agentId === agent.id &&
+            !selectActiveConversationStarted(current) &&
+            (liveConversation.providerId !== selection.providerId ||
+              liveConversation.modelId !== selection.modelId)
+          ) {
+            const updated = await api.setConversationModel(
+              liveConversation.id,
+              selection.providerId,
+              selection.modelId,
+            );
+            set((state) => ({
+              conversations: state.conversations.map((entry) =>
+                entry.id === updated.id ? updated : entry,
+              ),
+            }));
+          }
+          const name =
+            modelForRoute(selection.providerId, selection.modelId)?.name ?? selection.modelId;
+          toast.success('Modelo do agente atualizado', {
+            description: `As próximas respostas usarão ${name}.`,
+          });
+          return true;
+        } catch (error) {
+          toast.error('Não foi possível alterar o modelo', {
+            description: String(error instanceof Error ? error.message : error).replace(
+              /^MODEL_LOCKED:\s*/,
+              '',
+            ),
+          });
+          return false;
+        }
       }
+      const app = useAppStore.getState();
+      const previous = app.selection;
       // A **started Code session** owns its model: persist the pair immediately
       // so the next turn, goal rounds and reopening the session use the same
       // route, while the configured defaults stay untouched. Older replies keep
@@ -1712,6 +1833,23 @@ export const useChatStore = create<ChatState>()((set, get) => {
         toast.error('Não foi possível alterar o modelo', { description });
         return false;
       }
+    },
+
+    setReasoning: (reasoning) => {
+      if (currentLayout() !== 'agent') {
+        useAppStore.getState().setReasoning(reasoning);
+        return;
+      }
+      const agent = activeAgentForState(get());
+      if (!agent) {
+        useAppStore.getState().setReasoning(reasoning);
+        return;
+      }
+      void patchAgentRoute(agent.id, { reasoning }).catch((error) => {
+        toast.error('Não foi possível alterar o modo de pensamento', {
+          description: String(error instanceof Error ? error.message : error),
+        });
+      });
     },
 
     addAttachments: async (paths) => {

@@ -1,4 +1,6 @@
-import type { Agent, ProviderInfo } from '@/lib/types';
+import type { ProviderInfo } from '@/lib/types';
+
+export { inputFromAgent } from '@/lib/agentInput';
 
 export function relativeTime(timestamp: number | null | undefined): string {
   if (!timestamp) return '';
@@ -40,27 +42,4 @@ export function formatUsageCost(cost: number): string {
     currency: 'USD',
     maximumFractionDigits: cost < 1 ? 4 : 2,
   });
-}
-
-export function inputFromAgent(agent: Agent) {
-  return {
-    name: agent.name,
-    role: agent.role,
-    description: agent.description,
-    emoji: agent.emoji,
-    department: agent.department,
-    providerId: agent.providerId,
-    modelId: agent.modelId,
-    fallbackProviderId: agent.fallbackProviderId ?? null,
-    fallbackModelId: agent.fallbackModelId ?? null,
-    reasoning: agent.reasoning,
-    instructions: agent.instructions,
-    starters: [...agent.starters],
-    capabilities: agent.capabilities,
-    memoryEnabled: agent.memoryEnabled,
-    workspaceId: agent.workspaceId,
-    permissionMode: agent.permissionMode,
-    dockerImage: agent.dockerImage ?? null,
-    computerEnvironment: agent.computerEnvironment ?? 'auto',
-  };
 }

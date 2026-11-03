@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { CacheStats, Conversation, ProviderAuthStatus, ProviderInfo, ProviderKeyStatus } from '@/lib/types';
+import type {
+  Agent,
+  CacheStats,
+  Conversation,
+  ProviderAuthStatus,
+  ProviderInfo,
+  ProviderKeyStatus,
+} from '@/lib/types';
 import type { CacheConversationUi } from '@/lib/store/cacheStore';
 import type { StreamingState } from '@/lib/store/chatStore';
 
@@ -13,15 +20,31 @@ vi.mock('@/components/chat/external', () => ({ openExternalUrl: mocks.openExtern
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(async () => null) }));
 // The model pill has its own suite (ui-systems); here it only needs to exist.
 vi.mock('@/components/models/ModelPill', () => ({
-  ModelPill: ({ onClick }: { onClick: () => void }) => (
-    <button type="button" onClick={onClick}>
+  ModelPill: ({
+    onClick,
+    providerId,
+    modelId,
+    reasoning,
+  }: {
+    onClick: () => void;
+    providerId?: string;
+    modelId?: string;
+    reasoning?: unknown;
+  }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      data-provider={providerId ?? ''}
+      data-model={modelId ?? ''}
+      data-reasoning={reasoning ? JSON.stringify(reasoning) : ''}
+    >
       Modelo
     </button>
   ),
 }));
 
 // Imported after the mocks above.
-import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { useAgentStore, useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import { useCacheStore } from '@/lib/store/cacheStore';
 import { Composer } from './Composer';
 
@@ -107,6 +130,50 @@ function chatConversation(id = 'conv-chat'): Conversation {
     modelId: 'gpt-6.1-sol',
     messageCount: 0,
     mode: 'chat',
+  };
+}
+
+function agentConversation(id = 'conv-agent'): Conversation {
+  return {
+    ...chatConversation(id),
+    mode: 'agent',
+    agentId: 'agent-1',
+  };
+}
+
+function agentRecord(overrides: Partial<Agent> = {}): Agent {
+  return {
+    id: 'agent-1',
+    name: 'Irineu',
+    role: 'Engenheiro',
+    description: '',
+    emoji: '🛠️',
+    department: 'Engenharia',
+    pinned: false,
+    sortOrder: 1,
+    providerId: 'openai',
+    modelId: 'gpt-6.1-sol',
+    reasoning: { mode: 'effort', effort: 'high' },
+    instructions: '',
+    promptVersion: 1,
+    starters: [],
+    capabilities: {
+      webSearch: true,
+      fileAccess: true,
+      codeExecution: true,
+      skills: null,
+      tools: null,
+      mcpServers: null,
+    },
+    memoryEnabled: false,
+    workspaceId: null,
+    permissionMode: 'edit',
+    archivedAt: null,
+    createdAt: 1,
+    updatedAt: 1,
+    threadCount: 0,
+    lastActiveAt: null,
+    ...overrides,
   };
 }
 
@@ -208,7 +275,15 @@ beforeEach(() => {
     activeId: null,
   });
   useCacheStore.getState().reset();
-  useUiStore.setState({ settingsOpen: false, layoutMode: 'chat' });
+  useAgentStore.setState({
+    agentsById: {},
+    orderedIds: [],
+    status: 'idle',
+    error: null,
+    mutationById: {},
+    initialized: false,
+  });
+  useUiStore.setState({ settingsOpen: false, layoutMode: 'chat', activeAgentId: null });
   seedApp({ auth: signedIn() });
 });
 
@@ -307,6 +382,50 @@ describe('Composer — variant por layoutMode (Chat | Code)', () => {
     expect(screen.getByRole('button', { name: 'Criar arquivos' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Modo de permissão/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Modo Plano' })).toBeNull();
+  });
+
+  it('no modo Agentes mostra o seletor com a rota da persona na home', () => {
+    useAgentStore.setState({
+      agentsById: {
+        'agent-1': agentRecord({
+          providerId: 'openai',
+          modelId: 'gpt-6.1-sol',
+          reasoning: { mode: 'effort', effort: 'max' },
+        }),
+      },
+      orderedIds: ['agent-1'],
+    });
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1' });
+    useChatStore.setState({ activeId: null, conversations: [] });
+
+    render(<Composer />);
+
+    const pill = screen.getByRole('button', { name: 'Modelo' });
+    expect(pill.getAttribute('data-provider')).toBe('openai');
+    expect(pill.getAttribute('data-model')).toBe('gpt-6.1-sol');
+    expect(pill.getAttribute('data-reasoning')).toBe(JSON.stringify({ mode: 'effort', effort: 'max' }));
+  });
+
+  it('no modo Agentes esconde o chip de cache e usa a rota congelada da thread', () => {
+    useAgentStore.setState({
+      agentsById: { 'agent-1': agentRecord() },
+      orderedIds: ['agent-1'],
+    });
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1' });
+    const thread = {
+      ...agentConversation(),
+      providerId: 'openai',
+      modelId: 'gpt-6.1-sol',
+    };
+    useChatStore.setState({ activeId: thread.id, conversations: [thread] });
+    useCacheStore.setState({ byConversation: { [thread.id]: cacheUi() } });
+
+    render(<Composer />);
+
+    expect(screen.queryByRole('button', { name: /^Cache de prompt:/ })).toBeNull();
+    const pill = screen.getByRole('button', { name: 'Modelo' });
+    expect(pill.getAttribute('data-provider')).toBe('openai');
+    expect(pill.getAttribute('data-model')).toBe('gpt-6.1-sol');
   });
 });
 

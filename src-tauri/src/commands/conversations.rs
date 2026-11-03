@@ -262,8 +262,10 @@ pub fn truncate_conversation(
 ///
 /// O Chat mantém o modelo travado após a primeira mensagem; o layout Code —
 /// nativo (`mode == "code"`) ou sessão do Chat vinculada (`codeLinked`) — pode
-/// trocar a rota no meio da conversa. As respostas antigas continuam com o
-/// modelo em que foram geradas (o harness faz o fallback neutro do replay).
+/// trocar a rota no meio da conversa. Uma thread de agente ainda vazia também
+/// aceita a troca: o composer atualiza a persona e congela a rota atual antes
+/// do primeiro turno. As respostas antigas continuam com o modelo em que foram
+/// geradas (o harness faz o fallback neutro do replay).
 ///
 /// O prefixo `MODEL_LOCKED: ` é contrato com o renderer, que o remove ao
 /// mostrar a recusa em pt-BR.
@@ -284,7 +286,16 @@ pub(crate) fn validate_model_change(
     }
     let is_code_session =
         conversation.mode == crate::domain::CONVERSATION_MODE_CODE || conversation.code_linked;
-    if !is_code_session {
+    let is_empty_agent_thread = conversation.mode == crate::domain::CONVERSATION_MODE_AGENT
+        && conversation.message_count == 0;
+    if !is_code_session && !is_empty_agent_thread {
+        if conversation.mode == crate::domain::CONVERSATION_MODE_AGENT {
+            return Err(
+                "MODEL_LOCKED: o modelo do agente fica travado após a primeira mensagem \
+                 desta conversa"
+                    .to_string(),
+            );
+        }
         return Err(
             "MODEL_LOCKED: o modelo do Chat fica travado após a primeira mensagem; \
              use uma sessão do Code"
@@ -764,6 +775,29 @@ mod tests {
             changed,
             ("anthropic".to_string(), "claude-opus-5-5".to_string())
         );
+    }
+
+    #[test]
+    fn model_change_is_allowed_for_empty_agent_threads() {
+        let mut conversation =
+            sample_conversation(crate::domain::CONVERSATION_MODE_AGENT, false);
+        conversation.message_count = 0;
+        let changed =
+            validate_model_change(&conversation, "openai", "gpt-6-luna", |_| true, |_, _| true)
+                .expect("thread de agente ainda vazia aceita a rota escolhida no composer");
+        assert_eq!(changed, ("openai".to_string(), "gpt-6-luna".to_string()));
+    }
+
+    #[test]
+    fn model_change_is_locked_for_started_agent_threads() {
+        let mut conversation =
+            sample_conversation(crate::domain::CONVERSATION_MODE_AGENT, false);
+        conversation.message_count = 2;
+        let error =
+            validate_model_change(&conversation, "openai", "gpt-6-luna", |_| true, |_, _| true)
+                .expect_err("thread de agente iniciada não troca de modelo");
+        assert!(error.starts_with("MODEL_LOCKED: "), "{error}");
+        assert!(error.contains("agente"), "{error}");
     }
 
     #[test]

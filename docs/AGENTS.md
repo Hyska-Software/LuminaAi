@@ -51,6 +51,10 @@ starters, `capabilities_json`, `memory_enabled`, `workspace_id`,
 - `workspace_id` é opcional; sem ele cada conversa usa uma pasta interna própria.
 - `permission_mode` é herdado pela conversa criada e pode ser trocado na sessão
   pelo chip do Code.
+- O seletor de modelo do composer do layout Agentes edita a rota da persona
+  (provedor, modelo e raciocínio). Antes da primeira mensagem ele também
+  sincroniza o par congelado da thread vazia; depois disso o modelo da conversa
+  fica travado e o segmento ✦ continua ajustando o raciocínio da persona.
 
 ### `agent_memories`
 
@@ -318,7 +322,10 @@ Contrato completo: `docs/DOCKER.md`.
   concorrência/fila, orçamento diário, notificações de threads, política de
   navegador, apps do desktop e imagem/limites do Desktop privado. Modelo,
   instruções, workspace, permissões e capabilities continuam por persona no
-  editor do agente.
+  editor do agente; o composer também oferece a troca rápida de modelo e
+  raciocínio (a mesma rota do editor). O chip de cache do composer do Chat e o
+  segmento de cache do medidor de contexto do header não aparecem no layout
+  Agentes.
 - `AgentPanel` é a sidebar direita do layout Agentes, com abas **Tela**,
   **Rotinas**, **Navegador** e **Dados**. Docked acima de 1120 px; overlay com
   backdrop/Escape abaixo disso.

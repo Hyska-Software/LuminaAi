@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   Agent,
+  AgentInput,
   Artifact,
   ChatMessage,
   Conversation,
@@ -37,6 +38,7 @@ const mocks = vi.hoisted(() => {
     updateGoal: vi.fn(),
     getSettings: vi.fn(),
     saveSettings: vi.fn(),
+    updateAgent: vi.fn(),
     setProviderKey: vi.fn(),
     getCatalog: vi.fn(),
     refreshCatalog: vi.fn(),
@@ -219,6 +221,9 @@ beforeEach(() => {
     settings: useAppStore.getState().settings,
     keys: [],
   });
+  mocks.api.updateAgent.mockImplementation(async (id: string, input: AgentInput) =>
+    agentRecord({ id, ...input }),
+  );
   mocks.api.setConversationModel.mockImplementation(
     async (conversationId: string, providerId: string, modelId: string) =>
       conversation({ id: conversationId, providerId, modelId, messageCount: 2 }),
@@ -1207,6 +1212,146 @@ describe('model lock', () => {
         .chooseModel({ providerId: 'opencode-go', modelId: 'glm-5.3-flash', reasoning: null }),
     ).resolves.toBe(false);
     expect(mocks.api.setConversationModel).not.toHaveBeenCalled();
+  });
+
+  it('chooseModel on the Agents home updates the persona route', async () => {
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1' });
+    useAgentStore.setState({
+      agentsById: { 'agent-1': agentRecord() },
+      orderedIds: ['agent-1'],
+    });
+    useChatStore.setState({ activeId: null, conversations: [] });
+    const next = {
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet-5-5',
+      reasoning: { mode: 'effort' as const, effort: 'high' as const },
+    };
+
+    await expect(useChatStore.getState().chooseModel(next)).resolves.toBe(true);
+
+    expect(mocks.api.updateAgent).toHaveBeenCalledWith(
+      'agent-1',
+      expect.objectContaining(next),
+    );
+    expect(useAgentStore.getState().agentsById['agent-1']).toMatchObject(next);
+    expect(mocks.api.setConversationModel).not.toHaveBeenCalled();
+    // The agent owns the route: the global defaults stay untouched.
+    expect(useAppStore.getState().selection.modelId).toBe('deepseek-v4.1-flash');
+    expect(mocks.api.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('chooseModel keeps an empty agent thread in sync with the persona edit', async () => {
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1' });
+    useAgentStore.setState({
+      agentsById: { 'agent-1': agentRecord() },
+      orderedIds: ['agent-1'],
+    });
+    const thread = conversation({
+      id: 'agent-thread',
+      mode: 'agent',
+      agentId: 'agent-1',
+      messageCount: 0,
+    });
+    useChatStore.setState({
+      activeId: thread.id,
+      conversations: [thread],
+      messagesByConversation: { [thread.id]: [] },
+    });
+    const next = {
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet-5-5',
+      reasoning: { mode: 'effort' as const, effort: 'high' as const },
+    };
+    mocks.api.setConversationModel.mockResolvedValue({
+      ...thread,
+      providerId: next.providerId,
+      modelId: next.modelId,
+    });
+
+    await expect(useChatStore.getState().chooseModel(next)).resolves.toBe(true);
+
+    expect(mocks.api.updateAgent).toHaveBeenCalledWith(
+      'agent-1',
+      expect.objectContaining(next),
+    );
+    expect(mocks.api.setConversationModel).toHaveBeenCalledWith(
+      'agent-thread',
+      'anthropic',
+      'claude-sonnet-5-5',
+    );
+    expect(useChatStore.getState().conversations[0]).toMatchObject({
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet-5-5',
+    });
+  });
+
+  it('chooseModel refuses to switch the route of a started agent thread', async () => {
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1' });
+    useAgentStore.setState({
+      agentsById: { 'agent-1': agentRecord() },
+      orderedIds: ['agent-1'],
+    });
+    const thread = conversation({
+      id: 'agent-thread',
+      mode: 'agent',
+      agentId: 'agent-1',
+      messageCount: 2,
+    });
+    useChatStore.setState({
+      activeId: thread.id,
+      conversations: [thread],
+      messagesByConversation: {
+        [thread.id]: [userMessage({ conversationId: thread.id }), assistantMessage({ conversationId: thread.id })],
+      },
+    });
+
+    await expect(
+      useChatStore
+        .getState()
+        .chooseModel({ providerId: 'anthropic', modelId: 'claude-sonnet-5-5', reasoning: null }),
+    ).resolves.toBe(false);
+
+    expect(mocks.api.updateAgent).not.toHaveBeenCalled();
+    expect(mocks.api.setConversationModel).not.toHaveBeenCalled();
+    expect(toast.info).toHaveBeenCalled();
+  });
+
+  it('setReasoning updates the persona while the agent model is locked', async () => {
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1' });
+    useAgentStore.setState({
+      agentsById: {
+        'agent-1': agentRecord({ reasoning: { mode: 'effort', effort: 'high' } }),
+      },
+      orderedIds: ['agent-1'],
+    });
+    const thread = conversation({
+      id: 'agent-thread',
+      mode: 'agent',
+      agentId: 'agent-1',
+      messageCount: 2,
+    });
+    useChatStore.setState({
+      activeId: thread.id,
+      conversations: [thread],
+      messagesByConversation: {
+        [thread.id]: [userMessage({ conversationId: thread.id })],
+      },
+    });
+
+    useChatStore.getState().setReasoning({ mode: 'off' });
+
+    await vi.waitFor(() => {
+      expect(useAgentStore.getState().agentsById['agent-1'].reasoning).toEqual({ mode: 'off' });
+    });
+    expect(mocks.api.updateAgent).toHaveBeenCalledWith(
+      'agent-1',
+      expect.objectContaining({ reasoning: { mode: 'off' } }),
+    );
+    // The global chat selection is not the source of truth for agent turns.
+    expect(useAppStore.getState().selection.reasoning).toEqual({
+      mode: 'effort',
+      effort: 'max',
+    });
   });
 
   it('send uses the composer selection of a started Code session (model unlocked)', async () => {

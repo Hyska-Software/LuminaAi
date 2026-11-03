@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ArrowUp, FilePlus, Globe, Plus, Square, Target, TriangleAlert } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
 import { credentialGateMessage } from '@/components/chat/turnError';
 import { useReduceMotion } from '@/components/layout/hooks';
@@ -22,7 +23,15 @@ import {
   Tooltip,
 } from '@/components/ui';
 import { api } from '@/lib/api';
-import { selectAgent, useAgentStore, useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
+import {
+  agentSelectionForLayout,
+  selectAgent,
+  useAgentStore,
+  useAppStore,
+  useChatStore,
+  useCodeStore,
+  useUiStore,
+} from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { AttachmentChips } from './AttachmentChips';
 import { CacheMeterChip } from './CacheMeterChip';
@@ -97,6 +106,11 @@ export function Composer() {
   const activeAgent = useAgentStore((state) => selectAgent(state, activeAgentId));
   const isCodeLayout = layoutMode === 'code';
   const isAgentLayout = layoutMode === 'agent';
+  // Agent turns resolve the route from the persona/thread, not from the global
+  // chat selection, so the pill needs the explicit pair in that layout.
+  const agentSelection = useChatStore(
+    useShallow((state) => agentSelectionForLayout(state, layoutMode)),
+  );
   // D9 gate: an agent owns its provider, so the global composer selection is
   // irrelevant in that layout.
   const globalProviderId = useAppStore((state) => state.selection.providerId);
@@ -767,10 +781,19 @@ export function Composer() {
           )}
 
           <div className="ml-auto flex items-center gap-1.5">
-            {!isCodeLayout && activeConversationId ? (
+            {layoutMode === 'chat' && activeConversationId ? (
               <CacheMeterChip conversationId={activeConversationId} />
             ) : null}
-            {isAgentLayout ? null : (
+            {isAgentLayout ? (
+              agentSelection ? (
+                <ModelPill
+                  providerId={agentSelection.providerId}
+                  modelId={agentSelection.modelId}
+                  reasoning={agentSelection.reasoning}
+                  onClick={() => setModelPickerOpen(true)}
+                />
+              ) : null
+            ) : (
               <ModelPill onClick={() => setModelPickerOpen(true)} />
             )}
 

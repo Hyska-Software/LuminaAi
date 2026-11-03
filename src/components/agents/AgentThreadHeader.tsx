@@ -48,7 +48,7 @@ export function AgentThreadHeader({
         }));
       }} />
       {conversation.workspaceId ? (
-        <CodeContextMeterChip conversationId={conversation.id} />
+        <CodeContextMeterChip conversationId={conversation.id} showCache={false} />
       ) : null}
       <IconButton
         label={agentPanelActive ? 'Recolher painel do agente' : 'Abrir painel do agente'}
