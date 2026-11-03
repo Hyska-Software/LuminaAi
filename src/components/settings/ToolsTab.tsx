@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Check, Copy, FolderOpen, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Download, FolderOpen, Sparkles, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { DEFAULT_COMPUTER_DOCKER_IMAGE } from '@/lib/computerDocker';
 import type {
   CacheSettings,
   CodeEnvironmentStatus,
@@ -63,6 +64,10 @@ export function ToolsTab() {
   const [temperature, setTemperature] = useState(settings.temperature ?? 0.7);
   const [timeoutSecs, setTimeoutSecs] = useState(settings.codeTimeoutSecs);
   const [dockerImage, setDockerImage] = useState(settings.dockerImage ?? 'node:22-bookworm');
+  const [computerDockerImage, setComputerDockerImage] = useState(
+    settings.computerDockerImage ?? DEFAULT_COMPUTER_DOCKER_IMAGE,
+  );
+  const [computerImageBusy, setComputerImageBusy] = useState(false);
   const [maxConcurrentTurns, setMaxConcurrentTurns] = useState(
     settings.maxConcurrentTurns ?? 3,
   );
@@ -674,72 +679,6 @@ export function ToolsTab() {
                 aria-label="Montar rootfs do contêiner como somente leitura"
               />
             </SettingRow>
-            <SettingRow
-              vertical
-              label="Imagem do computer use"
-              description="Imagem gráfica (Xvfb + Chromium + xdotool + noVNC). O agente controla o display; o noVNC fica em 127.0.0.1:6080 para você observar."
-            >
-              <Input
-                defaultValue={settings.computerDockerImage ?? 'lumina/computer:latest'}
-                maxLength={200}
-                aria-label="Imagem Docker do computer use"
-                onBlur={(event) => {
-                  const value = event.target.value.trim();
-                  if (value) void saveSettings({ computerDockerImage: value });
-                }}
-              />
-            </SettingRow>
-            <SettingRow
-              vertical
-              label="Container do computer use"
-              description="Nome fixo do container gráfico. Ele é criado no primeiro screenshot e mantido entre ações."
-            >
-              <Input
-                defaultValue={settings.computerDockerContainer ?? 'lumina-computer'}
-                maxLength={80}
-                aria-label="Nome do container do computer use"
-                onBlur={(event) => {
-                  const value = event.target.value.trim();
-                  if (value) void saveSettings({ computerDockerContainer: value });
-                }}
-              />
-            </SettingRow>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <SettingRow
-                vertical
-                label="Ações por turno"
-                description="Limite de computer use em um único turno."
-              >
-                <Input
-                  type="number"
-                  min={1}
-                  max={200}
-                  defaultValue={settings.computerMaxActionsPerTurn ?? 20}
-                  aria-label="Máximo de ações de computer use por turno"
-                  onBlur={(event) => {
-                    const value = Math.max(1, Math.min(200, Number(event.target.value) || 20));
-                    void saveSettings({ computerMaxActionsPerTurn: value });
-                  }}
-                />
-              </SettingRow>
-              <SettingRow
-                vertical
-                label="Ações por hora"
-                description="Limite por agente em janela móvel de uma hora."
-              >
-                <Input
-                  type="number"
-                  min={1}
-                  max={2000}
-                  defaultValue={settings.computerMaxActionsPerHour ?? 120}
-                  aria-label="Máximo de ações de computer use por hora"
-                  onBlur={(event) => {
-                    const value = Math.max(1, Math.min(2_000, Number(event.target.value) || 120));
-                    void saveSettings({ computerMaxActionsPerHour: value });
-                  }}
-                />
-              </SettingRow>
-            </div>
             <SettingsBlock>
               <div className="flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft p-3">
                 <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
@@ -779,6 +718,7 @@ export function ToolsTab() {
                   size="sm"
                   variant="ghost"
                   disabled={dockerBusy}
+                  aria-label="Baixar imagem dos comandos"
                   onClick={() => {
                     setDockerBusy(true);
                     void api
@@ -794,51 +734,6 @@ export function ToolsTab() {
                 >
                   Baixar imagem
                 </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={dockerBusy}
-                  onClick={() => {
-                    setDockerBusy(true);
-                    void api
-                      .dockerCleanup()
-                      .then((count) =>
-                        toast.success(
-                          count === 0
-                            ? 'Nenhum container Lumina ativo'
-                            : `${count} container(s) removido(s)`,
-                        ),
-                      )
-                      .catch((error) =>
-                        toast.error('Não foi possível limpar', {
-                          description: String(error),
-                        }),
-                      )
-                      .finally(() => setDockerBusy(false));
-                  }}
-                >
-                  Limpar containers
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    void api
-                      .platformDiagnostics()
-                      .then((diagnostics) =>
-                        toast.info(`Diagnóstico · v${diagnostics.version}`, {
-                          description: `${diagnostics.activeTurns.length} turno(s) ativo(s) · ${diagnostics.openTasks} tarefa(s) aberta(s) · ${diagnostics.activeComputerSessions} sessão(ões) de computer use`,
-                        }),
-                      )
-                      .catch((error) =>
-                        toast.error('Não foi possível ler o diagnóstico', {
-                          description: String(error),
-                        }),
-                      );
-                  }}
-                >
-                  Diagnóstico
-                </Button>
                 {dockerInfo ? (
                   <span className="text-[11px] text-foreground-muted">{dockerInfo}</span>
                 ) : null}
@@ -846,6 +741,195 @@ export function ToolsTab() {
             </SettingsBlock>
           </>
         ) : null}
+      </SettingsSection>
+
+      <SettingsSection
+        title="Desktop privado (computer use)"
+        description="Desktop isolado em Docker, independente do sandbox de comandos. Estas opções valem quando o agente usa o ambiente “Desktop privado”."
+      >
+        <SettingRow
+          vertical
+          label="Imagem do computer use"
+          description="Imagem gráfica publicada no GHCR (Xvfb + Chromium + xdotool + noVNC). Baixe com o botão ou informe outra imagem acessível ao daemon. Para produção, prefira um digest fixo."
+        >
+          <div className="flex flex-col gap-2">
+            <Input
+              value={computerDockerImage}
+              maxLength={200}
+              aria-label="Imagem Docker do computer use"
+              placeholder={DEFAULT_COMPUTER_DOCKER_IMAGE}
+              onChange={(event) => setComputerDockerImage(event.target.value)}
+              onBlur={() => {
+                const value = computerDockerImage.trim();
+                if (value && value !== settings.computerDockerImage) {
+                  void saveSettings({ computerDockerImage: value });
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  const value = computerDockerImage.trim();
+                  if (value && value !== settings.computerDockerImage) {
+                    void saveSettings({ computerDockerImage: value });
+                  }
+                }
+              }}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={computerImageBusy || !computerDockerImage.trim()}
+                aria-label="Baixar imagem do computer use"
+                onClick={() => {
+                  const image = computerDockerImage.trim();
+                  if (!image) return;
+                  if (image !== settings.computerDockerImage) {
+                    void saveSettings({ computerDockerImage: image });
+                  }
+                  setComputerImageBusy(true);
+                  void api
+                    .dockerPullImage(image)
+                    .then(() =>
+                      toast.success('Imagem do computer use baixada', { description: image }),
+                    )
+                    .catch((error) =>
+                      toast.error('Não foi possível baixar a imagem', {
+                        description: String(error),
+                      }),
+                    )
+                    .finally(() => setComputerImageBusy(false));
+                }}
+              >
+                {computerImageBusy ? (
+                  <Spinner className="mr-1.5 size-3.5" />
+                ) : (
+                  <Download className="mr-1.5 size-3.5" />
+                )}
+                Baixar imagem
+              </Button>
+              {computerDockerImage.trim() !== DEFAULT_COMPUTER_DOCKER_IMAGE ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={computerImageBusy}
+                  onClick={() => {
+                    setComputerDockerImage(DEFAULT_COMPUTER_DOCKER_IMAGE);
+                    void saveSettings({ computerDockerImage: DEFAULT_COMPUTER_DOCKER_IMAGE });
+                  }}
+                >
+                  Usar imagem publicada
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </SettingRow>
+        <SettingRow
+          vertical
+          label="Container do computer use"
+          description="Nome fixo do container gráfico. Ele é criado no primeiro screenshot e mantido entre ações."
+        >
+          <Input
+            defaultValue={settings.computerDockerContainer ?? 'lumina-computer'}
+            maxLength={80}
+            aria-label="Nome do container do computer use"
+            onBlur={(event) => {
+              const value = event.target.value.trim();
+              if (value) void saveSettings({ computerDockerContainer: value });
+            }}
+          />
+        </SettingRow>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <SettingRow
+            vertical
+            label="Ações por turno"
+            description="Limite de computer use em um único turno."
+          >
+            <Input
+              type="number"
+              min={1}
+              max={200}
+              defaultValue={settings.computerMaxActionsPerTurn ?? 20}
+              aria-label="Máximo de ações de computer use por turno"
+              onBlur={(event) => {
+                const value = Math.max(1, Math.min(200, Number(event.target.value) || 20));
+                void saveSettings({ computerMaxActionsPerTurn: value });
+              }}
+            />
+          </SettingRow>
+          <SettingRow
+            vertical
+            label="Ações por hora"
+            description="Limite por agente em janela móvel de uma hora."
+          >
+            <Input
+              type="number"
+              min={1}
+              max={2000}
+              defaultValue={settings.computerMaxActionsPerHour ?? 120}
+              aria-label="Máximo de ações de computer use por hora"
+              onBlur={(event) => {
+                const value = Math.max(1, Math.min(2_000, Number(event.target.value) || 120));
+                void saveSettings({ computerMaxActionsPerHour: value });
+              }}
+            />
+          </SettingRow>
+        </div>
+        <SettingsBlock>
+          <div className="flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft p-3">
+            <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
+            <p className="text-[11px] leading-relaxed text-warning">
+              Docker Desktop/Engine precisa estar instalado e rodando. O agente controla um display
+              isolado no container; o noVNC fica em loopback, somente para você observar.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={dockerBusy}
+              onClick={() => {
+                setDockerBusy(true);
+                void api
+                  .dockerCleanup()
+                  .then((count) =>
+                    toast.success(
+                      count === 0
+                        ? 'Nenhum container Lumina ativo'
+                        : `${count} container(s) removido(s)`,
+                    ),
+                  )
+                  .catch((error) =>
+                    toast.error('Não foi possível limpar', {
+                      description: String(error),
+                    }),
+                  )
+                  .finally(() => setDockerBusy(false));
+              }}
+            >
+              Limpar containers
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                void api
+                  .platformDiagnostics()
+                  .then((diagnostics) =>
+                    toast.info(`Diagnóstico · v${diagnostics.version}`, {
+                      description: `${diagnostics.activeTurns.length} turno(s) ativo(s) · ${diagnostics.openTasks} tarefa(s) aberta(s) · ${diagnostics.activeComputerSessions} sessão(ões) de computer use`,
+                    }),
+                  )
+                  .catch((error) =>
+                    toast.error('Não foi possível ler o diagnóstico', {
+                      description: String(error),
+                    }),
+                  );
+              }}
+            >
+              Diagnóstico
+            </Button>
+          </div>
+        </SettingsBlock>
       </SettingsSection>
 
       <SettingsSection

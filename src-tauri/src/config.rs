@@ -80,7 +80,12 @@ pub const APPROVAL_TIMEOUT_MAX_SECS: u32 = 3_600;
 /// arquivo desde a v1.9 **sem** nenhuma UI, um `"edit"` persistido num arquivo
 /// v1 é o default de fábrica antigo, não uma escolha do usuário — a migração de
 /// leitura o converte (ver [`parse_settings_json`]).
-const SETTINGS_VERSION: u32 = 2;
+///
+/// v3 (computer use): a imagem gráfica passa de `lumina/computer:latest` (tag
+/// de build local, nunca publicada) para a imagem publicada no GHCR. Um valor
+/// igual ao default antigo é migrado uma única vez; imagens customizadas são
+/// preservadas.
+const SETTINGS_VERSION: u32 = 3;
 
 /// Normaliza a lista de skills desativadas vinda do disco ou do renderer:
 /// `trim`, descarta entradas vazias, remove duplicatas e ordena (a comparação
@@ -240,9 +245,11 @@ fn normalize_settings(mut settings: Settings) -> Settings {
 /// cair em `Settings::default()`, apagando todas as preferências. Aqui a chave
 /// inválida é removida antes da tipagem, então só ela volta ao default.
 ///
-/// Também aplica a migração de leitura v1 → v2: arquivos sem `settingsVersion`
-/// (ou de versão anterior) trocam o `"edit"` legado do modo de permissão do Code
-/// pelo novo default `"autonomous"`; valores gravados pela v2 são preservados.
+/// Também aplica as migrações de leitura:
+/// - v1 → v2: arquivos sem `settingsVersion` (ou v1) trocam o `"edit"` legado do
+///   modo de permissão do Code pelo novo default `"autonomous"`;
+/// - v2 → v3: a tag local antiga do computer use (`lumina/computer:latest`) vira
+///   a imagem publicada no GHCR. Valores customizados são preservados.
 fn parse_settings_json(raw: &str) -> Result<Settings, serde_json::Error> {
     let mut value: serde_json::Value = serde_json::from_str(raw)?;
     if let Some(object) = value.as_object_mut() {
@@ -250,7 +257,7 @@ fn parse_settings_json(raw: &str) -> Result<Settings, serde_json::Error> {
             .get("settingsVersion")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
-        if version < u64::from(SETTINGS_VERSION) {
+        if version < 2 {
             let legacy_default = object
                 .get("codeDefaultPermissionMode")
                 .and_then(serde_json::Value::as_str)
@@ -259,6 +266,20 @@ fn parse_settings_json(raw: &str) -> Result<Settings, serde_json::Error> {
                 object.insert(
                     "codeDefaultPermissionMode".to_string(),
                     serde_json::Value::String("autonomous".to_string()),
+                );
+            }
+        }
+        if version < u64::from(SETTINGS_VERSION) {
+            let legacy_computer_image = object
+                .get("computerDockerImage")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|image| image.trim() == "lumina/computer:latest");
+            if legacy_computer_image {
+                object.insert(
+                    "computerDockerImage".to_string(),
+                    serde_json::Value::String(
+                        crate::domain::DEFAULT_COMPUTER_DOCKER_IMAGE.to_string(),
+                    ),
                 );
             }
         }
@@ -2038,6 +2059,38 @@ mod tests {
         assert_eq!(
             normalize_settings(parsed).code_default_permission_mode,
             crate::domain::PermissionMode::Edit
+        );
+    }
+
+    #[test]
+    fn settings_v2_migrates_the_legacy_local_computer_image() {
+        let raw = r#"{"settingsVersion":2,"computerDockerImage":"lumina/computer:latest"}"#;
+        let parsed = parse_settings_json(raw).expect("migrar imagem legada");
+        assert_eq!(
+            normalize_settings(parsed).computer_docker_image,
+            crate::domain::DEFAULT_COMPUTER_DOCKER_IMAGE
+        );
+    }
+
+    #[test]
+    fn settings_v2_preserves_a_custom_computer_image() {
+        let raw = r#"{"settingsVersion":2,"computerDockerImage":"example/custom:1"}"#;
+        let parsed = parse_settings_json(raw).expect("parse imagem customizada");
+        assert_eq!(
+            normalize_settings(parsed).computer_docker_image,
+            "example/custom:1"
+        );
+    }
+
+    #[test]
+    fn settings_v3_preserves_an_explicit_legacy_local_tag() {
+        // Depois da migração, a tag local pode ser uma escolha explícita de
+        // desenvolvimento e não deve ser trocada silenciosamente.
+        let raw = r#"{"settingsVersion":3,"computerDockerImage":"lumina/computer:latest"}"#;
+        let parsed = parse_settings_json(raw).expect("parse v3");
+        assert_eq!(
+            normalize_settings(parsed).computer_docker_image,
+            "lumina/computer:latest"
         );
     }
 

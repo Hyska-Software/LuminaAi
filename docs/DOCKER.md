@@ -14,7 +14,12 @@
 - `dockerReadOnlyRoot` (default `true`; `/workspace` e `/tmp` continuam
   graváveis);
 - `computerDockerImage` / `computerDockerContainer`: computer use gráfico. O
-  nome configurado é um **prefixo**; cada conversa usa
+  default é a imagem publicada `ghcr.io/hyska-software/lumina-computer:latest`
+  (publicada pelo workflow `computer-image.yml`). O app não faz pull
+  automático: a UI oferece **Baixar imagem** em Configurações → Ferramentas e
+  no estado de erro do painel Tela. Também aceita uma imagem local construída
+  com `docker build -t lumina/computer:latest docker/computer`. O nome
+  configurado é um **prefixo**; cada conversa usa
   `<nome>-<conversationId>`, com porta noVNC loopback aleatória;
 - `browserAllowedDomains` / `browserBlockedDomains` /
   `browserAllowPrivateHosts`: política de hosts do navegador;
@@ -85,8 +90,11 @@ passando por timeout/cancelamento/spill do runner.
   build-essential) ou qualquer imagem com `sh`/`bash`; a imagem precisa existir
   no daemon.
 - `run_code`: Python precisa de uma imagem com `python`; JavaScript, `node`.
-- Computer use: `docker/computer/Dockerfile` (Xvfb + openbox + Chromium +
-  xdotool + scrot + noVNC).
+- Computer use: `ghcr.io/hyska-software/lumina-computer:latest` (publicada
+  pelo workflow `.github/workflows/computer-image.yml`, multi-arquitetura) ou
+  `docker/computer/Dockerfile` (Xvfb + openbox + Chromium + xdotool + scrot +
+  noVNC) para build local. O pacote do GHCR precisa estar público para o pull
+  anônimo; imagens privadas exigem `docker login ghcr.io`.
 - Produção: pinar `image@sha256:...`; o validador mostra id/arquitetura e roda um
   smoke test `sh -lc true`.
 
@@ -116,4 +124,5 @@ passando por timeout/cancelamento/spill do runner.
 - `--read-only` pode exigir imagem compatível (caches em `/tmp`/workspace).
 - Windows usa Docker Desktop (containers Linux); não há suporte a containers
   Windows.
-- Não há pull automático nem containers gráficos por sessão.
+- Não há pull automático: o download da imagem gráfica é explícito na UI
+  (Configurações → Ferramentas ou erro do painel Tela).

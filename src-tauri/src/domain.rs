@@ -1099,6 +1099,12 @@ fn default_docker_image() -> String {
     "node:22-bookworm".to_string()
 }
 
+/// Published graphical image used by the Docker computer-use backend.
+///
+/// Kept here (and mirrored by `src/lib/computerDocker.ts`) so the settings
+/// default, the error guidance and the release workflow agree on one tag.
+pub const DEFAULT_COMPUTER_DOCKER_IMAGE: &str = "ghcr.io/hyska-software/lumina-computer:latest";
+
 fn default_computer_environment_setting() -> String {
     "auto".to_string()
 }
@@ -1132,7 +1138,7 @@ fn default_max_queue_length() -> u32 {
 }
 
 fn default_computer_docker_image() -> String {
-    "lumina/computer:latest".to_string()
+    crate::domain::DEFAULT_COMPUTER_DOCKER_IMAGE.to_string()
 }
 
 fn default_computer_docker_container() -> String {
