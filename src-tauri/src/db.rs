@@ -17,9 +17,10 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::agents::{
-    Agent, AgentChannel, AgentChannelInput, AgentChannelMessage, AgentInput, AgentMemory,
-    AgentMemoryInput, AgentRoutine, AgentRoutineInput, AgentRoutineRun, AgentTask, AgentTaskEvent,
-    AgentTaskInput, AgentThreadCursor, AgentThreadPage, AgentUsage,
+    Agent, AgentChannel, AgentChannelInput, AgentChannelMessage, AgentEvent, AgentInboxCount,
+    AgentInboxItem, AgentInput, AgentMemory, AgentMemoryInput, AgentRoutine, AgentRoutineInput,
+    AgentRoutineRun, AgentSharedMemory, AgentTask, AgentTaskEvent, AgentTaskInput, AgentThreadCursor,
+    AgentThreadPage, AgentUsage,
 };
 use crate::computer::{ComputerActionRecord, ComputerSession};
 use crate::domain::{
@@ -47,8 +48,18 @@ const AGENT_COLUMNS: &str = "a.id, a.name, a.role, a.description, a.emoji, a.dep
 
 const AGENT_TASK_COLUMNS: &str = "id, channel_id, parent_task_id, owner_agent_id, \
      created_by_agent_id, created_by_user, title, brief, acceptance, status, priority, \
-     max_turns, max_tokens, max_cost, deadline_at, conversation_id, origin_conversation_id, result, \
-     result_artifact_ids, lease_until, handoff_count, version, created_at, updated_at";
+     max_turns, max_tokens, max_cost, deadline_at, conversation_id, origin_conversation_id, \
+     workspace_id, retry_count, result, result_artifact_ids, lease_until, handoff_count, version, \
+     created_at, updated_at";
+
+const AGENT_ROUTINE_COLUMNS: &str = "id, agent_id, title, prompt, schedule_kind, \
+     interval_minutes, hour, minute, enabled, conversation_id, next_run_at, last_run_at, \
+     last_status, last_error, trigger_kind, event_kind, event_filter_json, lease_until, \
+     created_at, updated_at";
+
+const AGENT_INBOX_ITEM_COLUMNS: &str = "i.id, i.recipient_agent_id, i.sender_agent_id, \
+     i.sender_user, i.channel_id, c.name, i.message_id, COALESCE(s.name, 'Usuário'), \
+     m.content, i.status, i.attempts, i.last_error, i.created_at, i.delivered_at";
 
 const WORKSPACE_COLUMNS: &str = "id, name, path, created_at, updated_at, last_opened_at, \
      pinned, trusted";
@@ -61,13 +72,13 @@ const ATTACHMENT_COLUMNS: &str = "id, name, mime_type, size, kind, text, page_co
      width, height, file_path, created_at";
 
 const ARTIFACT_COLUMNS: &str = "id, conversation_id, message_id, name, mime_type, kind, \
-     language, size, created_at, favorite";
+     language, size, created_at, favorite, task_id";
 
 /// Mesmas colunas de [`ARTIFACT_COLUMNS`], qualificadas para a query com
 /// `LEFT JOIN conversations` de [`Db::list_library_artifacts`]. Um teste garante
 /// que as duas listas continuam na mesma ordem (o mapper lê por posição).
 const ARTIFACT_JOIN_COLUMNS: &str = "a.id, a.conversation_id, a.message_id, a.name, \
-     a.mime_type, a.kind, a.language, a.size, a.created_at, a.favorite";
+     a.mime_type, a.kind, a.language, a.size, a.created_at, a.favorite, a.task_id";
 
 /* ------------------------------------------------------------------ */
 /* Schema                                                              */
@@ -127,6 +138,20 @@ CREATE TABLE IF NOT EXISTS agent_memories (
 CREATE INDEX IF NOT EXISTS idx_agent_memories_agent
   ON agent_memories(agent_id, pinned DESC, updated_at DESC);
 
+-- Memories intentionally shared across every agent (v1.17).
+CREATE TABLE IF NOT EXISTS agent_shared_memories (
+  id                     TEXT PRIMARY KEY,
+  source_agent_id        TEXT REFERENCES agents(id) ON DELETE SET NULL,
+  source_conversation_id TEXT,
+  kind                   TEXT NOT NULL DEFAULT 'fact',
+  content                TEXT NOT NULL,
+  pinned                 INTEGER NOT NULL DEFAULT 0,
+  created_at             INTEGER NOT NULL,
+  updated_at             INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_shared_memories
+  ON agent_shared_memories(pinned DESC, updated_at DESC);
+
 -- Scheduled routines owned by one agent (v1.14).
 CREATE TABLE IF NOT EXISTS agent_routines (
   id                TEXT PRIMARY KEY,
@@ -143,6 +168,10 @@ CREATE TABLE IF NOT EXISTS agent_routines (
   last_run_at       INTEGER,
   last_status       TEXT,
   last_error        TEXT,
+  trigger_kind      TEXT NOT NULL DEFAULT 'schedule',
+  event_kind        TEXT NOT NULL DEFAULT '',
+  event_filter_json TEXT NOT NULL DEFAULT '{}',
+  lease_until       INTEGER,
   created_at        INTEGER NOT NULL,
   updated_at        INTEGER NOT NULL
 );
@@ -168,9 +197,13 @@ CREATE INDEX IF NOT EXISTS idx_agent_routine_runs_routine
 CREATE TABLE IF NOT EXISTS agent_channels (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'channel',
+  dm_key      TEXT,
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_channels_dm_key
+  ON agent_channels(dm_key) WHERE dm_key IS NOT NULL;
 CREATE TABLE IF NOT EXISTS agent_channel_members (
   channel_id  TEXT NOT NULL REFERENCES agent_channels(id) ON DELETE CASCADE,
   agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -206,6 +239,8 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
   deadline_at           INTEGER,
   conversation_id       TEXT,
   origin_conversation_id TEXT,
+  workspace_id          TEXT,
+  retry_count           INTEGER NOT NULL DEFAULT 0,
   result                TEXT,
   result_artifact_ids   TEXT NOT NULL DEFAULT '[]',
   lease_until           INTEGER,
@@ -232,6 +267,52 @@ CREATE TABLE IF NOT EXISTS agent_task_events (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_task_events
   ON agent_task_events(task_id, created_at);
+
+-- Durable direct-message delivery queue (v1.17).
+CREATE TABLE IF NOT EXISTS agent_inbox (
+  id                 TEXT PRIMARY KEY,
+  recipient_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  sender_agent_id    TEXT,
+  sender_user        INTEGER NOT NULL DEFAULT 0,
+  channel_id         TEXT NOT NULL REFERENCES agent_channels(id) ON DELETE CASCADE,
+  message_id         TEXT NOT NULL REFERENCES agent_channel_messages(id) ON DELETE CASCADE,
+  status             TEXT NOT NULL DEFAULT 'pending',
+  attempts           INTEGER NOT NULL DEFAULT 0,
+  last_error         TEXT,
+  claimed_at         INTEGER,
+  delivered_at       INTEGER,
+  created_at         INTEGER NOT NULL,
+  UNIQUE(message_id, recipient_agent_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_inbox_pending
+  ON agent_inbox(recipient_agent_id, status, created_at);
+
+-- Internal events used by event-triggered routines (v1.17).
+CREATE TABLE IF NOT EXISTS agent_events (
+  id                   TEXT PRIMARY KEY,
+  kind                 TEXT NOT NULL,
+  payload_json         TEXT NOT NULL DEFAULT '{}',
+  source_agent_id      TEXT,
+  channel_id           TEXT,
+  task_id              TEXT,
+  created_at           INTEGER NOT NULL,
+  processed_at         INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_agent_events_pending
+  ON agent_events(processed_at, created_at);
+
+CREATE TABLE IF NOT EXISTS agent_event_deliveries (
+  event_id    TEXT NOT NULL REFERENCES agent_events(id) ON DELETE CASCADE,
+  routine_id  TEXT NOT NULL REFERENCES agent_routines(id) ON DELETE CASCADE,
+  status      TEXT NOT NULL DEFAULT 'pending',
+  error       TEXT,
+  created_at  INTEGER NOT NULL,
+  started_at  INTEGER,
+  ended_at    INTEGER,
+  PRIMARY KEY (event_id, routine_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_event_deliveries_status
+  ON agent_event_deliveries(status, created_at);
 
 -- Computer-use audit (v1.16). Never stores typed text/screenshot bytes.
 CREATE TABLE IF NOT EXISTS computer_sessions (
@@ -369,6 +450,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   -- NULL = arquivo enviado pelo usuário direto à Biblioteca (sem conversa).
   conversation_id TEXT,
   message_id      TEXT,
+  task_id         TEXT,
   name            TEXT NOT NULL,
   mime_type       TEXT NOT NULL,
   kind            TEXT NOT NULL,
@@ -1143,6 +1225,66 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         "origin_conversation_id",
         "ALTER TABLE agent_tasks ADD COLUMN origin_conversation_id TEXT",
     )?;
+    ensure_column(
+        conn,
+        "agent_tasks",
+        "workspace_id",
+        "ALTER TABLE agent_tasks ADD COLUMN workspace_id TEXT",
+    )?;
+    ensure_column(
+        conn,
+        "agent_tasks",
+        "retry_count",
+        "ALTER TABLE agent_tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(
+        conn,
+        "agent_channels",
+        "kind",
+        "ALTER TABLE agent_channels ADD COLUMN kind TEXT NOT NULL DEFAULT 'channel'",
+    )?;
+    ensure_column(
+        conn,
+        "agent_channels",
+        "dm_key",
+        "ALTER TABLE agent_channels ADD COLUMN dm_key TEXT",
+    )?;
+    ensure_column(
+        conn,
+        "artifacts",
+        "task_id",
+        "ALTER TABLE artifacts ADD COLUMN task_id TEXT",
+    )?;
+    for (column, ddl) in [
+        (
+            "trigger_kind",
+            "ALTER TABLE agent_routines ADD COLUMN trigger_kind TEXT NOT NULL DEFAULT 'schedule'",
+        ),
+        (
+            "event_kind",
+            "ALTER TABLE agent_routines ADD COLUMN event_kind TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "event_filter_json",
+            "ALTER TABLE agent_routines ADD COLUMN event_filter_json TEXT NOT NULL DEFAULT '{}'",
+        ),
+        (
+            "lease_until",
+            "ALTER TABLE agent_routines ADD COLUMN lease_until INTEGER",
+        ),
+    ] {
+        ensure_column(conn, "agent_routines", column, ddl)?;
+    }
+    conn.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_channels_dm_key \
+           ON agent_channels(dm_key) WHERE dm_key IS NOT NULL; \
+         CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id); \
+         UPDATE agent_channels SET kind = 'channel' WHERE kind IS NULL OR kind = ''; \
+         UPDATE artifacts SET task_id = (SELECT task_id FROM conversations \
+           WHERE conversations.id = artifacts.conversation_id) \
+           WHERE task_id IS NULL;",
+    )
+    .context("falha ao migrar colaboração multiagente")?;
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_agent_tasks_due \
          ON agent_tasks(status, created_at);",
@@ -1637,8 +1779,12 @@ fn agent_routine_from_row(row: &Row<'_>) -> rusqlite::Result<AgentRoutine> {
         last_run_at: row.get(11)?,
         last_status: row.get(12)?,
         last_error: row.get(13)?,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
+        trigger_kind: row.get(14)?,
+        event_kind: row.get(15)?,
+        event_filter_json: row.get(16)?,
+        lease_until: row.get(17)?,
+        created_at: row.get(18)?,
+        updated_at: row.get(19)?,
     })
 }
 
@@ -1650,6 +1796,53 @@ fn agent_channel_message_from_row(row: &Row<'_>) -> rusqlite::Result<AgentChanne
         agent_id: row.get(3)?,
         content: row.get(4)?,
         created_at: row.get(5)?,
+    })
+}
+
+fn agent_inbox_item_from_row(row: &Row<'_>) -> rusqlite::Result<AgentInboxItem> {
+    Ok(AgentInboxItem {
+        id: row.get(0)?,
+        recipient_agent_id: row.get(1)?,
+        sender_agent_id: row.get(2)?,
+        sender_user: row.get::<_, i64>(3)? != 0,
+        channel_id: row.get(4)?,
+        channel_name: row.get(5)?,
+        message_id: row.get(6)?,
+        sender_name: row.get(7)?,
+        message_content: row.get(8)?,
+        status: row.get(9)?,
+        attempts: row.get(10)?,
+        last_error: row.get(11)?,
+        created_at: row.get(12)?,
+        delivered_at: row.get(13)?,
+    })
+}
+
+fn agent_event_from_row(row: &Row<'_>) -> rusqlite::Result<AgentEvent> {
+    let payload: String = row.get(2)?;
+    Ok(AgentEvent {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        payload: serde_json::from_str(&payload).unwrap_or(serde_json::Value::Null),
+        source_agent_id: row.get(3)?,
+        channel_id: row.get(4)?,
+        task_id: row.get(5)?,
+        created_at: row.get(6)?,
+        processed_at: row.get(7)?,
+    })
+}
+
+fn agent_shared_memory_from_row(row: &Row<'_>) -> rusqlite::Result<AgentSharedMemory> {
+    Ok(AgentSharedMemory {
+        id: row.get(0)?,
+        source_agent_id: row.get(1)?,
+        source_agent_name: row.get(2)?,
+        source_conversation_id: row.get(3)?,
+        kind: row.get(4)?,
+        content: row.get(5)?,
+        pinned: row.get::<_, i64>(6)? != 0,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 
@@ -1690,7 +1883,7 @@ fn computer_action_from_row(row: &Row<'_>) -> rusqlite::Result<ComputerActionRec
 }
 
 fn agent_task_from_row(row: &Row<'_>) -> rusqlite::Result<AgentTask> {
-    let artifacts: String = row.get(18)?;
+    let artifacts: String = row.get(20)?;
     Ok(AgentTask {
         id: row.get(0)?,
         channel_id: row.get(1)?,
@@ -1709,13 +1902,15 @@ fn agent_task_from_row(row: &Row<'_>) -> rusqlite::Result<AgentTask> {
         deadline_at: row.get(14)?,
         conversation_id: row.get(15)?,
         origin_conversation_id: row.get(16)?,
-        result: row.get(17)?,
+        workspace_id: row.get(17)?,
+        retry_count: row.get(18)?,
+        result: row.get(19)?,
         result_artifact_ids: serde_json::from_str(&artifacts).unwrap_or_default(),
-        lease_until: row.get(19)?,
-        handoff_count: row.get(20)?,
-        version: row.get(21)?,
-        created_at: row.get(22)?,
-        updated_at: row.get(23)?,
+        lease_until: row.get(21)?,
+        handoff_count: row.get(22)?,
+        version: row.get(23)?,
+        created_at: row.get(24)?,
+        updated_at: row.get(25)?,
     })
 }
 
@@ -2752,6 +2947,134 @@ impl Db {
         Ok(changed as u64)
     }
 
+    pub fn list_agent_shared_memories(&self) -> Result<Vec<AgentSharedMemory>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.source_agent_id, s.name, m.source_conversation_id, m.kind, \
+             m.content, m.pinned, m.created_at, m.updated_at \
+             FROM agent_shared_memories m LEFT JOIN agents s ON s.id = m.source_agent_id \
+             ORDER BY m.pinned DESC, m.updated_at DESC, m.id",
+        )?;
+        let rows = stmt.query_map([], agent_shared_memory_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn get_agent_shared_memory(&self, id: &str) -> Result<Option<AgentSharedMemory>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.source_agent_id, s.name, m.source_conversation_id, m.kind, \
+             m.content, m.pinned, m.created_at, m.updated_at \
+             FROM agent_shared_memories m LEFT JOIN agents s ON s.id = m.source_agent_id \
+             WHERE m.id = ?1",
+        )?;
+        let mut rows = stmt.query_map([id], agent_shared_memory_from_row)?;
+        Ok(rows.next().transpose()?)
+    }
+
+    pub fn create_agent_shared_memory(
+        &self,
+        source_agent_id: &str,
+        input: &AgentMemoryInput,
+    ) -> Result<AgentSharedMemory> {
+        let conn = self.conn.lock();
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM agents WHERE id = ?1 AND archived_at IS NULL",
+            [source_agent_id],
+            |row| row.get(0),
+        )?;
+        if exists == 0 {
+            return Err(anyhow::anyhow!(
+                "AGENT_NOT_FOUND: agente `{source_agent_id}` não existe ou está arquivado"
+            ));
+        }
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM agent_shared_memories",
+            [],
+            |row| row.get(0),
+        )?;
+        if count >= crate::agents::AGENT_MEMORY_MAX_ITEMS as i64 {
+            return Err(anyhow::anyhow!(
+                "AGENT_MEMORY_LIMIT: já existem {} memórias compartilhadas; apague algumas antes de salvar novas.",
+                crate::agents::AGENT_MEMORY_MAX_ITEMS
+            ));
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_ms();
+        conn.execute(
+            "INSERT INTO agent_shared_memories \
+             (id, source_agent_id, source_conversation_id, kind, content, pinned, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+            params![
+                id,
+                source_agent_id,
+                input.source_conversation_id,
+                input.kind,
+                input.content,
+                input.pinned as i64,
+                now
+            ],
+        )
+        .context("falha ao salvar memória compartilhada")?;
+        drop(conn);
+        self.get_agent_shared_memory(&id)?
+            .ok_or_else(|| anyhow::anyhow!("memória compartilhada recém-criada não encontrada"))
+    }
+
+    pub fn update_agent_shared_memory(
+        &self,
+        id: &str,
+        source_agent_id: &str,
+        input: &AgentMemoryInput,
+    ) -> Result<AgentSharedMemory> {
+        let now = now_ms();
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE agent_shared_memories SET kind = ?3, content = ?4, pinned = ?5, \
+             source_conversation_id = ?6, updated_at = ?7 \
+             WHERE id = ?1 AND source_agent_id = ?2",
+            params![
+                id,
+                source_agent_id,
+                input.kind,
+                input.content,
+                input.pinned as i64,
+                input.source_conversation_id,
+                now
+            ],
+        )?;
+        drop(conn);
+        if changed == 0 {
+            return Err(anyhow::anyhow!(
+                "AGENT_MEMORY_FORBIDDEN: memória compartilhada não encontrada ou criada por outro agente"
+            ));
+        }
+        self.get_agent_shared_memory(id)?
+            .ok_or_else(|| anyhow::anyhow!("memória compartilhada atualizada não encontrada"))
+    }
+
+    pub fn delete_agent_shared_memory(&self, id: &str, source_agent_id: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "DELETE FROM agent_shared_memories WHERE id = ?1 AND source_agent_id = ?2",
+            params![id, source_agent_id],
+        )?;
+        if changed == 0 {
+            return Err(anyhow::anyhow!(
+                "AGENT_MEMORY_FORBIDDEN: memória compartilhada não encontrada ou criada por outro agente"
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn delete_shared_memory(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute("DELETE FROM agent_shared_memories WHERE id = ?1", [id])?;
+        if changed == 0 {
+            return Err(anyhow::anyhow!("AGENT_MEMORY_NOT_FOUND: memória compartilhada não existe"));
+        }
+        Ok(())
+    }
+
     /// Removes volatile context items of one kind from every thread of an
     /// agent. Used when durable memory is disabled so old blocks stop being
     /// replayed.
@@ -3317,10 +3640,10 @@ impl Db {
             "INSERT INTO agent_tasks (id, channel_id, parent_task_id, owner_agent_id, \
              created_by_agent_id, created_by_user, title, brief, acceptance, status, priority, \
              max_turns, max_tokens, max_cost, deadline_at, conversation_id, \
-             origin_conversation_id, result, result_artifact_ids, lease_until, handoff_count, \
-             version, created_at, updated_at) \
+             origin_conversation_id, workspace_id, retry_count, result, result_artifact_ids, \
+             lease_until, handoff_count, version, created_at, updated_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'queued', 0, ?10, ?11, ?12, ?13, \
-             NULL, ?15, NULL, '[]', NULL, 0, 1, ?14, ?14)",
+             NULL, ?15, ?16, 0, NULL, '[]', NULL, 0, 1, ?14, ?14)",
             params![
                 id,
                 input.channel_id,
@@ -3337,6 +3660,7 @@ impl Db {
                 deadline_at,
                 now,
                 origin_conversation_id,
+                input.workspace_id,
             ],
         )
         .context("falha ao criar tarefa do agente")?;
@@ -3348,6 +3672,26 @@ impl Db {
                 event_id,
                 id,
                 if created_by_user { "user" } else { "agent" },
+                now
+            ],
+        )?;
+        conn.execute(
+            "INSERT INTO agent_events \
+             (id, kind, payload_json, source_agent_id, channel_id, task_id, created_at) \
+             VALUES (?1, 'task.status', ?2, ?3, ?4, ?5, ?6)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                serde_json::json!({
+                    "taskId": id,
+                    "title": input.title,
+                    "status": "queued",
+                    "ownerAgentId": input.to_agent_id,
+                    "channelId": input.channel_id,
+                })
+                .to_string(),
+                created_by_agent_id,
+                input.channel_id,
+                id,
                 now
             ],
         )?;
@@ -3598,9 +3942,54 @@ impl Db {
                 now
             ],
         )?;
+        conn.execute(
+            "INSERT INTO agent_events \
+             (id, kind, payload_json, source_agent_id, channel_id, task_id, created_at) \
+             VALUES (?1, 'task.status', ?2, NULL, ?3, ?4, ?5)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                serde_json::json!({
+                    "taskId": task_id,
+                    "title": current.title,
+                    "status": to_status,
+                    "ownerAgentId": current.owner_agent_id,
+                    "channelId": current.channel_id,
+                })
+                .to_string(),
+                current.channel_id,
+                task_id,
+                now
+            ],
+        )?;
         drop(conn);
         self.get_agent_task(task_id)?
             .ok_or_else(|| anyhow::anyhow!("tarefa atualizada não encontrada"))
+    }
+
+    pub fn retry_agent_task_once(
+        &self,
+        task_id: &str,
+        owner_agent_id: &str,
+        expected_version: i64,
+        now: i64,
+    ) -> Result<bool> {
+        let updated = self.transition_agent_task(
+            task_id,
+            Some(expected_version),
+            Some(owner_agent_id),
+            "queued",
+            "system",
+            serde_json::json!({ "reason": "retry", "attempt": 2 }),
+            None,
+            None,
+            now,
+        )?;
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE agent_tasks SET retry_count = retry_count + 1, updated_at = ?2 WHERE id = ?1",
+            params![task_id, now],
+        )?;
+        Ok(updated.retry_count == 0)
     }
 
     pub fn handoff_agent_task(
@@ -3726,6 +4115,26 @@ impl Db {
                     "summary": summary,
                 })
                 .to_string(),
+                now
+            ],
+        )?;
+        conn.execute(
+            "INSERT INTO agent_events \
+             (id, kind, payload_json, source_agent_id, channel_id, task_id, created_at) \
+             VALUES (?1, 'task.status', ?2, ?3, ?4, ?5, ?6)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                serde_json::json!({
+                    "taskId": task_id,
+                    "title": current.title,
+                    "status": "accepted",
+                    "ownerAgentId": to_agent_id,
+                    "channelId": current.channel_id,
+                })
+                .to_string(),
+                from_agent_id,
+                current.channel_id,
+                task_id,
                 now
             ],
         )?;
@@ -3879,23 +4288,19 @@ impl Db {
 
     pub fn list_agent_routines(&self, agent_id: &str) -> Result<Vec<AgentRoutine>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT id, agent_id, title, prompt, schedule_kind, interval_minutes, hour, minute, \
-             enabled, conversation_id, next_run_at, last_run_at, last_status, last_error, \
-             created_at, updated_at FROM agent_routines WHERE agent_id = ?1 \
-             ORDER BY created_at, id",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AGENT_ROUTINE_COLUMNS} FROM agent_routines WHERE agent_id = ?1 \
+             ORDER BY created_at, id"
+        ))?;
         let rows = stmt.query_map([agent_id], agent_routine_from_row)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     pub fn get_agent_routine(&self, id: &str) -> Result<Option<AgentRoutine>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT id, agent_id, title, prompt, schedule_kind, interval_minutes, hour, minute, \
-             enabled, conversation_id, next_run_at, last_run_at, last_status, last_error, \
-             created_at, updated_at FROM agent_routines WHERE id = ?1",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AGENT_ROUTINE_COLUMNS} FROM agent_routines WHERE id = ?1"
+        ))?;
         let mut rows = stmt.query_map([id], agent_routine_from_row)?;
         Ok(rows.next().transpose()?)
     }
@@ -3917,20 +4322,36 @@ impl Db {
                 "AGENT_NOT_FOUND: agente `{agent_id}` não existe"
             ));
         }
+        let routine_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM agent_routines WHERE agent_id = ?1",
+            [agent_id],
+            |row| row.get(0),
+        )?;
+        if routine_count >= crate::agents::AGENT_ROUTINE_MAX_PER_AGENT {
+            return Err(anyhow::anyhow!(
+                "AGENT_ROUTINE_LIMIT: este agente já tem {} rotinas",
+                crate::agents::AGENT_ROUTINE_MAX_PER_AGENT
+            ));
+        }
         let id = uuid::Uuid::new_v4().to_string();
-        let next = crate::agents::routine_next_run_at(
-            &input.schedule_kind,
-            input.interval_minutes,
-            input.hour,
-            input.minute,
-            now,
-        );
+        let next = if input.trigger_kind == "event" {
+            0
+        } else {
+            crate::agents::routine_next_run_at(
+                &input.schedule_kind,
+                input.interval_minutes,
+                input.hour,
+                input.minute,
+                now,
+            )
+        };
         conn.execute(
             "INSERT INTO agent_routines \
              (id, agent_id, title, prompt, schedule_kind, interval_minutes, hour, minute, \
               enabled, conversation_id, next_run_at, last_run_at, last_status, last_error, \
-              created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, NULL, NULL, NULL, ?11, ?11)",
+              trigger_kind, event_kind, event_filter_json, lease_until, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, NULL, NULL, NULL, \
+                     ?11, ?12, ?13, NULL, ?14, ?14)",
             params![
                 id,
                 agent_id,
@@ -3942,6 +4363,9 @@ impl Db {
                 input.minute as i64,
                 input.enabled as i64,
                 next,
+                input.trigger_kind,
+                input.event_kind,
+                input.event_filter_json,
                 now,
             ],
         )
@@ -3957,18 +4381,23 @@ impl Db {
         input: &AgentRoutineInput,
         now: i64,
     ) -> Result<AgentRoutine> {
-        let next = crate::agents::routine_next_run_at(
-            &input.schedule_kind,
-            input.interval_minutes,
-            input.hour,
-            input.minute,
-            now,
-        );
+        let next = if input.trigger_kind == "event" {
+            0
+        } else {
+            crate::agents::routine_next_run_at(
+                &input.schedule_kind,
+                input.interval_minutes,
+                input.hour,
+                input.minute,
+                now,
+            )
+        };
         let conn = self.conn.lock();
         let changed = conn.execute(
             "UPDATE agent_routines SET title = ?2, prompt = ?3, schedule_kind = ?4, \
              interval_minutes = ?5, hour = ?6, minute = ?7, enabled = ?8, next_run_at = ?9, \
-             updated_at = ?10 WHERE id = ?1",
+             trigger_kind = ?10, event_kind = ?11, event_filter_json = ?12, updated_at = ?13 \
+             WHERE id = ?1",
             params![
                 id,
                 input.title,
@@ -3979,6 +4408,9 @@ impl Db {
                 input.minute as i64,
                 input.enabled as i64,
                 next,
+                input.trigger_kind,
+                input.event_kind,
+                input.event_filter_json,
                 now,
             ],
         )?;
@@ -3999,13 +4431,17 @@ impl Db {
         let routine = self
             .get_agent_routine(id)?
             .ok_or_else(|| anyhow::anyhow!("AGENT_ROUTINE_NOT_FOUND: rotina `{id}` não existe"))?;
-        let next = crate::agents::routine_next_run_at(
-            &routine.schedule_kind,
-            routine.interval_minutes,
-            routine.hour,
-            routine.minute,
-            now,
-        );
+        let next = if routine.trigger_kind == "event" {
+            0
+        } else {
+            crate::agents::routine_next_run_at(
+                &routine.schedule_kind,
+                routine.interval_minutes,
+                routine.hour,
+                routine.minute,
+                now,
+            )
+        };
         let conn = self.conn.lock();
         conn.execute(
             "UPDATE agent_routines SET enabled = ?2, next_run_at = ?3, updated_at = ?4 \
@@ -4028,12 +4464,11 @@ impl Db {
 
     pub fn list_due_agent_routines(&self, now: i64) -> Result<Vec<AgentRoutine>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT id, agent_id, title, prompt, schedule_kind, interval_minutes, hour, minute, \
-             enabled, conversation_id, next_run_at, last_run_at, last_status, last_error, \
-             created_at, updated_at FROM agent_routines \
-             WHERE enabled = 1 AND next_run_at <= ?1 ORDER BY next_run_at, id LIMIT 8",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AGENT_ROUTINE_COLUMNS} FROM agent_routines \
+             WHERE enabled = 1 AND trigger_kind = 'schedule' AND next_run_at <= ?1 \
+             ORDER BY next_run_at, id LIMIT 8"
+        ))?;
         let rows = stmt.query_map([now], agent_routine_from_row)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
@@ -4127,7 +4562,7 @@ impl Db {
     pub fn list_agent_channels(&self) -> Result<Vec<AgentChannel>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT c.id, c.name, c.created_at, c.updated_at, MAX(m.created_at) \
+            "SELECT c.id, c.name, c.kind, c.created_at, c.updated_at, MAX(m.created_at) \
              FROM agent_channels c LEFT JOIN agent_channel_messages m ON m.channel_id = c.id \
              GROUP BY c.id ORDER BY c.updated_at DESC, c.id",
         )?;
@@ -4135,20 +4570,22 @@ impl Db {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
+                row.get::<_, String>(2)?,
                 row.get::<_, i64>(3)?,
-                row.get::<_, Option<i64>>(4)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, Option<i64>>(5)?,
             ))
         })?;
         let base = rows.collect::<rusqlite::Result<Vec<_>>>()?;
         drop(stmt);
         drop(conn);
         let mut channels = Vec::with_capacity(base.len());
-        for (id, name, created_at, updated_at, last_message_at) in base {
+        for (id, name, kind, created_at, updated_at, last_message_at) in base {
             channels.push(AgentChannel {
                 member_ids: self.channel_members(&id)?,
                 id,
                 name,
+                kind,
                 created_at,
                 updated_at,
                 last_message_at,
@@ -4209,6 +4646,16 @@ impl Db {
         if exists == 0 {
             return Err(anyhow::anyhow!("AGENT_CHANNEL_NOT_FOUND: canal `{id}` não existe"));
         }
+        let kind: String = conn.query_row(
+            "SELECT kind FROM agent_channels WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        if kind == "dm" {
+            return Err(anyhow::anyhow!(
+                "AGENT_CHANNEL_DM_READONLY: canais diretos não podem ser editados como canais"
+            ));
+        }
         for agent_id in &input.member_ids {
             let agent_exists: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM agents WHERE id = ?1 AND archived_at IS NULL",
@@ -4235,6 +4682,402 @@ impl Db {
         drop(conn);
         self.get_agent_channel(id)?
             .ok_or_else(|| anyhow::anyhow!("canal atualizado não encontrado"))
+    }
+
+    /// Returns the unique direct channel between two active agents, creating it
+    /// (and both memberships) on first use.
+    pub fn get_or_create_dm_channel(
+        &self,
+        first_agent_id: &str,
+        second_agent_id: &str,
+        now: i64,
+    ) -> Result<AgentChannel> {
+        if first_agent_id == second_agent_id {
+            return Err(anyhow::anyhow!("AGENT_DM_SELF: não é possível conversar consigo mesmo"));
+        }
+        let mut conn = self.conn.lock();
+        let first = conn
+            .query_row(
+                "SELECT name FROM agents WHERE id = ?1 AND archived_at IS NULL",
+                [first_agent_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "AGENT_DM_INVALID: agente `{first_agent_id}` não existe ou está arquivado"
+                )
+            })?;
+        let second = conn
+            .query_row(
+                "SELECT name FROM agents WHERE id = ?1 AND archived_at IS NULL",
+                [second_agent_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "AGENT_DM_INVALID: agente `{second_agent_id}` não existe ou está arquivado"
+                )
+            })?;
+        let (low, high) = if first_agent_id < second_agent_id {
+            (first_agent_id, second_agent_id)
+        } else {
+            (second_agent_id, first_agent_id)
+        };
+        let dm_key = format!("{low}:{high}");
+        let tx = conn.transaction()?;
+        let existing = tx
+            .query_row(
+                "SELECT id FROM agent_channels WHERE dm_key = ?1",
+                [&dm_key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if let Some(id) = existing {
+            tx.commit()?;
+            drop(conn);
+            return self
+                .get_agent_channel(&id)?
+                .ok_or_else(|| anyhow::anyhow!("AGENT_DM_INVALID: canal direto não encontrado"));
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let name: String = format!("DM · {first} ↔ {second}").chars().take(60).collect();
+        tx.execute(
+            "INSERT INTO agent_channels (id, name, kind, dm_key, created_at, updated_at) \
+             VALUES (?1, ?2, 'dm', ?3, ?4, ?4)",
+            params![id, name, dm_key, now],
+        )?;
+        for agent_id in [first_agent_id, second_agent_id] {
+            tx.execute(
+                "INSERT OR IGNORE INTO agent_channel_members (channel_id, agent_id) \
+                 VALUES (?1, ?2)",
+                params![id, agent_id],
+            )?;
+        }
+        tx.commit()?;
+        drop(conn);
+        self.get_agent_channel(&id)?
+            .ok_or_else(|| anyhow::anyhow!("AGENT_DM_INVALID: canal direto recém-criado não encontrado"))
+    }
+
+    pub fn enqueue_agent_inbox(
+        &self,
+        recipient_agent_id: &str,
+        sender_agent_id: Option<&str>,
+        channel_id: &str,
+        message_id: &str,
+        now: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock();
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM agents WHERE id = ?1 AND archived_at IS NULL",
+            [recipient_agent_id],
+            |row| row.get(0),
+        )?;
+        if exists == 0 {
+            return Err(anyhow::anyhow!(
+                "AGENT_INBOX_INVALID: destinatário `{recipient_agent_id}` não existe ou está arquivado"
+            ));
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO agent_inbox \
+             (id, recipient_agent_id, sender_agent_id, sender_user, channel_id, message_id, \
+              status, attempts, created_at) \
+             VALUES (?1, ?2, ?3, 0, ?4, ?5, 'pending', 0, ?6)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                recipient_agent_id,
+                sender_agent_id,
+                channel_id,
+                message_id,
+                now
+            ],
+        )
+        .context("falha ao enfileirar mensagem direta")?;
+        Ok(())
+    }
+
+    pub fn list_pending_agent_inbox(&self, limit: u32) -> Result<Vec<AgentInboxItem>> {
+        let conn = self.conn.lock();
+        let sql = format!(
+            "SELECT {AGENT_INBOX_ITEM_COLUMNS} FROM agent_inbox i \
+             JOIN agent_channels c ON c.id = i.channel_id \
+             JOIN agent_channel_messages m ON m.id = i.message_id \
+             LEFT JOIN agents s ON s.id = i.sender_agent_id \
+             WHERE i.status = 'pending' ORDER BY i.created_at, i.id LIMIT ?1"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([limit.clamp(1, 100) as i64], agent_inbox_item_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn list_agent_inbox(&self, agent_id: &str, limit: u32) -> Result<Vec<AgentInboxItem>> {
+        let conn = self.conn.lock();
+        let sql = format!(
+            "SELECT {AGENT_INBOX_ITEM_COLUMNS} FROM agent_inbox i \
+             JOIN agent_channels c ON c.id = i.channel_id \
+             JOIN agent_channel_messages m ON m.id = i.message_id \
+             LEFT JOIN agents s ON s.id = i.sender_agent_id \
+             WHERE i.recipient_agent_id = ?1 ORDER BY i.created_at DESC, i.id LIMIT ?2"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            params![agent_id, limit.clamp(1, 100) as i64],
+            agent_inbox_item_from_row,
+        )?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn claim_agent_inbox(&self, id: &str, now: i64) -> Result<bool> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE agent_inbox SET status = 'delivering', claimed_at = ?2, \
+             attempts = attempts + 1 WHERE id = ?1 AND status = 'pending'",
+            params![id, now],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn requeue_agent_inbox(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE agent_inbox SET status = 'pending', claimed_at = NULL WHERE id = ?1",
+            [id],
+        )?;
+        Ok(())
+    }
+
+    pub fn finish_agent_inbox(
+        &self,
+        id: &str,
+        status: &str,
+        error: Option<&str>,
+        now: i64,
+    ) -> Result<()> {
+        let delivered_at = (status == "delivered").then_some(now);
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE agent_inbox SET status = ?2, last_error = ?3, claimed_at = NULL, \
+             delivered_at = COALESCE(?4, delivered_at) WHERE id = ?1",
+            params![id, status, error, delivered_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn requeue_stale_agent_inbox(&self, before: i64) -> Result<usize> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE agent_inbox SET status = 'pending', claimed_at = NULL \
+             WHERE status = 'delivering' AND claimed_at IS NOT NULL AND claimed_at < ?1",
+            [before],
+        )?;
+        Ok(changed)
+    }
+
+    pub fn list_channel_inbox_counts(&self) -> Result<Vec<AgentInboxCount>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT channel_id, COUNT(*) FROM agent_inbox \
+             WHERE status = 'pending' GROUP BY channel_id ORDER BY channel_id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(AgentInboxCount {
+                channel_id: row.get(0)?,
+                pending: row.get(1)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn list_unprocessed_agent_events(&self, limit: u32) -> Result<Vec<AgentEvent>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, kind, payload_json, source_agent_id, channel_id, task_id, \
+             created_at, processed_at FROM agent_events \
+             WHERE processed_at IS NULL ORDER BY created_at, id LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit.clamp(1, 100) as i64], agent_event_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn get_agent_event(&self, id: &str) -> Result<Option<AgentEvent>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, kind, payload_json, source_agent_id, channel_id, task_id, \
+             created_at, processed_at FROM agent_events WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map([id], agent_event_from_row)?;
+        Ok(rows.next().transpose()?)
+    }
+
+    pub fn mark_agent_event_processed(&self, id: &str, now: i64) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE agent_events SET processed_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_event_routines(&self, event_kind: &str) -> Result<Vec<AgentRoutine>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AGENT_ROUTINE_COLUMNS} FROM agent_routines \
+             WHERE enabled = 1 AND trigger_kind = 'event' AND event_kind = ?1 \
+             ORDER BY created_at, id"
+        ))?;
+        let rows = stmt.query_map([event_kind], agent_routine_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn enqueue_event_deliveries(
+        &self,
+        event_id: &str,
+        routine_ids: &[String],
+        now: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock();
+        for routine_id in routine_ids {
+            conn.execute(
+                "INSERT OR IGNORE INTO agent_event_deliveries \
+                 (event_id, routine_id, status, created_at) VALUES (?1, ?2, 'pending', ?3)",
+                params![event_id, routine_id, now],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn list_pending_event_deliveries(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<(AgentEvent, AgentRoutine)>> {
+        let pairs: Vec<(String, String)> = {
+            let conn = self.conn.lock();
+            let mut stmt = conn.prepare(
+                "SELECT event_id, routine_id FROM agent_event_deliveries \
+                 WHERE status = 'pending' ORDER BY created_at, event_id LIMIT ?1",
+            )?;
+            let rows = stmt.query_map([limit.clamp(1, 100) as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let mut out = Vec::new();
+        for (event_id, routine_id) in pairs {
+            let Some(event) = self.get_agent_event(&event_id)? else {
+                continue;
+            };
+            let Some(routine) = self.get_agent_routine(&routine_id)? else {
+                continue;
+            };
+            out.push((event, routine));
+        }
+        Ok(out)
+    }
+
+    pub fn claim_event_delivery(
+        &self,
+        event_id: &str,
+        routine_id: &str,
+        now: i64,
+    ) -> Result<bool> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE agent_event_deliveries SET status = 'running', started_at = ?3 \
+             WHERE event_id = ?1 AND routine_id = ?2 AND status = 'pending'",
+            params![event_id, routine_id, now],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn finish_event_delivery(
+        &self,
+        event_id: &str,
+        routine_id: &str,
+        status: &str,
+        error: Option<&str>,
+        now: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE agent_event_deliveries SET status = ?3, error = ?4, ended_at = ?5 \
+             WHERE event_id = ?1 AND routine_id = ?2",
+            params![event_id, routine_id, status, error, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn skip_old_agent_events(&self, before: i64, now: i64) -> Result<usize> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE agent_event_deliveries SET status = 'skipped', ended_at = ?2 \
+             WHERE status IN ('pending','running') AND event_id IN \
+             (SELECT id FROM agent_events WHERE created_at < ?1)",
+            params![before, now],
+        )?;
+        let changed = conn.execute(
+            "UPDATE agent_events SET processed_at = ?2 \
+             WHERE processed_at IS NULL AND created_at < ?1",
+            params![before, now],
+        )?;
+        Ok(changed)
+    }
+
+    pub fn claim_due_agent_routines(
+        &self,
+        now: i64,
+        limit: u32,
+    ) -> Result<Vec<AgentRoutine>> {
+        let ids: Vec<String> = {
+            let conn = self.conn.lock();
+            let mut stmt = conn.prepare(
+                "SELECT id FROM agent_routines \
+                 WHERE enabled = 1 AND trigger_kind = 'schedule' AND next_run_at <= ?1 \
+                   AND (lease_until IS NULL OR lease_until < ?1) \
+                 ORDER BY next_run_at, id LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![now, limit.clamp(1, 50) as i64], |row| {
+                row.get::<_, String>(0)
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let mut claimed = Vec::new();
+        for id in ids {
+            let conn = self.conn.lock();
+            let changed = conn.execute(
+                "UPDATE agent_routines SET lease_until = ?2 \
+                 WHERE id = ?1 AND enabled = 1 AND trigger_kind = 'schedule' \
+                   AND next_run_at <= ?3 AND (lease_until IS NULL OR lease_until < ?3)",
+                params![id, now + 5 * 60 * 1000, now],
+            )?;
+            drop(conn);
+            if changed > 0 {
+                if let Some(routine) = self.get_agent_routine(&id)? {
+                    claimed.push(routine);
+                }
+            }
+        }
+        Ok(claimed)
+    }
+
+    pub fn clear_agent_routine_lease(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE agent_routines SET lease_until = NULL WHERE id = ?1",
+            [id],
+        )?;
+        Ok(())
+    }
+
+    pub fn sweep_agent_routine_leases(&self, now: i64) -> Result<usize> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE agent_routines SET lease_until = NULL \
+             WHERE lease_until IS NOT NULL AND lease_until < ?1",
+            [now],
+        )?;
+        Ok(changed)
     }
 
     pub fn delete_agent_channel(&self, id: &str) -> Result<()> {
@@ -4290,6 +5133,26 @@ impl Db {
         conn.execute(
             "UPDATE agent_channels SET updated_at = ?2 WHERE id = ?1",
             params![channel_id, now],
+        )?;
+        let preview: String = content.chars().take(16_000).collect();
+        conn.execute(
+            "INSERT INTO agent_events \
+             (id, kind, payload_json, source_agent_id, channel_id, task_id, created_at) \
+             VALUES (?1, 'channel.message', ?2, ?3, ?4, NULL, ?5)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                serde_json::json!({
+                    "channelId": channel_id,
+                    "messageId": id,
+                    "role": role,
+                    "agentId": agent_id,
+                    "content": preview,
+                })
+                .to_string(),
+                agent_id,
+                channel_id,
+                now
+            ],
         )?;
         drop(conn);
         Ok(AgentChannelMessage {
@@ -5482,8 +6345,9 @@ impl Db {
         let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO artifacts (id, conversation_id, message_id, name, mime_type, kind, \
-             language, size, created_at, path, favorite) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             language, size, created_at, path, favorite, task_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, \
+                     (SELECT task_id FROM conversations WHERE id = ?2))",
             params![
                 &artifact.artifact.id,
                 &artifact.artifact.conversation_id,
@@ -5541,7 +6405,7 @@ impl Db {
         let rows = stmt.query_map([], |row| {
             Ok(LibraryArtifact {
                 artifact: artifact_from_row(row)?,
-                conversation_title: row.get(10)?,
+                conversation_title: row.get(11)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -5554,11 +6418,43 @@ impl Db {
         conn.query_row(&sql, [id], |row| {
             Ok(StoredArtifact {
                 artifact: artifact_from_row(row)?,
-                path: row.get(10)?,
+                path: row.get(11)?,
             })
         })
         .optional()
         .context("falha ao ler artefato")
+    }
+
+    pub fn artifact_belongs_to_task(&self, artifact_id: &str, task_id: &str) -> Result<bool> {
+        let conn = self.conn.lock();
+        let row = conn
+            .query_row(
+                "SELECT a.task_id, a.conversation_id FROM artifacts a WHERE a.id = ?1",
+                [artifact_id],
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?;
+        let Some((artifact_task, conversation_id)) = row else {
+            return Ok(false);
+        };
+        if artifact_task.as_deref() == Some(task_id) {
+            return Ok(true);
+        }
+        if artifact_task.is_some() {
+            return Ok(false);
+        }
+        let Some(conversation_id) = conversation_id else {
+            return Ok(false);
+        };
+        let conversation_task: Option<String> = conn
+            .query_row(
+                "SELECT task_id FROM conversations WHERE id = ?1",
+                [conversation_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(conversation_task.as_deref() == Some(task_id))
     }
 
     pub fn delete_artifact(&self, id: &str) -> anyhow::Result<()> {
@@ -6389,6 +7285,9 @@ mod tests {
             hour: 9,
             minute: 0,
             enabled: true,
+            trigger_kind: "schedule".to_string(),
+            event_kind: String::new(),
+            event_filter_json: "{}".to_string(),
         };
         let now = now_ms();
         let routine = db
@@ -6503,6 +7402,44 @@ mod tests {
     }
 
     #[test]
+    fn shared_memories_are_global_and_keep_source_after_agent_delete() {
+        let db = test_db();
+        let mut input = agent_input("Compartilha");
+        input.memory_enabled = true;
+        input.capabilities.shared_memory = true;
+        let agent = db.create_agent(&input).expect("agent");
+        let memory = db
+            .create_agent_shared_memory(
+                &agent.id,
+                &crate::agents::AgentMemoryInput {
+                    kind: "procedure".to_string(),
+                    content: "Revise o changelog antes do release.".to_string(),
+                    source_conversation_id: None,
+                    pinned: true,
+                }
+                .normalize()
+                .expect("normalize"),
+            )
+            .expect("shared memory");
+        assert_eq!(db.list_agent_shared_memories().expect("list").len(), 1);
+        assert_eq!(
+            db.get_agent_shared_memory(&memory.id)
+                .expect("get")
+                .expect("exists")
+                .source_agent_name
+                .as_deref(),
+            Some("Compartilha")
+        );
+        db.delete_agent(&agent.id).expect("delete agent");
+        assert!(db
+            .get_agent_shared_memory(&memory.id)
+            .expect("get")
+            .expect("exists")
+            .source_agent_id
+            .is_none());
+    }
+
+    #[test]
     fn agent_task_conversation_binding_is_atomic_and_idempotent() {
         let db = test_db();
         let owner = db.create_agent(&agent_input("Dona")).expect("agent");
@@ -6564,6 +7501,7 @@ mod tests {
             acceptance: "Lista com referência de página.".to_string(),
             channel_id: Some(channel.id.clone()),
             parent_task_id: None,
+            workspace_id: None,
             max_turns: Some(4),
             max_tokens: Some(20_000),
             max_cost: Some(0.5),
@@ -6875,6 +7813,9 @@ mod tests {
                     hour: 9,
                     minute: 0,
                     enabled: true,
+                    trigger_kind: "schedule".to_string(),
+                    event_kind: String::new(),
+                    event_filter_json: "{}".to_string(),
                 }
                 .normalize()
                 .expect("routine input"),
@@ -8027,8 +8968,9 @@ mod tests {
             prefixed, plain,
             "a query com JOIN precisa listar as colunas na mesma ordem do mapper"
         );
-        assert_eq!(plain.len(), 10);
-        assert_eq!(plain[9], "favorite", "favorite é a última coluna do mapper");
+        assert_eq!(plain.len(), 11);
+        assert_eq!(plain[9], "favorite", "favorite precede task_id");
+        assert_eq!(plain[10], "task_id");
     }
 
     #[test]

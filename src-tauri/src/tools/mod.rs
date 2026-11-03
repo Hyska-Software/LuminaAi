@@ -12,6 +12,7 @@ use crate::providers::ToolDefinition;
 
 pub mod artifact_library;
 pub mod artifacts;
+pub mod agents;
 pub mod code;
 pub mod code_exec;
 pub mod create_file;
@@ -23,6 +24,15 @@ pub mod registry;
 pub mod skills;
 pub mod tasks;
 pub mod web_search;
+
+/// Runtime hooks available to tools that mutate agent collaboration state.
+/// Production wires this to Tauri events and the active-turn registry; tests
+/// pass `None`.
+pub trait AgentHooks: Send + Sync {
+    fn task_updated(&self, task: &crate::agents::AgentTask);
+    fn channel_updated(&self, channel_id: &str);
+    fn cancel_conversation(&self, conversation_id: &str);
+}
 
 /// Upper bound for the text fed back to the model from a single tool call.
 pub const MAX_TOOL_RESULT_CHARS: usize = 120_000;
@@ -40,6 +50,8 @@ pub struct ToolRuntime {
     pub settings: Settings,
     /// Turn cancellation token: `run_code` kills the process tree on cancel.
     pub cancel: CancellationToken,
+    /// Production hooks for agent task/channel events and real cancellation.
+    pub agent_hooks: Option<std::sync::Arc<dyn AgentHooks>>,
     /// Resolved `<app-data>` directory (artifacts, code-runs, skills).
     pub data_dir: PathBuf,
     /// External skills repositories (Codex/Claude/OpenCode/Agent Skills) read
@@ -170,13 +182,34 @@ pub async fn execute(rt: &ToolRuntime, call: &ToolCallRecord) -> ToolOutcome {
         "validate_ui" => genui::run(&arguments),
         // Durable agent memory (only for agent turns with memory enabled).
         "memory" => memory::run(rt, &arguments),
+        name if agents::is_agent_tool(name) => {
+            let Some(agent_id) = rt.options.agent_id.as_deref() else {
+                return ToolOutcome::error(
+                    "as ferramentas de agente só existem em conversas de um agente",
+                );
+            };
+            agents::run_with_hooks(&rt.db, agent_id, name, &arguments, &rt.settings, rt.agent_hooks.as_deref())
+        }
+        "task_wait" => {
+            let Some(agent_id) = rt.options.agent_id.as_deref() else {
+                return ToolOutcome::error("as ferramentas de tarefa só existem em conversas de um agente");
+            };
+            tasks::wait_for_task(
+                &rt.db,
+                agent_id,
+                &rt.conversation_id,
+                &arguments,
+                &rt.cancel,
+            )
+            .await
+        }
         name if tasks::is_delegation_tool(name) => {
             let Some(agent_id) = rt.options.agent_id.as_deref() else {
                 return ToolOutcome::error(
                     "a delegação só existe em conversas de um agente",
                 );
             };
-            tasks::run(&rt.db, agent_id, &rt.conversation_id, name, &arguments)
+            tasks::run_with_hooks(&rt.db, agent_id, &rt.conversation_id, name, &arguments, rt.agent_hooks.as_deref())
         }
         other => ToolOutcome::error(format!("ferramenta desconhecida: {other}")),
     };
@@ -363,6 +396,7 @@ mod tests {
             options,
             settings: Settings::default(),
             cancel: tokio_util::sync::CancellationToken::new(),
+            agent_hooks: None,
             data_dir: std::env::temp_dir().join(format!(
                 "lumina-tools-dispatch-{}",
                 uuid::Uuid::new_v4()

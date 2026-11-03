@@ -8,7 +8,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::agents::{
     Agent, AgentExportDocument, AgentInput, AgentMemory, AgentMemoryInput, AgentRevision,
-    AgentThreadCursor, AgentThreadPage, AgentUsage,
+    AgentSharedMemory, AgentThreadCursor, AgentThreadPage, AgentUsage,
 };
 use crate::harness::{self, HarnessDeps};
 use crate::state::AppState;
@@ -216,6 +216,24 @@ pub fn delete_agent_memory(
     state
         .db
         .delete_agent_memory(&agent_id, &memory_id)
+        .map_err(to_error)
+}
+
+#[tauri::command]
+pub fn list_shared_agent_memories(
+    state: State<'_, AppState>,
+) -> Result<Vec<AgentSharedMemory>, String> {
+    state.db.list_agent_shared_memories().map_err(to_error)
+}
+
+#[tauri::command]
+pub fn delete_shared_agent_memory(
+    state: State<'_, AppState>,
+    memory_id: String,
+) -> Result<(), String> {
+    state
+        .db
+        .delete_shared_memory(&memory_id)
         .map_err(to_error)
 }
 

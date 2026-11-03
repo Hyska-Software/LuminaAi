@@ -75,9 +75,19 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             // keeps the schedule responsive without a cloud worker.
             let scheduler = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                crate::commands::routines::scheduler_tick(scheduler.clone()).await;
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                     crate::commands::routines::scheduler_tick(scheduler.clone()).await;
+                }
+            });
+            // Event-triggered routines are drained on boot and every 5s.
+            let event_scheduler = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                crate::commands::routines::event_tick(event_scheduler.clone()).await;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    crate::commands::routines::event_tick(event_scheduler.clone()).await;
                 }
             });
             // Delegated tasks are latency-sensitive: pick them up quickly while
@@ -89,6 +99,16 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
                     crate::commands::tasks::scheduler_tick(task_scheduler.clone()).await;
                 }
             });
+            // Direct messages: deliver pending inbox rows immediately after boot
+            // and every 5s while the app is open.
+            let inbox_scheduler = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                crate::commands::inbox::inbox_tick(inbox_scheduler.clone()).await;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    crate::commands::inbox::inbox_tick(inbox_scheduler.clone()).await;
+                }
+            });
             // Orphan containers and audit sessions from a previous process are
             // not live. Clean them once at boot; periodic cleanup would kill
             // legitimate terminal/run_code containers.
@@ -97,6 +117,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
                 let state = boot_cleanup.state::<crate::state::AppState>();
                 let now = crate::domain::now_ms();
                 let _ = state.db.sweep_agent_tasks(now);
+                let _ = state.db.sweep_agent_routine_leases(now);
                 let _ = state.db.finish_interrupted_agent_routine_runs(now);
                 let _ = state
                     .db
@@ -189,6 +210,8 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::agents::update_agent_memory,
             commands::agents::delete_agent_memory,
             commands::agents::clear_agent_memories,
+            commands::agents::list_shared_agent_memories,
+            commands::agents::delete_shared_agent_memory,
             commands::agents::get_agent_usage,
             commands::agents::list_agent_usage,
             commands::agents::duplicate_agent,
@@ -208,6 +231,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::channels::update_agent_channel,
             commands::channels::delete_agent_channel,
             commands::channels::list_agent_channel_messages,
+            commands::inbox::list_agent_channel_inbox_counts,
             commands::channels::post_agent_channel_message,
             commands::tasks::list_agent_tasks,
             commands::tasks::get_agent_task,
@@ -253,6 +277,8 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::skills::set_skill_enabled,
             commands::skills::delete_skill,
             commands::skills::get_skill_content,
+            commands::skills::save_skill,
+            commands::skills::list_skill_versions,
             commands::attachments::import_attachments,
             commands::attachments::get_attachment,
             commands::attachments::delete_attachment,

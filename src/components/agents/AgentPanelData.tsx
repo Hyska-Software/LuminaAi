@@ -45,6 +45,9 @@ const CAPABILITIES: Array<{ key: keyof AgentPanelContext['agent']['capabilities'
   { key: 'fileAccess', label: 'Arquivos' },
   { key: 'codeExecution', label: 'Código' },
   { key: 'delegation', label: 'Delegação' },
+  { key: 'automation', label: 'Automações' },
+  { key: 'sharedMemory', label: 'Memória equipe' },
+  { key: 'skillsWrite', label: 'Skills (escrita)' },
   { key: 'computerUse', label: 'Computador' },
   { key: 'screenCapture', label: 'Tela (leitura)' },
   { key: 'browserUse', label: 'Navegador' },
@@ -316,7 +319,12 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
           ) : null}
         </div>
       </div>
-      <AgentTaskBoardDialog open={boardOpen} onOpenChange={setBoardOpen} />
+      <AgentTaskBoardDialog
+        open={boardOpen}
+        onOpenChange={setBoardOpen}
+        ownerAgentId={context.agent.id}
+        title={`Tarefas de ${context.agent.name}`}
+      />
     </div>
   );
 }

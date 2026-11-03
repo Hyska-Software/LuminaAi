@@ -44,6 +44,9 @@ const DEFAULT_CAPABILITIES: AgentCapabilities = {
   fileAccess: true,
   codeExecution: true,
   delegation: false,
+  automation: false,
+  sharedMemory: false,
+  skillsWrite: false,
   computerUse: false,
   screenCapture: false,
   browserUse: false,
@@ -82,6 +85,7 @@ const TOOL_OPTIONS: Array<{ name: string; label: string; group: string }> = [
   { name: 'task', label: 'Subagente', group: 'Sessão' },
   { name: 'list_skills', label: 'Listar skills', group: 'Skills' },
   { name: 'read_skill', label: 'Ler skill', group: 'Skills' },
+  { name: 'skill_save', label: 'Salvar skill', group: 'Skills' },
   { name: 'list_artifacts', label: 'Listar artefatos', group: 'Biblioteca' },
   { name: 'read_artifact', label: 'Ler artefato', group: 'Biblioteca' },
   { name: 'validate_ui', label: 'Validar interface', group: 'Interface' },
@@ -89,12 +93,22 @@ const TOOL_OPTIONS: Array<{ name: string; label: string; group: string }> = [
   { name: 'delegate_task', label: 'Delegar tarefa', group: 'Delegação' },
   { name: 'task_list', label: 'Listar tarefas', group: 'Delegação' },
   { name: 'task_get', label: 'Ler tarefa', group: 'Delegação' },
+  { name: 'task_wait', label: 'Aguardar tarefa', group: 'Delegação' },
+  { name: 'task_cancel', label: 'Cancelar tarefa', group: 'Delegação' },
   { name: 'accept_task', label: 'Aceitar tarefa', group: 'Delegação' },
   { name: 'decline_task', label: 'Recusar tarefa', group: 'Delegação' },
   { name: 'handoff_task', label: 'Transferir tarefa', group: 'Delegação' },
   { name: 'update_task', label: 'Atualizar tarefa', group: 'Delegação' },
   { name: 'finish_task', label: 'Concluir tarefa', group: 'Delegação' },
   { name: 'send_message', label: 'Mensagem no canal', group: 'Delegação' },
+  { name: 'agent_directory', label: 'Diretório de agentes', group: 'Agentes' },
+  { name: 'agent_usage', label: 'Uso do agente', group: 'Agentes' },
+  { name: 'agent_inbox', label: 'Inbox direto', group: 'Agentes' },
+  { name: 'agent_message', label: 'Mensagem direta', group: 'Agentes' },
+  { name: 'routine_list', label: 'Listar rotinas', group: 'Automação' },
+  { name: 'routine_create', label: 'Criar rotina', group: 'Automação' },
+  { name: 'routine_update', label: 'Editar rotina', group: 'Automação' },
+  { name: 'routine_delete', label: 'Excluir rotina', group: 'Automação' },
   { name: 'computer_screenshot', label: 'Screenshot', group: 'Computador' },
   { name: 'computer_windows', label: 'Listar janelas', group: 'Computador' },
   { name: 'computer_ui_tree', label: 'Árvore de acessibilidade', group: 'Computador' },
@@ -663,6 +677,24 @@ export function AgentEditorDialog() {
                   onCheckedChange={(checked) => setCapability('delegation', checked)}
                   label="Delegar tarefas"
                   description="Permite criar e transferir tarefas para outros agentes e postar no canal. Concluir uma tarefa atribuída já é permitido a qualquer agente."
+                />
+                <Switch
+                  checked={form.capabilities.automation ?? false}
+                  onCheckedChange={(checked) => setCapability('automation', checked)}
+                  label="Automações"
+                  description="Permite ao agente listar, criar, editar e excluir as próprias rotinas agendadas."
+                />
+                <Switch
+                  checked={form.capabilities.sharedMemory ?? false}
+                  onCheckedChange={(checked) => setCapability('sharedMemory', checked)}
+                  label="Memória compartilhada"
+                  description="Permite ler e gravar memórias visíveis a todos os agentes com esta capability."
+                />
+                <Switch
+                  checked={form.capabilities.skillsWrite ?? false}
+                  onCheckedChange={(checked) => setCapability('skillsWrite', checked)}
+                  label="Escrever skills"
+                  description="Permite salvar SKILL.md em <app-data>/skills, com histórico de versões."
                 />
                 <Switch
                   checked={form.capabilities.computerUse ?? false}

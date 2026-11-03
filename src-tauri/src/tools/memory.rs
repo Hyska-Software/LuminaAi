@@ -36,6 +36,11 @@ pub fn definition() -> ToolDefinition {
                     "enum": ["fact", "preference", "procedure", "note"],
                     "description": "Optional classification for save (default: fact)."
                 },
+                "scope": {
+                    "type": "string",
+                    "enum": ["private", "shared"],
+                    "description": "private (default) or shared across agents with sharedMemory."
+                },
                 "pinned": {
                     "type": "boolean",
                     "description": "Optional: pin a saved memory so it is always shown first."
@@ -72,20 +77,61 @@ pub fn run_with(
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase();
+    let scope = json_str(args, "scope")
+        .unwrap_or_else(|| "private".to_string())
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(scope.as_str(), "private" | "shared") {
+        return ToolOutcome::error("scope inválido: use private ou shared");
+    }
+    let shared_allowed = || -> Result<(), ToolOutcome> {
+        match db.get_agent(agent_id) {
+            Ok(Some(agent))
+                if agent.memory_enabled && agent.capabilities.shared_memory =>
+            {
+                Ok(())
+            }
+            Ok(Some(_)) => Err(ToolOutcome::error(
+                "AGENT_CAPABILITY_DENIED: memória compartilhada não está habilitada para este agente",
+            )),
+            Ok(None) => Err(ToolOutcome::error("AGENT_NOT_FOUND: agente não existe")),
+            Err(error) => Err(ToolOutcome::error(format!("{error:#}"))),
+        }
+    };
     match action.as_str() {
-        "list" => match db.list_agent_memories(agent_id) {
-            Ok(memories) => ToolOutcome {
-                content: serde_json::to_string_pretty(&memories)
-                    .unwrap_or_else(|_| "[]".to_string()),
-                summary: Some(if memories.len() == 1 {
-                    "1 memória".to_string()
-                } else {
-                    format!("{} memórias", memories.len())
-                }),
-                ..Default::default()
-            },
-            Err(error) => ToolOutcome::error(format!("não foi possível ler as memórias: {error:#}")),
-        },
+        "list" => {
+            if scope == "shared" {
+                if let Err(outcome) = shared_allowed() {
+                    return outcome;
+                }
+                return match db.list_agent_shared_memories() {
+                    Ok(memories) => ToolOutcome {
+                        content: serde_json::to_string_pretty(&memories)
+                            .unwrap_or_else(|_| "[]".to_string()),
+                        summary: Some(format!("{} memória(s) compartilhada(s)", memories.len())),
+                        ..Default::default()
+                    },
+                    Err(error) => {
+                        ToolOutcome::error(format!("não foi possível ler as memórias: {error:#}"))
+                    }
+                };
+            }
+            match db.list_agent_memories(agent_id) {
+                Ok(memories) => ToolOutcome {
+                    content: serde_json::to_string_pretty(&memories)
+                        .unwrap_or_else(|_| "[]".to_string()),
+                    summary: Some(if memories.len() == 1 {
+                        "1 memória".to_string()
+                    } else {
+                        format!("{} memórias", memories.len())
+                    }),
+                    ..Default::default()
+                },
+                Err(error) => {
+                    ToolOutcome::error(format!("não foi possível ler as memórias: {error:#}"))
+                }
+            }
+        }
         "save" => {
             let Some(content) = json_str(args, "content") else {
                 return ToolOutcome::error("o argumento `content` é obrigatório para salvar");
@@ -100,10 +146,32 @@ pub fn run_with(
                 Ok(input) => input,
                 Err(error) => return ToolOutcome::error(error),
             };
+            if scope == "shared" {
+                if let Err(outcome) = shared_allowed() {
+                    return outcome;
+                }
+                return match db.create_agent_shared_memory(agent_id, &input) {
+                    Ok(memory) => ToolOutcome {
+                        content: serde_json::to_string_pretty(&json!({
+                            "saved": true,
+                            "scope": "shared",
+                            "id": memory.id,
+                            "kind": memory.kind,
+                        }))
+                        .unwrap_or_else(|_| "{\"saved\":true}".to_string()),
+                        summary: Some("Memória compartilhada salva".to_string()),
+                        ..Default::default()
+                    },
+                    Err(error) => {
+                        ToolOutcome::error(format!("não foi possível salvar: {error:#}"))
+                    }
+                };
+            }
             match db.create_agent_memory(agent_id, &input) {
                 Ok(memory) => ToolOutcome {
                     content: serde_json::to_string_pretty(&json!({
                         "saved": true,
+                        "scope": "private",
                         "id": memory.id,
                         "kind": memory.kind,
                     }))
@@ -121,6 +189,58 @@ pub fn run_with(
             let Some(content) = json_str(args, "content") else {
                 return ToolOutcome::error("o argumento `content` é obrigatório para atualizar");
             };
+            if scope == "shared" {
+                if let Err(outcome) = shared_allowed() {
+                    return outcome;
+                }
+                let existing = match db.get_agent_shared_memory(id.trim()) {
+                    Ok(Some(memory)) if memory.source_agent_id.as_deref() == Some(agent_id) => {
+                        memory
+                    }
+                    Ok(Some(_)) => {
+                        return ToolOutcome::error(
+                            "AGENT_MEMORY_FORBIDDEN: a memória foi criada por outro agente",
+                        );
+                    }
+                    Ok(None) => {
+                        return ToolOutcome::error("memória compartilhada não encontrada");
+                    }
+                    Err(error) => {
+                        return ToolOutcome::error(format!(
+                            "não foi possível ler a memória: {error:#}"
+                        ));
+                    }
+                };
+                let input = AgentMemoryInput {
+                    kind: json_str(args, "kind").unwrap_or(existing.kind),
+                    content,
+                    source_conversation_id: Some(conversation_id.to_string()),
+                    pinned: args
+                        .get("pinned")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(existing.pinned),
+                };
+                let input = match input.normalize() {
+                    Ok(input) => input,
+                    Err(error) => return ToolOutcome::error(error),
+                };
+                return match db.update_agent_shared_memory(id.trim(), agent_id, &input) {
+                    Ok(memory) => ToolOutcome {
+                        content: serde_json::to_string_pretty(&json!({
+                            "updated": true,
+                            "scope": "shared",
+                            "id": memory.id,
+                            "kind": memory.kind,
+                        }))
+                        .unwrap_or_else(|_| "{\"updated\":true}".to_string()),
+                        summary: Some("Memória compartilhada atualizada".to_string()),
+                        ..Default::default()
+                    },
+                    Err(error) => {
+                        ToolOutcome::error(format!("não foi possível atualizar: {error:#}"))
+                    }
+                };
+            }
             let existing = match db.get_agent_memory(agent_id, id.trim()) {
                 Ok(Some(memory)) => memory,
                 Ok(None) => {
@@ -147,6 +267,7 @@ pub fn run_with(
                 Ok(memory) => ToolOutcome {
                     content: serde_json::to_string_pretty(&json!({
                         "updated": true,
+                        "scope": "private",
                         "id": memory.id,
                         "kind": memory.kind,
                     }))
@@ -161,9 +282,34 @@ pub fn run_with(
             let Some(id) = json_str(args, "id") else {
                 return ToolOutcome::error("o argumento `id` é obrigatório para esquecer");
             };
+            if scope == "shared" {
+                if let Err(outcome) = shared_allowed() {
+                    return outcome;
+                }
+                return match db.delete_agent_shared_memory(id.trim(), agent_id) {
+                    Ok(()) => ToolOutcome {
+                        content: json!({
+                            "forgotten": true,
+                            "scope": "shared",
+                            "id": id.trim()
+                        })
+                        .to_string(),
+                        summary: Some("Memória compartilhada removida".to_string()),
+                        ..Default::default()
+                    },
+                    Err(error) => {
+                        ToolOutcome::error(format!("não foi possível remover: {error:#}"))
+                    }
+                };
+            }
             match db.delete_agent_memory(agent_id, id.trim()) {
                 Ok(()) => ToolOutcome {
-                    content: json!({ "forgotten": true, "id": id.trim() }).to_string(),
+                    content: json!({
+                        "forgotten": true,
+                        "scope": "private",
+                        "id": id.trim()
+                    })
+                    .to_string(),
                     summary: Some("Memória removida".to_string()),
                     ..Default::default()
                 },
@@ -195,6 +341,7 @@ mod tests {
             options,
             settings: Settings::default(),
             cancel: CancellationToken::new(),
+            agent_hooks: None,
             data_dir: PathBuf::new(),
             skills_roots: Vec::<ExternalSkillRoot>::new(),
         }

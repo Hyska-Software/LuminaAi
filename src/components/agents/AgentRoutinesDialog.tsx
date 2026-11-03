@@ -44,7 +44,10 @@ const STATUS_LABELS: Record<string, string> = {
   running: 'executando',
 };
 
-function scheduleLabel(routine: Pick<AgentRoutine, 'scheduleKind' | 'intervalMinutes' | 'hour' | 'minute'>): string {
+function scheduleLabel(routine: Pick<AgentRoutine, 'scheduleKind' | 'intervalMinutes' | 'hour' | 'minute' | 'triggerKind' | 'eventKind'>): string {
+  if (routine.triggerKind === 'event') {
+    return routine.eventKind === 'task.status' ? 'Evento: status de tarefa' : 'Evento: mensagem em canal';
+  }
   if (routine.scheduleKind === 'daily') {
     return `Todos os dias às ${String(routine.hour).padStart(2, '0')}:${String(routine.minute).padStart(2, '0')}`;
   }
@@ -63,6 +66,9 @@ function emptyInput(): AgentRoutineInput {
     hour: 9,
     minute: 0,
     enabled: true,
+    triggerKind: 'schedule',
+    eventKind: '',
+    eventFilterJson: '{}',
   };
 }
 
@@ -132,6 +138,9 @@ export function AgentRoutinesDialog({
       hour: routine.hour,
       minute: routine.minute,
       enabled: routine.enabled,
+      triggerKind: routine.triggerKind,
+      eventKind: routine.eventKind,
+      eventFilterJson: routine.eventFilterJson || '{}',
     });
   };
 
@@ -143,6 +152,10 @@ export function AgentRoutinesDialog({
     }
     if (!form.prompt.trim()) {
       toast.error('Descreva a instrução da rotina');
+      return;
+    }
+    if (form.triggerKind === 'event' && !form.eventKind) {
+      toast.error('Escolha o tipo de evento');
       return;
     }
     setSaving(true);
@@ -342,6 +355,46 @@ export function AgentRoutinesDialog({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1.5">
+                <Label htmlFor="routine-trigger">Gatilho</Label>
+                <NativeSelect
+                  id="routine-trigger"
+                  value={form.triggerKind}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      triggerKind: event.target.value as AgentRoutineInput['triggerKind'],
+                      eventKind:
+                        event.target.value === 'event'
+                          ? current.eventKind || 'channel.message'
+                          : '',
+                    }))
+                  }
+                >
+                  <option value="schedule">Agendada</option>
+                  <option value="event">Por evento</option>
+                </NativeSelect>
+              </div>
+              {form.triggerKind === 'event' ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="routine-event">Evento</Label>
+                  <NativeSelect
+                    id="routine-event"
+                    value={form.eventKind}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        eventKind: event.target.value as AgentRoutineInput['eventKind'],
+                      }))
+                    }
+                  >
+                    <option value="channel.message">Mensagem em canal</option>
+                    <option value="task.status">Status de tarefa</option>
+                  </NativeSelect>
+                </div>
+              ) : null}
+              {form.triggerKind === 'schedule' ? (
+                <>
+              <div className="space-y-1.5">
                 <Label htmlFor="routine-kind">Frequência</Label>
                 <NativeSelect
                   id="routine-kind"
@@ -406,6 +459,20 @@ export function AgentRoutinesDialog({
                       }
                     />
                   </div>
+                </div>
+              )}
+                </>
+              ) : (
+                <div className="space-y-1.5 col-span-2">
+                  <Label htmlFor="routine-filter">Filtro JSON (opcional)</Label>
+                  <Input
+                    id="routine-filter"
+                    value={form.eventFilterJson}
+                    placeholder='{"channelId":"..."}'
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, eventFilterJson: event.target.value }))
+                    }
+                  />
                 </div>
               )}
             </div>

@@ -45,12 +45,19 @@ o lease expira em 30 min, o runner renova a cada 5 min e o sweep recupera
 
 Criação/transferência (capability `delegation`): `delegate_task`,
 `handoff_task`, `send_message`.
-Dono (sempre disponíveis): `task_list`, `task_get`, `accept_task`,
-`decline_task`, `update_task`, `finish_task`.
+Dono (sempre disponíveis): `task_list`, `task_get`, `task_wait`, `task_cancel`,
+`accept_task`, `decline_task`, `update_task`, `finish_task`.
 
 - `delegate_task` — cria tarefa para outro agente; rejeita auto-delegação,
   herda canal (inclusive de uma thread de tarefa) e tarefa-pai.
 - `task_list` / `task_get` — escopados ao dono/criador/canal do chamador.
+- `task_wait` — espera até 300 s por um estado estável (`done`, `failed`,
+  `cancelled`, `declined`, `review`, `waiting_input`, `waiting_approval`);
+  devolve `waitTimedOut` sem alterar a tarefa.
+- `task_cancel` — dono ou criador encerra uma tarefa não terminal; a transição
+  é auditada em `agent_task_events`. O turno em execução observa o novo status
+  no próximo passo (cancelamento cooperativo); o comando de UI continua sendo o
+  caminho para interromper imediatamente.
 - `accept_task` / `decline_task` — aceite/recusa pelo dono.
 - `handoff_task` — transfere imediatamente (máx. 3), zera `conversation_id` e
   exige que o destino seja membro do canal; recusa no primeiro turno é possível.

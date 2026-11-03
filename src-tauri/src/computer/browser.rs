@@ -1931,7 +1931,7 @@ mod tests {
             let ctx = crate::tools::registry::ToolCtx {
                 db: db.clone(), http: reqwest::Client::new(), conversation_id: conversation.id.clone(),
                 message_id: "message".into(), tool_call_id: "call".into(), turn_id: "turn".into(),
-                workspace: None, settings: settings.clone(), cancel: tokio_util::sync::CancellationToken::new(),
+                workspace: None, settings: settings.clone(), cancel: tokio_util::sync::CancellationToken::new(), agent_hooks: None,
                 data_dir: temp.path().to_path_buf(), approval: None, observed: None, emit: None, rules: Vec::new(),
                 jobs: None, questions: None, turn_kind: crate::domain::TurnKind::User, mcp: None, subagent: None,
                 enabled_tools: Arc::new(Default::default()), subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -2140,7 +2140,7 @@ mod tests {
             db: db.clone(), http: reqwest::Client::new(), conversation_id: conversation.clone(),
             message_id: "cdp-message".into(), tool_call_id: "cdp-call".into(), turn_id: "cdp-turn".into(),
             workspace: None, settings: crate::domain::Settings { execution_environment: "docker".into(), ..Default::default() },
-            cancel: tokio_util::sync::CancellationToken::new(), data_dir: temp.path().to_path_buf(),
+            cancel: tokio_util::sync::CancellationToken::new(), agent_hooks: None, data_dir: temp.path().to_path_buf(),
             approval: None, observed: None, emit: None, rules: Vec::new(), jobs: None, questions: None,
             turn_kind: crate::domain::TurnKind::User, mcp: None, subagent: None,
             enabled_tools: Arc::new(Default::default()), subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),

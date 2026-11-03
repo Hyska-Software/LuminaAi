@@ -6,17 +6,27 @@ use sha2::{Digest, Sha256};
 
 /// Resolve an app-owned directory without accepting paths supplied by a model.
 pub(crate) fn prepare(data_dir: &Path, conversation_id: &str) -> anyhow::Result<PathBuf> {
+    prepare_key(data_dir, conversation_id)
+}
+
+/// Task-scoped internal workspace. The key survives handoffs because it is
+/// derived from the durable task id, not from the current owner thread.
+pub(crate) fn prepare_for_task(data_dir: &Path, task_id: &str) -> anyhow::Result<PathBuf> {
+    prepare_key(data_dir, &format!("task:{task_id}"))
+}
+
+fn prepare_key(data_dir: &Path, key: &str) -> anyhow::Result<PathBuf> {
     std::fs::create_dir_all(data_dir).context("create application data directory")?;
     let root = data_dir.canonicalize().context("resolve application data directory")?;
     let parent = root.join("agent-workspaces");
     create_child(&root, &parent)?;
-    let target = path(&root, conversation_id);
+    let target = path(&root, key);
     create_child(&parent, &target)
 }
 
 /// Path of the internal workspace without creating it. Used by cleanup paths.
-pub(crate) fn path(data_dir: &Path, conversation_id: &str) -> PathBuf {
-    let name: String = Sha256::digest(conversation_id.as_bytes())
+pub(crate) fn path(data_dir: &Path, key: &str) -> PathBuf {
+    let name: String = Sha256::digest(key.as_bytes())
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
@@ -72,6 +82,17 @@ mod tests {
             .into_iter().map(str::to_string).collect();
         super::super::restrict_implicit_agent_workspace(&mut tools);
         assert_eq!(tools, vec!["browser_snapshot", "computer_screenshot"]);
+    }
+
+    #[test]
+    fn task_workspaces_are_shared_by_task_id_not_thread() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let first = prepare_for_task(temp.path(), "task-1").expect("first");
+        let second = prepare_for_task(temp.path(), "task-1").expect("second");
+        let other = prepare_for_task(temp.path(), "task-2").expect("other");
+        assert_eq!(first, second);
+        assert_ne!(first, other);
+        assert!(first.starts_with(temp.path().canonicalize().expect("root")));
     }
 
     #[test]

@@ -99,6 +99,8 @@ pub struct ToolCtx {
     pub workspace: Option<WorkspaceHandle>,
     pub settings: Settings,
     pub cancel: CancellationToken,
+    /// Production hooks for agent task/channel events and real cancellation.
+    pub agent_hooks: Option<std::sync::Arc<dyn crate::tools::AgentHooks>>,
     pub data_dir: PathBuf,
     /// Aprovações interativas do app (presente no perfil Code em produção).
     pub approval: Option<Arc<crate::policy::approval::ApprovalRegistry>>,
@@ -842,6 +844,7 @@ mod tests {
             }),
             settings: Settings::default(),
             cancel: CancellationToken::new(),
+            agent_hooks: None,
             data_dir: std::env::temp_dir().join("lumina-registry-test"),
             approval: None,
             observed: None,

@@ -17,7 +17,7 @@ use crate::config;
 use crate::domain::{Settings, SkillContent, SkillSummary};
 #[cfg(test)]
 use crate::tools::skills::ExternalSkillRoot;
-use crate::tools::skills::{self, Skill, SkillSource};
+use crate::tools::skills::{self, Skill, SkillDraft, SkillSource, SkillVersion};
 
 fn to_error(error: impl std::fmt::Display) -> String {
     format!("{error:#}")
@@ -216,6 +216,20 @@ pub fn get_skill_content(app: AppHandle, name: String) -> Result<SkillContent, S
     let data_dir = config::data_dir(&app).map_err(to_error)?;
     let skill = find_skill(&data_dir, &name).map_err(to_error)?;
     Ok(content_of(&skill))
+}
+
+#[tauri::command]
+pub fn save_skill(app: AppHandle, draft: SkillDraft) -> Result<SkillContent, String> {
+    let data_dir = config::data_dir(&app).map_err(to_error)?;
+    let skill = skills::save_user_skill(&data_dir, &draft, crate::domain::now_ms())
+        .map_err(to_error)?;
+    Ok(content_of(&skill))
+}
+
+#[tauri::command]
+pub fn list_skill_versions(app: AppHandle, name: String) -> Result<Vec<SkillVersion>, String> {
+    let data_dir = config::data_dir(&app).map_err(to_error)?;
+    skills::list_skill_versions(&data_dir, &name).map_err(to_error)
 }
 
 /// Ativa/desativa uma skill e devolve a lista atualizada.

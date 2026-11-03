@@ -1623,6 +1623,7 @@ async fn bridge_chat_tool(ctx: &ToolCtx, name: &str, args: &Value) -> ToolOutcom
         options,
         settings: ctx.settings.clone(),
         cancel: ctx.cancel.clone(),
+        agent_hooks: ctx.agent_hooks.clone(),
         data_dir: ctx.data_dir.clone(),
         skills_roots: ctx.skills_roots.clone(),
     };
@@ -3238,6 +3239,7 @@ mod tests {
                 }),
                 settings: Settings::default(),
                 cancel: tokio_util::sync::CancellationToken::new(),
+                agent_hooks: None,
                 data_dir: self.data_dir.clone(),
                 approval: Some(self.approvals.clone()),
                 observed: Some(self.observed.clone()),

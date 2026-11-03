@@ -8,9 +8,11 @@ import type {
   AgentChannelInput,
   AgentChannelMessage,
   AgentChannelPostResult,
+  AgentInboxCount,
   AgentInput,
   AgentMemory,
   AgentMemoryInput,
+  AgentSharedMemory,
   AgentRevision,
   AgentRoutine,
   AgentRoutineRun,
@@ -66,7 +68,9 @@ import type {
   Settings,
   SettingsView,
   SkillContent,
+  SkillDraft,
   SkillSummary,
+  SkillVersion,
   TerminalEvent,
   TerminalInfo,
   TurnEvent,
@@ -135,6 +139,9 @@ export const api = {
     invoke<SkillSummary[]>('set_skill_enabled', { name, enabled }),
   deleteSkill: (name: string) => invoke<SkillSummary[]>('delete_skill', { name }),
   getSkillContent: (name: string) => invoke<SkillContent>('get_skill_content', { name }),
+  saveSkill: (draft: SkillDraft) => invoke<SkillContent>('save_skill', { draft }),
+  listSkillVersions: (name: string) =>
+    invoke<SkillVersion[]>('list_skill_versions', { name }),
 
   /* -------- catalog -------- */
   getCatalog: () => invoke<CatalogView>('get_catalog'),
@@ -211,6 +218,10 @@ export const api = {
     invoke<void>('delete_agent_memory', { agentId, memoryId }),
   clearAgentMemories: (agentId: string) =>
     invoke<number>('clear_agent_memories', { agentId }),
+  listSharedAgentMemories: () =>
+    invoke<AgentSharedMemory[]>('list_shared_agent_memories'),
+  deleteSharedAgentMemory: (memoryId: string) =>
+    invoke<void>('delete_shared_agent_memory', { memoryId }),
   getAgentUsage: (agentId: string) =>
     invoke<AgentUsage>('get_agent_usage', { agentId }),
   listAgentUsage: () => invoke<AgentUsage[]>('list_agent_usage'),
@@ -258,6 +269,8 @@ export const api = {
     invoke<void>('delete_agent_channel', { channelId }),
   listAgentChannelMessages: (channelId: string) =>
     invoke<AgentChannelMessage[]>('list_agent_channel_messages', { channelId }),
+  listAgentChannelInboxCounts: () =>
+    invoke<AgentInboxCount[]>('list_agent_channel_inbox_counts'),
   postAgentChannelMessage: (channelId: string, content: string) =>
     invoke<AgentChannelPostResult>('post_agent_channel_message', { channelId, content }),
   mcpStatus: () => invoke<McpStatus>('mcp_status'),

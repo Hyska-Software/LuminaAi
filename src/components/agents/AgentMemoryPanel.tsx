@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 
 import { Button, IconButton, NativeSelect, Textarea } from '@/components/ui';
 import { api } from '@/lib/api';
-import type { AgentMemory, AgentMemoryKind } from '@/lib/types';
+import type { AgentMemory, AgentMemoryKind, AgentSharedMemory } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 const KIND_LABELS: Record<AgentMemoryKind, string> = {
@@ -35,6 +35,8 @@ export function AgentMemoryPanel({
   className?: string;
 }) {
   const [memories, setMemories] = useState<AgentMemory[]>([]);
+  const [shared, setShared] = useState<AgentSharedMemory[]>([]);
+  const [tab, setTab] = useState<'private' | 'shared'>('private');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -51,7 +53,12 @@ export function AgentMemoryPanel({
     setLoading(true);
     setError(null);
     try {
-      setMemories(await api.listAgentMemories(agentId));
+      const [privateMemories, sharedMemories] = await Promise.all([
+        api.listAgentMemories(agentId),
+        api.listSharedAgentMemories(),
+      ]);
+      setMemories(privateMemories);
+      setShared(sharedMemories);
     } catch (caught) {
       setError(String(caught));
     } finally {
@@ -135,6 +142,17 @@ export function AgentMemoryPanel({
     }
   };
 
+  const removeShared = async (memory: AgentSharedMemory) => {
+    try {
+      await api.deleteSharedAgentMemory(memory.id);
+      setShared((current) => current.filter((item) => item.id !== memory.id));
+    } catch (caught) {
+      toast.error('Não foi possível excluir a memória compartilhada', {
+        description: String(caught),
+      });
+    }
+  };
+
   if (!agentId) {
     return (
       <p className={cn('text-[12px] leading-relaxed text-foreground-muted', className)}>
@@ -146,6 +164,69 @@ export function AgentMemoryPanel({
 
   return (
     <div className={cn('space-y-3', className)}>
+      <div className="flex gap-1 rounded-lg border border-border bg-surface/50 p-1" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'private'}
+          className={cn(
+            'flex-1 rounded-md px-2 py-1 text-[11px]',
+            tab === 'private' ? 'bg-surface-active text-foreground' : 'text-foreground-muted',
+          )}
+          onClick={() => setTab('private')}
+        >
+          Privadas
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'shared'}
+          className={cn(
+            'flex-1 rounded-md px-2 py-1 text-[11px]',
+            tab === 'shared' ? 'bg-surface-active text-foreground' : 'text-foreground-muted',
+          )}
+          onClick={() => setTab('shared')}
+        >
+          Compartilhadas
+        </button>
+      </div>
+
+      {tab === 'shared' ? (
+        <div className="space-y-2">
+          <p className="text-[12px] leading-relaxed text-foreground-muted">
+            Notas visíveis a todos os agentes com a capability “Memória compartilhada”. O agente
+            escreve pelas tools; aqui você revisa e exclui.
+          </p>
+          {shared.length === 0 ? (
+            <p className="rounded-xl border border-border bg-surface/50 p-3 text-[12px] text-foreground-muted">
+              Nenhuma memória compartilhada.
+            </p>
+          ) : (
+            shared.map((memory) => (
+              <div
+                key={memory.id}
+                className="flex items-start gap-2 rounded-xl border border-border bg-surface/50 p-2.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] leading-relaxed text-foreground">{memory.content}</p>
+                  <p className="mt-1 text-[10px] text-foreground-subtle">
+                    {kindLabel(memory.kind)} · {memory.sourceAgentName ?? 'agente removido'}
+                  </p>
+                </div>
+                <IconButton
+                  label="Excluir memória compartilhada"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void removeShared(memory)}
+                >
+                  <Trash2 className="size-3.5" />
+                </IconButton>
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+        <>
       <div className="flex items-start justify-between gap-3">
         <p className="text-[12px] leading-relaxed text-foreground-muted">
           {memoryEnabled
@@ -281,6 +362,8 @@ export function AgentMemoryPanel({
           ligada.
         </p>
       ) : null}
+        </>
+      )}
     </div>
   );
 }

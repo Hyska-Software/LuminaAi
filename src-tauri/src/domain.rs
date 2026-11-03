@@ -663,6 +663,10 @@ pub struct TurnOptions {
     /// a persisted user message. Internal: only the channel runner sets it.
     #[serde(skip)]
     pub channel_context: Option<String>,
+    /// Internal event payload for event-triggered routines; injected as a
+    /// `surface_item kind="event"`, never trusted as instructions.
+    #[serde(skip)]
+    pub event_context: Option<String>,
     /// Regenerate the last assistant answer (drops it before running).
     pub regenerate: bool,
     /// Profundidade de delegação (0 = sessão do usuário; 1 = subagente).
@@ -712,6 +716,7 @@ impl Default for TurnOptions {
             temperature: None,
             system_prompt_override: None,
             channel_context: None,
+            event_context: None,
             regenerate: false,
             delegation_depth: 0,
             wire_session_id: None,

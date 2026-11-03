@@ -1116,6 +1116,7 @@ mod tests {
             options: Default::default(),
             settings,
             cancel: CancellationToken::new(),
+            agent_hooks: None,
             data_dir: temp.path.clone(),
             // Tests never read the developer's real skill repositories.
             skills_roots: Vec::new(),

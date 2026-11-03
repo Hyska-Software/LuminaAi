@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
   listAgentChannels: vi.fn(),
+  listAgentChannelInboxCounts: vi.fn(),
   listConversations: vi.fn(),
   renameConversation: vi.fn(),
   deleteConversation: vi.fn(),
@@ -99,6 +100,7 @@ function openMenu(trigger: HTMLElement): void {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.listAgentChannels.mockResolvedValue([]);
+  mocks.listAgentChannelInboxCounts.mockResolvedValue([]);
   mocks.listConversations.mockResolvedValue([thread()]);
   mocks.renameConversation.mockResolvedValue(undefined);
   mocks.deleteConversation.mockResolvedValue(undefined);

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Loader2, Send, Settings2, Users } from 'lucide-react';
+import { ArrowLeft, ListChecks, Loader2, Send, Settings2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { AgentAvatar } from './AgentAvatar';
+import { AgentTaskBoardDialog } from './AgentTaskBoardDialog';
 import { AgentPanelButton, AgentPanelOpener } from './AgentPanelToggle';
 import { Markdown } from '@/components/chat/Markdown';
 import { Button, IconButton, Textarea } from '@/components/ui';
@@ -41,6 +42,8 @@ export function AgentChannelView({
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState('');
   const [errors, setErrors] = useState<string[]>([]);
+  const [taskBoardOpen, setTaskBoardOpen] = useState(false);
+  const [mentionOpen, setMentionOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const requestId = useRef(0);
   const activeChannelId = useUiStore((state) => state.activeChannelId);
@@ -53,6 +56,32 @@ export function AgentChannelView({
     }
     return map;
   }, [agents]);
+  const members = useMemo(
+    () =>
+      (channel?.memberIds ?? [])
+        .map((id) => ({ id, ...(names.get(id) ?? { name: 'Agente', emoji: '🤖' }) }))
+        .filter((member) => member.name !== 'Agente'),
+    [channel?.memberIds, names],
+  );
+  const mentionMatch = /(?:^|\s)@([^\s@]*)$/.exec(draft);
+  const mentionCandidates = mentionMatch
+    ? members
+        .filter((member) =>
+          member.name.toLocaleLowerCase('pt-BR').includes(mentionMatch[1].toLocaleLowerCase('pt-BR')),
+        )
+        .slice(0, 6)
+    : [];
+  const isDm = channel?.kind === 'dm';
+
+  const insertMention = (name: string) => {
+    setDraft((current) =>
+      current.replace(/(?:^|\s)@([^\s@]*)$/, (match) => {
+        const prefix = match.startsWith(' ') ? ' ' : '';
+        return `${prefix}@${name} `;
+      }),
+    );
+    setMentionOpen(false);
+  };
 
   const load = useCallback(async (silent = false) => {
     const request = ++requestId.current;
@@ -161,7 +190,7 @@ export function AgentChannelView({
           <ArrowLeft className="size-4" />
         </IconButton>
         <span className="flex size-8 items-center justify-center rounded-xl border border-border bg-surface-active/70 text-[15px]">
-          #
+          {isDm ? '@' : '#'}
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-medium text-foreground">{channel.name}</p>
@@ -175,13 +204,23 @@ export function AgentChannelView({
         </div>
         <AgentPanelButton />
         <IconButton
-          label="Editar canal"
+          label="Tarefas do canal"
           size="sm"
           variant="ghost"
-          onClick={() => onEdit(channel)}
+          onClick={() => setTaskBoardOpen(true)}
         >
-          <Settings2 className="size-4" />
+          <ListChecks className="size-4" />
         </IconButton>
+        {isDm ? null : (
+          <IconButton
+            label="Editar canal"
+            size="sm"
+            variant="ghost"
+            onClick={() => onEdit(channel)}
+          >
+            <Settings2 className="size-4" />
+          </IconButton>
+        )}
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -233,6 +272,13 @@ export function AgentChannelView({
 
       <div className="shrink-0 px-4 pb-3">
         <div className="mx-auto w-full max-w-3xl">
+          {isDm ? (
+            <p className="rounded-xl border border-border bg-surface-raised/60 px-3 py-2 text-center text-[11px] text-foreground-muted">
+              Conversa direta entre agentes. As respostas são geradas pelo inbox e aparecem aqui;
+              o composer do usuário fica desativado.
+            </p>
+          ) : (
+            <>
           {errors.length > 0 ? (
             <div
               role="alert"
@@ -246,6 +292,24 @@ export function AgentChannelView({
             </div>
           ) : null}
           <div className="rounded-3xl border border-border bg-surface-raised shadow-sm focus-within:border-border-strong">
+            {mentionOpen && mentionCandidates.length > 0 ? (
+              <div className="border-b border-border/70 p-1.5">
+                {mentionCandidates.map((member) => (
+                  <button
+                    key={member.id}
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-surface-hover"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      insertMention(member.name);
+                    }}
+                  >
+                    <AgentAvatar emoji={member.emoji} size="sm" />
+                    <span className="truncate">{member.name}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <Textarea
               value={draft}
               rows={2}
@@ -253,10 +317,18 @@ export function AgentChannelView({
               placeholder={`Mensagem para #${channel.name}…`}
               aria-label={`Mensagem para o canal ${channel.name}`}
               className="min-h-14 resize-none border-0 bg-transparent px-4 pt-3 text-[14px] focus:ring-0"
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                setMentionOpen(/(?:^|\s)@([^\s@]*)$/.test(event.target.value));
+              }}
               onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setMentionOpen(false);
+                  return;
+                }
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
+                  setMentionOpen(false);
                   void send();
                 }
               }}
@@ -277,8 +349,17 @@ export function AgentChannelView({
             Cada agente responde uma vez, em ordem. Use @nome para direcionar a mensagem; sem
             menção, todos respondem.
           </p>
+            </>
+          )}
         </div>
       </div>
+
+      <AgentTaskBoardDialog
+        open={taskBoardOpen}
+        onOpenChange={setTaskBoardOpen}
+        channelId={channelId}
+        title={`Tarefas de #${channel.name}`}
+      />
     </div>
   );
 }

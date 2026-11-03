@@ -2,10 +2,12 @@
 //! module is owned by one subsystem.
 
 pub mod agents;
+pub mod agent_hooks;
 pub mod browser;
 pub mod channels;
 pub mod computer;
 pub mod diagnostics;
+pub mod inbox;
 pub mod routines;
 pub mod tasks;
 pub mod artifacts;

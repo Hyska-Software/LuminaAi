@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/api';
-import type { SkillContent, SkillSummary } from '@/lib/types';
+import type { SkillContent, SkillSummary, SkillVersion } from '@/lib/types';
 import {
   Badge,
   Button,
@@ -51,6 +51,26 @@ export function SkillPreviewDialog({ skill, onClose }: SkillPreviewDialogProps) 
   const [state, setState] = useState<PreviewState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [mode, setMode] = useState<PreviewMode>('document');
+  const [versions, setVersions] = useState<SkillVersion[]>([]);
+
+  useEffect(() => {
+    if (skill.source !== 'user') {
+      setVersions([]);
+      return;
+    }
+    let cancelled = false;
+    api
+      .listSkillVersions(skill.name)
+      .then((list) => {
+        if (!cancelled) setVersions(list);
+      })
+      .catch(() => {
+        if (!cancelled) setVersions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [skill.name, skill.source]);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +112,20 @@ export function SkillPreviewDialog({ skill, onClose }: SkillPreviewDialogProps) 
             {!skill.enabled ? <Badge tone="muted">Desativada</Badge> : null}
           </div>
           <DialogDescription>{skill.description}</DialogDescription>
+          {versions.length > 0 ? (
+            <details className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] text-foreground-muted">
+              <summary className="cursor-pointer select-none">
+                Histórico de versões ({versions.length})
+              </summary>
+              <ul className="mt-1 space-y-0.5 font-mono text-[10px]">
+                {versions.slice(0, 10).map((version) => (
+                  <li key={version.file} className="truncate">
+                    {version.file} · {new Date(version.savedAt).toLocaleString('pt-BR')}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
         </DialogHeader>
 
         {showToolbar ? (

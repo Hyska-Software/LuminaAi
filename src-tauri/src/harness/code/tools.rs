@@ -85,6 +85,15 @@ pub async fn execute(ctx: &ToolCtx, call: &ToolCallRecord) -> ToolOutcome {
     if call.name == "memory" {
         return run_memory(&call_ctx, args);
     }
+    if call.name == "skill_save" {
+        return crate::tools::skills::run_save_with(&call_ctx.data_dir, &args);
+    }
+    if crate::tools::agents::is_agent_tool(&call.name) {
+        return run_agent_tool(&call_ctx, &call.name, args);
+    }
+    if call.name == "task_wait" {
+        return run_task_wait(&call_ctx, args).await;
+    }
     if crate::tools::tasks::is_delegation_tool(&call.name) {
         return run_delegation(&call_ctx, &call.name, args);
     }
@@ -144,6 +153,41 @@ fn run_memory(ctx: &ToolCtx, args: Value) -> ToolOutcome {
     crate::tools::memory::run_with(&ctx.db, agent_id, &ctx.conversation_id, &args)
 }
 
+/// Agent-only tools (directory/usage/routines). The persona comes from the
+/// conversation, never from the model.
+fn run_agent_tool(ctx: &ToolCtx, tool: &str, args: Value) -> ToolOutcome {
+    let conversation = match ctx.db.get_conversation(&ctx.conversation_id) {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return ToolOutcome::error("AGENT_TOOL_INVALID: conversa não encontrada"),
+        Err(error) => return ToolOutcome::error(format!("{error:#}")),
+    };
+    let Some(agent_id) = conversation.agent_id.as_deref() else {
+        return ToolOutcome::error("as ferramentas de agente só existem em conversas de um agente");
+    };
+    crate::tools::agents::run_with_hooks(&ctx.db, agent_id, tool, &args, &ctx.settings, ctx.agent_hooks.as_deref())
+}
+
+/// `task_wait` is async and must not go through the synchronous delegation
+/// dispatcher.
+async fn run_task_wait(ctx: &ToolCtx, args: Value) -> ToolOutcome {
+    let conversation = match ctx.db.get_conversation(&ctx.conversation_id) {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return ToolOutcome::error("AGENT_TASK_INVALID: conversa não encontrada"),
+        Err(error) => return ToolOutcome::error(format!("{error:#}")),
+    };
+    let Some(agent_id) = conversation.agent_id.as_deref() else {
+        return ToolOutcome::error("as ferramentas de tarefa só existem em conversas de um agente");
+    };
+    crate::tools::tasks::wait_for_task(
+        &ctx.db,
+        agent_id,
+        &ctx.conversation_id,
+        &args,
+        &ctx.cancel,
+    )
+    .await
+}
+
 /// Delegation tools for the Code profile. The conversation resolves the
 /// persona; a normal Code session has no agent and the tools are not exposed.
 fn run_delegation(ctx: &ToolCtx, tool: &str, args: Value) -> ToolOutcome {
@@ -155,7 +199,7 @@ fn run_delegation(ctx: &ToolCtx, tool: &str, args: Value) -> ToolOutcome {
     let Some(agent_id) = conversation.agent_id.as_deref() else {
         return ToolOutcome::error("a delegação só existe em conversas de um agente");
     };
-    crate::tools::tasks::run(&ctx.db, agent_id, &ctx.conversation_id, tool, &args)
+    crate::tools::tasks::run_with_hooks(&ctx.db, agent_id, &ctx.conversation_id, tool, &args, ctx.agent_hooks.as_deref())
 }
 
 /// Executa um lote de chamadas respeitando o scheduler do registry
@@ -281,6 +325,7 @@ mod tests {
             workspace: None,
             settings: crate::domain::Settings::default(),
             cancel: tokio_util::sync::CancellationToken::new(),
+            agent_hooks: None,
             data_dir: std::env::temp_dir().join("lumina-code-tools-test"),
             approval: None,
             observed: None,

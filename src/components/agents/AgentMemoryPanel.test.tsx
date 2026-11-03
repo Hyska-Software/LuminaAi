@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   updateAgentMemory: vi.fn(),
   deleteAgentMemory: vi.fn(),
   clearAgentMemories: vi.fn(),
+  listSharedAgentMemories: vi.fn(),
+  deleteSharedAgentMemory: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -43,6 +45,8 @@ beforeEach(() => {
   mocks.updateAgentMemory.mockResolvedValue({ ...memory, pinned: true });
   mocks.deleteAgentMemory.mockResolvedValue(undefined);
   mocks.clearAgentMemories.mockResolvedValue(1);
+  mocks.listSharedAgentMemories.mockResolvedValue([]);
+  mocks.deleteSharedAgentMemory.mockResolvedValue(undefined);
 });
 
 describe('AgentMemoryPanel', () => {

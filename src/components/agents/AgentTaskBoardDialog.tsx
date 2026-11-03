@@ -18,7 +18,7 @@ import {
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { selectActiveAgents, useAgentStore, useChatStore, useUiStore } from '@/lib/store';
-import type { Agent, AgentTask } from '@/lib/types';
+import type { Agent, AgentChannel, AgentTask } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
   TASK_BOARD_COLUMNS,
@@ -36,18 +36,33 @@ const CANCELLABLE: Record<string, true> = {
   review: true,
 };
 
+const REASSIGNABLE: Record<string, true> = {
+  accepted: true,
+  running: true,
+  waiting_input: true,
+  waiting_approval: true,
+  review: true,
+};
+
 /** Global kanban of delegated tasks across every agent/channel. */
 export function AgentTaskBoardDialog({
   open,
   onOpenChange,
+  channelId,
+  ownerAgentId,
+  title,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  channelId?: string;
+  ownerAgentId?: string;
+  title?: string;
 }) {
   const agents = useAgentStore(useShallow(selectActiveAgents));
   const conversations = useChatStore((state) => state.conversations);
   const openConversation = useChatStore((state) => state.openConversation);
   const [tasks, setTasks] = useState<AgentTask[]>([]);
+  const [channels, setChannels] = useState<AgentChannel[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -56,13 +71,18 @@ export function AgentTaskBoardDialog({
     setLoading(true);
     setError(null);
     try {
-      setTasks(await api.listAgentTasks());
+      const [nextTasks, nextChannels] = await Promise.all([
+        api.listAgentTasks({ channelId, ownerAgentId }),
+        api.listAgentChannels(),
+      ]);
+      setTasks(nextTasks);
+      setChannels(nextChannels);
     } catch (caught) {
       setError(String(caught));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [channelId, ownerAgentId]);
 
   useEffect(() => {
     if (!open) return;
@@ -144,7 +164,7 @@ export function AgentTaskBoardDialog({
         <DialogHeader className="pb-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <ListChecks className="size-4 text-accent" />
-            Tarefas dos agentes
+            {title ?? 'Tarefas dos agentes'}
           </DialogTitle>
           <DialogDescription>
             Quadro de delegações entre agentes. Abra a thread para ver o histórico completo ou
@@ -234,7 +254,7 @@ export function AgentTaskBoardDialog({
                             Retomar
                           </Button>
                         ) : null}
-                        {CANCELLABLE[task.status] ? (
+                        {REASSIGNABLE[task.status] ? (
                           <>
                             <NativeSelect
                               aria-label={`Reatribuir ${task.title}`}
@@ -246,6 +266,12 @@ export function AgentTaskBoardDialog({
                               <option value="">Reatribuir…</option>
                               {agents
                                 .filter((entry) => entry.id !== task.ownerAgentId)
+                                .filter((entry) => {
+                                  const channel = channels.find(
+                                    (item) => item.id === task.channelId,
+                                  );
+                                  return !channel || channel.memberIds.includes(entry.id);
+                                })
                                 .map((entry) => (
                                   <option key={entry.id} value={entry.id}>
                                     {entry.name}
@@ -267,6 +293,21 @@ export function AgentTaskBoardDialog({
                               Cancelar
                             </Button>
                           </>
+                        ) : CANCELLABLE[task.status] ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="mt-1.5 w-full"
+                            disabled={busyId === task.id}
+                            onClick={() => void cancel(task)}
+                          >
+                            {busyId === task.id ? (
+                              <Loader2 className="mr-1.5 size-3 animate-spin" />
+                            ) : (
+                              <Ban className="mr-1.5 size-3" />
+                            )}
+                            Cancelar
+                          </Button>
                         ) : null}
                       </article>
                     );

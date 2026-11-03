@@ -356,7 +356,7 @@ os.chmod(p,0o755)"#;
             let ctx = crate::tools::registry::ToolCtx {
                 db: db.clone(), http: reqwest::Client::new(), conversation_id: conversation.clone(),
                 message_id: "rfb-message".into(), tool_call_id: "rfb-call".into(), turn_id: "rfb-turn".into(),
-                workspace: None, settings: settings.clone(), cancel: tokio_util::sync::CancellationToken::new(),
+                workspace: None, settings: settings.clone(), cancel: tokio_util::sync::CancellationToken::new(), agent_hooks: None,
                 data_dir: dir.path().to_path_buf(), approval: None, observed: None, emit: None,
                 rules: Vec::new(), jobs: None, questions: None, turn_kind: crate::domain::TurnKind::User,
                 mcp: None, subagent: None, enabled_tools: Arc::new(Default::default()),

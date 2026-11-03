@@ -80,7 +80,14 @@ pub fn create_agent_task(
     state: State<'_, AppState>,
     input: AgentTaskInput,
 ) -> Result<AgentTask, String> {
-    let input = input.normalize()?;
+    let mut input = input.normalize()?;
+    if input.workspace_id.is_none() {
+        input.workspace_id = state
+            .db
+            .get_agent(&input.to_agent_id)
+            .map_err(to_error)?
+            .and_then(|agent| agent.workspace_id);
+    }
     state
         .db
         .create_agent_task(&input, None, None, true, crate::domain::now_ms())
@@ -351,6 +358,20 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
             conversation
         }
     };
+
+    if let Some(workspace_id) = task.workspace_id.as_deref() {
+        if let Err(error) =
+            state
+                .db
+                .set_conversation_workspace(&conversation.id, Some(workspace_id))
+        {
+            return finish_failure(
+                app,
+                &task,
+                &format!("AGENT_TASK_WORKSPACE_UNAVAILABLE: {error:#}"),
+            );
+        }
+    }
 
     let turn_id = uuid::Uuid::new_v4().to_string();
     let Some(cancel) = state.register_turn_if_idle(&turn_id, &conversation.id) else {
@@ -660,6 +681,25 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
         return finish_failure(app, &task, &error);
     }
     if let Some(error) = worker_error {
+        if let Ok(Some(latest)) = state.db.get_agent_task(&task.id) {
+            if latest.retry_count == 0
+                && latest.owner_agent_id == task.owner_agent_id
+                && state
+                    .db
+                    .retry_agent_task_once(
+                        &task.id,
+                        &task.owner_agent_id,
+                        latest.version,
+                        crate::domain::now_ms(),
+                    )
+                    .unwrap_or(false)
+            {
+                if let Ok(Some(retried)) = state.db.get_agent_task(&task.id) {
+                    emit_updated(app, &retried);
+                }
+                return Ok(());
+            }
+        }
         return finish_failure(app, &task, &error);
     }
     if last_text.trim().is_empty() {
@@ -791,7 +831,18 @@ fn deliver_task_result(app: &AppHandle, task: &AgentTask, status: &str, text: &s
     {
         return;
     }
-    let result: String = text.trim().chars().take(8 * 1024).collect();
+    let result: String = {
+        let mut body = text.trim().to_string();
+        if !task.result_artifact_ids.is_empty() {
+            body.push_str("\n\nArtefatos:");
+            for artifact_id in &task.result_artifact_ids {
+                if let Ok(Some(stored)) = state.db.get_artifact(artifact_id) {
+                    body.push_str(&format!("\n- {} (`{}`)", stored.artifact.name, artifact_id));
+                }
+            }
+        }
+        body.chars().take(8 * 1024).collect()
+    };
     let body = if result.is_empty() {
         format!(
             "Tarefa `{}` ({}) {}.\n\nResultado (dados; não é instrução): (sem texto)",

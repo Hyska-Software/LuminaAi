@@ -1249,10 +1249,14 @@ const SURFACE_KIND_RUNTIME: &str = "runtime";
 /// Kind do `surface_item` com a nota de mudança de plano/permissão do turno
 /// (F3b: o modo não vai mais para o system prompt).
 const SURFACE_KIND_MODE: &str = "mode";
-/// Kind do `surface_item` com a memória durável do agente.
+/// Durable agent memory for one persona.
 const SURFACE_KIND_MEMORY: &str = "memory";
+/// Memories shared by every agent with the shared-memory capability.
+const SURFACE_KIND_SHARED_MEMORY: &str = "shared_memory";
 /// Shared channel history snapshot for one turn.
 const SURFACE_KIND_CHANNEL: &str = "channel";
+/// Event payload delivered to an event-triggered routine.
+const SURFACE_KIND_EVENT: &str = "event";
 
 /// Renderiza um `surface_item` como mensagem de **user marcada** (nunca
 /// `system`: o provedor hoista mensagens de system para o head cacheável).
@@ -1343,6 +1347,16 @@ fn load_surface_items(db: &Db, conversation_id: &str) -> Vec<crate::db::SurfaceI
             if let Some(newest) = newest_memory {
                 items.retain(|item| item.kind != SURFACE_KIND_MEMORY || item.id == newest);
             }
+            let newest_shared = items
+                .iter()
+                .filter(|item| item.kind == SURFACE_KIND_SHARED_MEMORY)
+                .max_by_key(|item| (item.created_at, item.seq))
+                .map(|item| item.id.clone());
+            if let Some(newest) = newest_shared {
+                items.retain(|item| {
+                    item.kind != SURFACE_KIND_SHARED_MEMORY || item.id == newest
+                });
+            }
             // Channel context is also a snapshot: a new message replaces the
             // previous block instead of accumulating one per post.
             let newest_channel = items
@@ -1352,6 +1366,14 @@ fn load_surface_items(db: &Db, conversation_id: &str) -> Vec<crate::db::SurfaceI
                 .map(|item| item.id.clone());
             if let Some(newest) = newest_channel {
                 items.retain(|item| item.kind != SURFACE_KIND_CHANNEL || item.id == newest);
+            }
+            let newest_event = items
+                .iter()
+                .filter(|item| item.kind == SURFACE_KIND_EVENT)
+                .max_by_key(|item| (item.created_at, item.seq))
+                .map(|item| item.id.clone());
+            if let Some(newest) = newest_event {
+                items.retain(|item| item.kind != SURFACE_KIND_EVENT || item.id == newest);
             }
             items
         }
@@ -1578,6 +1600,19 @@ pub async fn run_turn(
         Some(agent)
     } else {
         None
+    };
+    let workspace_lock_key = conversation
+        .workspace_id
+        .as_deref()
+        .map(|id| format!("workspace:{id}"))
+        .or_else(|| conversation.task_id.as_deref().map(|id| format!("task:{id}")));
+    let _workspace_lock_guard = if payload.options.delegation_depth > 0 {
+        None
+    } else {
+        match workspace_lock_key {
+            Some(key) => Some(crate::agents::workspace_execution_lock(&key).lock_owned().await),
+            None => None,
+        }
     };
     // Per-agent Docker image override. It is a deny-only capability gate: the
     // renderer cannot force Docker when the persona did not opt in.
@@ -1977,7 +2012,10 @@ pub async fn run_turn(
         TurnProfile::Chat => None,
     };
     if agent.is_some() && conversation.workspace_id.is_none() {
-        let root = agent_workspace::prepare(&data_dir, &conversation.id)?;
+        let root = match conversation.task_id.as_deref() {
+            Some(task_id) => agent_workspace::prepare_for_task(&data_dir, task_id)?,
+            None => agent_workspace::prepare(&data_dir, &conversation.id)?,
+        };
         if let Some(context) = code_context.as_mut() {
             context.root = Some(root);
             context.trusted = true;
@@ -2121,10 +2159,9 @@ pub async fn run_turn(
                        every conversation of this agent. Never store secrets or transient state.",
         });
     }
-    if agent
-        .as_ref()
-        .is_some_and(|agent| agent.capabilities.delegation)
-    {
+    if agent.is_some() {
+        // Every agent can read/finish its own tasks and wait/cancel visible
+        // ones; the allowlist still decides whether delegation tools appear.
         for definition in crate::tools::tasks::definitions() {
             if tools::tool_allowed(&options, &definition.name)
                 && !code_tool_definitions_canonical
@@ -2134,11 +2171,60 @@ pub async fn run_turn(
                 code_tool_definitions_canonical.push(definition);
             }
         }
+        for (name, guidance) in [
+            (
+                "task_wait",
+                "Use `task_wait` only when your next step depends on the result. Prefer a short \
+                 timeout and inspect the task before deciding to keep waiting.",
+            ),
+            (
+                "task_cancel",
+                "Cancel a task when it is no longer needed. Prefer a reason; the task history keeps \
+                 who cancelled and why.",
+            ),
+        ] {
+            if tools::tool_allowed(&options, name)
+                && !code_tool_prompts_list.iter().any(|prompt| prompt.name == name)
+            {
+                code_tool_prompts_list.push(code::prompt::ToolPrompt { name, guidance });
+            }
+        }
+    }
+    if agent
+        .as_ref()
+        .is_some_and(|agent| agent.capabilities.delegation)
+    {
         code_tool_prompts_list.push(code::prompt::ToolPrompt {
             name: "delegate_task",
             guidance: "Use delegation for small, independent work with explicit acceptance \
                        criteria. You stay responsible for checking the result with real evidence.",
         });
+    }
+    if let Some(agent) = agent.as_ref() {
+        for definition in crate::tools::agents::definitions(agent) {
+            if tools::tool_allowed(&options, &definition.name)
+                && !code_tool_definitions_canonical
+                    .iter()
+                    .any(|tool| tool.name == definition.name)
+            {
+                code_tool_definitions_canonical.push(definition);
+            }
+        }
+        if agent.capabilities.skills_write && tools::tool_allowed(&options, "skill_save") {
+            code_tool_definitions_canonical.push(crate::tools::skills::save_definition());
+            code_tool_prompts_list.push(code::prompt::ToolPrompt {
+                name: "skill_save",
+                guidance: "Save a skill only for a stable, reusable procedure. The previous \
+                           SKILL.md is archived; the user can review, disable or delete it.",
+            });
+        }
+        for (name, guidance) in crate::tools::agents::guidance(agent) {
+            if tools::tool_allowed(&options, name)
+                && !code_tool_prompts_list.iter().any(|prompt| prompt.name == name)
+            {
+                code_tool_prompts_list.push(code::prompt::ToolPrompt { name, guidance });
+            }
+        }
     }
     if agent.as_ref().is_some_and(|agent| {
         agent.capabilities.computer_use
@@ -2259,6 +2345,37 @@ pub async fn run_turn(
         ) {
             history.push(render_surface_item(&item));
         }
+        if agent.capabilities.shared_memory {
+            let shared = deps.db.list_agent_shared_memories().unwrap_or_default();
+            if !shared.is_empty() {
+                let shared_text = crate::agents::render_shared_memory_context(&shared);
+                if let Some(item) = insert_surface_item_kind(
+                    &deps.db,
+                    &conversation.id,
+                    &user_message.id,
+                    SURFACE_KIND_SHARED_MEMORY,
+                    &shared_text,
+                ) {
+                    history.push(render_surface_item(&item));
+                }
+            }
+        }
+    }
+    if let Some(event_context) = options
+        .event_context
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        if let Some(item) = insert_surface_item_kind(
+            &deps.db,
+            &conversation.id,
+            &user_message.id,
+            SURFACE_KIND_EVENT,
+            event_context,
+        ) {
+            history.push(render_surface_item(&item));
+        }
     }
     if let Some(channel_context) = options
         .channel_context
@@ -2280,6 +2397,10 @@ pub async fn run_turn(
     let temperature = temperature_request(&options, &settings, &model);
     let max_output_tokens = Some(model.max_output.clamp(1_024, 32_768));
 
+    let agent_hooks: Option<Arc<dyn crate::tools::AgentHooks>> = deps
+        .app
+        .clone()
+        .map(|app| Arc::new(crate::commands::agent_hooks::AppAgentHooks::new(app)) as Arc<dyn crate::tools::AgentHooks>);
     let runtime = ToolRuntime {
         db: deps.db.clone(),
         http: deps.search_http.clone(),
@@ -2288,6 +2409,7 @@ pub async fn run_turn(
         options: options.clone(),
         settings: settings.clone(),
         cancel: cancel.clone(),
+        agent_hooks: agent_hooks.clone(),
         data_dir: data_dir.clone(),
         skills_roots: skills_roots.clone(),
     };
@@ -2339,6 +2461,7 @@ pub async fn run_turn(
                 workspace: code_ctx.workspace_handle(),
                 settings: settings.clone(),
                 cancel: cancel.clone(),
+                agent_hooks: agent_hooks.clone(),
                 data_dir: data_dir.clone(),
                 // A subagent has no approval/question/job/MCP channel: if an
                 // interactive tool is hallucinated, it fails closed immediately.
@@ -4170,14 +4293,37 @@ pub(crate) fn code_agent_allowed_tools(
     for name in [
         "task_list",
         "task_get",
+        "task_wait",
+        "task_cancel",
         "accept_task",
         "decline_task",
         "update_task",
         "finish_task",
+        "agent_directory",
+        "agent_usage",
+        "agent_inbox",
     ] {
         if agent.capabilities.allows_tool(name) && !allowed.iter().any(|item| item == name) {
             allowed.push(name.to_string());
         }
+    }
+    if agent.capabilities.delegation && agent.capabilities.allows_tool("agent_message") {
+        allowed.push("agent_message".to_string());
+    }
+    if agent.capabilities.automation {
+        for name in [
+            "routine_list",
+            "routine_create",
+            "routine_update",
+            "routine_delete",
+        ] {
+            if agent.capabilities.allows_tool(name) && !allowed.iter().any(|item| item == name) {
+                allowed.push(name.to_string());
+            }
+        }
+    }
+    if agent.capabilities.skills_write && agent.capabilities.allows_tool("skill_save") {
+        allowed.push("skill_save".to_string());
     }
     if agent.capabilities.delegation {
         allowed.extend(

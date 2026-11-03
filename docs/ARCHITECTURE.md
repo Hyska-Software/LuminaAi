@@ -503,9 +503,9 @@ Contrato completo: **`docs/AGENTS.md`**. Resumo:
   view.
 - **Delegação**: `agent_tasks`/`agent_task_events` com dono, lease, orçamento,
   deadline, `origin_conversation_id` e máquina de estados; tools
-  `delegate_task`/`handoff_task`/`finish_task`; handoff imediato e resultado
-  entregue como mensagem `system` na origem; runner Rust a cada 5 s em paralelo
-  sob o governador (`docs/TASKS.md`).
+  `delegate_task`/`handoff_task`/`task_wait`/`task_cancel`/`finish_task`;
+  handoff imediato e resultado entregue como mensagem `system` na origem;
+  runner Rust a cada 5 s em paralelo sob o governador (`docs/TASKS.md`).
 - **Computer use**: screenshot/clique/teclado/janelas/UI tree local no Windows e
   Docker gráfico (Xvfb + noVNC); input sempre com aprovação
   (`RiskClass::Computer`), contrato em `docs/COMPUTER.md`.

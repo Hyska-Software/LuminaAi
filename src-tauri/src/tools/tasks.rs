@@ -15,6 +15,8 @@ const TOOL_NAMES: &[&str] = &[
     "delegate_task",
     "task_list",
     "task_get",
+    "task_wait",
+    "task_cancel",
     "accept_task",
     "decline_task",
     "handoff_task",
@@ -68,6 +70,38 @@ pub fn definitions() -> Vec<ToolDefinition> {
             parameters: json!({
                 "type": "object",
                 "properties": { "taskId": { "type": "string" } },
+                "required": ["taskId"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "task_wait".to_string(),
+            description: "Wait for a delegated task to reach a stable state (done, failed, \
+                          cancelled, declined, review, waiting_input or waiting_approval). \
+                          Returns the current task when the timeout expires."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "taskId": { "type": "string" },
+                    "timeoutSeconds": { "type": "integer", "minimum": 0, "maximum": 300 }
+                },
+                "required": ["taskId"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "task_cancel".to_string(),
+            description: "Cancel a delegated task. The owner or the agent that created it can \
+                          cancel; terminal tasks cannot be cancelled. A running turn observes \
+                          the new status at its next step."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "taskId": { "type": "string" },
+                    "reason": { "type": "string", "maxLength": 500 }
+                },
                 "required": ["taskId"],
                 "additionalProperties": false
             }),
@@ -203,12 +237,31 @@ fn task_visible(
         || (task.channel_id.is_some() && task.channel_id == conversation.channel_id)
 }
 
+fn notify_task(db: &Db, task_id: &str, hooks: Option<&dyn crate::tools::AgentHooks>) {
+    if let Some(hooks) = hooks {
+        if let Ok(Some(task)) = db.get_agent_task(task_id) {
+            hooks.task_updated(&task);
+        }
+    }
+}
+
 pub fn run(
     db: &Db,
     agent_id: &str,
     conversation_id: &str,
     tool: &str,
     args: &Value,
+) -> ToolOutcome {
+    run_with_hooks(db, agent_id, conversation_id, tool, args, None)
+}
+
+pub fn run_with_hooks(
+    db: &Db,
+    agent_id: &str,
+    conversation_id: &str,
+    tool: &str,
+    args: &Value,
+    hooks: Option<&dyn crate::tools::AgentHooks>,
 ) -> ToolOutcome {
     let agent = match db.get_agent(agent_id) {
         Ok(Some(agent)) => agent,
@@ -257,6 +310,13 @@ pub fn run(
                 acceptance: json_str(args, "acceptance").unwrap_or_default(),
                 channel_id: inherited_channel,
                 parent_task_id: conversation.task_id.clone(),
+                workspace_id: conversation.workspace_id.clone().or_else(|| {
+                    conversation
+                        .task_id
+                        .as_deref()
+                        .and_then(|task_id| db.get_agent_task(task_id).ok().flatten())
+                        .and_then(|task| task.workspace_id)
+                }),
                 max_turns: args.get("maxTurns").and_then(Value::as_u64).map(|v| v as u32),
                 max_tokens: args.get("maxTokens").and_then(Value::as_u64).map(|v| v as u32),
                 max_cost: args.get("maxCost").and_then(Value::as_f64),
@@ -270,11 +330,16 @@ pub fn run(
                 Err(error) => return ToolOutcome::error(error),
             };
             match db.create_agent_task(&input, Some(agent_id), Some(conversation_id), false, now) {
-                Ok(task) => ToolOutcome {
-                    content: serde_json::to_string_pretty(&task).unwrap_or_else(|_| "{}".to_string()),
-                    summary: Some(format!("Delegada para {}", task.owner_agent_id)),
-                    ..Default::default()
-                },
+                Ok(task) => {
+                    let task_id = task.id.clone();
+                    notify_task(db, &task_id, hooks);
+                    ToolOutcome {
+                        content: serde_json::to_string_pretty(&task)
+                            .unwrap_or_else(|_| "{}".to_string()),
+                        summary: Some(format!("Delegada para {}", task.owner_agent_id)),
+                        ..Default::default()
+                    }
+                }
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
@@ -326,6 +391,70 @@ pub fn run(
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
+        "task_cancel" => {
+            let Some(task_id) = json_str(args, "taskId") else {
+                return ToolOutcome::error("o argumento `taskId` é obrigatório");
+            };
+            let task = match db.get_agent_task(&task_id) {
+                Ok(Some(task)) => task,
+                Ok(None) => {
+                    return ToolOutcome::error(format!(
+                        "AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"
+                    ));
+                }
+                Err(error) => return ToolOutcome::error(format!("{error:#}")),
+            };
+            if !task_visible(&task, agent_id, &conversation) {
+                return ToolOutcome::error(
+                    "AGENT_TASK_FORBIDDEN: esta tarefa não pertence ao seu escopo",
+                );
+            }
+            if task.owner_agent_id != agent_id
+                && task.created_by_agent_id.as_deref() != Some(agent_id)
+            {
+                return ToolOutcome::error(
+                    "AGENT_TASK_FORBIDDEN: só o dono ou quem criou a tarefa pode cancelá-la",
+                );
+            }
+            if matches!(task.status.as_str(), "done" | "cancelled" | "failed" | "declined") {
+                return ToolOutcome::error(
+                    "AGENT_TASK_INVALID: a tarefa já está encerrada e não pode ser cancelada",
+                );
+            }
+            let reason = json_str(args, "reason")
+                .map(|reason| reason.trim().chars().take(500).collect::<String>())
+                .filter(|reason| !reason.is_empty());
+            let result = reason
+                .as_deref()
+                .map(|reason| format!("Cancelada pelo agente: {reason}"))
+                .unwrap_or_else(|| "Cancelada pelo agente".to_string());
+            if let (Some(hooks), Some(conversation_id)) = (hooks, task.conversation_id.as_deref()) {
+                hooks.cancel_conversation(conversation_id);
+            }
+            match db.transition_agent_task(
+                &task_id,
+                Some(task.version),
+                None,
+                "cancelled",
+                "agent",
+                json!({ "cancelledBy": agent_id, "reason": reason }),
+                Some(&result),
+                None,
+                now,
+            ) {
+                Ok(task) => {
+                    let task_id = task.id.clone();
+                    notify_task(db, &task_id, hooks);
+                    ToolOutcome {
+                        content: serde_json::to_string_pretty(&task)
+                            .unwrap_or_else(|_| "{}".to_string()),
+                        summary: Some("Tarefa cancelada".to_string()),
+                        ..Default::default()
+                    }
+                }
+                Err(error) => ToolOutcome::error(format!("{error:#}")),
+            }
+        }
         "accept_task" => {
             let Some(task_id) = json_str(args, "taskId") else {
                 return ToolOutcome::error("o argumento `taskId` é obrigatório");
@@ -345,7 +474,10 @@ pub fn run(
                 None,
                 now,
             ) {
-                Ok(_) => ok_task(db, &task_id),
+                Ok(_) => {
+                    notify_task(db, &task_id, hooks);
+                    ok_task(db, &task_id)
+                }
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
@@ -369,7 +501,10 @@ pub fn run(
                 None,
                 now,
             ) {
-                Ok(_) => ok_task(db, &task_id),
+                Ok(_) => {
+                    notify_task(db, &task_id, hooks);
+                    ok_task(db, &task_id)
+                }
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
@@ -392,7 +527,10 @@ pub fn run(
             let next_steps = json_str(args, "nextSteps").unwrap_or_default();
             let combined = format!("{summary}\n\nPróximos passos: {next_steps}");
             match db.handoff_agent_task(&task_id, agent_id, &to_agent, "agent", &combined, now) {
-                Ok(_) => ok_task(db, &task_id),
+                Ok(_) => {
+                    notify_task(db, &task_id, hooks);
+                    ok_task(db, &task_id)
+                }
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
@@ -427,7 +565,10 @@ pub fn run(
                 None,
                 now,
             ) {
-                Ok(_) => ok_task(db, &task_id),
+                Ok(_) => {
+                    notify_task(db, &task_id, hooks);
+                    ok_task(db, &task_id)
+                }
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
@@ -466,13 +607,13 @@ pub fn run(
                     }
                     Err(error) => return ToolOutcome::error(format!("{error:#}")),
                 };
-                let belongs = stored.artifact.conversation_id.as_deref()
-                    == Some(conversation_id)
-                    || task.conversation_id.as_deref()
-                        == stored.artifact.conversation_id.as_deref();
+                let belongs = db
+                    .artifact_belongs_to_task(artifact_id, &task.id)
+                    .unwrap_or(false);
+                let _ = stored;
                 if !belongs {
                     return ToolOutcome::error(format!(
-                        "AGENT_TASK_INVALID: artefato `{artifact_id}` não pertence a esta tarefa"
+                        "ARTIFACT_NOT_IN_TASK: artefato `{artifact_id}` não pertence a esta tarefa"
                     ));
                 }
             }
@@ -487,7 +628,10 @@ pub fn run(
                 Some(&artifacts),
                 now,
             ) {
-                Ok(_) => ok_task(db, &task_id),
+                Ok(_) => {
+                    notify_task(db, &task_id, hooks);
+                    ok_task(db, &task_id)
+                }
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
@@ -513,6 +657,11 @@ pub fn run(
             }
             match db.get_agent_channel(&channel_id) {
                 Ok(Some(channel)) => {
+                    if channel.kind == "dm" {
+                        return ToolOutcome::error(
+                            "AGENT_CHANNEL_DM_READONLY: use `agent_message` para conversas diretas",
+                        );
+                    }
                     if !channel.member_ids.iter().any(|id| id == agent_id) {
                         return ToolOutcome::error(
                             "AGENT_TASK_FORBIDDEN: este agente não participa do canal",
@@ -529,16 +678,98 @@ pub fn run(
                 content.trim(),
                 now,
             ) {
-                Ok(message) => ToolOutcome {
-                    content: serde_json::to_string_pretty(&message)
-                        .unwrap_or_else(|_| "{}".to_string()),
-                    summary: Some("Mensagem publicada".to_string()),
-                    ..Default::default()
-                },
+                Ok(message) => {
+                    if let Some(hooks) = hooks {
+                        hooks.channel_updated(&channel_id);
+                    }
+                    ToolOutcome {
+                        content: serde_json::to_string_pretty(&message)
+                            .unwrap_or_else(|_| "{}".to_string()),
+                        summary: Some("Mensagem publicada".to_string()),
+                        ..Default::default()
+                    }
+                }
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
         other => ToolOutcome::error(format!("ferramenta de tarefa desconhecida: {other}")),
+    }
+}
+
+/// Waits for a visible task to reach a stable state. Used by both the Agent
+/// and Code harnesses; the model sets the timeout, capped at five minutes.
+pub async fn wait_for_task(
+    db: &Db,
+    agent_id: &str,
+    conversation_id: &str,
+    args: &Value,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> ToolOutcome {
+    let Some(task_id) = json_str(args, "taskId") else {
+        return ToolOutcome::error("o argumento `taskId` é obrigatório");
+    };
+    let conversation = match db.get_conversation(conversation_id) {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return ToolOutcome::error("AGENT_TASK_INVALID: conversa não encontrada"),
+        Err(error) => return ToolOutcome::error(format!("{error:#}")),
+    };
+    let timeout_seconds = args
+        .get("timeoutSeconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(30)
+        .min(300);
+    let started = std::time::Instant::now();
+    let deadline = started + std::time::Duration::from_secs(timeout_seconds);
+    loop {
+        let task = match db.get_agent_task(&task_id) {
+            Ok(Some(task)) => task,
+            Ok(None) => {
+                return ToolOutcome::error(format!(
+                    "AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"
+                ));
+            }
+            Err(error) => return ToolOutcome::error(format!("{error:#}")),
+        };
+        if !task_visible(&task, agent_id, &conversation) {
+            return ToolOutcome::error(
+                "AGENT_TASK_FORBIDDEN: esta tarefa não pertence ao seu escopo",
+            );
+        }
+        let stable = matches!(
+            task.status.as_str(),
+            "done"
+                | "failed"
+                | "cancelled"
+                | "declined"
+                | "review"
+                | "waiting_input"
+                | "waiting_approval"
+        );
+        let timed_out = !stable && std::time::Instant::now() >= deadline;
+        if stable || timed_out {
+            let status = task.status.clone();
+            return ToolOutcome {
+                content: serde_json::to_string_pretty(&json!({
+                    "task": task,
+                    "waitTimedOut": timed_out,
+                    "waitedMs": started.elapsed().as_millis() as u64,
+                }))
+                .unwrap_or_else(|_| "{}".to_string()),
+                summary: Some(format!(
+                    "Tarefa · {}{status}",
+                    if timed_out { "timeout · " } else { "" }
+                )),
+                ..Default::default()
+            };
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        let sleep_for = remaining.min(std::time::Duration::from_millis(500));
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                return ToolOutcome::error("AGENT_TASK_CANCELLED: espera interrompida");
+            }
+            _ = tokio::time::sleep(sleep_for) => {}
+        }
     }
 }
 
@@ -577,6 +808,153 @@ mod tests {
 
     fn task_status(db: &Db, id: &str) -> String {
         db.get_agent_task(id).expect("task").expect("exists").status
+    }
+
+    struct RecordingHooks {
+        cancelled: std::sync::Mutex<Vec<String>>,
+        updated: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl crate::tools::AgentHooks for RecordingHooks {
+        fn task_updated(&self, task: &crate::agents::AgentTask) {
+            self.updated.lock().unwrap().push(task.id.clone());
+        }
+        fn channel_updated(&self, _channel_id: &str) {}
+        fn cancel_conversation(&self, conversation_id: &str) {
+            self.cancelled
+                .lock()
+                .unwrap()
+                .push(conversation_id.to_string());
+        }
+    }
+
+    #[test]
+    fn task_cancel_is_allowed_for_the_creator_and_rejects_terminal_tasks() {
+        let db = Db::open_in_memory().expect("db");
+        let first = agent(&db, "Ana", true);
+        let second = agent(&db, "Bia", true);
+        let conversation = db
+            .create_agent_conversation(&first.id, "Cancelamento")
+            .expect("conversation");
+        let delegated = run(
+            &db,
+            &first.id,
+            &conversation.id,
+            "delegate_task",
+            &serde_json::json!({
+                "toAgentId": second.id,
+                "title": "Trabalho longo",
+                "brief": "Faça o trabalho.",
+            }),
+        );
+        assert!(!delegated.is_error, "{}", delegated.content);
+        let value: serde_json::Value = serde_json::from_str(&delegated.content).expect("json");
+        let task_id = value["id"].as_str().expect("id").to_string();
+
+        let cancelled = run(
+            &db,
+            &first.id,
+            &conversation.id,
+            "task_cancel",
+            &serde_json::json!({ "taskId": task_id, "reason": "mudou a prioridade" }),
+        );
+        assert!(!cancelled.is_error, "{}", cancelled.content);
+        assert_eq!(task_status(&db, &task_id), "cancelled");
+
+        let again = run(
+            &db,
+            &first.id,
+            &conversation.id,
+            "task_cancel",
+            &serde_json::json!({ "taskId": task_id }),
+        );
+        assert!(again.is_error);
+        assert!(again.content.contains("AGENT_TASK_INVALID"));
+    }
+
+    #[tokio::test]
+    async fn task_wait_times_out_without_transitioning_the_task() {
+        let db = Db::open_in_memory().expect("db");
+        let first = agent(&db, "Ana", true);
+        let second = agent(&db, "Bia", true);
+        let conversation = db
+            .create_agent_conversation(&first.id, "Espera")
+            .expect("conversation");
+        let delegated = run(
+            &db,
+            &first.id,
+            &conversation.id,
+            "delegate_task",
+            &serde_json::json!({
+                "toAgentId": second.id,
+                "title": "Tarefa em fila",
+                "brief": "Ainda não começou.",
+            }),
+        );
+        assert!(!delegated.is_error, "{}", delegated.content);
+        let value: serde_json::Value = serde_json::from_str(&delegated.content).expect("json");
+        let task_id = value["id"].as_str().expect("id").to_string();
+
+        let waited = wait_for_task(
+            &db,
+            &first.id,
+            &conversation.id,
+            &serde_json::json!({ "taskId": task_id, "timeoutSeconds": 0 }),
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await;
+        assert!(!waited.is_error, "{}", waited.content);
+        assert!(waited.content.contains("\"waitTimedOut\": true"));
+        assert!(waited.content.contains("\"status\": \"queued\""));
+        assert_eq!(task_status(&db, &task_id), "queued");
+    }
+
+    #[test]
+    fn task_cancel_cancels_the_owner_thread_and_notifies() {
+        let db = Db::open_in_memory().expect("db");
+        let first = agent(&db, "Ana", true);
+        let second = agent(&db, "Bia", true);
+        let conversation = db
+            .create_agent_conversation(&first.id, "Coordenação")
+            .expect("conversation");
+        let delegated = run(
+            &db,
+            &first.id,
+            &conversation.id,
+            "delegate_task",
+            &serde_json::json!({
+                "toAgentId": second.id,
+                "title": "Cancelar",
+                "brief": "Faça algo.",
+            }),
+        );
+        assert!(!delegated.is_error, "{}", delegated.content);
+        let value: serde_json::Value = serde_json::from_str(&delegated.content).expect("json");
+        let task_id = value["id"].as_str().expect("id").to_string();
+        let task = db.get_agent_task(&task_id).expect("task").expect("exists");
+        let owner_thread = db
+            .create_agent_conversation(&second.id, "Tarefa: Cancelar")
+            .expect("owner thread");
+        db.set_agent_task_conversation(&task.id, &owner_thread.id, crate::domain::now_ms())
+            .expect("bind");
+        let hooks = RecordingHooks {
+            cancelled: std::sync::Mutex::new(Vec::new()),
+            updated: std::sync::Mutex::new(Vec::new()),
+        };
+        let cancelled = run_with_hooks(
+            &db,
+            &first.id,
+            &conversation.id,
+            "task_cancel",
+            &serde_json::json!({ "taskId": task_id }),
+            Some(&hooks),
+        );
+        assert!(!cancelled.is_error, "{}", cancelled.content);
+        assert_eq!(
+            hooks.cancelled.lock().unwrap().as_slice(),
+            &[owner_thread.id.clone()]
+        );
+        assert!(hooks.updated.lock().unwrap().iter().any(|id| id == &task_id));
     }
 
     #[test]

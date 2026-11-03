@@ -853,6 +853,12 @@ export interface AgentCapabilities {
   codeExecution: boolean;
   /** Delegação de tarefas para outros agentes. */
   delegation?: boolean;
+  /** Criação/edição das próprias rotinas. */
+  automation?: boolean;
+  /** Memória compartilhada entre agentes. */
+  sharedMemory?: boolean;
+  /** Escrita de skills do usuário. */
+  skillsWrite?: boolean;
   /** Computer use visual (screenshot + input). */
   computerUse?: boolean;
   /** Captura de tela sem input. */
@@ -964,9 +970,22 @@ export interface AgentMemoryInput {
   pinned?: boolean;
 }
 
+export interface AgentSharedMemory {
+  id: string;
+  sourceAgentId: string | null;
+  sourceAgentName: string | null;
+  sourceConversationId: string | null;
+  kind: AgentMemoryKind;
+  content: string;
+  pinned: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface AgentChannel {
   id: string;
   name: string;
+  kind?: 'channel' | 'dm';
   memberIds: string[];
   createdAt: number;
   updatedAt: number;
@@ -990,6 +1009,28 @@ export interface AgentChannelMessage {
 export interface AgentChannelPostResult {
   messages: AgentChannelMessage[];
   errors: string[];
+}
+
+export interface AgentInboxItem {
+  id: string;
+  recipientAgentId: string;
+  senderAgentId: string | null;
+  senderUser: boolean;
+  channelId: string;
+  channelName: string;
+  messageId: string;
+  senderName: string;
+  messageContent: string;
+  status: 'pending' | 'delivering' | 'delivered' | 'failed';
+  attempts: number;
+  lastError: string | null;
+  createdAt: number;
+  deliveredAt: number | null;
+}
+
+export interface AgentInboxCount {
+  channelId: string;
+  pending: number;
 }
 
 export type AgentTaskStatus =
@@ -1036,6 +1077,8 @@ export interface AgentTask {
   deadlineAt: number | null;
   conversationId: string | null;
   originConversationId: string | null;
+  workspaceId?: string | null;
+  retryCount?: number;
   result: string | null;
   resultArtifactIds: string[];
   leaseUntil: number | null;
@@ -1052,6 +1095,7 @@ export interface AgentTaskInput {
   acceptance?: string;
   channelId?: string | null;
   parentTaskId?: string | null;
+  workspaceId?: string | null;
   maxTurns?: number;
   maxTokens?: number;
   maxCost?: number;
@@ -1107,6 +1151,10 @@ export interface AgentRoutine {
   lastRunAt: number | null;
   lastStatus: string | null;
   lastError: string | null;
+  triggerKind: 'schedule' | 'event';
+  eventKind: 'channel.message' | 'task.status' | '';
+  eventFilterJson: string;
+  leaseUntil: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -1119,6 +1167,9 @@ export interface AgentRoutineInput {
   hour: number;
   minute: number;
   enabled: boolean;
+  triggerKind: 'schedule' | 'event';
+  eventKind: 'channel.message' | 'task.status' | '';
+  eventFilterJson: string;
 }
 
 export interface AgentRoutineRunEvent {
@@ -1128,6 +1179,8 @@ export interface AgentRoutineRunEvent {
   title: string;
   status: string;
   error: string | null;
+  eventKind?: string | null;
+  eventId?: string | null;
 }
 
 export interface AgentRoutineRun {
@@ -1589,6 +1642,18 @@ export interface SkillContent {
   dir: string;
   /** Corpo do `SKILL.md` (Markdown, sem o frontmatter). */
   content: string;
+}
+
+export interface SkillDraft {
+  name: string;
+  description: string;
+  content: string;
+  overwrite: boolean;
+}
+
+export interface SkillVersion {
+  file: string;
+  savedAt: number;
 }
 
 export interface CodeEnvironmentStatus {

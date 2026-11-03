@@ -340,6 +340,23 @@ export default function App() {
       .catch(() => {
         /* event bridge unavailable outside Tauri */
       });
+    void listen<{ channelId: string; recipientAgentId: string }>(
+      'lumina:agent-inbox-updated',
+      (event) => {
+        if (disposed) return;
+        window.dispatchEvent(
+          new CustomEvent('lumina:agent-inbox-updated', { detail: event.payload }),
+        );
+        void useAgentStore.getState().refresh();
+      },
+    )
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* event bridge unavailable outside Tauri */
+      });
     return () => {
       disposed = true;
       unlisten?.();

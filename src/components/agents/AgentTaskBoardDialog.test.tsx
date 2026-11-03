@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 
 const mocks = vi.hoisted(() => ({
   listAgentTasks: vi.fn(),
+  listAgentChannels: vi.fn(),
   cancelAgentTask: vi.fn(),
 }));
 
@@ -51,6 +52,7 @@ beforeEach(() => {
     task({ id: 'queued', title: 'Preparar entrega', status: 'queued' }),
     task({ id: 'running', title: 'Analisar contrato', status: 'running' }),
   ]);
+  mocks.listAgentChannels.mockResolvedValue([]);
   vi.spyOn(window, 'confirm').mockReturnValue(true);
 });
 

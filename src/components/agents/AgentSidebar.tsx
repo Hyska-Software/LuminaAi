@@ -16,6 +16,7 @@ import {
   ListChecks,
   ListTree,
   Loader2,
+  MessageCircle,
   MessageCircleQuestion,
   MessageSquare,
   MessageSquarePlus,
@@ -438,21 +439,26 @@ function AgentRow({
 function ChannelRow({
   channel,
   active,
+  label,
+  pending,
   onSelect,
   onEdit,
 }: {
   channel: AgentChannel;
   active: boolean;
+  label: string;
+  pending: number;
   onSelect: () => void;
   onEdit: () => void;
 }) {
+  const dm = channel.kind === 'dm';
   return (
     <div className="group/channel relative flex items-center">
       <button
         type="button"
         onClick={onSelect}
         aria-current={active ? 'page' : undefined}
-        title={channel.name}
+        title={label}
         className={cn(
           'flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 pr-8 text-left text-[12px]',
           'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
@@ -461,28 +467,40 @@ function ChannelRow({
             : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
         )}
       >
-        <Hash aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
-        <span className="min-w-0 flex-1 truncate">{channel.name}</span>
-        <span className="shrink-0 text-[10px] text-foreground-subtle">
-          {channel.memberIds.length}
-        </span>
-      </button>
-      <button
-        type="button"
-        aria-label={`Editar canal ${channel.name}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          onEdit();
-        }}
-        className={cn(
-          'absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md',
-          'text-foreground-subtle hover:bg-surface-active hover:text-foreground',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-          'opacity-100 lg:opacity-0 lg:group-hover/channel:opacity-100 lg:focus-visible:opacity-100',
+        {dm ? (
+          <MessageCircle aria-hidden className="size-3.5 shrink-0 text-accent" />
+        ) : (
+          <Hash aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
         )}
-      >
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {pending > 0 ? (
+          <span className="shrink-0 rounded-full bg-accent px-1.5 text-[10px] font-medium text-background">
+            {pending}
+          </span>
+        ) : (
+          <span className="shrink-0 text-[10px] text-foreground-subtle">
+            {channel.memberIds.length}
+          </span>
+        )}
+      </button>
+      {dm ? null : (
+        <button
+          type="button"
+          aria-label={`Editar canal ${channel.name}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onEdit();
+          }}
+          className={cn(
+            'absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md',
+            'text-foreground-subtle hover:bg-surface-active hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+            'opacity-100 lg:opacity-0 lg:group-hover/channel:opacity-100 lg:focus-visible:opacity-100',
+          )}
+        >
         <Pencil className="size-3.5" />
       </button>
+      )}
     </div>
   );
 }
@@ -506,6 +524,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const setAgentPanelOpen = useUiStore((state) => state.setAgentPanelOpen);
   const setAgentRightPanel = useUiStore((state) => state.setAgentRightPanel);
   const [channels, setChannels] = useState<AgentChannel[]>([]);
+  const [inboxCounts, setInboxCounts] = useState<Record<string, number>>({});
   const [channelDialogOpen, setChannelDialogOpen] = useState(false);
   const [editingChannel, setEditingChannel] = useState<AgentChannel | null>(null);
   const [renameThreadTarget, setRenameThreadTarget] = useState<Conversation | null>(null);
@@ -549,20 +568,30 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   useEffect(() => {
     let disposed = false;
     const load = () => {
-      void api
-        .listAgentChannels()
-        .then((list) => {
-          if (!disposed) setChannels(list);
+      void Promise.all([api.listAgentChannels(), api.listAgentChannelInboxCounts()])
+        .then(([list, counts]) => {
+          if (disposed) return;
+          setChannels(list);
+          setInboxCounts(
+            Object.fromEntries(counts.map((entry) => [entry.channelId, entry.pending])),
+          );
         })
         .catch(() => {
-          if (!disposed) setChannels([]);
+          if (!disposed) {
+            setChannels([]);
+            setInboxCounts({});
+          }
         });
     };
     load();
     window.addEventListener('lumina:channels-changed', load);
+    window.addEventListener('lumina:agent-channel-updated', load);
+    window.addEventListener('lumina:agent-inbox-updated', load);
     return () => {
       disposed = true;
       window.removeEventListener('lumina:channels-changed', load);
+      window.removeEventListener('lumina:agent-channel-updated', load);
+      window.removeEventListener('lumina:agent-inbox-updated', load);
     };
   }, []);
 
@@ -920,6 +949,15 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                   key={channel.id}
                   channel={channel}
                   active={activeChannelId === channel.id}
+                  label={
+                    channel.kind === 'dm'
+                      ? channel.memberIds
+                          .map((id) => agents.find((agent) => agent.id === id)?.name)
+                          .filter(Boolean)
+                          .join(' ↔ ') || channel.name
+                      : channel.name
+                  }
+                  pending={inboxCounts[channel.id] ?? 0}
                   onSelect={() => selectChannel(channel)}
                   onEdit={() => {
                     setEditingChannel(channel);

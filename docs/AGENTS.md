@@ -82,9 +82,12 @@ o turno real.
 - `fileAccess` → gate de `create_file`;
 - `codeExecution` → gate de `run_code` (além do gate global);
 - `delegation` → gate de `delegate_task`/`handoff_task`/`send_message`; as tools
-  de dono (`task_list`, `task_get`, `accept_task`, `decline_task`, `update_task`,
-  `finish_task`) ficam disponíveis para qualquer agente concluir trabalho
-  atribuído;
+  de dono (`task_list`, `task_get`, `task_wait`, `task_cancel`, `accept_task`,
+  `decline_task`, `update_task`, `finish_task`) ficam disponíveis para qualquer
+  agente concluir ou encerrar trabalho atribuído;
+- `automation` → gate de `routine_list`/`routine_create`/`routine_update`/
+  `routine_delete`; `agent_directory` e `agent_usage` são somente leitura e
+  ficam disponíveis a qualquer agente;
 - `computerUse`/`screenCapture` → gate das tools de computer use;
 - `dockerExecution` → permite `agents.docker_image` como override de imagem;
 - `skills: null` herda todas; `Some([...])` é allowlist (`Some([])` nega todas);
@@ -100,6 +103,22 @@ A aplicação acontece em três camadas:
 3. **Conteúdo**: `list_skills`/`read_skill` escondem skills não autorizadas;
    o catálogo de skills do prompt é filtrado; tools MCP de servidores não
    autorizados não entram no catálogo.
+
+### Tools exclusivas do layout Agentes
+
+Elas não entram no catálogo de uma sessão normal do Chat/Code; o harness resolve
+a persona pela conversa, nunca pelo modelo:
+
+- `agent_directory` — roster ativo (id, nome, papel, modelo, capabilities,
+  workspace, threads) e canais dos quais o chamador participa. Instruções e
+  memórias de outros agentes não são expostas.
+- `agent_usage` — uso all-time, uso do dia local, limite diário e saldo.
+- `routine_list`/`routine_create`/`routine_update`/`routine_delete` — somente
+  com `automation`; o agente só enxerga/altera as próprias rotinas e o backend
+  limita 50 rotinas por agente.
+
+As tools de tarefa (`task_wait`, `task_cancel`) são compartilhadas com o layout
+Code e descritas em `docs/TASKS.md`.
 
 O renderer nunca envia a allowlist: o harness resolve as capabilities da
 persona vinculada à conversa. `TurnOptions` carrega esses campos com
@@ -221,6 +240,9 @@ com erro — o fallback é de rota, não um retry infinito.
 ## 7. Rotinas
 
 - CRUD em `AgentRoutinesDialog` (menu do agente → Rotinas).
+- Com a capability `automation`, o próprio agente pode listar, criar, editar e
+  excluir rotinas pelas tools `routine_*`; cada agente tem no máximo 50 rotinas
+  e só acessa as próprias.
 - O agendador roda no Rust enquanto o app está aberto (tick de 30 s). Ele não é
   um serviço de nuvem nem promete execução com o app fechado.
 - Cada rotina executa um turno normal na sua thread dedicada, com o modelo,
@@ -282,8 +304,8 @@ Contrato completo: `docs/TASKS.md`.
   deadline, lease/version, `origin_conversation_id` e profundidade máxima 2.
 - Tools de criação/transferência (capability `delegation`): `delegate_task`,
   `handoff_task`, `send_message`. Tools de dono, sempre disponíveis:
-  `task_list`, `task_get`, `accept_task`, `decline_task`, `update_task`,
-  `finish_task` (escopo por dono/criador/canal).
+  `task_list`, `task_get`, `task_wait`, `task_cancel`, `accept_task`,
+  `decline_task`, `update_task`, `finish_task` (escopo por dono/criador/canal).
 - O scheduler Rust roda tarefas a cada 5 s em paralelo sob o governador,
   recupera leases expirados, aplica deadline, cria/reusa thread oculta com
   `task_id`, roda múltiplos turnos com orçamento e publica o resultado no canal.

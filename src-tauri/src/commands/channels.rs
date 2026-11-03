@@ -51,25 +51,66 @@ fn escape_channel_text(value: &str) -> String {
 
 fn channel_targets(content: &str, members: &[(String, String)]) -> Vec<String> {
     let lower = content.to_lowercase();
-    if lower.contains("@everyone") {
+    let is_boundary = |ch: Option<char>| {
+        ch.map_or(true, |value| {
+            !value.is_alphanumeric() && value != '-' && value != '_'
+        })
+    };
+    let mut candidates: Vec<(String, String)> = Vec::new();
+    for (id, name) in members {
+        candidates.push((id.to_lowercase(), id.clone()));
+        candidates.push((name.to_lowercase(), id.clone()));
+    }
+    candidates.sort_by(|left, right| right.0.len().cmp(&left.0.len()));
+    let mut targets: Vec<String> = Vec::new();
+    let mut found_known = false;
+    let mut saw_mention = false;
+    let chars: Vec<char> = lower.chars().collect();
+    let mut index = 0usize;
+    while index < chars.len() {
+        if chars[index] != '@' {
+            index += 1;
+            continue;
+        }
+        if index > 0 && !is_boundary(Some(chars[index - 1])) {
+            index += 1;
+            continue;
+        }
+        saw_mention = true;
+        let rest: String = chars[index + 1..].iter().collect();
+        if rest.starts_with("everyone") {
+            let after = rest.chars().nth("everyone".len());
+            if is_boundary(after) {
+                return members.iter().map(|(id, _)| id.clone()).collect();
+            }
+        }
+        let matched = candidates.iter().find(|(candidate, _)| {
+            if !rest.starts_with(candidate) {
+                return false;
+            }
+            is_boundary(rest.chars().nth(candidate.chars().count()))
+        });
+        if let Some((candidate, id)) = matched {
+            found_known = true;
+            if !targets.iter().any(|existing| existing == id) {
+                targets.push(id.clone());
+            }
+            index += 1 + candidate.chars().count();
+        } else {
+            index += 1;
+        }
+    }
+    if !found_known && saw_mention {
         return members.iter().map(|(id, _)| id.clone()).collect();
     }
-    let mentions_all = members
-        .iter()
-        .filter(|(id, name)| {
-            lower.contains(&format!("@{}", name.to_lowercase()))
-                || lower.contains(&format!("@{}", id.to_lowercase()))
-        })
-        .map(|(id, _)| id.clone())
-        .collect::<Vec<_>>();
-    if mentions_all.is_empty() {
+    if targets.is_empty() {
         members.iter().map(|(id, _)| id.clone()).collect()
     } else {
-        mentions_all
+        targets
     }
 }
 
-fn build_channel_context(
+pub(crate) fn build_channel_context(
     channel_id: &str,
     messages: &[AgentChannelMessage],
     names: &std::collections::HashMap<String, String>,
@@ -190,6 +231,12 @@ pub async fn post_agent_channel_message(
         .ok_or_else(|| format!("AGENT_CHANNEL_NOT_FOUND: canal `{channel_id}` não existe"))?;
     if channel.member_ids.is_empty() {
         return Err("AGENT_CHANNEL_EMPTY: adicione pelo menos um agente ao canal.".to_string());
+    }
+    if channel.kind == "dm" {
+        return Err(
+            "AGENT_CHANNEL_DM_READONLY: conversas diretas são geradas pelo inbox dos agentes."
+                .to_string(),
+        );
     }
 
     let _ = state
@@ -389,6 +436,11 @@ mod tests {
         assert_eq!(
             channel_targets("@desconhecido", &members()),
             vec!["a".to_string(), "b".to_string()]
+        );
+        assert_eq!(
+            channel_targets("@Ana @Anabel", &members()),
+            vec!["a".to_string()],
+            "@Anabel não pode casar com @Ana"
         );
     }
 
