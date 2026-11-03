@@ -58,8 +58,11 @@ pub fn definitions() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "computer_screenshot".to_string(),
             description: "Capture the local screen (or the Docker graphical session) to a PNG. \
-                          Returns the absolute path and dimensions. The user can inspect the file; \
-                          use `computer_windows` for window targets."
+                          Returns the absolute path and dimensions. Observe again after the user \
+                          returns control. For login, CAPTCHA or other sensitive steps, ask the \
+                          user to take control using `ask_user` with header `computer_desktop` \
+                          when available; never request passwords or one-time codes in chat. \
+                          Use `computer_windows` for window targets."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -233,7 +236,10 @@ pub fn definitions() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "browser_snapshot".to_string(),
             description: "Read the active page: URL, title, accessibility elements with stable refs \
-                          (e1, e2, …) and a screenshot. Use a ref with browser_click/browser_type."
+                          (e1, e2, …) and a screenshot. Use a ref with browser_click/browser_type. \
+                          For login, CAPTCHA, or other sensitive intervention, ask the user to take \
+                          control using `ask_user` with header `computer_browser` when available; \
+                          never request credentials or one-time codes in chat."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -463,6 +469,12 @@ async fn approve(
     tool: &str,
     detail: ApprovalDetail,
 ) -> Result<(), ToolOutcome> {
+    let gate = crate::computer::control::gate(&ctx.conversation_id);
+    let mut takeover = gate.subscribe();
+    let host_gate = crate::computer::control::gate(crate::computer::control::HOST_CONTROL);
+    let mut host_takeover = host_gate.subscribe();
+    ensure_agent_control(ctx)?;
+    if uses_host_desktop(ctx, tool) { ensure_host_control(ctx)?; }
     // Unattended routines/tasks have no approval card. Browser actions can be
     // explicitly pre-authorized (domain policy still applies) while desktop
     // input remains fail-closed.
@@ -471,10 +483,13 @@ async fn approve(
         ctx.settings.computer_allow_unattended_browser,
         tool,
     ) {
-        return Ok(());
+        ensure_agent_control(ctx)?;
+        return if uses_host_desktop(ctx, tool) { ensure_host_control(ctx) } else { Ok(()) };
     }
-    super::exec::policy_check(
-        ctx,
+    let mut approval_ctx = ctx.clone();
+    approval_ctx.cancel = ctx.cancel.child_token();
+    let approval = super::exec::policy_check(
+        &approval_ctx,
         tool,
         RiskClass::Computer,
         true,
@@ -484,7 +499,49 @@ async fn approve(
         detail,
         "Controlar o computador?",
     )
-    .await
+    ;
+    tokio::pin!(approval);
+    tokio::select! {
+        result = &mut approval => {
+            result?;
+            ensure_agent_control(ctx)?;
+            if uses_host_desktop(ctx, tool) { ensure_host_control(ctx) } else { Ok(()) }
+        }
+        _ = takeover.changed() => {
+            approval_ctx.cancel.cancel();
+            let _ = approval.await;
+            Err(ToolOutcome::error("COMPUTER_PAUSED: o usuário solicitou o controle do computador"))
+        },
+        _ = host_takeover.changed(), if uses_host_desktop(ctx, tool) => {
+            approval_ctx.cancel.cancel();
+            let _ = approval.await;
+            Err(ToolOutcome::error("COMPUTER_PAUSED: o usuário solicitou o controle do computador local"))
+        },
+    }
+}
+
+fn uses_host_desktop(ctx: &ToolCtx, tool: &str) -> bool {
+    is_browser_tool(tool) || crate::computer::backend(&ctx.settings) == crate::computer::ComputerBackend::Local
+}
+
+fn ensure_host_control(ctx: &ToolCtx) -> Result<(), ToolOutcome> {
+    match ctx.db.computer_control(crate::computer::control::HOST_CONTROL) {
+        Ok((false, false)) => Ok(()),
+        Ok(_) => Err(ToolOutcome::error("COMPUTER_PAUSED: o usuário controla o computador local em outra conversa")),
+        Err(error) => Err(ToolOutcome::error(format!("COMPUTER_CONTROL_UNAVAILABLE: {error:#}"))),
+    }
+}
+
+fn ensure_agent_control(ctx: &ToolCtx) -> Result<(), ToolOutcome> {
+    match ctx.db.computer_control(&ctx.conversation_id) {
+        Ok((false, false)) => Ok(()),
+        Ok(_) => Err(ToolOutcome::error(
+            "COMPUTER_PAUSED: o usuário assumiu ou solicitou o controle do computador",
+        )),
+        Err(error) => Err(ToolOutcome::error(format!(
+            "COMPUTER_CONTROL_UNAVAILABLE: não foi possível verificar o controle: {error:#}"
+        ))),
+    }
 }
 
 async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
@@ -1350,14 +1407,22 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
             "COMPUTER_DISABLED: o ambiente de computador está desligado ou em modo navegador",
         );
     }
-    if tool != "browser_open" {
-        if let Ok((paused, taken_over)) = ctx.db.computer_control(&ctx.conversation_id) {
-            if paused || taken_over {
-                return ToolOutcome::error(
-                    "COMPUTER_PAUSED: o usuário assumiu o controle do computador",
-                );
-            }
+    let host_gate = crate::computer::control::gate(crate::computer::control::HOST_CONTROL);
+    let _host_action = if uses_host_desktop(ctx, tool) { Some(host_gate.action.lock().await) } else { None };
+    if uses_host_desktop(ctx, tool) {
+        if let Err(outcome) = ensure_host_control(ctx) { return outcome; }
+    }
+    let gate = crate::computer::control::gate(&ctx.conversation_id);
+    let _action = gate.action.lock().await;
+    if let Err(outcome) = ensure_agent_control(ctx) {
+        return outcome;
+    }
+    match ctx.db.computer_needs_observation(&ctx.conversation_id) {
+        Ok(true) if !matches!(tool, "computer_screenshot" | "browser_snapshot") => {
+            return ToolOutcome::error("COMPUTER_OBSERVATION_REQUIRED: o usuário modificou o ambiente; observe-o com computer_screenshot ou browser_snapshot antes de agir");
         }
+        Err(error) => return ToolOutcome::error(format!("COMPUTER_CONTROL_UNAVAILABLE: {error:#}")),
+        _ => {}
     }
     let conversation = ctx.db.get_conversation(&ctx.conversation_id).ok().flatten();
     let agent_id = conversation.as_ref().and_then(|value| value.agent_id.clone());
@@ -1429,6 +1494,11 @@ pub async fn run(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
         }
     };
     let outcome = run_inner(ctx, tool, args).await;
+    if !outcome.is_error && matches!(tool, "computer_screenshot" | "browser_snapshot") {
+        if let Err(error) = ctx.db.set_computer_needs_observation(&ctx.conversation_id, false) {
+            return ToolOutcome::error(format!("COMPUTER_CONTROL_UNAVAILABLE: {error:#}"));
+        }
+    }
     let decision = decision_of(&outcome);
     let _ = ctx.db.finish_computer_action(
         &pending.id,

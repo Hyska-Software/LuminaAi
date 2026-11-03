@@ -31,13 +31,20 @@ privado → Imagem do computer use.
 O app inicia o container automaticamente com:
 
 - Xvfb + openbox + Chromium + xdotool/scrot/wmctrl;
-- noVNC em `http://127.0.0.1:6080/vnc.html` (visualização humana);
+- dois servidores RFB restritos ao loopback **dentro** do container: um somente
+  de observação e outro para controle humano autorizado;
 - `--cap-drop ALL`, `no-new-privileges`, limites de CPU/memória/pids;
-- rede `none` (o noVNC é publicado em loopback, não é rede do agente).
+- rede `none` por padrão. A interface usa uma ponte WebSocket local de uso único
+  e `docker exec`/`socat`; nenhuma porta RFB é publicada no host e a visualização
+  não exige habilitar a rede do agente.
 
 O agente conversa com o display via `docker exec` (`computer_screenshot`,
 `computer_click`, `computer_type`, `computer_key`, `computer_windows`,
 `computer_focus`). O VNC nunca é exposto ao modelo.
+
+As imagens anteriores não têm os dois servidores e `socat`: atualize a imagem
+publicada ou faça o build local acima e encerre/reinicie a sessão. Não há pull
+automático. O pacote `@novnc/novnc` (MPL-2.0) é o cliente integrado do renderer.
 
 ## Produção
 

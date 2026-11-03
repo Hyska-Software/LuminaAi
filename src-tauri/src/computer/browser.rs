@@ -98,6 +98,70 @@ struct BrowserSession {
     download_dir: PathBuf,
     active_tab: Mutex<Option<String>>,
     refs: Mutex<HashMap<String, Vec<BrowserElement>>>,
+    held_input: Mutex<HashMap<String, HeldInput>>,
+}
+
+/// Inputs are recorded before dispatch: a lost CDP reply must not be mistaken
+/// for proof that the browser did not receive a press.
+#[derive(Default, Clone)]
+struct HeldInput {
+    keys: HashMap<String, Value>,
+    buttons: HashMap<String, Value>,
+}
+
+impl HeldInput {
+    fn identity(kind: &str, params: &Value) -> Option<String> {
+        let field = |name| params.get(name).and_then(Value::as_str).filter(|s| !s.is_empty());
+        match kind {
+            "key" => field("code").or_else(|| field("key")).map(str::to_string),
+            "mouse" => field("button").filter(|s| matches!(*s, "left" | "middle" | "right" | "back" | "forward")).map(str::to_string),
+            _ => None,
+        }
+    }
+
+    fn before_dispatch(&mut self, kind: &str, params: &Value) -> Result<(), String> {
+        let event = params.get("type").and_then(Value::as_str).unwrap_or("");
+        if matches!(event, "keyDown" | "rawKeyDown" | "keyUp" | "mousePressed" | "mouseReleased") {
+            let id = Self::identity(kind, params).ok_or("BROWSER_INPUT_INVALID: tecla ou botão ausente")?;
+            if matches!(event, "keyDown" | "rawKeyDown" | "mousePressed") {
+                if kind == "key" && !self.keys.contains_key(&id) && self.keys.len() >= 32 {
+                    return Err("BROWSER_INPUT_INVALID: teclas pressionadas demais".into());
+                }
+                let mut release = params.clone();
+                let object = release.as_object_mut().ok_or("BROWSER_INPUT_INVALID")?;
+                object.insert("type".into(), json!(if kind == "key" { "keyUp" } else { "mouseReleased" }));
+                object.remove("text");
+                object.remove("unmodifiedText");
+                object.remove("autoRepeat");
+                object.insert("modifiers".into(), json!(0));
+                if kind == "mouse" {
+                    object.insert("buttons".into(), json!(0));
+                    self.buttons.insert(id, release);
+                } else {
+                    self.keys.insert(id, release);
+                }
+            }
+        } else if event == "mouseMoved" {
+            for release in self.buttons.values_mut() {
+                release["x"] = params["x"].clone();
+                release["y"] = params["y"].clone();
+            }
+        }
+        Ok(())
+    }
+
+    fn after_dispatch(&mut self, kind: &str, params: &Value) {
+        let event = params.get("type").and_then(Value::as_str).unwrap_or("");
+        if let Some(id) = Self::identity(kind, params) {
+            match event {
+                "keyUp" => { self.keys.remove(&id); },
+                "mouseReleased" => { self.buttons.remove(&id); },
+                _ => {},
+            }
+        }
+    }
+
+    fn is_empty(&self) -> bool { self.keys.is_empty() && self.buttons.is_empty() }
 }
 
 impl BrowserSession {
@@ -115,6 +179,55 @@ pub struct BrowserManager {
 }
 
 impl BrowserManager {
+    /// Streams CDP screencast frames until the subscriber cancels or disconnects.
+    pub async fn stream_frames(
+        &self,
+        conversation_id: &str,
+        tab_id: Option<&str>,
+        cancel: tokio_util::sync::CancellationToken,
+        channel: tauri::ipc::Channel<BrowserFrame>,
+    ) -> Result<(), String> {
+        let (port, _) = self.session_port(conversation_id).await?;
+        let tab = match tab_id {
+            Some(id) => id.to_string(),
+            None => self.active_tab_id(conversation_id, port).await?,
+        };
+        let ws = self.tab_ws(port, Some(&tab)).await?;
+        let mut client = CdpClient::connect(&ws).await?;
+        client.call("Page.enable", json!({})).await?;
+        client.call("Page.startScreencast", json!({ "format": "jpeg", "quality": 75, "everyNthFrame": 1 })).await?;
+        let (url, title) = self.page_meta(&ws).await.unwrap_or_default();
+        let mut ack_id = 1000u64;
+        let mut last_frame = Instant::now() - Duration::from_secs(1);
+        loop {
+            let item = tokio::select! {
+                _ = cancel.cancelled() => break,
+                item = client.socket.next() => item,
+            };
+            let Some(Ok(Message::Text(text))) = item else { break };
+            let Ok(event) = serde_json::from_str::<Value>(&text) else { continue };
+            if event.get("method").and_then(Value::as_str) != Some("Page.screencastFrame") { continue; }
+            let params = &event["params"];
+            let Some(data) = params.get("data").and_then(Value::as_str) else { continue; };
+            let Some(session_id) = params.get("sessionId").and_then(Value::as_u64) else { continue; };
+            if last_frame.elapsed() >= Duration::from_millis(60) {
+                use base64::Engine;
+                let dimensions = base64::engine::general_purpose::STANDARD.decode(data).ok()
+                    .and_then(|bytes| image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok())
+                    .and_then(|reader| reader.into_dimensions().ok())
+                    .unwrap_or((1280, 820));
+                if channel.send(BrowserFrame {
+                    data_url: format!("data:image/jpeg;base64,{data}"), url: url.clone(), title: title.clone(),
+                    width: dimensions.0, height: dimensions.1, captured_at: crate::domain::now_ms(),
+                }).is_err() { break; }
+                last_frame = Instant::now();
+            }
+            ack_id += 1;
+            let ack = json!({ "id": ack_id, "method": "Page.screencastFrameAck", "params": { "sessionId": session_id } });
+            if client.socket.send(Message::Text(ack.to_string().into())).await.is_err() { break; }
+        }
+        Ok(())
+    }
     fn new(data_dir: PathBuf) -> Self {
         Self {
             data_dir,
@@ -302,6 +415,7 @@ impl BrowserManager {
             .arg("--disable-sync")
             .arg("--disable-features=Translate,MediaRouter")
             .arg("--window-size=1280,820")
+            .arg("--force-device-scale-factor=1")
             .arg("about:blank")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -325,6 +439,7 @@ impl BrowserManager {
             download_dir: downloads.clone(),
             active_tab: Mutex::new(None),
             refs: Mutex::new(HashMap::new()),
+            held_input: Mutex::new(HashMap::new()),
         };
         self.sessions
             .lock()
@@ -617,13 +732,18 @@ impl BrowserManager {
             .get("data")
             .and_then(Value::as_str)
             .ok_or_else(|| "BROWSER_FRAME_EMPTY".to_string())?;
+        use base64::Engine;
+        let (width, height) = base64::engine::general_purpose::STANDARD.decode(data).ok()
+            .and_then(|bytes| image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok())
+            .and_then(|reader| reader.into_dimensions().ok())
+            .unwrap_or((1280, 820));
         let meta = self.page_meta(&ws).await.unwrap_or_default();
         Ok(BrowserFrame {
             data_url: format!("data:image/jpeg;base64,{data}"),
             url: meta.0,
             title: meta.1,
-            width: 1280,
-            height: 820,
+            width,
+            height,
             captured_at: crate::domain::now_ms(),
         })
     }
@@ -975,6 +1095,67 @@ impl BrowserManager {
                 }),
             )
             .await?;
+        Ok(())
+    }
+
+    /// Dispatches a validated human input event to the isolated browser.
+    pub async fn human_input(&self, conversation_id: &str, tab_id: Option<&str>, kind: &str, params: Value) -> Result<(), String> {
+        let (method, allowed) = match kind {
+            "mouse" => ("Input.dispatchMouseEvent", &["mouseMoved", "mousePressed", "mouseReleased", "mouseWheel"][..]),
+            "key" => ("Input.dispatchKeyEvent", &["keyDown", "keyUp", "rawKeyDown"][..]),
+            _ => return Err("BROWSER_INPUT_INVALID: tipo de entrada inválido".into()),
+        };
+        let event_type = params.get("type").and_then(Value::as_str).unwrap_or("");
+        if !allowed.contains(&event_type) { return Err("BROWSER_INPUT_INVALID: evento inválido".into()); }
+        if kind == "mouse" {
+            for key in ["x", "y"] {
+                let value = params.get(key).and_then(Value::as_f64).unwrap_or(f64::NAN);
+                if !(0.0..=10000.0).contains(&value) { return Err("BROWSER_POINT_INVALID".into()); }
+            }
+        }
+        if params.to_string().len() > 4096 { return Err("BROWSER_INPUT_TOO_LARGE".into()); }
+        let (port, _) = self.session_port(conversation_id).await?;
+        let tab = match tab_id { Some(id) => id.to_string(), None => self.active_tab_id(conversation_id, port).await? };
+        let ws = self.tab_ws(port, Some(&tab)).await?;
+        {
+            let sessions = self.sessions.lock();
+            let session = sessions.get(conversation_id).ok_or("BROWSER_NOT_RUNNING")?;
+            session.held_input.lock().entry(tab.clone()).or_default().before_dispatch(kind, &params)?;
+        }
+        tokio::time::timeout(CDP_TIMEOUT, cdp_call(&ws, method, params.clone())).await
+            .map_err(|_| "BROWSER_CDP_TIMEOUT: entrada".to_string())??;
+        {
+            let sessions = self.sessions.lock();
+            if let Some(session) = sessions.get(conversation_id) {
+                let mut inputs = session.held_input.lock();
+                if let Some(held) = inputs.get_mut(&tab) {
+                    held.after_dispatch(kind, &params);
+                    if held.is_empty() { inputs.remove(&tab); }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Caller must hold the conversation action gate until control is returned.
+    pub async fn release_human_input(&self, conversation_id: &str) -> Result<(), String> {
+        let (port, pending) = {
+            let sessions = self.sessions.lock();
+            let Some(session) = sessions.get(conversation_id) else { return Ok(()) };
+            let held = session.held_input.lock().clone();
+            (session.port, held)
+        };
+        for (tab, held) in pending {
+            if held.is_empty() { continue; }
+            let ws = self.tab_ws(port, Some(&tab)).await
+                .map_err(|e| format!("BROWSER_INPUT_CLEANUP_FAILED: {e}"))?;
+            tokio::time::timeout(Duration::from_secs(30), release_held_input(&held, |method, params| cdp_call(&ws, method, params)))
+                .await.map_err(|_| "BROWSER_INPUT_CLEANUP_FAILED: tempo esgotado".to_string())??;
+            let sessions = self.sessions.lock();
+            if let Some(session) = sessions.get(conversation_id) {
+                session.held_input.lock().remove(&tab);
+            }
+        }
         Ok(())
     }
 
@@ -1520,6 +1701,22 @@ async fn cdp_call(ws_url: &str, method: &str, params: Value) -> Result<Value, St
     client.call(method, params).await
 }
 
+async fn release_held_input<F, Fut>(held: &HeldInput, mut dispatch: F) -> Result<(), String>
+where
+    F: FnMut(&'static str, Value) -> Fut,
+    Fut: std::future::Future<Output = Result<Value, String>>,
+{
+    for params in held.keys.values() {
+        dispatch("Input.dispatchKeyEvent", params.clone()).await
+            .map_err(|error| format!("BROWSER_INPUT_CLEANUP_FAILED: {error}"))?;
+    }
+    for params in held.buttons.values() {
+        dispatch("Input.dispatchMouseEvent", params.clone()).await
+            .map_err(|error| format!("BROWSER_INPUT_CLEANUP_FAILED: {error}"))?;
+    }
+    Ok(())
+}
+
 async fn focus_process(pid: u32) {
     #[cfg(windows)]
     {
@@ -1546,6 +1743,265 @@ async fn focus_process(pid: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The integration fixture needs a harmless live child owned by BrowserManager.
+    #[test]
+    fn cdp_stub_lifetime_child() {
+        if std::env::var_os("LUMINA_CDP_STUB_CHILD").is_some() {
+            std::thread::sleep(Duration::from_secs(60));
+        }
+    }
+
+    #[tokio::test]
+    async fn cdp_handoff_handles_lost_replies_and_serializes_agent_actions() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::sync::Notify;
+
+        #[derive(Default)]
+        struct ProtocolState {
+            key: AtomicBool,
+            button: AtomicBool,
+            fail_down: AtomicBool,
+            fail_up: AtomicBool,
+            pause_up: AtomicBool,
+            release_started: Notify,
+            resume_release: Notify,
+        }
+        let protocol = Arc::new(ProtocolState::default());
+        protocol.fail_down.store(true, Ordering::SeqCst);
+        protocol.fail_up.store(true, Ordering::SeqCst);
+        protocol.pause_up.store(true, Ordering::SeqCst);
+
+        let ws_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("CDP listener");
+        let ws_address = ws_listener.local_addr().expect("CDP address");
+        let ws_state = protocol.clone();
+        let ws_server = tokio::spawn(async move {
+            while let Ok((socket, _)) = ws_listener.accept().await {
+                let state = ws_state.clone();
+                tokio::spawn(async move {
+                    let Ok(mut ws) = tokio_tungstenite::accept_async(socket).await else { return };
+                    let Some(Ok(Message::Text(text))) = ws.next().await else { return };
+                    let Ok(request) = serde_json::from_str::<Value>(&text) else { return };
+                    let event = request["params"]["type"].as_str().unwrap_or("");
+                    let method = request["method"].as_str().unwrap_or("");
+                    let valid = match event {
+                        "keyDown" | "keyUp" => method == "Input.dispatchKeyEvent",
+                        "mousePressed" | "mouseReleased" => method == "Input.dispatchMouseEvent",
+                        _ => false,
+                    } && !(event == "keyUp" && request["params"].get("text").is_some());
+                    if !valid {
+                        let _ = ws.send(Message::Text(json!({ "id": request["id"], "error": { "message": "invalid input event" } }).to_string().into())).await;
+                        return;
+                    }
+                    match event {
+                        "keyDown" => {
+                            state.key.store(true, Ordering::SeqCst);
+                            if state.fail_down.swap(false, Ordering::SeqCst) { return; }
+                        }
+                        "keyUp" => {
+                            if state.fail_up.swap(false, Ordering::SeqCst) {
+                                state.key.store(false, Ordering::SeqCst);
+                                return;
+                            }
+                            if state.pause_up.swap(false, Ordering::SeqCst) {
+                                state.release_started.notify_one();
+                                state.resume_release.notified().await;
+                            }
+                            state.key.store(false, Ordering::SeqCst);
+                        }
+                        "mousePressed" => state.button.store(true, Ordering::SeqCst),
+                        "mouseReleased" => state.button.store(false, Ordering::SeqCst),
+                        _ => {},
+                    }
+                    let _ = ws.send(Message::Text(json!({ "id": request["id"], "result": {} }).to_string().into())).await;
+                });
+            }
+        });
+        let http_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("HTTP listener");
+        let http_port = http_listener.local_addr().expect("HTTP address").port();
+        let http_server = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = http_listener.accept().await {
+                tokio::spawn(async move {
+                    let mut request = [0u8; 4096];
+                    if socket.read(&mut request).await.is_err() { return; }
+                    let body = json!([{ "id": "tab-1", "type": "page", "webSocketDebuggerUrl": format!("ws://{ws_address}/devtools/page/tab-1") }]).to_string();
+                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+                    let _ = socket.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let db = Arc::new(crate::db::Db::open(&temp.path().join("cdp.db")).expect("database"));
+        let conversation = db.create_conversation("CDP integration", "test", "test").expect("conversation").id;
+        let manager = Arc::new(BrowserManager::new(temp.path().to_path_buf()));
+        let child = Command::new(std::env::current_exe().expect("test binary"))
+            .args(["--exact", "computer::browser::tests::cdp_stub_lifetime_child"])
+            .env("LUMINA_CDP_STUB_CHILD", "1")
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .spawn().expect("stub process");
+        manager.sessions.lock().insert(conversation.clone(), BrowserSession {
+            child, port: http_port, executable: "cdp-protocol-stub".into(),
+            profile_dir: temp.path().to_path_buf(), download_dir: temp.path().to_path_buf(),
+            active_tab: Mutex::new(Some("tab-1".into())), refs: Mutex::new(HashMap::new()),
+            held_input: Mutex::new(HashMap::new()),
+        });
+        struct Cleanup { manager: Arc<BrowserManager>, conversation: String, ws: tokio::task::JoinHandle<()>, http: tokio::task::JoinHandle<()> }
+        impl Drop for Cleanup {
+            fn drop(&mut self) { self.manager.close(&self.conversation); self.ws.abort(); self.http.abort(); }
+        }
+        let _cleanup = Cleanup { manager: manager.clone(), conversation: conversation.clone(), ws: ws_server, http: http_server };
+        db.set_computer_control(&conversation, Some(true), Some(true), 1).expect("takeover");
+        db.set_computer_control_target(&conversation, "browser").expect("target");
+        let gate = crate::computer::control::gate(&conversation);
+        let generation = gate.start_browser_generation();
+
+        {
+            let _action = gate.action.lock().await;
+            let result = manager.human_input(&conversation, Some("tab-1"), "key", json!({
+                "type":"keyDown", "key":"a", "code":"KeyA", "text":"a", "windowsVirtualKeyCode":65
+            })).await;
+            assert!(result.is_err(), "lost CDP reply must be reported");
+            manager.human_input(&conversation, Some("tab-1"), "mouse", json!({
+                "type":"mousePressed", "x":100, "y":120, "button":"left", "buttons":1, "clickCount":1
+            })).await.expect("mouse press");
+        }
+        assert!(protocol.key.load(Ordering::SeqCst) && protocol.button.load(Ordering::SeqCst));
+        println!("CDP stub: key and button pressed; keyDown response deliberately lost");
+
+        let failure = crate::commands::computer::release_computer_control_with_browser(
+            &db, &conversation, "browser", Some(&generation), Some(manager.as_ref()),
+        ).await.expect_err("lost keyUp acknowledgement must fail closed");
+        assert!(failure.contains("BROWSER_INPUT_CLEANUP_FAILED"));
+        assert_eq!(db.computer_control(&conversation).expect("state"), (true, true));
+        assert!(gate.require_browser_generation(&generation).is_ok());
+        assert!(protocol.button.load(Ordering::SeqCst));
+        println!("CDP stub: lost keyUp response keeps human control and pending cleanup");
+
+        let release_db = db.clone();
+        let release_manager = manager.clone();
+        let release_conversation = conversation.clone();
+        let release_generation = generation.clone();
+        let release = tokio::spawn(async move {
+            crate::commands::computer::release_computer_control_with_browser(
+                &release_db, &release_conversation, "browser", Some(&release_generation), Some(release_manager.as_ref()),
+            ).await
+        });
+        tokio::time::timeout(Duration::from_secs(5), protocol.release_started.notified()).await.expect("cleanup started");
+        assert!(!release.is_finished());
+        assert!(gate.action.try_lock().is_err());
+        let ctx = crate::tools::registry::ToolCtx {
+            db: db.clone(), http: reqwest::Client::new(), conversation_id: conversation.clone(),
+            message_id: "cdp-message".into(), tool_call_id: "cdp-call".into(), turn_id: "cdp-turn".into(),
+            workspace: None, settings: crate::domain::Settings { execution_environment: "docker".into(), ..Default::default() },
+            cancel: tokio_util::sync::CancellationToken::new(), data_dir: temp.path().to_path_buf(),
+            approval: None, observed: None, emit: None, rules: Vec::new(), jobs: None, questions: None,
+            turn_kind: crate::domain::TurnKind::User, mcp: None, subagent: None,
+            enabled_tools: Arc::new(Default::default()), subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            subagent_slots: Arc::new(tokio::sync::Semaphore::new(1)), skills_roots: Vec::new(),
+        };
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let agent = tokio::spawn(async move {
+            let _ = started.send(());
+            crate::tools::code::computer::run(&ctx, "computer_windows", &json!({})).await
+        });
+        ready.await.expect("agent started");
+        tokio::task::yield_now().await;
+        assert!(!agent.is_finished(), "agent cannot pass the handoff while cleanup is blocked");
+        assert_eq!(db.computer_control(&conversation).expect("state"), (true, true));
+        protocol.resume_release.notify_one();
+        tokio::time::timeout(Duration::from_secs(10), release).await.expect("release timeout").expect("release task").expect("cleanup");
+        let outcome = tokio::time::timeout(Duration::from_secs(5), agent).await.expect("agent timeout").expect("agent task");
+        assert!(outcome.is_error && outcome.content.contains("COMPUTER_OBSERVATION_REQUIRED"));
+        assert!(!protocol.key.load(Ordering::SeqCst) && !protocol.button.load(Ordering::SeqCst));
+        assert_eq!(db.computer_control(&conversation).expect("state"), (false, false));
+        assert!(db.computer_needs_observation(&conversation).expect("observation"));
+        assert!(gate.require_browser_generation(&generation).is_err());
+        println!("CDP stub: key and button released before agent proceeds; fresh observation required");
+
+        let _action = gate.action.lock().await;
+        db.set_computer_control(&conversation, Some(true), Some(true), 2).expect("retake");
+        db.set_computer_control_target(&conversation, "browser").expect("target");
+        let next = gate.start_browser_generation();
+        assert_ne!(generation, next);
+        assert!(gate.require_browser_generation(&generation).is_err());
+        assert!(gate.require_browser_generation(&next).is_ok());
+        println!("CDP stub: stale generation rejected after retake");
+    }
+
+    #[tokio::test]
+    async fn cleanup_releases_held_keys_and_multiple_buttons_without_text() {
+        let mut held = HeldInput::default();
+        held.before_dispatch("key", &json!({"type":"keyDown","code":"KeyA","key":"a","text":"a","modifiers":2})).expect("key");
+        held.before_dispatch("mouse", &json!({"type":"mousePressed","button":"left","x":10,"y":20})).expect("left");
+        held.before_dispatch("mouse", &json!({"type":"mousePressed","button":"right","x":10,"y":20})).expect("right");
+        held.before_dispatch("mouse", &json!({"type":"mouseMoved","x":40,"y":50})).expect("move");
+        let events = std::sync::Mutex::new(Vec::new());
+        release_held_input(&held, |method, params| {
+            events.lock().expect("events").push((method, params));
+            async { Ok(json!({})) }
+        }).await.expect("cleanup");
+        let events = events.lock().expect("events");
+        assert_eq!(events.len(), 3);
+        let key = events.iter().find(|event| event.0 == "Input.dispatchKeyEvent").expect("key");
+        assert_eq!(key.1["type"], "keyUp");
+        assert_eq!(key.1["modifiers"], 0);
+        assert!(key.1.get("text").is_none());
+        for (_, event) in events.iter().filter(|event| event.0 == "Input.dispatchMouseEvent") {
+            assert_eq!(event["type"], "mouseReleased");
+            assert_eq!(event["x"], 40);
+            assert_eq!(event["y"], 50);
+        }
+    }
+
+    #[tokio::test]
+    async fn disconnected_cdp_during_keydown_keeps_input_for_cleanup() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.expect("accept");
+            let mut socket = tokio_tungstenite::accept_async(socket).await.expect("upgrade");
+            let request = socket.next().await.expect("request").expect("message");
+            assert!(request.into_text().expect("text").contains("keyDown"));
+            drop(socket);
+        });
+        let mut held = HeldInput::default();
+        let press = json!({"type":"keyDown","code":"ShiftLeft","key":"Shift"});
+        held.before_dispatch("key", &press).expect("track before send");
+        assert!(cdp_call(&format!("ws://{address}"), "Input.dispatchKeyEvent", press).await.is_err());
+        server.await.expect("server");
+        assert_eq!(held.keys.len(), 1);
+        assert!(release_held_input(&held, |_, _| async { Err("disconnected".to_string()) }).await.is_err());
+        assert_eq!(held.keys.len(), 1, "failure must preserve the pending release");
+        release_held_input(&held, |_, params| async move {
+            assert_eq!(params["type"], "keyUp");
+            Ok(json!({}))
+        }).await.expect("retry");
+    }
+
+    #[tokio::test]
+    async fn browser_handoff_waits_for_inflight_input_and_cleans_before_unlocking() {
+        let gate = std::sync::Arc::new(crate::computer::control::ControlGate::default());
+        let input = gate.action.lock().await;
+        let held = std::sync::Arc::new(Mutex::new(HeldInput::default()));
+        let other_gate = gate.clone();
+        let other_held = held.clone();
+        let handoff = tokio::spawn(async move {
+            let _action = other_gate.action.lock().await;
+            let snapshot = other_held.lock().clone();
+            release_held_input(&snapshot, |_, params| async move {
+                assert_eq!(params["type"], "keyUp");
+                Ok(json!({}))
+            }).await
+        });
+        tokio::task::yield_now().await;
+        assert!(!handoff.is_finished());
+        held.lock().before_dispatch("key", &json!({"type":"keyDown","code":"KeyA","key":"a"})).expect("press");
+        drop(input);
+        handoff.await.expect("task").expect("cleaned");
+    }
 
     #[test]
     fn only_http_and_https_urls_are_allowed() {

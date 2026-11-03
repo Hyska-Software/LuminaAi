@@ -15,6 +15,8 @@ use crate::domain::Settings;
 use crate::workspace::exec::{self, ExecRequest};
 
 pub mod browser;
+pub mod control;
+pub mod stream;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -251,7 +253,7 @@ pub async fn screenshot(
         }
         ComputerBackend::Docker => {
             ensure_container(settings, data_dir, conversation_id).await?;
-            let docker_path = "/tmp/lumina-shot.png";
+            let docker_path = format!("/tmp/lumina-shot-{}.png", uuid::Uuid::new_v4());
             let shot = sh(
                 data_dir,
                 "docker",
@@ -260,7 +262,7 @@ pub async fn screenshot(
                     container_for(settings, conversation_id),
                     "sh".into(),
                     "-lc".into(),
-                    format!("DISPLAY=:99 scrot -o {docker_path}"),
+                    format!("DISPLAY=:99 scrot -o {}", sh_quote(&docker_path)),
                 ],
                 Duration::from_secs(20),
             )
@@ -286,6 +288,7 @@ pub async fn screenshot(
                 Duration::from_secs(20),
             )
             .await?;
+            let _ = docker_exec(settings, data_dir, conversation_id, &format!("rm -f {}", sh_quote(&docker_path))).await;
             if copy.exit_code != Some(0) {
                 anyhow::bail!("COMPUTER_SCREENSHOT_FAILED: {}", copy.stderr.trim());
             }
@@ -1077,7 +1080,7 @@ pub async fn remove_container(
     data_dir: &Path,
     conversation_id: &str,
 ) -> anyhow::Result<()> {
-    let _ = sh(
+    let output = sh(
         data_dir,
         "docker",
         vec![
@@ -1088,6 +1091,17 @@ pub async fn remove_container(
         Duration::from_secs(30),
     )
     .await?;
+    if output.exit_code != Some(0) && !output.stderr.contains("No such container") {
+        anyhow::bail!("COMPUTER_CONTAINER_REMOVE_FAILED: {}", output.stderr.trim());
+    }
+    Ok(())
+}
+
+pub async fn verify_stream_support(settings: &Settings, data_dir: &Path, conversation_id: &str) -> anyhow::Result<()> {
+    let result = docker_exec(settings, data_dir, conversation_id, "command -v socat >/dev/null && test -x /usr/local/bin/lumina-clear-input && test -f /tmp/x11vnc-view.log && test -f /tmp/x11vnc-control.log").await?;
+    if result.exit_code != Some(0) {
+        anyhow::bail!("COMPUTER_STREAM_IMAGE_OUTDATED: atualize a imagem do Desktop privado em Configurações → Agentes e reinicie a sessão");
+    }
     Ok(())
 }
 
@@ -1124,11 +1138,13 @@ pub async fn vnc_url(
     Ok(format!("http://127.0.0.1:{port}/vnc.html"))
 }
 
-async fn ensure_container(
+pub async fn ensure_container(
     settings: &Settings,
     data_dir: &Path,
     conversation_id: &str,
 ) -> anyhow::Result<()> {
+    let gate = control::gate(conversation_id);
+    let _startup = gate.startup.lock().await;
     let name = container_for(settings, conversation_id);
     let inspect = sh(
         data_dir,
@@ -1181,14 +1197,6 @@ async fn ensure_container(
             "none".to_string()
         },
     ];
-    if settings.docker_network {
-        // noVNC is human-only and bound to loopback. It needs a network
-        // namespace, so it is only published when the user enables Docker
-        // networking explicitly. Each conversation gets its own host port.
-        let port = free_host_port()?;
-        args.push("-p".to_string());
-        args.push(format!("127.0.0.1:{port}:6080"));
-    }
     args.push(settings.computer_docker_image.clone());
     let run = sh(data_dir, "docker", args, Duration::from_secs(120)).await?;
     if run.exit_code != Some(0) {

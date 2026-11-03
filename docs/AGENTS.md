@@ -321,13 +321,15 @@ Contrato completo: `docs/DOCKER.md`.
   tela sem um controle para reabri-lo.
 - Estado em `uiStore` (`agentPanelOpen`, `agentPanelTab`, `agentRightPanel`) e
   largura em `sidePanelWidth`.
-- Tela: `computer_preview` (só UI, sem modelo/DB), `computer_set_paused`,
-  `computer_take_control`/`release_computer_control`; pausa bloqueia input no
-  backend (`COMPUTER_PAUSED`).
+- Tela: desktop privado integrado por RFB com modo somente leitura e controle;
+  captura local contínua no Windows; `computer_preview` é captura inicial sem
+  modelo/DB. `computer_take_control`/`release_computer_control` serializam a
+  transferência e a pausa bloqueia tools no backend (`COMPUTER_PAUSED`).
 - Toda ação grava `computer_actions` como `pending` antes de executar e fecha em
   `ok`/`error`; boot marca pendentes como `interrupted`.
-- Container gráfico por conversa (não global), porta noVNC loopback aleatória e
-  cleanup no Stop/boot.
+- Container gráfico por conversa (não global), sem porta gráfica publicada;
+  a ponte local usa token de uso único e `docker exec`, inclusive sem rede no
+  container. Cleanup no Stop/boot.
 - Ações CUA: drag, scroll, move, wait e clipboard read/write.
 - Política de apps (`computerAllowedApps`/`BlockedApps`) e hosts
   (`browserAllowedDomains`/`BlockedDomains`, private hosts e metadata).

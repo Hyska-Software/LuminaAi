@@ -346,12 +346,22 @@ export const api = {
     invoke<string>('tool_image_preview', { path }),
   computerPreview: (conversationId: string) =>
     invoke<ComputerPreview>('computer_preview', { conversationId }),
+  computerOpenStream: (conversationId: string, interactive: boolean) =>
+    invoke<string>('computer_open_stream', { conversationId, interactive }),
+  computerControlStatus: (conversationId: string) =>
+    invoke<{ paused: boolean; takenOver: boolean; target: string; generation: string | null }>('computer_control_status', { conversationId }),
+  computerStartLocalStream: (conversationId: string, streamId: string, onFrame: (frame: { dataUrl: string; width: number; height: number; capturedAt: number }) => void) => {
+    const channel = new Channel<{ dataUrl: string; width: number; height: number; capturedAt: number }>();
+    channel.onmessage = onFrame;
+    return invoke<void>('computer_start_local_stream', { conversationId, streamId, onFrame: channel });
+  },
+  computerStopLocalStream: (streamId: string) => invoke<void>('computer_stop_local_stream', { streamId }),
   setComputerPaused: (conversationId: string, paused: boolean) =>
     invoke<void>('set_computer_paused', { conversationId, paused }),
   computerTakeControl: (conversationId: string) =>
     invoke<ComputerControlTarget>('computer_take_control', { conversationId }),
-  releaseComputerControl: (conversationId: string) =>
-    invoke<void>('release_computer_control', { conversationId }),
+  releaseComputerControl: (conversationId: string, expectedTarget: 'desktop' | 'browser', generation?: string | null) =>
+    invoke<void>('release_computer_control', { conversationId, expectedTarget, generation: generation ?? null }),
   browserSessionStatus: (conversationId: string) =>
     invoke<BrowserStatus>('browser_session_status', { conversationId }),
   browserSessionOpen: (conversationId: string, url?: string | null) =>
@@ -360,25 +370,35 @@ export const api = {
     invoke<boolean>('browser_session_close', { conversationId }),
   browserTabs: (conversationId: string) =>
     invoke<BrowserTab[]>('browser_tabs', { conversationId }),
-  browserNewTab: (conversationId: string, url?: string | null) =>
-    invoke<BrowserTab>('browser_new_tab', { conversationId, url: url ?? null }),
-  browserCloseTab: (conversationId: string, tabId: string) =>
-    invoke<void>('browser_close_tab', { conversationId, tabId }),
-  browserActivateTab: (conversationId: string, tabId: string) =>
-    invoke<void>('browser_activate_tab', { conversationId, tabId }),
-  browserNavigate: (conversationId: string, url: string, tabId?: string | null) =>
-    invoke<string>('browser_navigate', { conversationId, tabId: tabId ?? null, url }),
+  browserNewTab: (conversationId: string, generation: string, url?: string | null) =>
+    invoke<BrowserTab>('browser_new_tab', { conversationId, generation, url: url ?? null }),
+  browserCloseTab: (conversationId: string, tabId: string, generation: string) =>
+    invoke<void>('browser_close_tab', { conversationId, tabId, generation }),
+  browserActivateTab: (conversationId: string, tabId: string, generation: string) =>
+    invoke<void>('browser_activate_tab', { conversationId, tabId, generation }),
+  browserNavigate: (conversationId: string, url: string, generation: string, tabId?: string | null) =>
+    invoke<string>('browser_navigate', { conversationId, tabId: tabId ?? null, url, generation }),
   browserHistory: (
     conversationId: string,
     action: 'back' | 'forward' | 'reload',
+    generation: string,
     tabId?: string | null,
-  ) => invoke<void>('browser_history', { conversationId, tabId: tabId ?? null, action }),
+  ) => invoke<void>('browser_history', { conversationId, tabId: tabId ?? null, action, generation }),
   browserFrame: (conversationId: string, tabId?: string | null) =>
     invoke<BrowserFrame>('browser_frame', { conversationId, tabId: tabId ?? null }),
+  browserStartStream: (conversationId: string, tabId: string | null, streamId: string, onFrame: (frame: BrowserFrame) => void) => {
+    const channel = new Channel<BrowserFrame>();
+    channel.onmessage = onFrame;
+    return invoke<void>('browser_start_stream', { conversationId, tabId, streamId, onFrame: channel });
+  },
+  browserStopStream: (streamId: string) => invoke<void>('browser_stop_stream', { streamId }),
+  browserHumanInput: (conversationId: string, tabId: string | null, kind: 'mouse' | 'key', params: Record<string, string | number | boolean>, generation: string) =>
+    invoke<void>('browser_human_input', { conversationId, tabId, kind, params, generation }),
   browserClickAt: (
     conversationId: string,
     x: number,
     y: number,
+    generation: string,
     tabId?: string | null,
   ) =>
     invoke<void>('browser_click_at', {
@@ -386,18 +406,21 @@ export const api = {
       tabId: tabId ?? null,
       x,
       y,
+      generation,
     }),
-  browserPressKey: (conversationId: string, key: string, tabId?: string | null) =>
+  browserPressKey: (conversationId: string, key: string, generation: string, tabId?: string | null) =>
     invoke<void>('browser_press_key', {
       conversationId,
       tabId: tabId ?? null,
       key,
+      generation,
     }),
-  browserInsertText: (conversationId: string, text: string, tabId?: string | null) =>
+  browserInsertText: (conversationId: string, text: string, generation: string, tabId?: string | null) =>
     invoke<void>('browser_insert_text', {
       conversationId,
       tabId: tabId ?? null,
       text,
+      generation,
     }),
   browserSnapshot: (conversationId: string, tabId?: string | null) =>
     invoke<BrowserSnapshot>('browser_snapshot', { conversationId, tabId: tabId ?? null }),

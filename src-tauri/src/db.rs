@@ -276,6 +276,8 @@ CREATE TABLE IF NOT EXISTS computer_control (
   conversation_id TEXT PRIMARY KEY,
   paused          INTEGER NOT NULL DEFAULT 0,
   taken_over      INTEGER NOT NULL DEFAULT 0,
+  needs_observation INTEGER NOT NULL DEFAULT 0,
+  control_target TEXT NOT NULL DEFAULT '',
   updated_at      INTEGER NOT NULL
 );
 
@@ -1196,6 +1198,8 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
     ] {
         ensure_column(conn, "computer_actions", column, ddl)?;
     }
+    ensure_column(conn, "computer_control", "needs_observation", "ALTER TABLE computer_control ADD COLUMN needs_observation INTEGER NOT NULL DEFAULT 0")?;
+    ensure_column(conn, "computer_control", "control_target", "ALTER TABLE computer_control ADD COLUMN control_target TEXT NOT NULL DEFAULT ''")?;
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_agent_memories_agent \
          ON agent_memories(agent_id, pinned DESC, updated_at DESC);",
@@ -2820,6 +2824,28 @@ impl Db {
         Ok(row.unwrap_or((false, false)))
     }
 
+    pub fn computer_needs_observation(&self, conversation_id: &str) -> Result<bool> {
+        let conn = self.conn.lock();
+        Ok(conn.query_row("SELECT needs_observation FROM computer_control WHERE conversation_id = ?1", [conversation_id], |row| row.get::<_, i64>(0)).optional()?.unwrap_or(0) != 0)
+    }
+
+    pub fn computer_control_target(&self, conversation_id: &str) -> Result<String> {
+        let conn = self.conn.lock();
+        Ok(conn.query_row("SELECT control_target FROM computer_control WHERE conversation_id = ?1", [conversation_id], |row| row.get(0)).optional()?.unwrap_or_default())
+    }
+
+    pub fn set_computer_control_target(&self, conversation_id: &str, target: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute("INSERT INTO computer_control (conversation_id, paused, taken_over, control_target, updated_at) VALUES (?1, 0, 0, ?2, ?3) ON CONFLICT(conversation_id) DO UPDATE SET control_target = excluded.control_target, updated_at = excluded.updated_at", params![conversation_id, target, crate::domain::now_ms()])?;
+        Ok(())
+    }
+
+    pub fn set_computer_needs_observation(&self, conversation_id: &str, required: bool) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute("INSERT INTO computer_control (conversation_id, paused, taken_over, needs_observation, updated_at) VALUES (?1, 0, 0, ?2, ?3) ON CONFLICT(conversation_id) DO UPDATE SET needs_observation = excluded.needs_observation, updated_at = excluded.updated_at", params![conversation_id, required as i64, crate::domain::now_ms()])?;
+        Ok(())
+    }
+
     pub fn set_computer_control(
         &self,
         conversation_id: &str,
@@ -2844,8 +2870,8 @@ impl Db {
     pub fn reset_all_computer_controls(&self) -> Result<u64> {
         let conn = self.conn.lock();
         let changed = conn.execute(
-            "UPDATE computer_control SET paused = 0, taken_over = 0, updated_at = ?1",
-            [crate::domain::now_ms()],
+            "UPDATE computer_control SET paused = CASE WHEN taken_over != 0 THEN 1 ELSE paused END, taken_over = 0, control_target = CASE WHEN conversation_id = ?2 THEN control_target ELSE '' END, updated_at = ?1",
+            params![crate::domain::now_ms(), crate::computer::control::HOST_CONTROL],
         )?;
         Ok(changed as u64)
     }

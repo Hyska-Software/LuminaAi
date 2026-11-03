@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({
   listAgentRoutines: vi.fn(),
@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({
   dockerPullImage: vi.fn(),
   browserSessionStatus: vi.fn(),
   browserFrame: vi.fn(),
+  browserStartStream: vi.fn(),
+  browserStopStream: vi.fn(),
+  browserHumanInput: vi.fn(),
+  computerControlStatus: vi.fn(),
   browserTakeControl: vi.fn(),
   browserClickAt: vi.fn(),
   browserPressKey: vi.fn(),
@@ -18,9 +22,13 @@ const mocks = vi.hoisted(() => ({
   listAgentTasks: vi.fn(),
   listComputerActions: vi.fn(),
   listAgentMemories: vi.fn(),
+  controlEvent: null as null | ((event: { conversationId: string; paused: boolean; takenOver: boolean; target: string; generation: string | null }) => void),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
+vi.mock('./useComputerControlEvents', () => ({
+  useComputerControlEvents: (_conversation: string | null, callback: typeof mocks.controlEvent) => { mocks.controlEvent = callback; },
+}));
 vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }),
 }));
@@ -95,7 +103,11 @@ beforeEach(() => {
     activeTab: null,
   });
   mocks.browserFrame.mockResolvedValue(null);
-  mocks.browserTakeControl.mockResolvedValue({ kind: 'browser', url: null });
+  mocks.browserStartStream.mockResolvedValue(undefined);
+  mocks.browserStopStream.mockResolvedValue(undefined);
+  mocks.browserHumanInput.mockResolvedValue(undefined);
+  mocks.computerControlStatus.mockResolvedValue({ paused: false, takenOver: false });
+  mocks.browserTakeControl.mockResolvedValue({ kind: 'browser', url: null, generation: 'generation-1' });
   mocks.browserClickAt.mockResolvedValue(undefined);
   mocks.browserPressKey.mockResolvedValue(undefined);
   mocks.browserInsertText.mockResolvedValue(undefined);
@@ -238,7 +250,7 @@ describe('AgentPanel — Navegador', () => {
       height: 820,
       capturedAt: 1,
     });
-    mocks.browserTakeControl.mockResolvedValue({ kind: 'browser', url: null });
+    mocks.browserTakeControl.mockResolvedValue({ kind: 'browser', url: null, generation: 'generation-1' });
     render(
       <AgentPanelBrowser
         context={{ ...context, agent: browserAgent, conversation: { id: 'conv-1' } as never }}
@@ -261,10 +273,41 @@ describe('AgentPanel — Navegador', () => {
         toJSON: () => ({}),
       }),
     });
-    fireEvent.click(image, { clientX: 100, clientY: 120 });
+    fireEvent.pointerDown(image, { clientX: 100, clientY: 120, button: 0, buttons: 1 });
     await waitFor(() =>
-      expect(mocks.browserClickAt).toHaveBeenCalledWith('conv-1', 100, 120, 'tab-1'),
+      expect(mocks.browserHumanInput).toHaveBeenCalledWith('conv-1', 'tab-1', 'mouse', expect.objectContaining({ type: 'mousePressed', x: 100, y: 120 }), 'generation-1'),
     );
+
+    let resolveInput: () => void = () => {};
+    mocks.browserHumanInput.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveInput = resolve; }));
+    fireEvent.pointerDown(image, { clientX: 110, clientY: 120, button: 0, buttons: 1 });
+    await waitFor(() => expect(mocks.browserHumanInput).toHaveBeenCalledTimes(2));
+    fireEvent.pointerDown(image, { clientX: 120, clientY: 120, button: 0, buttons: 1 });
+    act(() => mocks.controlEvent?.({ conversationId: 'conv-1', paused: true, takenOver: true, target: 'browser', generation: 'generation-2' }));
+    await act(async () => { resolveInput(); });
+    await waitFor(() => expect(mocks.browserHumanInput).toHaveBeenCalledTimes(3));
+    expect(mocks.browserHumanInput.mock.calls[2]?.[4]).toBe('generation-1');
+  });
+
+  it('mostra atividade recente da conversa sem expor os dados digitados', async () => {
+    mocks.listComputerActions.mockResolvedValue([{
+      id: 'a1', tool: 'computer_type', action: 'computer_type', result: 'ok',
+      target: { textLength: 12 }, createdAt: 1,
+    }]);
+    const browserAgent: Agent = { ...agent, capabilities: { ...agent.capabilities, browserUse: true } };
+    mocks.browserSessionStatus.mockResolvedValue({ running: true, tabs: [], activeTab: null });
+    render(<AgentPanelBrowser context={{ ...context, agent: browserAgent, conversation: { id: 'conv-1' } as never }} />);
+    expect(await screen.findByText('Digitou no desktop')).toBeTruthy();
+    expect(screen.queryByText('12')).toBeNull();
+  });
+
+  it('não oferece controle do navegador enquanto o desktop está nas mãos do usuário', async () => {
+    const browserAgent: Agent = { ...agent, capabilities: { ...agent.capabilities, browserUse: true } };
+    mocks.browserSessionStatus.mockResolvedValue({ running: true, tabs: [], activeTab: null });
+    mocks.computerControlStatus.mockResolvedValue({ paused: true, takenOver: true, target: 'desktop' });
+    render(<AgentPanelBrowser context={{ ...context, agent: browserAgent, conversation: { id: 'conv-1' } as never }} />);
+    const button = await screen.findByRole('button', { name: 'Assumir o controle' });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true));
   });
 });
 

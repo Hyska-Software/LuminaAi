@@ -121,7 +121,7 @@ fn ask_user_schema() -> Value {
                         },
                         "header": {
                             "type": "string",
-                            "description": "Short heading for the question card."
+                            "description": "Short heading for the question card. For a request that the user intervene in the agent's computer, use exactly computer_desktop or computer_browser; this offers a link to the matching panel, but never grants control or answers the question. Ask the user to take control, finish the step, return control, and then answer. Include a selectable completion option; free-text answers are disabled for these requests. Never request credentials or codes in chat."
                         },
                         "question": {
                             "type": "string",

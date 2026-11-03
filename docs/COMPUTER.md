@@ -10,7 +10,7 @@
 
 - `computerUse` — screenshot + clique/teclado;
 - `screenCapture` — somente leitura (screenshot/window list/UI tree);
-- `browserUse` — reservado para o browser CDP (ainda não implementado);
+- `browserUse` — navegador Chromium/Edge isolado por conversa, controlado por CDP;
 - `dockerExecution` — necessária para override de imagem Docker por agente.
 
 Todas começam `false` e só removem acesso. As tools só entram no catálogo do
@@ -66,14 +66,17 @@ não há grant persistente. Sem canal de aprovação a tool falha fechada
 
 - Imagem padrão publicada em `ghcr.io/hyska-software/lumina-computer:latest`
   (workflow `computer-image.yml`); também funciona uma imagem local de
-  `docker/computer/` (Xvfb + openbox + Chromium + xdotool + scrot + noVNC).
+  `docker/computer/` (Xvfb + openbox + Chromium + xdotool + scrot + RFB).
   O app oferece **Baixar imagem** em Configurações → Agentes → Desktop privado e
   no erro do painel Tela; não faz pull automático.
 - Container `<computerDockerContainer>-<conversationId>` iniciado no primeiro
   screenshot, com `--cap-drop ALL`, `no-new-privileges`, limites e
   `--network none`.
-- noVNC é **somente visualização humana**, publicado em uma porta loopback
-  aleatória (`docker port`); só existe quando `dockerNetwork` está ligado.
+- Visualização e controle usam RFB integrado ao painel. Dois servidores escutam
+  apenas no loopback do container: um é somente leitura e outro aceita entrada.
+  Uma ponte WebSocket em loopback, com token aleatório de uso único, encaminha
+  os bytes via `docker exec`/`socat`. Nenhuma porta gráfica do container é
+  publicada no host e o fluxo também funciona com rede Docker desligada.
 - O agente executa `scrot`/`xdotool`/`wmctrl` via `docker exec`.
 
 ## Imagens para o modelo
@@ -122,11 +125,25 @@ O layout Agentes ganhou um painel dockable/overlay com abas **Tela**,
 workspace (`CodePanel`) continua separado: as duas superfícies alternam no mesmo
 dock.
 
-- **Tela** usa `computer_preview` (screenshot para a UI, sem modelo/DB), cards de
-  ambiente e pausa/controle humano. A pausa é validada no backend:
-  tools de input retornam `COMPUTER_PAUSED`.
+- **Tela** usa fluxo RFB no desktop privado e captura local contínua no Windows;
+  `computer_preview` continua disponível para captura inicial e fallback.
+  Os controles da interface permitem assumir, devolver e expandir a visualização.
+  No Windows o usuário interage diretamente com o computador físico, não com a
+  imagem espelhada.
 - **Rotinas** lista/cria/executa e mostra `agent_routine_runs`.
-- **Navegador** controla o CDP local; “Assumir o controle” foca a janela real.
+- **Navegador** usa screencast CDP e encaminha eventos de mouse e teclado pelo
+  painel quando o usuário assume; o backend valida o controle antes de cada input.
+  Teclas e botões potencialmente pressionados são mantidos em memória por aba,
+  inclusive quando a resposta CDP se perde. Ao devolver o controle, o backend
+  aguarda os eventos de soltura sob o bloqueio da conversa; se falharem, o
+  controle permanece com o usuário. Fechar uma aba pelo painel também exige a
+  limpeza prévia. O registro não é persistido nem guarda o campo de texto CDP.
+  Cada tomada de controle tem uma geração emitida pelo backend; eventos de
+  teclado, mouse, inserção de texto, navegação, gestão de abas e pedidos de
+  devolução usam a geração que
+  tinham ao entrar na fila. Após devolver e assumir novamente, eventos antigos
+  são recusados, inclusive se chegarem atrasados pelo IPC. Se o processo do
+  navegador for reaberto durante a mesma posse, a geração também muda.
 - **Dados** mostra identidade/modelo/capabilities, uso, memória, tarefas, fila e
   auditoria.
 
@@ -163,7 +180,7 @@ O container Docker é **por conversa**:
 ```
 
 Dois agentes/threads nunca compartilham o mesmo Xvfb, clipboard ou Chromium. Cada
-container tem label `lumina.owner=lumina`, portas noVNC loopback aleatórias e é
+container tem label `lumina.owner=lumina`, não publica portas gráficas no host e é
 removido no Stop da sessão, no cleanup de boot e no `docker_cleanup`.
 
 ## Actions de desktop
@@ -197,12 +214,32 @@ Settings:
 
 O painel Navegador, quando “Assumir o controle” está ativo:
 
-- clicar no preview envia `browser_click_at` com coordenadas convertidas do
-  letterbox para o viewport;
-- digitar no preview envia `browser_insert_text`/`browser_press_key`;
+- ponteiro, roda e teclas são encaminhados ao CDP após conversão do letterbox;
 - o agente fica pausado no backend e só volta com “Devolver ao agente”;
-- cliques usam `Input.dispatchMouseEvent` e digitação usa `Input.insertText`
-  (eventos confiáveis), não `element.click()`/`value=`.
+- eventos usam `Input.dispatchMouseEvent` e `Input.dispatchKeyEvent`, não
+  `element.click()`/`value=`. A interação por IME e a fidelidade de alguns atalhos
+  dependem do WebView e ainda precisam de validação específica.
+
+A troca de controle é serializada por conversa e identifica o alvo (desktop ou
+navegador), impedindo que um takeover de uma superfície autorize entrada na outra.
+A posse do desktop físico também bloqueia automação local e de navegador de
+outras conversas, pois todas compartilham o mesmo Windows.
+
+Para pedir ajuda em login, CAPTCHA ou outro bloqueio, o agente pode usar
+`ask_user` com o campo `header` igual a `computer_desktop` ou `computer_browser`
+e oferecer uma opção de conclusão. No layout Agentes, o card abre a aba
+correspondente; isso **não** concede controle nem responde à pergunta. O usuário
+deve assumir e devolver o controle no painel e depois responder ao card. Nesses
+pedidos, o campo de texto livre fica desabilitado para evitar envio acidental de
+credenciais pela resposta estruturada.
+A solicitação bloqueia novas
+ações e cancela uma aprovação pendente; a transferência só é confirmada depois
+da ação em curso terminar. A liberação invalida o canal interativo. Com a conexão
+perdida ou após reiniciar, o agente não retoma automaticamente: o usuário deve
+assumir e devolver o controle explicitamente. Após a devolução, a primeira ação
+do agente deve observar o ambiente com `computer_screenshot` ou `browser_snapshot`.
+As transferências são auditadas sem
+registrar teclas, texto, clipboard ou frames.
 
 ## Limites de segurança
 
@@ -212,8 +249,8 @@ O painel Navegador, quando “Assumir o controle” está ativo:
   “senha”, “credential”): input/foco falha fechado
   (`COMPUTER_SENSITIVE_WINDOW`). A lista é heurística e não substitui a revisão
   humana da aprovação.
-- `browser_open` abre o navegador real e usa as tools de desktop; um cliente CDP
-  dedicado (DOM/refs, downloads e abas) ainda não está implementado.
+- O navegador CDP é um processo local com perfil isolado por conversa; a política
+  de hosts não deve ser confundida com um firewall completo de rede.
 - macOS/Linux local ainda não implementados.
 
 ## Testes
@@ -224,7 +261,8 @@ O painel Navegador, quando “Assumir o controle” está ativo:
 - `harness::tests::tool_screenshots_are_persisted_as_paths_and_replayed_only_for_vision_models`.
 - `providers::*::tests` (blocos de imagem por protocolo).
 - `computer::browser::tests` (URL http/https, perfil sanitizado, refs CDP,
-  allow/deny de hosts/private/metadata).
+  allow/deny de hosts/private/metadata e transferência com servidor CDP
+  simulado, incluindo respostas perdidas e concorrência).
 - `computer::tests::graphical_container_is_isolated_per_conversation` e
   `screenshot_retention_removes_old_files_and_empty_dirs`.
 - `db::tests::computer_audit_pending_action_is_finished_or_interrupted`.
@@ -234,3 +272,10 @@ O painel Navegador, quando “Assumir o controle” está ativo:
   `cargo test --lib docker_graphical_backend_screenshot_and_click -- --ignored`
   após `docker build -t lumina/computer:test docker/computer`. O teste sobe o
   container, captura 1440×900, clica e remove o container.
+- Ponte RFB e transferência real do backend (ignorado por padrão):
+  `cargo test --lib rfb_input_is_cleared_on_disconnect_and_control_revocation -- --ignored --nocapture`.
+  Com a mesma imagem local e a rede do container desligada, o teste envia tecla
+  e botão por RFB, retém temporariamente a limpeza no container descartável e
+  verifica que a ferramenta do agente falha fechada até a devolução concluir.
+  Ele também verifica a observação obrigatória e a invalidação da conexão antiga;
+  não cobre a interface Tauri/noVNC de ponta a ponta.

@@ -217,7 +217,10 @@ pub async fn request_interactive(
     }
     let outcome = tokio::select! {
         biased;
-        _ = cancel.cancelled() => ApprovalOutcome::cancelled(),
+        _ = cancel.cancelled() => {
+            registry.resolve(&id, ApprovalOutcome::cancelled());
+            ApprovalOutcome::cancelled()
+        },
         result = tokio::time::timeout(timeout, receiver) => match result {
             Ok(Ok(outcome)) => outcome,
             Ok(Err(_)) => ApprovalOutcome::expired(),
@@ -271,6 +274,16 @@ mod tests {
         let outcome = rx.await.expect("decisão enviada");
         assert!(outcome.is_approved());
         assert!(!registry.has_pending("apr-1"));
+    }
+
+    #[tokio::test]
+    async fn cancelled_request_does_not_leave_a_stale_approval() {
+        let registry = ApprovalRegistry::new();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        cancel.cancel();
+        let outcome = request_interactive(&registry, None, request("cancelled"), std::time::Duration::from_secs(1), &cancel).await;
+        assert!(!outcome.is_approved());
+        assert!(!registry.has_pending("cancelled"));
     }
 
     #[tokio::test]

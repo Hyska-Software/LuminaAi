@@ -1283,6 +1283,7 @@ export interface ComputerPreview {
   activeWindow: string;
   paused: boolean;
   takenOver: boolean;
+  controlTarget: string;
   sessionId: string | null;
   capturedAt: number;
 }
@@ -1290,6 +1291,7 @@ export interface ComputerPreview {
 export interface ComputerControlTarget {
   kind: 'local' | 'vnc' | 'browser';
   url: string | null;
+  generation: string | null;
 }
 
 export interface BrowserTab {
