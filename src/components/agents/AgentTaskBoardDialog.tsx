@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 
 import { AgentAvatar } from './AgentAvatar';
+import { AgentDialogBody } from './AgentDialogBody';
 import {
   Badge,
   Button,
@@ -119,7 +120,7 @@ export function AgentTaskBoardDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl">
-        <DialogHeader>
+        <DialogHeader className="pb-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <ListChecks className="size-4 text-accent" />
             Tarefas dos agentes
@@ -129,6 +130,7 @@ export function AgentTaskBoardDialog({
             cancele uma tarefa em execução.
           </DialogDescription>
         </DialogHeader>
+        <AgentDialogBody className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-[11px] text-foreground-muted">
             {tasks.length} tarefa(s) · atualiza sozinho quando o status muda
@@ -153,7 +155,7 @@ export function AgentTaskBoardDialog({
             {error}
           </p>
         ) : null}
-        <div className="grid max-h-[62vh] grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {COLUMNS.map((column) => {
             const entries = tasks.filter((task) => column.statuses.includes(task.status));
             return (
@@ -223,6 +225,7 @@ export function AgentTaskBoardDialog({
             );
           })}
         </div>
+        </AgentDialogBody>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Fechar

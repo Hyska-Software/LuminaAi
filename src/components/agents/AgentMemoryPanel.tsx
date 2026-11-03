@@ -159,7 +159,7 @@ export function AgentMemoryPanel({
         ) : null}
       </div>
 
-      <div className="space-y-2 rounded-xl border border-border bg-surface-raised/50 p-2.5">
+      <div className="space-y-2 rounded-xl border border-border bg-surface/50 p-3">
         <div className="flex items-center gap-2">
           <NativeSelect
             value={draftKind}
@@ -215,7 +215,7 @@ export function AgentMemoryPanel({
           {memories.map((memory) => (
             <li
               key={memory.id}
-              className="rounded-xl border border-border bg-surface-raised/50 p-2.5"
+              className="rounded-xl border border-border bg-surface/50 p-3"
             >
               <div className="flex items-start gap-2">
                 <span className="mt-0.5 rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-medium text-accent">

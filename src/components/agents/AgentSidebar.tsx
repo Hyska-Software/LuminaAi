@@ -42,6 +42,7 @@ import { api } from '@/lib/api';
 import { AgentAvatar } from './AgentAvatar';
 import { AgentActivityDialog } from './AgentActivityDialog';
 import { AgentChannelDialog } from './AgentChannelDialog';
+import { AgentDialogBody } from './AgentDialogBody';
 import { AgentRevisionDialog } from './AgentRevisionDialog';
 import { AgentRoutinesDialog } from './AgentRoutinesDialog';
 import { AgentTaskBoardDialog } from './AgentTaskBoardDialog';
@@ -1083,14 +1084,14 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
 
       <Dialog open={manageOpen} onOpenChange={setManageOpen}>
         <DialogContent className="max-w-2xl">
-          <DialogHeader>
+          <DialogHeader className="pb-4 pr-12">
             <DialogTitle>Gerenciar agentes</DialogTitle>
             <DialogDescription>
               {agents.length} ativo(s) · {archived.length} arquivado(s). Arquivar preserva o
               histórico e as conversas.
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+          <AgentDialogBody className="space-y-4">
             <section className="space-y-2">
               <h3 className="text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
                 Ativos
@@ -1103,7 +1104,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                 agents.map((agent) => (
                   <div
                     key={agent.id}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-surface-raised/50 p-2.5"
+                    className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
                   >
                     <AgentAvatar emoji={agent.emoji} size="sm" />
                     <div className="min-w-0 flex-1">
@@ -1157,7 +1158,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                 archived.map((agent) => (
                   <div
                     key={agent.id}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-surface-raised/50 p-2.5"
+                    className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
                   >
                     <AgentAvatar emoji={agent.emoji} size="sm" />
                     <div className="min-w-0 flex-1">
@@ -1196,7 +1197,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                 ))
               )}
             </section>
-          </div>
+          </AgentDialogBody>
           <DialogFooter>
             <Button variant="ghost" onClick={() => void importAgent()}>
               <Upload className="mr-1.5 size-4" />
@@ -1215,7 +1216,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
 
       <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="max-w-md">
-          <DialogHeader>
+          <DialogHeader className="pb-4 pr-12">
             <DialogTitle>Excluir agente?</DialogTitle>
             <DialogDescription>
               {deleteTarget
@@ -1224,10 +1225,12 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
             </DialogDescription>
           </DialogHeader>
           {deleteThreads > 0 ? (
-            <p className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-[12px] text-foreground-muted">
-              Este agente tem {deleteThreads} conversa(s). Arquive-o para manter o histórico; a
-              exclusão definitiva só é permitida sem conversas.
-            </p>
+            <AgentDialogBody>
+              <p className="rounded-lg border border-border bg-surface/50 px-3 py-2 text-[12px] text-foreground-muted">
+                Este agente tem {deleteThreads} conversa(s). Arquive-o para manter o histórico; a
+                exclusão definitiva só é permitida sem conversas.
+              </p>
+            </AgentDialogBody>
           ) : null}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
@@ -1246,13 +1249,13 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         onOpenChange={(open) => !open && setAllThreadsAgent(null)}
       >
         <DialogContent className="max-w-xl">
-          <DialogHeader>
+          <DialogHeader className="pb-4 pr-12">
             <DialogTitle>Conversas de {allThreadsAgent?.name ?? 'agente'}</DialogTitle>
             <DialogDescription>
               {allThreadsAgent ? `${threadsFor(allThreadsAgent.id).length} conversa(s)` : ''}
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-[55vh] space-y-0.5 overflow-y-auto pr-1">
+          <AgentDialogBody className="space-y-0.5">
             {allThreadsAgent && threadsFor(allThreadsAgent.id).length === 0 ? (
               <p className="py-6 text-center text-[12px] text-foreground-muted">
                 Nenhuma conversa ainda.
@@ -1276,7 +1279,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                   />
                 ))
               : null}
-          </div>
+          </AgentDialogBody>
           <DialogFooter>
             <Button
               variant="secondary"
@@ -1346,19 +1349,21 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         onOpenChange={(open) => !open && setRenameThreadTarget(null)}
       >
         <DialogContent className="max-w-md">
-          <DialogHeader>
+          <DialogHeader className="pb-4 pr-12">
             <DialogTitle>Renomear conversa</DialogTitle>
             <DialogDescription>O novo título aparece na barra lateral e na paleta.</DialogDescription>
           </DialogHeader>
-          <Input
-            value={renameThreadValue}
-            maxLength={120}
-            aria-label="Título da conversa"
-            onChange={(event) => setRenameThreadValue(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void confirmThreadRename();
-            }}
-          />
+          <AgentDialogBody>
+            <Input
+              value={renameThreadValue}
+              maxLength={120}
+              aria-label="Título da conversa"
+              onChange={(event) => setRenameThreadValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void confirmThreadRename();
+              }}
+            />
+          </AgentDialogBody>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setRenameThreadTarget(null)}>
               Cancelar
@@ -1379,7 +1384,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         onOpenChange={(open) => !open && setDeleteThreadTarget(null)}
       >
         <DialogContent className="max-w-md">
-          <DialogHeader>
+          <DialogHeader className="pb-4 pr-12">
             <DialogTitle>Excluir conversa?</DialogTitle>
             <DialogDescription>
               {deleteThreadTarget

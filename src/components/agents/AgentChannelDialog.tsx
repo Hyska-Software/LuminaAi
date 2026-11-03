@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 
 import { AgentAvatar } from './AgentAvatar';
+import { AgentDialogBody } from './AgentDialogBody';
 import {
   Button,
   Dialog,
@@ -97,7 +98,7 @@ export function AgentChannelDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
-        <DialogHeader>
+        <DialogHeader className="pb-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <Users className="size-4 text-accent" />
             {channel ? 'Editar canal' : 'Novo canal'}
@@ -106,7 +107,7 @@ export function AgentChannelDialog({
             Um canal é uma thread compartilhada: todos os agentes marcados leem e escrevem nela.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <AgentDialogBody className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="channel-name">Nome</Label>
             <Input
@@ -158,7 +159,7 @@ export function AgentChannelDialog({
               {error}
             </p>
           ) : null}
-        </div>
+        </AgentDialogBody>
         <DialogFooter>
           {channel ? (
             <Button variant="ghost" className="mr-auto text-danger" onClick={() => void remove()} disabled={saving}>

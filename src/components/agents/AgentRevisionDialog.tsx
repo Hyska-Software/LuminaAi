@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, Loader2, Sparkles, WandSparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { AgentDialogBody } from './AgentDialogBody';
 import {
   Button,
   Dialog,
@@ -33,7 +34,7 @@ function ChangeBlock({ change }: { change: AgentChange }) {
   const after = changeValue(change.after);
   const long = before.length > 160 || after.length > 160;
   return (
-    <div className="rounded-xl border border-border bg-surface-raised/40 p-2.5">
+    <div className="rounded-xl border border-border bg-surface/50 p-3">
       <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">
         {change.label}
       </p>
@@ -150,7 +151,7 @@ export function AgentRevisionDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
-        <DialogHeader>
+        <DialogHeader className="pb-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <WandSparkles className="size-4 text-accent" />
             Editar {agent?.name ?? 'agente'} com IA
@@ -161,7 +162,7 @@ export function AgentRevisionDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-[64vh] space-y-3 overflow-y-auto pr-1">
+        <AgentDialogBody className="space-y-4">
           <Textarea
             value={prompt}
             rows={3}
@@ -214,7 +215,7 @@ export function AgentRevisionDialog({
               </div>
             )
           ) : null}
-        </div>
+        </AgentDialogBody>
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={loading || applying}>

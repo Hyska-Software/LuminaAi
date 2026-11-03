@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Activity, AlertTriangle, ListChecks, MessageSquare, Square, Timer } from 'lucide-react';
 
 import { AgentAvatar } from './AgentAvatar';
+import { AgentDialogBody } from './AgentDialogBody';
 import {
   Badge,
   Button,
@@ -92,7 +93,7 @@ export function AgentActivityDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
-        <DialogHeader>
+        <DialogHeader className="pb-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <Activity className="size-4 text-accent" />
             Atividade
@@ -102,7 +103,7 @@ export function AgentActivityDialog({
             Parar um turno libera o slot de concorrência imediatamente.
           </DialogDescription>
         </DialogHeader>
-        <div className="max-h-[60vh] space-y-5 overflow-y-auto pr-1">
+        <AgentDialogBody className="space-y-5">
           {entries.length > 0 ? (
             <section aria-labelledby="activity-running" className="space-y-2">
               <h3
@@ -119,7 +120,7 @@ export function AgentActivityDialog({
                 return (
                   <article
                     key={stream.turnId}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-surface-raised/50 p-2.5"
+                    className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
                   >
                     {agent ? <AgentAvatar emoji={agent.emoji} size="sm" /> : null}
                     <div className="min-w-0 flex-1">
@@ -160,7 +161,7 @@ export function AgentActivityDialog({
                   key={approval.id}
                   type="button"
                   onClick={() => focusConversation(conversationId)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-warning/30 bg-warning-soft/40 p-2.5 text-left hover:bg-warning-soft/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  className="flex w-full items-center gap-3 rounded-xl border border-warning/30 bg-warning-soft/40 p-3 text-left hover:bg-warning-soft/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   <AlertTriangle className="size-4 shrink-0 text-warning" />
                   <span className="min-w-0 flex-1">
@@ -179,7 +180,7 @@ export function AgentActivityDialog({
                   key={question.id}
                   type="button"
                   onClick={() => focusConversation(conversationId)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface-raised/50 p-2.5 text-left hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface/50 p-3 text-left hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   <MessageSquare className="size-4 shrink-0 text-accent" />
                   <span className="min-w-0 flex-1">
@@ -212,7 +213,7 @@ export function AgentActivityDialog({
                   onClick={() => {
                     if (task.conversationId) focusConversation(task.conversationId);
                   }}
-                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface-raised/50 p-2.5 text-left hover:bg-surface-raised disabled:cursor-default disabled:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface/50 p-3 text-left hover:bg-surface-hover disabled:cursor-default disabled:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   <ListChecks className="size-4 shrink-0 text-accent" />
                   <span className="min-w-0 flex-1">
@@ -234,7 +235,7 @@ export function AgentActivityDialog({
               Nada pendente. Turnos, aprovações e tarefas aparecem aqui.
             </p>
           ) : null}
-        </div>
+        </AgentDialogBody>
         <DialogFooter>
           <Button
             variant="danger"

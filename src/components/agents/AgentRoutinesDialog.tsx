@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CalendarClock, Loader2, Pencil, Play, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { AgentDialogBody } from './AgentDialogBody';
 import {
   Button,
   Dialog,
@@ -202,7 +203,7 @@ export function AgentRoutinesDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
-        <DialogHeader>
+        <DialogHeader className="pb-4 pr-12">
           <DialogTitle>Rotinas de {agent?.name ?? 'agente'}</DialogTitle>
           <DialogDescription>
             Uma instrução com horário. Cada execução entra na conversa dedicada da rotina, com o
@@ -210,7 +211,7 @@ export function AgentRoutinesDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid max-h-[64vh] gap-4 overflow-y-auto pr-1 md:grid-cols-[1.05fr_0.95fr]">
+        <AgentDialogBody className="grid gap-4 md:grid-cols-[1.05fr_0.95fr]">
           <section className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">
@@ -239,7 +240,7 @@ export function AgentRoutinesDialog({
                 <article
                   key={routine.id}
                   className={cn(
-                    'rounded-xl border border-border bg-surface-raised/50 p-2.5',
+                    'rounded-xl border border-border bg-surface/50 p-3',
                     editing?.id === routine.id && 'border-accent/40 bg-accent-soft/30',
                   )}
                 >
@@ -313,7 +314,7 @@ export function AgentRoutinesDialog({
             )}
           </section>
 
-          <section className="space-y-3 rounded-xl border border-border bg-surface-raised/40 p-3">
+          <section className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
             <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">
               {editing ? 'Editar rotina' : 'Nova rotina'}
             </h3>
@@ -430,7 +431,7 @@ export function AgentRoutinesDialog({
               rotina; não há execução em nuvem.
             </p>
           </section>
-        </div>
+        </AgentDialogBody>
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>

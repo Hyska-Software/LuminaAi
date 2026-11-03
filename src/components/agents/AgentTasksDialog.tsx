@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 
 import { AgentAvatar } from './AgentAvatar';
+import { AgentDialogBody } from './AgentDialogBody';
 import {
   Badge,
   Button,
@@ -160,7 +161,7 @@ export function AgentTasksDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
-        <DialogHeader>
+        <DialogHeader className="pb-4 pr-12">
           <DialogTitle>Tarefas de {agent.name}</DialogTitle>
           <DialogDescription>
             Trabalho delegado com dono, orçamento e thread própria. Tarefas rodam em segundo
@@ -168,7 +169,7 @@ export function AgentTasksDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid max-h-[64vh] gap-4 overflow-y-auto pr-1 md:grid-cols-[1.05fr_0.95fr]">
+        <AgentDialogBody className="grid gap-4 md:grid-cols-[1.05fr_0.95fr]">
           <section className="space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">
@@ -195,7 +196,7 @@ export function AgentTasksDialog({
               tasks.map((task) => (
                 <article
                   key={task.id}
-                  className="rounded-xl border border-border bg-surface-raised/50 p-3"
+                  className="rounded-xl border border-border bg-surface/50 p-3"
                 >
                   <div className="flex items-start gap-2">
                     <span className={cn('mt-0.5 size-2 shrink-0 rounded-full bg-current', taskTone(task.status))} />
@@ -249,7 +250,7 @@ export function AgentTasksDialog({
             )}
           </section>
 
-          <section className="space-y-3 rounded-xl border border-border bg-surface-raised/40 p-3">
+          <section className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
             <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">
               Nova tarefa
             </h3>
@@ -343,7 +344,7 @@ export function AgentTasksDialog({
               Tarefas não assistidas falham fechado em aprovações.
             </p>
           </section>
-        </div>
+        </AgentDialogBody>
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Loader2, Sparkles, WandSparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { AgentDialogBody } from './AgentDialogBody';
 import {
   Button,
   Dialog,
@@ -58,7 +59,7 @@ export function AgentBuilderDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
-        <DialogHeader>
+        <DialogHeader className="pb-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <WandSparkles className="size-4 text-accent" />
             Criar agente com IA
@@ -68,7 +69,7 @@ export function AgentBuilderDialog({
             editável — nada é salvo sem a sua revisão.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
+        <AgentDialogBody className="space-y-4">
           <Textarea
             value={prompt}
             rows={5}
@@ -98,7 +99,7 @@ export function AgentBuilderDialog({
             <Sparkles className="size-3" />
             Usa o modelo selecionado no composer. Você poderá ajustar tudo antes de salvar.
           </p>
-        </div>
+        </AgentDialogBody>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={loading}>
             Cancelar

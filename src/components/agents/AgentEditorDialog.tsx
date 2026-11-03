@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -186,6 +186,13 @@ export function AgentEditorDialog() {
   const [mcpLoading, setMcpLoading] = useState(false);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspacesLoading, setWorkspacesLoading] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  /* Each tab starts at the top: the body is shared so the previous scroll
+     position would otherwise leak into a shorter tab. */
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [tab]);
 
   useEffect(() => {
     if (!editor) return;
@@ -383,7 +390,7 @@ export function AgentEditorDialog() {
   return (
     <Dialog open={editor !== null} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
-        <DialogHeader>
+        <DialogHeader className="pb-4 pr-12">
           <DialogTitle>{editor?.mode === 'edit' ? 'Editar agente' : 'Criar agente'}</DialogTitle>
           <DialogDescription>
             Identidade, comportamento, modelo e limites. As instruções não concedem permissões ao
@@ -391,17 +398,22 @@ export function AgentEditorDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={setTab} className="min-h-0">
-          <TabsList className="w-full justify-start overflow-x-auto">
-            <TabsTrigger value="identity">Identidade</TabsTrigger>
-            <TabsTrigger value="model">Modelo</TabsTrigger>
-            <TabsTrigger value="behavior">Comportamento</TabsTrigger>
-            <TabsTrigger value="capabilities">Capacidades</TabsTrigger>
-            <TabsTrigger value="memory">Memória</TabsTrigger>
-          </TabsList>
+        <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
+          <div className="shrink-0 px-6">
+            <TabsList className="w-full justify-start overflow-x-auto scrollbar-none">
+              <TabsTrigger value="identity">Identidade</TabsTrigger>
+              <TabsTrigger value="model">Modelo</TabsTrigger>
+              <TabsTrigger value="behavior">Comportamento</TabsTrigger>
+              <TabsTrigger value="capabilities">Capacidades</TabsTrigger>
+              <TabsTrigger value="memory">Memória</TabsTrigger>
+            </TabsList>
+          </div>
 
-          <div className="max-h-[62vh] overflow-y-auto pr-1">
-            <TabsContent value="identity" className="mt-4 space-y-4">
+          <div
+            ref={bodyRef}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-5 pt-4"
+          >
+            <TabsContent value="identity" className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-[1fr_5rem]">
                 <div className="space-y-1.5">
                   <Label htmlFor="agent-name">Nome</Label>
@@ -457,7 +469,7 @@ export function AgentEditorDialog() {
                 />
               </div>
 
-              <div className="rounded-xl border border-border bg-surface-raised/50 p-3">
+              <div className="rounded-xl border border-border bg-surface/50 p-4">
                 <div className="flex items-center gap-2 text-[12px] text-foreground-muted">
                   <Bot className="size-4 text-accent" />
                   Cada conversa com este agente fica isolada na barra lateral e usa o modelo
@@ -466,64 +478,63 @@ export function AgentEditorDialog() {
               </div>
             </TabsContent>
 
-            <TabsContent value="model" className="mt-4 space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="agent-provider">Provedor</Label>
-                  <NativeSelect
-                    id="agent-provider"
-                    value={form.providerId}
-                    onChange={(event) => {
-                      const next = providers.find((entry) => entry.id === event.target.value);
-                      const nextModel = next?.models.find(
-                        (entry) => entry.id === next.defaultModelId,
-                      );
-                      setForm((current) => ({
-                        ...current,
-                        providerId: event.target.value,
-                        modelId: next?.defaultModelId ?? '',
-                        reasoning: reasoningForModel(nextModel, current.reasoning),
-                      }));
-                    }}
-                  >
-                    {providers.map((entry) => (
-                      <option key={entry.id} value={entry.id}>
-                        {entry.name}
-                      </option>
-                    ))}
-                  </NativeSelect>
+            <TabsContent value="model" className="space-y-4">
+              <div className="space-y-4 rounded-xl border border-border bg-surface/50 p-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="agent-provider">Provedor</Label>
+                    <NativeSelect
+                      id="agent-provider"
+                      value={form.providerId}
+                      onChange={(event) => {
+                        const next = providers.find((entry) => entry.id === event.target.value);
+                        const nextModel = next?.models.find(
+                          (entry) => entry.id === next.defaultModelId,
+                        );
+                        setForm((current) => ({
+                          ...current,
+                          providerId: event.target.value,
+                          modelId: next?.defaultModelId ?? '',
+                          reasoning: reasoningForModel(nextModel, current.reasoning),
+                        }));
+                      }}
+                    >
+                      {providers.map((entry) => (
+                        <option key={entry.id} value={entry.id}>
+                          {entry.name}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="agent-model">Modelo</Label>
+                    <NativeSelect
+                      id="agent-model"
+                      value={form.modelId}
+                      onChange={(event) => {
+                        const nextModel = provider?.models.find(
+                          (entry) => entry.id === event.target.value,
+                        );
+                        setForm((current) => ({
+                          ...current,
+                          modelId: event.target.value,
+                          reasoning: reasoningForModel(nextModel, current.reasoning),
+                        }));
+                      }}
+                    >
+                      {provider &&
+                      form.modelId &&
+                      !provider.models.some((entry) => entry.id === form.modelId) ? (
+                        <option value={form.modelId}>{form.modelId} (indisponível)</option>
+                      ) : null}
+                      {(provider?.models ?? []).map((entry) => (
+                        <option key={entry.id} value={entry.id}>
+                          {entry.name}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="agent-model">Modelo</Label>
-                  <NativeSelect
-                    id="agent-model"
-                    value={form.modelId}
-                    onChange={(event) => {
-                      const nextModel = provider?.models.find(
-                        (entry) => entry.id === event.target.value,
-                      );
-                      setForm((current) => ({
-                        ...current,
-                        modelId: event.target.value,
-                        reasoning: reasoningForModel(nextModel, current.reasoning),
-                      }));
-                    }}
-                  >
-                    {provider &&
-                    form.modelId &&
-                    !provider.models.some((entry) => entry.id === form.modelId) ? (
-                      <option value={form.modelId}>{form.modelId} (indisponível)</option>
-                    ) : null}
-                    {(provider?.models ?? []).map((entry) => (
-                      <option key={entry.id} value={entry.id}>
-                        {entry.name}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-border bg-surface-raised/50 p-3">
                 <ThinkingSelector
                   model={model}
                   value={form.reasoning}
@@ -531,7 +542,7 @@ export function AgentEditorDialog() {
                 />
               </div>
 
-              <div className="space-y-3 rounded-xl border border-border p-3">
+              <div className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
                 <div>
                   <p className="text-[12px] font-medium text-foreground">Modelo de reserva</p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-foreground-subtle">
@@ -591,7 +602,7 @@ export function AgentEditorDialog() {
               </p>
             </TabsContent>
 
-            <TabsContent value="behavior" className="mt-4 space-y-4">
+            <TabsContent value="behavior" className="space-y-4">
               <div className="space-y-1.5">
                 <Label htmlFor="agent-instructions">Instruções do agente</Label>
                 <Textarea
@@ -622,8 +633,8 @@ export function AgentEditorDialog() {
               </div>
             </TabsContent>
 
-            <TabsContent value="capabilities" className="mt-4 space-y-5">
-              <div className="space-y-2 rounded-xl border border-border bg-surface-raised/50 p-3">
+            <TabsContent value="capabilities" className="space-y-4">
+              <div className="space-y-2 rounded-xl border border-border bg-surface/50 p-4">
                 <p className="flex items-center gap-1.5 text-[12px] font-medium text-foreground">
                   <Sparkles className="size-3.5 text-accent" />
                   Ações básicas
@@ -678,7 +689,7 @@ export function AgentEditorDialog() {
                 />
               </div>
 
-              <div className="space-y-3 rounded-xl border border-border bg-surface-raised/50 p-3">
+              <div className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
                 <div>
                   <p className="text-[12px] font-medium text-foreground">Workspace e permissões</p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-foreground-subtle">
@@ -832,7 +843,7 @@ export function AgentEditorDialog() {
               />
             </TabsContent>
 
-            <TabsContent value="memory" className="mt-4 space-y-4">
+            <TabsContent value="memory" className="space-y-4">
               <Switch
                 checked={form.memoryEnabled}
                 onCheckedChange={(checked) => set('memoryEnabled', checked)}
@@ -848,12 +859,14 @@ export function AgentEditorDialog() {
         </Tabs>
 
         {error ? (
-          <p
-            role="alert"
-            className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-[12px] text-danger"
-          >
-            {error}
-          </p>
+          <div className="shrink-0 px-6 pb-3">
+            <p
+              role="alert"
+              className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-[12px] text-danger"
+            >
+              {error}
+            </p>
+          </div>
         ) : null}
 
         <DialogFooter>
@@ -892,7 +905,7 @@ function CapabilityList({
   empty: string;
 }) {
   return (
-    <div className="space-y-2 rounded-xl border border-border p-3">
+    <div className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
       <Switch
         checked={inherit}
         onCheckedChange={onInherit}
@@ -912,7 +925,7 @@ function CapabilityList({
               key={item.value}
               className={cn(
                 'flex min-w-0 items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-[12px]',
-                selected.includes(item.value) ? 'border-accent/40 bg-accent-soft/50' : 'bg-surface-raised/40',
+                selected.includes(item.value) ? 'border-accent/40 bg-accent-soft/50' : 'bg-surface-raised',
               )}
             >
               <input
