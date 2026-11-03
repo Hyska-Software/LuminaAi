@@ -137,6 +137,14 @@ export default function App() {
     layoutMode === 'agent' &&
     activeConversation?.mode === 'agent' &&
     Boolean(activeConversation.workspaceId);
+  // AgentThreadHeader owns the computer-use status for its conversation; the
+  // floating banner remains for every other thread/layout (fail-safe).
+  const agentThreadHeaderVisible =
+    layoutMode === 'agent' &&
+    !activeChannelId &&
+    activeConversation?.mode === 'agent' &&
+    !activeConversation.channelId &&
+    activeConversation.agentId === activeAgentId;
   const agentPanelVisible =
     layoutMode === 'agent' &&
     (Boolean(activeAgentId) || Boolean(activeChannelId)) &&
@@ -476,7 +484,9 @@ export default function App() {
         <SettingsDialog />
         <ModelPickerDialog />
         <CommandPalette />
-        <ComputerControlBanner />
+        <ComputerControlBanner
+          hideConversationId={agentThreadHeaderVisible ? activeConversation?.id ?? null : null}
+        />
       </ErrorBoundary>
       <Toaster
         position="bottom-right"

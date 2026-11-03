@@ -282,7 +282,8 @@ Contrato completo: `docs/COMPUTER.md`.
   acessibilidade; Docker gráfico via `docker/computer/` (Xvfb + noVNC).
 - `browserUse` usa o navegador local controlado por CDP (abas, endereço,
   snapshot com refs, click/type, wait, extract e download) em um perfil isolado
-  por conversa; apenas http/https.
+  por conversa; apenas http/https. O Chromium/Edge roda headless e a página é
+  exibida dentro do painel Navegador, sem janela externa do sistema.
 - `RiskClass::Computer` sempre pede aprovação, inclusive em Autônomo; o card
   mostra screenshot/alvo e só oferece permitir uma vez/negar; sem canal de
   aprovação a tool falha fechada.

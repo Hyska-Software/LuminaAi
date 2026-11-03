@@ -49,8 +49,11 @@ não há grant persistente. Sem canal de aprovação a tool falha fechada
   encerra a sessão. Comandos: `list_computer_actions`,
   `list_computer_sessions`, `list_active_computer_sessions`,
   `stop_computer_session`, `stop_all_computer_sessions`.
-- Enquanto há sessão ativa, `ComputerControlBanner` mostra agente/thread/backend
-  e oferece **Parar** (encerra a sessão e os turnos).
+- Enquanto há sessão ativa, o topbar da thread do agente mostra o aviso
+  compacto e **Parar** para aquela conversa. Fora do topbar (outros layouts ou
+  sessões em outras threads), `ComputerControlBanner` continua como fail-safe,
+  mostrando agente/thread/backend e **Parar tudo** (encerra as sessões e os
+  turnos).
 
 ## Backends
 
@@ -93,8 +96,11 @@ não há grant persistente. Sem canal de aprovação a tool falha fechada
 
 ### Navegador CDP
 
-`browser_open` abre uma sessão **local** de Chromium/Edge (perfil isolado por
-conversa, porta CDP aleatória em loopback). As tools de página são:
+`browser_open` abre uma sessão **local** de Chromium/Edge em modo **headless**
+(perfil isolado por conversa, porta CDP aleatória em loopback). O navegador não
+abre nenhuma janela do sistema: a página é desenhada pelo screencast CDP dentro
+da aba **Navegador** do painel do agente, que também fornece abas, barra de
+endereço e o controle humano. As tools de página são:
 
 | Tool | Aprovação | Efeito |
 | --- | --- | --- |

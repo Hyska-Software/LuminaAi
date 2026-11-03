@@ -223,7 +223,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
       );
       setStatus(next);
       toast.success('Navegador aberto', {
-        description: 'A sessão usa um perfil isolado; o agente só age com aprovação.',
+        description: 'A página aparece aqui no painel; nenhuma janela externa é aberta.',
       });
     } catch (error) {
       toast.error('Não foi possível abrir o navegador', { description: String(error) });
@@ -593,8 +593,8 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
               Nenhuma sessão aberta.
             </p>
             <p className="max-w-64 text-[11px] text-foreground-subtle">
-              O Lumina abre um Chromium/Edge isolado, com perfil próprio por conversa e porta CDP
-              apenas em loopback.
+              O Lumina abre um Chromium/Edge isolado em segundo plano, com perfil próprio por
+              conversa. A página aparece aqui, sem janela externa.
             </p>
             <Button size="sm" disabled={busy} onClick={() => void openSession()}>
               {busy ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Globe2 className="mr-1.5 size-3.5" />}

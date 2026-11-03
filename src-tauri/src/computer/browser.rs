@@ -24,6 +24,35 @@ const CDP_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_SNAPSHOT_ELEMENTS: usize = 200;
 const MAX_EXTRACT_CHARS: usize = 30_000;
 
+/// Launch flags for the controlled browser.
+///
+/// The process is intentionally headless: the page is rendered inside the
+/// Agentes panel through CDP screencast and must never open a second app window.
+/// Background-throttling flags keep frames and timers alive while the panel is
+/// not focused.
+fn launch_arguments(port: u16, profile: &Path) -> Vec<String> {
+    vec![
+        "--headless=new".to_string(),
+        format!("--remote-debugging-port={port}"),
+        "--remote-debugging-address=127.0.0.1".to_string(),
+        format!("--user-data-dir={}", profile.display()),
+        "--no-first-run".to_string(),
+        "--no-default-browser-check".to_string(),
+        "--disable-background-networking".to_string(),
+        "--disable-background-timer-throttling".to_string(),
+        "--disable-backgrounding-occluded-windows".to_string(),
+        "--disable-renderer-backgrounding".to_string(),
+        "--disable-component-update".to_string(),
+        "--disable-default-apps".to_string(),
+        "--disable-extensions".to_string(),
+        "--disable-sync".to_string(),
+        "--disable-features=Translate,MediaRouter".to_string(),
+        "--window-size=1280,820".to_string(),
+        "--force-device-scale-factor=1".to_string(),
+        "about:blank".to_string(),
+    ]
+}
+
 static GLOBAL: OnceLock<BrowserManager> = OnceLock::new();
 
 pub fn init_global(data_dir: &Path) {
@@ -499,20 +528,7 @@ impl BrowserManager {
         let port = free_port()?;
         let mut command = Command::new(&executable);
         command
-            .arg(format!("--remote-debugging-port={port}"))
-            .arg("--remote-debugging-address=127.0.0.1")
-            .arg(format!("--user-data-dir={}", profile.display()))
-            .arg("--no-first-run")
-            .arg("--no-default-browser-check")
-            .arg("--disable-background-networking")
-            .arg("--disable-component-update")
-            .arg("--disable-default-apps")
-            .arg("--disable-extensions")
-            .arg("--disable-sync")
-            .arg("--disable-features=Translate,MediaRouter")
-            .arg("--window-size=1280,820")
-            .arg("--force-device-scale-factor=1")
-            .arg("about:blank")
+            .args(launch_arguments(port, &profile))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -1834,6 +1850,17 @@ async fn focus_process(pid: u32) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn controlled_browser_launches_headless_without_an_external_window() {
+        let arguments = launch_arguments(9222, Path::new("C:/profile"));
+        assert_eq!(arguments.first().map(String::as_str), Some("--headless=new"));
+        assert!(arguments.iter().any(|argument| argument == "--remote-debugging-port=9222"));
+        assert!(arguments.iter().any(|argument| argument.starts_with("--user-data-dir=")));
+        assert!(arguments.iter().any(|argument| argument == "--window-size=1280,820"));
+        assert_eq!(arguments.last().map(String::as_str), Some("about:blank"));
+        assert!(!arguments.iter().any(|argument| argument == "--app"));
+    }
+
     #[tokio::test]
     async fn conversation_download_directory_is_shared_across_opening_orders_and_rebinding() {
         use std::sync::Arc;
@@ -2267,7 +2294,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "opens a real local Chromium/Edge window"]
+    #[ignore = "starts the real local Chromium/Edge engine"]
     async fn local_cdp_browser_navigates_snapshots_and_types() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

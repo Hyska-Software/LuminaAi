@@ -1,6 +1,7 @@
 import { ArrowLeft, FolderKanban, PanelRight, Pencil } from 'lucide-react';
 
 import { AgentAvatar } from './AgentAvatar';
+import { AgentComputerControl } from './AgentComputerControl';
 import { AgentConversationWorkspace } from './AgentConversationWorkspace';
 import { modelLabel } from './agentUtils';
 import { CodeContextMeterChip } from '@/components/code/CodeAgentWidgets';
@@ -40,6 +41,7 @@ export function AgentThreadHeader({
           {conversation.title} · {modelLabel(providers, conversation.providerId, conversation.modelId)}
         </p>
       </div>
+      <AgentComputerControl conversationId={conversation.id} />
       <AgentConversationWorkspace conversation={conversation} busy={turnActive} onChanged={(updated) => {
         useChatStore.setState((state) => ({
           conversations: state.conversations.map((item) => item.id === updated.id ? updated : item),

@@ -1,46 +1,33 @@
-import { useEffect, useState } from 'react';
 import { MonitorStop, Square } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { useActiveComputerSessions } from './useActiveComputerSessions';
 import { Button } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAgentStore, useChatStore, useUiStore } from '@/lib/store';
-import type { ComputerSession } from '@/lib/types';
 
 /**
- * Always-visible in-app control bar while any computer-use session is active.
- * (A separate always-on-top OS window is still planned; this banner is the
- * fail-safe inside Lumina.)
+ * Global fail-safe while a computer-use session is active outside the agent
+ * thread header. Inside an agent thread, its topbar owns the status/stop
+ * control; App passes that conversation as `hideConversationId` so the same
+ * state is never shown twice.
  */
-export function ComputerControlBanner() {
-  const [sessions, setSessions] = useState<ComputerSession[]>([]);
+export function ComputerControlBanner({
+  hideConversationId = null,
+}: {
+  hideConversationId?: string | null;
+}) {
+  const { sessions, clear } = useActiveComputerSessions();
   const agents = useAgentStore((state) => state.agentsById);
   const conversations = useChatStore((state) => state.conversations);
   const openConversation = useChatStore((state) => state.openConversation);
   const stopAllTurns = useChatStore((state) => state.stopAllTurns);
 
-  useEffect(() => {
-    let disposed = false;
-    const load = () => {
-      void api
-        .listActiveComputerSessions()
-        .then((list) => {
-          if (!disposed) setSessions(list);
-        })
-        .catch(() => {
-          if (!disposed) setSessions([]);
-        });
-    };
-    load();
-    const timer = window.setInterval(load, 2500);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  if (sessions.length === 0) return null;
-  const session = sessions[0];
+  const visible = sessions.filter(
+    (entry) => entry.conversationId !== hideConversationId,
+  );
+  if (visible.length === 0) return null;
+  const session = visible[0];
   const agent = session.agentId ? agents[session.agentId] : undefined;
   const conversation = conversations.find((entry) => entry.id === session.conversationId);
 
@@ -48,7 +35,7 @@ export function ComputerControlBanner() {
     try {
       await api.stopAllComputerSessions();
       await stopAllTurns();
-      setSessions([]);
+      clear();
       toast.success('Computer use interrompido');
     } catch (error) {
       toast.error('Não foi possível parar', { description: String(error) });
