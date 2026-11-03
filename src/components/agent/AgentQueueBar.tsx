@@ -1,8 +1,11 @@
 import { ListOrdered, Pause, Play, Trash2, X } from 'lucide-react';
 
 import { Button, IconButton } from '@/components/ui';
-import { useAgentQueueStore, useChatStore } from '@/lib/store';
+import { useAgentQueueStore, useChatStore, type AgentQueueItem } from '@/lib/store';
 import { cn } from '@/lib/utils';
+
+/** Stable fallback: a fresh `[]` on every selector call would loop React. */
+const EMPTY_QUEUE: AgentQueueItem[] = [];
 
 /**
  * FIFO above the composer for agent threads. The queue is persisted in
@@ -15,7 +18,9 @@ export function AgentQueueBar({
   conversationId: string;
   className?: string;
 }) {
-  const items = useAgentQueueStore((state) => state.byConversation[conversationId] ?? []);
+  const items = useAgentQueueStore(
+    (state) => state.byConversation[conversationId] ?? EMPTY_QUEUE,
+  );
   const paused = useAgentQueueStore(
     (state) => state.pausedByConversation[conversationId] === true,
   );

@@ -24,7 +24,7 @@ vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }),
 }));
 
-import { useAgentStore } from '@/lib/store';
+import { useAgentStore, useUiStore } from '@/lib/store';
 import type { Agent, AgentInput } from '@/lib/types';
 import { AgentPanelBrowser } from './AgentPanelBrowser';
 import { AgentPanelData } from './AgentPanelData';
@@ -145,6 +145,46 @@ describe('AgentPanel — Tela', () => {
         }),
       ),
     );
+  });
+
+  it('explica como configurar o Docker quando a imagem do desktop privado falha', async () => {
+    const dockerAgent: Agent = {
+      ...agent,
+      workspaceId: 'ws-1',
+      computerEnvironment: 'private_desktop',
+    };
+    useAgentStore.setState({
+      agentsById: { [dockerAgent.id]: dockerAgent },
+      orderedIds: [dockerAgent.id],
+    });
+    mocks.computerPreview.mockRejectedValue(
+      'COMPUTER_DOCKER_FAILED: não foi possível iniciar `lumina/computer:latest` — pull access denied',
+    );
+    useUiStore.setState({ settingsOpen: false, settingsTab: 'general' });
+
+    render(
+      <AgentPanelScreen
+        context={{
+          ...context,
+          agent: dockerAgent,
+          conversation: { id: 'conv-1', workspaceId: 'ws-1' } as never,
+        }}
+      />,
+    );
+
+    expect(
+      await screen.findByText('Docker do Desktop privado não está configurado'),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/docker build -t lumina\/computer:latest docker\/computer/),
+    ).toBeTruthy();
+    expect(
+      (screen.getByRole('button', { name: 'Assumir o controle' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Docker' }));
+    expect(useUiStore.getState().settingsOpen).toBe(true);
+    expect(useUiStore.getState().settingsTab).toBe('tools');
   });
 });
 

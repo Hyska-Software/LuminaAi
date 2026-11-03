@@ -389,7 +389,7 @@ export function AgentEditorDialog() {
 
   return (
     <Dialog open={editor !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="h-[720px] max-w-3xl">
         <DialogHeader className="pb-4 pr-12">
           <DialogTitle>{editor?.mode === 'edit' ? 'Editar agente' : 'Criar agente'}</DialogTitle>
           <DialogDescription>

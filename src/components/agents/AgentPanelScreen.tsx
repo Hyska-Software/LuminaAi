@@ -19,9 +19,10 @@ import { toast } from 'sonner';
 import type { AgentPanelContext } from './AgentPanel';
 import { inputFromAgent } from './agentUtils';
 import { AgentRoutinesDialog } from './AgentRoutinesDialog';
+import { ComputerDockerHelp, isComputerDockerError } from './ComputerDockerHelp';
 import { Badge, Button, Spinner } from '@/components/ui';
 import { api } from '@/lib/api';
-import { useAgentStore, useChatStore } from '@/lib/store';
+import { useAgentStore, useChatStore, useUiStore } from '@/lib/store';
 import type { ComputerEnvironment, ComputerPreview } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -85,6 +86,7 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
   const conversationId = conversation?.id ?? null;
   const updateAgent = useAgentStore((state) => state.update);
   const startNewConversation = useChatStore((state) => state.startNewConversation);
+  const openSettings = useUiStore((state) => state.openSettings);
   const [preview, setPreview] = useState<ComputerPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -102,6 +104,7 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
     environment !== 'off' &&
     environment !== 'browser' &&
     computerCapable;
+  const dockerSetupError = Boolean(previewError && isComputerDockerError(previewError));
 
   const loadPreview = useCallback(async () => {
     if (!conversationId || !previewAvailable || loadingRef.current) return;
@@ -127,11 +130,11 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
   }, [conversationId, environment, agent.id]);
 
   useEffect(() => {
-    if (!previewEnabled || !previewAvailable) return;
+    if (!previewEnabled || !previewAvailable || previewError) return;
     void loadPreview();
     const interval = window.setInterval(() => void loadPreview(), 2500);
     return () => window.clearInterval(interval);
-  }, [previewEnabled, previewAvailable, loadPreview]);
+  }, [previewEnabled, previewAvailable, loadPreview, previewError]);
 
   useEffect(() => {
     let disposed = false;
@@ -307,6 +310,15 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
               <div className="flex aspect-video items-center justify-center">
                 <Spinner className="size-5" />
               </div>
+            ) : previewError && dockerSetupError ? (
+              <ComputerDockerHelp
+                error={previewError}
+                onRetry={() => {
+                  setPreviewEnabled(true);
+                  void loadPreview();
+                }}
+                onOpenSettings={() => openSettings('tools')}
+              />
             ) : (
               <div className="flex aspect-video flex-col items-center justify-center gap-2 p-5 text-center">
                 <Monitor className="size-6 text-foreground-subtle" />
@@ -348,7 +360,10 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
             <Button
               size="sm"
               variant={preview?.takenOver ? 'secondary' : 'primary'}
-              disabled={controlBusy}
+              disabled={controlBusy || dockerSetupError}
+              title={
+                dockerSetupError ? 'Configure a imagem do Docker antes de assumir o controle' : undefined
+              }
               onClick={() =>
                 preview?.takenOver ? void releaseControl() : void takeControl()
               }
