@@ -590,6 +590,27 @@ impl ChatMessage {
             origin: TurnKind::User,
         }
     }
+
+    pub fn system(conversation_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            conversation_id: conversation_id.into(),
+            role: MessageRole::System,
+            content: content.into(),
+            reasoning: None,
+            status: MessageStatus::Complete,
+            tool_calls: Vec::new(),
+            citations: Vec::new(),
+            attachments: Vec::new(),
+            model_id: None,
+            provider_id: None,
+            usage: None,
+            created_at: now_ms(),
+            provider_state: None,
+            trace: Vec::new(),
+            origin: TurnKind::User,
+        }
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -630,8 +651,18 @@ pub struct TurnOptions {
     /// `Settings::code_execution_enabled`.
     pub run_code: bool,
     pub max_steps: u32,
+    /// Internal per-turn cap. Background tasks set this to a small value while
+    /// `settings.code_max_steps` remains the interactive default.
+    #[serde(skip)]
+    pub max_steps_override: Option<u32>,
     pub temperature: Option<f32>,
+    /// Internal subagent instructions. Never accepted from the renderer.
+    #[serde(skip)]
     pub system_prompt_override: Option<String>,
+    /// Volatile shared-channel history injected as a `surface_item`, never as
+    /// a persisted user message. Internal: only the channel runner sets it.
+    #[serde(skip)]
+    pub channel_context: Option<String>,
     /// Regenerate the last assistant answer (drops it before running).
     pub regenerate: bool,
     /// Profundidade de delegação (0 = sessão do usuário; 1 = subagente).
@@ -677,8 +708,10 @@ impl Default for TurnOptions {
             create_files: true,
             run_code: true,
             max_steps: MAX_STEPS_DEFAULT,
+            max_steps_override: None,
             temperature: None,
             system_prompt_override: None,
+            channel_context: None,
             regenerate: false,
             delegation_depth: 0,
             wire_session_id: None,
@@ -2278,6 +2311,24 @@ impl ToolCallRecord {
 
 pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
+}
+
+/// Start of the current local day in unix milliseconds. Used by the per-agent
+/// daily budget. Resolves DST gaps by taking the earliest valid instant and
+/// falls back to a 24 h window if the platform cannot resolve midnight.
+pub fn local_day_start_ms(now: i64) -> i64 {
+    use chrono::{Local, TimeZone};
+    let Some(now_dt) = Local.timestamp_millis_opt(now).single() else {
+        return now - 86_400_000;
+    };
+    let Some(naive) = now_dt.date_naive().and_hms_opt(0, 0, 0) else {
+        return now - 86_400_000;
+    };
+    Local
+        .from_local_datetime(&naive)
+        .earliest()
+        .map(|value| value.timestamp_millis())
+        .unwrap_or(now - 86_400_000)
 }
 
 #[cfg(test)]

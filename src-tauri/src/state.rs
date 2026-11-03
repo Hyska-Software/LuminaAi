@@ -56,6 +56,34 @@ impl TurnRegistry {
         token
     }
 
+    /// Registers a turn only when the conversation has no other active turn.
+    /// This is the backend single-flight boundary for agent threads: the
+    /// renderer prevents double sends, but background runners and reloads do
+    /// not share that state.
+    pub fn register_if_idle(
+        &self,
+        turn_id: &str,
+        conversation_id: &str,
+    ) -> Option<CancellationToken> {
+        let mut turns = self.turns.lock();
+        if turns
+            .values()
+            .any(|entry| entry.conversation_id == conversation_id)
+        {
+            return None;
+        }
+        let token = CancellationToken::new();
+        turns.insert(
+            turn_id.to_string(),
+            TurnEntry {
+                cancel: token.clone(),
+                conversation_id: conversation_id.to_string(),
+                started_at: crate::domain::now_ms(),
+            },
+        );
+        Some(token)
+    }
+
     pub fn finish(&self, turn_id: &str) {
         self.turns.lock().remove(turn_id);
     }
@@ -70,10 +98,12 @@ impl TurnRegistry {
         }
     }
 
-    pub fn cancel_all(&self) {
-        for entry in self.turns.lock().values() {
+    pub fn cancel_all(&self) -> usize {
+        let turns = self.turns.lock();
+        for entry in turns.values() {
             entry.cancel.cancel();
         }
+        turns.len()
     }
 
     /// Há algum turno ativo para esta conversa?
@@ -137,6 +167,20 @@ impl TurnRegistry {
         conversations.sort();
         conversations.dedup();
         conversations
+    }
+}
+
+/// Finishes a registered turn even when the command returns early through
+/// `?`. Holds a borrow of the registry, so it is cheap and cannot outlive the
+/// state that created it.
+pub struct TurnGuard<'a> {
+    registry: &'a TurnRegistry,
+    turn_id: String,
+}
+
+impl Drop for TurnGuard<'_> {
+    fn drop(&mut self) {
+        self.registry.finish(&self.turn_id);
     }
 }
 
@@ -339,6 +383,21 @@ impl AppState {
         self.turns.register(turn_id, conversation_id)
     }
 
+    pub fn register_turn_if_idle(
+        &self,
+        turn_id: &str,
+        conversation_id: &str,
+    ) -> Option<CancellationToken> {
+        self.turns.register_if_idle(turn_id, conversation_id)
+    }
+
+    pub fn turn_guard(&self, turn_id: &str) -> TurnGuard<'_> {
+        TurnGuard {
+            registry: &self.turns,
+            turn_id: turn_id.to_string(),
+        }
+    }
+
     pub fn finish_turn(&self, turn_id: &str) {
         self.turns.finish(turn_id);
     }
@@ -348,8 +407,8 @@ impl AppState {
         self.turns.cancel(turn_id)
     }
 
-    pub fn cancel_all(&self) {
-        self.turns.cancel_all();
+    pub fn cancel_all(&self) -> usize {
+        self.turns.cancel_all()
     }
 
     pub fn cancel_conversation(&self, conversation_id: &str) -> usize {
@@ -410,6 +469,18 @@ mod tests {
         registry.finish("turn-1");
         assert!(!registry.has_active_for("conv-1"));
         assert!(registry.active_conversations().is_empty());
+    }
+
+    #[test]
+    fn turn_registry_accepts_only_one_turn_per_conversation() {
+        let registry = TurnRegistry::new();
+        let first = registry.register_if_idle("turn-1", "conv-1").expect("first");
+        assert!(!first.is_cancelled());
+        assert!(registry.register_if_idle("turn-2", "conv-1").is_none());
+        let other = registry.register_if_idle("turn-3", "conv-2").expect("other");
+        assert!(!other.is_cancelled());
+        registry.finish("turn-1");
+        assert!(registry.register_if_idle("turn-4", "conv-1").is_some());
     }
 
     #[test]

@@ -184,9 +184,25 @@ pub fn rename_conversation(
 
 #[tauri::command]
 pub fn delete_conversation(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let conversation = state.db.get_conversation(&id).map_err(to_error)?;
+    state.cancel_conversation(&id);
     let result = state.db.delete_conversation(&id).map_err(to_error);
     if result.is_ok() {
         state.terminals.close_conversation(&id);
+        if let Some(browser) = crate::computer::browser::global() {
+            browser.close(&id);
+        }
+        let _ = state
+            .db
+            .end_computer_session(&id, "stopped", crate::domain::now_ms());
+        if let Some(conversation) = conversation {
+            if conversation.mode == crate::domain::CONVERSATION_MODE_AGENT
+                && conversation.workspace_id.is_none()
+            {
+                let dir = crate::harness::agent_workspace::path(&state.data_dir, &id);
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        }
     }
     result
 }

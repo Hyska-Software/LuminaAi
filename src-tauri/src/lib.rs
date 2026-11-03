@@ -95,9 +95,12 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             let boot_cleanup = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let state = boot_cleanup.state::<crate::state::AppState>();
+                let now = crate::domain::now_ms();
+                let _ = state.db.sweep_agent_tasks(now);
+                let _ = state.db.finish_interrupted_agent_routine_runs(now);
                 let _ = state
                     .db
-                    .end_all_computer_sessions("stopped", crate::domain::now_ms());
+                    .end_all_computer_sessions("stopped", now);
                 let _ = state.db.reset_all_computer_controls();
                 let _ = state
                     .db
@@ -120,6 +123,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
         .invoke_handler(tauri::generate_handler![
             commands::turn::run_turn,
             commands::turn::cancel_turn,
+            commands::turn::cancel_all_turns,
             commands::turn::cancel_conversation,
             commands::turn::list_active_turns,
             commands::turn::list_turn_events,
@@ -209,6 +213,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::tasks::get_agent_task,
             commands::tasks::create_agent_task,
             commands::tasks::cancel_agent_task,
+            commands::tasks::resume_agent_task,
             commands::tasks::reassign_agent_task,
             commands::tasks::run_agent_task_now,
             commands::conversations::list_conversations,

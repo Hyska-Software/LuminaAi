@@ -42,6 +42,7 @@ export function AgentChannelView({
   const [draft, setDraft] = useState('');
   const [errors, setErrors] = useState<string[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const requestId = useRef(0);
   const activeChannelId = useUiStore((state) => state.activeChannelId);
   const setActiveChannelId = useUiStore((state) => state.setActiveChannelId);
 
@@ -53,13 +54,15 @@ export function AgentChannelView({
     return map;
   }, [agents]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    const request = ++requestId.current;
+    if (!silent) setLoading(true);
     try {
       const [channels, history] = await Promise.all([
         api.listAgentChannels(),
         api.listAgentChannelMessages(channelId),
       ]);
+      if (request !== requestId.current) return;
       const found = channels.find((entry) => entry.id === channelId) ?? null;
       setChannel(found);
       setMessages(history);
@@ -68,9 +71,11 @@ export function AgentChannelView({
         setActiveChannelId(null);
       }
     } catch (error) {
-      toast.error('Não foi possível abrir o canal', { description: String(error) });
+      if (request === requestId.current) {
+        toast.error('Não foi possível abrir o canal', { description: String(error) });
+      }
     } finally {
-      setLoading(false);
+      if (request === requestId.current) setLoading(false);
     }
   }, [channelId, setActiveChannelId]);
 
@@ -80,9 +85,15 @@ export function AgentChannelView({
   }, [activeChannelId, channelId, load]);
 
   useEffect(() => {
-    const reload = () => void load();
+    const reload = () => void load(true);
     window.addEventListener('lumina:channels-changed', reload);
-    return () => window.removeEventListener('lumina:channels-changed', reload);
+    window.addEventListener('lumina:agent-channel-updated', reload);
+    const interval = window.setInterval(reload, 3000);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('lumina:channels-changed', reload);
+      window.removeEventListener('lumina:agent-channel-updated', reload);
+    };
   }, [load]);
 
   useEffect(() => {
@@ -118,6 +129,7 @@ export function AgentChannelView({
     } catch (error) {
       setMessages((current) => current.filter((message) => message.id !== optimistic.id));
       setDraft(content);
+      void load(true);
       toast.error('Não foi possível publicar no canal', { description: String(error) });
     } finally {
       setSending(false);
@@ -222,7 +234,10 @@ export function AgentChannelView({
       <div className="shrink-0 px-4 pb-3">
         <div className="mx-auto w-full max-w-3xl">
           {errors.length > 0 ? (
-            <div className="mb-2 rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-[11px] text-foreground-muted">
+            <div
+              role="alert"
+              className="mb-2 rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-[11px] text-foreground-muted"
+            >
               {errors.map((error) => (
                 <p key={error} className="truncate">
                   {error}
@@ -259,7 +274,8 @@ export function AgentChannelView({
             </div>
           </div>
           <p className="mt-1.5 text-center text-[10px] text-foreground-subtle">
-            Cada agente responde uma vez, em ordem. As respostas ficam no histórico compartilhado.
+            Cada agente responde uma vez, em ordem. Use @nome para direcionar a mensagem; sem
+            menção, todos respondem.
           </p>
         </div>
       </div>

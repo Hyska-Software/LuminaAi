@@ -357,6 +357,7 @@ describe('AgentPanel — Dados', () => {
         maxCost: 0.5,
         deadlineAt: null,
         conversationId: null,
+        originConversationId: null,
         result: null,
         resultArtifactIds: [],
         leaseUntil: null,

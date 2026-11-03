@@ -112,6 +112,10 @@ impl ConcurrencyGovernor {
     ) -> Result<TurnPermit, AcquireError> {
         loop {
             let notified = self.notify.notified();
+            tokio::pin!(notified);
+            // Register before checking: a permit released between the check and
+            // the first poll would otherwise be lost and the waiter would hang.
+            notified.as_mut().enable();
             {
                 let mut state = self.state.lock();
                 if Self::try_take(&mut state, agent_key.as_deref(), limits) {
@@ -122,7 +126,7 @@ impl ConcurrencyGovernor {
                 }
             }
             tokio::select! {
-                _ = notified => {}
+                _ = &mut notified => {}
                 _ = cancel.cancelled() => return Err(AcquireError::Cancelled),
             }
             if cancel.is_cancelled() {

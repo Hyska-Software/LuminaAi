@@ -67,7 +67,9 @@ export function useConversationSearch(query: string, enabled: boolean): Conversa
         const localResults = rankConversations(
           filterConversationsForLayout(conversationsRef.current, layoutMode, {
             agentId: agentScope,
-          }),
+          }).filter(
+            (conversation) => layoutMode !== 'agent' || !conversation.taskId,
+          ),
           trimmedQuery,
           {
             requireMatch: true,
@@ -78,7 +80,9 @@ export function useConversationSearch(query: string, enabled: boolean): Conversa
           const backendResults = await api.searchConversations(trimmedQuery);
           if (token !== requestToken.current) return;
           const visibleBackendResults = (Array.isArray(backendResults) ? backendResults : []).filter(
-            (conversation) => isConversationVisibleIn(conversation, layoutMode, agentScope),
+            (conversation) =>
+              isConversationVisibleIn(conversation, layoutMode, agentScope) &&
+              (layoutMode !== 'agent' || !conversation.taskId),
           );
           const merged = mergeConversationResults(
             localResults.map((entry) => entry.conversation),

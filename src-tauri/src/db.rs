@@ -42,12 +42,12 @@ const CONVERSATION_COLUMNS: &str = "id, title, created_at, updated_at, pinned, \
 const AGENT_COLUMNS: &str = "a.id, a.name, a.role, a.description, a.emoji, a.department, \
      a.pinned, a.sort_order, a.provider_id, a.model_id, a.fallback_provider_id, \
      a.fallback_model_id, a.reasoning_json, a.instructions, a.prompt_version, a.starters_json, \
-     a.capabilities_json, a.memory_enabled, a.workspace_id, a.permission_mode, a.docker_image, \
+     a.capabilities_json, a.memory_enabled, a.memory_revision, a.workspace_id, a.permission_mode, a.docker_image, \
      a.computer_environment, a.archived_at, a.created_at, a.updated_at";
 
 const AGENT_TASK_COLUMNS: &str = "id, channel_id, parent_task_id, owner_agent_id, \
      created_by_agent_id, created_by_user, title, brief, acceptance, status, priority, \
-     max_turns, max_tokens, max_cost, deadline_at, conversation_id, result, \
+     max_turns, max_tokens, max_cost, deadline_at, conversation_id, origin_conversation_id, result, \
      result_artifact_ids, lease_until, handoff_count, version, created_at, updated_at";
 
 const WORKSPACE_COLUMNS: &str = "id, name, path, created_at, updated_at, last_opened_at, \
@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS agents (
   starters_json     TEXT NOT NULL DEFAULT '[]',
   capabilities_json TEXT NOT NULL DEFAULT '{}',
   memory_enabled    INTEGER NOT NULL DEFAULT 0,
+  memory_revision   INTEGER NOT NULL DEFAULT 0,
   workspace_id      TEXT,
   permission_mode   TEXT NOT NULL DEFAULT 'edit',
   docker_image      TEXT,
@@ -204,6 +205,7 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
   max_cost              REAL NOT NULL DEFAULT 1.0,
   deadline_at           INTEGER,
   conversation_id       TEXT,
+  origin_conversation_id TEXT,
   result                TEXT,
   result_artifact_ids   TEXT NOT NULL DEFAULT '[]',
   lease_until           INTEGER,
@@ -1135,6 +1137,12 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         "task_id",
         "ALTER TABLE conversations ADD COLUMN task_id TEXT",
     )?;
+    ensure_column(
+        conn,
+        "agent_tasks",
+        "origin_conversation_id",
+        "ALTER TABLE agent_tasks ADD COLUMN origin_conversation_id TEXT",
+    )?;
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_agent_tasks_due \
          ON agent_tasks(status, created_at);",
@@ -1181,6 +1189,12 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         "agents",
         "computer_environment",
         "ALTER TABLE agents ADD COLUMN computer_environment TEXT NOT NULL DEFAULT 'auto'",
+    )?;
+    ensure_column(
+        conn,
+        "agents",
+        "memory_revision",
+        "ALTER TABLE agents ADD COLUMN memory_revision INTEGER NOT NULL DEFAULT 0",
     )?;
     for (column, ddl) in [
         (
@@ -1579,17 +1593,18 @@ fn agent_from_row(row: &Row<'_>) -> rusqlite::Result<Agent> {
         starters: serde_json::from_str(&starters_json).unwrap_or_default(),
         capabilities: serde_json::from_str(&capabilities_json).unwrap_or_default(),
         memory_enabled: row.get::<_, i64>(17)? != 0,
-        workspace_id: row.get(18)?,
-        permission_mode: PermissionMode::from_str(&row.get::<_, String>(19)?),
-        docker_image: row.get(20)?,
+        memory_revision: row.get(18)?,
+        workspace_id: row.get(19)?,
+        permission_mode: PermissionMode::from_str(&row.get::<_, String>(20)?),
+        docker_image: row.get(21)?,
         computer_environment: crate::agents::normalize_computer_environment(
-            &row.get::<_, String>(21)?,
+            &row.get::<_, String>(22)?,
         ),
-        archived_at: row.get(22)?,
-        created_at: row.get(23)?,
-        updated_at: row.get(24)?,
-        thread_count: row.get(25)?,
-        last_active_at: row.get(26)?,
+        archived_at: row.get(23)?,
+        created_at: row.get(24)?,
+        updated_at: row.get(25)?,
+        thread_count: row.get(26)?,
+        last_active_at: row.get(27)?,
     })
 }
 
@@ -1675,7 +1690,7 @@ fn computer_action_from_row(row: &Row<'_>) -> rusqlite::Result<ComputerActionRec
 }
 
 fn agent_task_from_row(row: &Row<'_>) -> rusqlite::Result<AgentTask> {
-    let artifacts: String = row.get(17)?;
+    let artifacts: String = row.get(18)?;
     Ok(AgentTask {
         id: row.get(0)?,
         channel_id: row.get(1)?,
@@ -1693,13 +1708,14 @@ fn agent_task_from_row(row: &Row<'_>) -> rusqlite::Result<AgentTask> {
         max_cost: row.get(13)?,
         deadline_at: row.get(14)?,
         conversation_id: row.get(15)?,
-        result: row.get(16)?,
+        origin_conversation_id: row.get(16)?,
+        result: row.get(17)?,
         result_artifact_ids: serde_json::from_str(&artifacts).unwrap_or_default(),
-        lease_until: row.get(18)?,
-        handoff_count: row.get(19)?,
-        version: row.get(20)?,
-        created_at: row.get(21)?,
-        updated_at: row.get(22)?,
+        lease_until: row.get(19)?,
+        handoff_count: row.get(20)?,
+        version: row.get(21)?,
+        created_at: row.get(22)?,
+        updated_at: row.get(23)?,
     })
 }
 
@@ -2252,7 +2268,7 @@ impl Db {
         let sql = format!(
             "SELECT {AGENT_COLUMNS}, COUNT(c.id), MAX(c.updated_at) \
              FROM agents a LEFT JOIN conversations c \
-               ON c.agent_id = a.id AND c.channel_id IS NULL \
+               ON c.agent_id = a.id AND c.channel_id IS NULL AND c.task_id IS NULL \
              WHERE {filter} GROUP BY a.id \
              ORDER BY a.pinned DESC, a.department COLLATE NOCASE, a.sort_order, \
              a.name COLLATE NOCASE"
@@ -2357,6 +2373,7 @@ impl Db {
             .transpose()?;
         let starters = serde_json::to_string(&input.starters)?;
         let capabilities = serde_json::to_string(&input.capabilities)?;
+        let memory_disabled = current.memory_enabled && !input.memory_enabled;
         let conn = self.conn.lock();
         conn.execute(
             "UPDATE agents SET name = ?2, role = ?3, description = ?4, emoji = ?5, \
@@ -2391,6 +2408,9 @@ impl Db {
         )
         .context("falha ao atualizar agente")?;
         drop(conn);
+        if memory_disabled {
+            let _ = self.delete_agent_surface_items(id, "memory");
+        }
         self.get_agent(id)?
             .ok_or_else(|| anyhow::anyhow!("AGENT_NOT_FOUND: agente `{id}` não existe"))
     }
@@ -2543,6 +2563,7 @@ impl Db {
         let sql = format!(
             "SELECT {CONVERSATION_COLUMNS} FROM conversations \
              WHERE agent_id = ?1 AND parent_conversation_id IS NULL AND channel_id IS NULL \
+             AND task_id IS NULL \
              AND (?2 IS NULL OR updated_at < ?2 OR (updated_at = ?2 AND id < ?3)) \
              ORDER BY updated_at DESC, id DESC LIMIT ?4"
         );
@@ -2633,6 +2654,11 @@ impl Db {
             ],
         )
         .context("falha ao salvar memória do agente")?;
+        conn.execute(
+            "UPDATE agents SET memory_revision = memory_revision + 1, updated_at = ?2 \
+             WHERE id = ?1",
+            params![agent_id, now],
+        )?;
         drop(conn);
         self.get_agent_memory(agent_id, &id)?
             .ok_or_else(|| anyhow::anyhow!("memória recém-criada não encontrada"))
@@ -2672,6 +2698,13 @@ impl Db {
                 now_ms()
             ],
         )?;
+        if changed > 0 {
+            conn.execute(
+                "UPDATE agents SET memory_revision = memory_revision + 1, updated_at = ?2 \
+                 WHERE id = ?1",
+                params![agent_id, now_ms()],
+            )?;
+        }
         drop(conn);
         if changed == 0 {
             return Err(anyhow::anyhow!(
@@ -2688,6 +2721,13 @@ impl Db {
             "DELETE FROM agent_memories WHERE id = ?2 AND agent_id = ?1",
             params![agent_id, memory_id],
         )?;
+        if changed > 0 {
+            conn.execute(
+                "UPDATE agents SET memory_revision = memory_revision + 1, updated_at = ?2 \
+                 WHERE id = ?1",
+                params![agent_id, now_ms()],
+            )?;
+        }
         if changed == 0 {
             return Err(anyhow::anyhow!(
                 "AGENT_MEMORY_NOT_FOUND: memória `{memory_id}` não existe neste agente"
@@ -2701,6 +2741,26 @@ impl Db {
         let changed = conn.execute(
             "DELETE FROM agent_memories WHERE agent_id = ?1",
             [agent_id],
+        )?;
+        if changed > 0 {
+            conn.execute(
+                "UPDATE agents SET memory_revision = memory_revision + 1, updated_at = ?2 \
+                 WHERE id = ?1",
+                params![agent_id, now_ms()],
+            )?;
+        }
+        Ok(changed as u64)
+    }
+
+    /// Removes volatile context items of one kind from every thread of an
+    /// agent. Used when durable memory is disabled so old blocks stop being
+    /// replayed.
+    pub fn delete_agent_surface_items(&self, agent_id: &str, kind: &str) -> Result<u64> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "DELETE FROM surface_items WHERE kind = ?2 AND conversation_id IN \
+             (SELECT id FROM conversations WHERE agent_id = ?1)",
+            params![agent_id, kind],
         )?;
         Ok(changed as u64)
     }
@@ -2745,6 +2805,25 @@ impl Db {
                 agent_id: agent_id.to_string(),
                 ..AgentUsage::default()
             }))
+    }
+
+    /// Usage of one agent inside a time window. The daily budget uses local
+    /// midnight, so a lifetime total can no longer block the agent forever.
+    pub fn agent_usage_since(&self, agent_id: &str, since: i64) -> Result<AgentUsage> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT c.agent_id, COUNT(u.id), \
+             COALESCE(SUM(u.input_tokens), 0), COALESCE(SUM(u.output_tokens), 0), \
+             COALESCE(SUM(u.reasoning_tokens), 0), COALESCE(SUM(u.total_tokens), 0), \
+             COALESCE(SUM(u.cost), 0), MAX(u.created_at) \
+             FROM usage_log u JOIN conversations c ON c.id = u.conversation_id \
+             WHERE c.agent_id = ?1 AND u.created_at >= ?2 GROUP BY c.agent_id",
+        )?;
+        let mut rows = stmt.query_map(params![agent_id, since], Self::agent_usage_from_row)?;
+        Ok(rows.next().transpose()?.unwrap_or(AgentUsage {
+            agent_id: agent_id.to_string(),
+            ..AgentUsage::default()
+        }))
     }
 
     /* ---------------- computer-use audit ---------------- */
@@ -3159,6 +3238,7 @@ impl Db {
         &self,
         input: &AgentTaskInput,
         created_by_agent_id: Option<&str>,
+        origin_conversation_id: Option<&str>,
         created_by_user: bool,
         now: i64,
     ) -> Result<AgentTask> {
@@ -3236,10 +3316,11 @@ impl Db {
         conn.execute(
             "INSERT INTO agent_tasks (id, channel_id, parent_task_id, owner_agent_id, \
              created_by_agent_id, created_by_user, title, brief, acceptance, status, priority, \
-             max_turns, max_tokens, max_cost, deadline_at, conversation_id, result, \
-             result_artifact_ids, lease_until, handoff_count, version, created_at, updated_at) \
+             max_turns, max_tokens, max_cost, deadline_at, conversation_id, \
+             origin_conversation_id, result, result_artifact_ids, lease_until, handoff_count, \
+             version, created_at, updated_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'queued', 0, ?10, ?11, ?12, ?13, \
-             NULL, NULL, '[]', NULL, 0, 1, ?14, ?14)",
+             NULL, ?15, NULL, '[]', NULL, 0, 1, ?14, ?14)",
             params![
                 id,
                 input.channel_id,
@@ -3255,6 +3336,7 @@ impl Db {
                 input.max_cost.unwrap_or(1.0),
                 deadline_at,
                 now,
+                origin_conversation_id,
             ],
         )
         .context("falha ao criar tarefa do agente")?;
@@ -3306,6 +3388,30 @@ impl Db {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Tasks visible to one agent inside its current context. A task is visible
+    /// when the agent owns it, created it, or it belongs to the same channel.
+    pub fn list_agent_tasks_visible(
+        &self,
+        agent_id: &str,
+        channel_id: Option<&str>,
+        status: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<AgentTask>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AGENT_TASK_COLUMNS} FROM agent_tasks \
+             WHERE (owner_agent_id = ?1 OR created_by_agent_id = ?1 \
+                    OR (?2 IS NOT NULL AND channel_id = ?2)) \
+               AND (?3 IS NULL OR status = ?3) \
+             ORDER BY priority DESC, created_at DESC LIMIT ?4"
+        ))?;
+        let rows = stmt.query_map(
+            params![agent_id, channel_id, status, i64::from(limit.clamp(1, 200))],
+            agent_task_from_row,
+        )?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub fn list_queued_agent_tasks(&self, now: i64, limit: u32) -> Result<Vec<AgentTask>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(&format!(
@@ -3339,14 +3445,16 @@ impl Db {
         now: i64,
     ) -> Result<()> {
         let conn = self.conn.lock();
-        conn.execute(
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
             "UPDATE agent_tasks SET conversation_id = ?2, updated_at = ?3 WHERE id = ?1",
             params![task_id, conversation_id, now],
         )?;
-        conn.execute(
-            "UPDATE conversations SET task_id = ?2 WHERE id = ?3",
+        tx.execute(
+            "UPDATE conversations SET task_id = ?1 WHERE id = ?2",
             params![task_id, conversation_id],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -3375,11 +3483,16 @@ impl Db {
         }
         let version = current.version + 1;
         let lease = now + crate::agents::AGENT_TASK_LEASE_MS;
-        conn.execute(
+        let changed = conn.execute(
             "UPDATE agent_tasks SET status = 'running', lease_until = ?2, version = ?3, \
-             updated_at = ?4 WHERE id = ?1",
-            params![task_id, lease, version, now],
+             updated_at = ?4 \
+             WHERE id = ?1 AND version = ?5 AND status IN ('queued','accepted') \
+             AND (lease_until IS NULL OR lease_until <= ?4)",
+            params![task_id, lease, version, now, current.version],
         )?;
+        if changed == 0 {
+            return Err(anyhow::anyhow!("AGENT_TASK_BUSY: a tarefa foi reivindicada por outro runner"));
+        }
         conn.execute(
             "INSERT INTO agent_task_events (id, task_id, from_status, to_status, actor, \
              payload_json, created_at) VALUES (?1, ?2, ?3, 'running', 'system', '{}', ?4)",
@@ -3397,11 +3510,22 @@ impl Db {
 
     /// Extends a running task lease. Returns false when the task is no longer
     /// running/owned by another runner (the caller should cancel its harness).
-    pub fn renew_agent_task_lease(&self, task_id: &str, now: i64) -> Result<bool> {
+    pub fn renew_agent_task_lease(
+        &self,
+        task_id: &str,
+        owner_agent_id: &str,
+        now: i64,
+    ) -> Result<bool> {
         let conn = self.conn.lock();
         let changed = conn.execute(
-            "UPDATE agent_tasks SET lease_until = ?2 WHERE id = ?1 AND status = 'running'",
-            params![task_id, now + crate::agents::AGENT_TASK_LEASE_MS],
+            "UPDATE agent_tasks SET lease_until = ?3 \
+             WHERE id = ?1 AND owner_agent_id = ?2 \
+             AND status NOT IN ('done','cancelled','failed','declined')",
+            params![
+                task_id,
+                owner_agent_id,
+                now + crate::agents::AGENT_TASK_LEASE_MS
+            ],
         )?;
         Ok(changed > 0)
     }
@@ -3409,6 +3533,8 @@ impl Db {
     pub fn transition_agent_task(
         &self,
         task_id: &str,
+        expected_version: Option<i64>,
+        expected_owner: Option<&str>,
         to_status: &str,
         actor: &str,
         payload: serde_json::Value,
@@ -3437,19 +3563,28 @@ impl Db {
             .map(|ids| serde_json::to_string(ids))
             .transpose()?
             .unwrap_or_else(|| serde_json::to_string(&current.result_artifact_ids).unwrap_or_else(|_| "[]".to_string()));
-        conn.execute(
+        let changed = conn.execute(
             "UPDATE agent_tasks SET status = ?2, result = COALESCE(?3, result), \
              result_artifact_ids = ?4, lease_until = CASE WHEN ?5 THEN NULL ELSE lease_until END, \
-             version = version + 1, updated_at = ?6 WHERE id = ?1",
+             version = version + 1, updated_at = ?6 \
+             WHERE id = ?1 AND (?7 IS NULL OR version = ?7) \
+             AND (?8 IS NULL OR owner_agent_id = ?8)",
             params![
                 task_id,
                 to_status,
                 result,
                 artifacts,
                 terminal as i64,
-                now
+                now,
+                expected_version,
+                expected_owner
             ],
         )?;
+        if changed == 0 {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_STALE: a tarefa mudou de dono/versão; recarregue antes de transicionar"
+            ));
+        }
         conn.execute(
             "INSERT INTO agent_task_events (id, task_id, from_status, to_status, actor, \
              payload_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -3471,6 +3606,7 @@ impl Db {
     pub fn handoff_agent_task(
         &self,
         task_id: &str,
+        from_agent_id: &str,
         to_agent_id: &str,
         actor: &str,
         summary: &str,
@@ -3486,6 +3622,16 @@ impl Db {
                 .transpose()?
                 .ok_or_else(|| anyhow::anyhow!("AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"))?
         };
+        if current.owner_agent_id != from_agent_id {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_BUSY: a tarefa não pertence mais a `{from_agent_id}`"
+            ));
+        }
+        if to_agent_id == from_agent_id {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_INVALID: o destino do handoff deve ser outro agente"
+            ));
+        }
         if current.handoff_count >= crate::agents::AGENT_TASK_MAX_HANDOFFS {
             return Err(anyhow::anyhow!(
                 "AGENT_TASK_LIMIT: esta tarefa já teve {} handoffs",
@@ -3511,15 +3657,63 @@ impl Db {
                 "AGENT_TASK_INVALID: o agente destino não existe ou está arquivado"
             ));
         }
+        if let Some(channel_id) = current.channel_id.as_deref() {
+            let member: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM agent_channel_members WHERE channel_id = ?1 AND agent_id = ?2",
+                params![channel_id, to_agent_id],
+                |row| row.get(0),
+            )?;
+            if member == 0 {
+                return Err(anyhow::anyhow!(
+                    "AGENT_TASK_INVALID: o agente destino não participa do canal"
+                ));
+            }
+        }
+        let target_open: i64 = conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM agent_tasks WHERE owner_agent_id = ?1 \
+                 AND id != ?2 AND status IN ({})",
+                Self::task_open_statuses()
+            ),
+            params![to_agent_id, task_id],
+            |row| row.get(0),
+        )?;
+        if target_open >= crate::agents::AGENT_TASK_MAX_OPEN_PER_AGENT {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_LIMIT: o agente destino já tem {} tarefas abertas",
+                crate::agents::AGENT_TASK_MAX_OPEN_PER_AGENT
+            ));
+        }
+        let summary_section = format!("\n\n## Handoff\n{summary}");
+        let changed = conn.execute(
+            "UPDATE agent_tasks SET owner_agent_id = ?2, status = 'accepted', \
+             conversation_id = NULL, lease_until = NULL, handoff_count = handoff_count + 1, \
+             version = version + 1, updated_at = ?3, brief = brief || ?5 \
+             WHERE id = ?1 AND owner_agent_id = ?4 AND version = ?6",
+            params![
+                task_id,
+                to_agent_id,
+                now,
+                from_agent_id,
+                summary_section,
+                current.version
+            ],
+        )?;
+        if changed == 0 {
+            return Err(anyhow::anyhow!(
+                "AGENT_TASK_BUSY: a tarefa mudou durante o handoff; recarregue antes de tentar"
+            ));
+        }
+        // The old thread belongs to the previous owner. Keep it as history but
+        // detach it from the task so the new owner gets a fresh, correctly
+        // bound conversation.
         conn.execute(
-            "UPDATE agent_tasks SET owner_agent_id = ?2, status = 'handoff_pending', \
-             lease_until = NULL, handoff_count = handoff_count + 1, version = version + 1, \
-             updated_at = ?3 WHERE id = ?1",
-            params![task_id, to_agent_id, now],
+            "UPDATE conversations SET task_id = NULL WHERE task_id = ?1",
+            [task_id],
         )?;
         conn.execute(
             "INSERT INTO agent_task_events (id, task_id, from_status, to_status, actor, \
-             payload_json, created_at) VALUES (?1, ?2, ?3, 'handoff_pending', ?4, ?5, ?6)",
+             payload_json, created_at) VALUES (?1, ?2, ?3, 'accepted', ?4, ?5, ?6)",
             params![
                 uuid::Uuid::new_v4().to_string(),
                 task_id,
@@ -3538,6 +3732,137 @@ impl Db {
         drop(conn);
         self.get_agent_task(task_id)?
             .ok_or_else(|| anyhow::anyhow!("tarefa com handoff não encontrada"))
+    }
+
+    /// Recovers tasks left behind by a crash, enforces deadlines and migrates
+    /// legacy `handoff_pending` rows to the immediate-handoff model.
+    pub fn sweep_agent_tasks(&self, now: i64) -> Result<Vec<AgentTask>> {
+        let conn = self.conn.lock();
+        let mut affected_ids: Vec<String> = Vec::new();
+        {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {AGENT_TASK_COLUMNS} FROM agent_tasks \
+                 WHERE status IN ('queued','accepted','running','handoff_pending')"
+            ))?;
+            let rows = stmt.query_map([], agent_task_from_row)?;
+            for row in rows {
+                let task = row?;
+                if task.status == "handoff_pending" {
+                    let version = task.version + 1;
+                    let changed = conn.execute(
+                        "UPDATE agent_tasks SET status = 'accepted', conversation_id = NULL, \
+                         lease_until = NULL, version = ?2, updated_at = ?3 \
+                         WHERE id = ?1 AND version = ?4",
+                        params![task.id, version, now, task.version],
+                    )?;
+                    if changed > 0 {
+                        conn.execute(
+                            "UPDATE conversations SET task_id = NULL WHERE task_id = ?1",
+                            [&task.id],
+                        )?;
+                        conn.execute(
+                            "INSERT INTO agent_task_events (id, task_id, from_status, to_status, \
+                             actor, payload_json, created_at) \
+                             VALUES (?1, ?2, 'handoff_pending', 'accepted', 'system', \
+                             '{\"migrated\":true}', ?3)",
+                            params![uuid::Uuid::new_v4().to_string(), task.id, now],
+                        )?;
+                        affected_ids.push(task.id);
+                    }
+                    continue;
+                }
+                let expired = task.deadline_at.is_some_and(|deadline| deadline <= now);
+                if matches!(task.status.as_str(), "queued" | "accepted") && expired {
+                    let version = task.version + 1;
+                    let changed = conn.execute(
+                        "UPDATE agent_tasks SET status = 'failed', result = ?2, \
+                         lease_until = NULL, version = ?3, updated_at = ?4 \
+                         WHERE id = ?1 AND version = ?5",
+                        params![
+                            task.id,
+                            "AGENT_TASK_DEADLINE",
+                            version,
+                            now,
+                            task.version
+                        ],
+                    )?;
+                    if changed > 0 {
+                        conn.execute(
+                            "INSERT INTO agent_task_events (id, task_id, from_status, to_status, \
+                             actor, payload_json, created_at) \
+                             VALUES (?1, ?2, ?3, 'failed', 'system', ?4, ?5)",
+                            params![
+                                uuid::Uuid::new_v4().to_string(),
+                                task.id,
+                                task.status,
+                                serde_json::json!({ "error": "AGENT_TASK_DEADLINE" }).to_string(),
+                                now
+                            ],
+                        )?;
+                        affected_ids.push(task.id);
+                    }
+                    continue;
+                }
+                if task.status == "running"
+                    && task.lease_until.is_some_and(|lease| lease < now)
+                {
+                    let version = task.version + 1;
+                    let changed = conn.execute(
+                        "UPDATE agent_tasks SET status = 'queued', lease_until = NULL, \
+                         version = ?2, updated_at = ?3 WHERE id = ?1 AND version = ?4",
+                        params![task.id, version, now, task.version],
+                    )?;
+                    if changed > 0 {
+                        conn.execute(
+                            "INSERT INTO agent_task_events (id, task_id, from_status, to_status, \
+                             actor, payload_json, created_at) \
+                             VALUES (?1, ?2, 'running', 'queued', 'system', \
+                             '{\"recovered\":true}', ?3)",
+                            params![uuid::Uuid::new_v4().to_string(), task.id, now],
+                        )?;
+                        affected_ids.push(task.id);
+                    }
+                }
+            }
+        }
+        drop(conn);
+        let mut affected = Vec::new();
+        for id in affected_ids {
+            if let Some(task) = self.get_agent_task(&id)? {
+                affected.push(task);
+            }
+        }
+        Ok(affected)
+    }
+
+    /// Closes routine runs that were interrupted by a crash or app exit.
+    pub fn finish_interrupted_agent_routine_runs(&self, now: i64) -> Result<usize> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE agent_routine_runs SET status = 'error', error = 'interrompida', \
+             ended_at = ?1 WHERE status = 'running'",
+            [now],
+        )?;
+        conn.execute(
+            "UPDATE agent_routines SET last_status = 'error', last_error = 'interrompida', \
+             updated_at = ?1 WHERE last_status = 'running'",
+            [now],
+        )?;
+        Ok(changed)
+    }
+
+    /// True when a terminal result message for `task_id` already exists in the
+    /// origin conversation. Makes result delivery idempotent across the runner
+    /// and the user-facing cancel command.
+    pub fn task_result_message_exists(&self, origin_conversation_id: &str, task_id: &str) -> Result<bool> {
+        let conn = self.conn.lock();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id = ?1 AND role = 'system' \
+             AND instr(content, ?2) > 0",
+            params![origin_conversation_id, task_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 
     pub fn list_agent_task_events(&self, task_id: &str) -> Result<Vec<AgentTaskEvent>> {
@@ -3984,6 +4309,10 @@ impl Db {
         agent_id: &str,
         title: &str,
     ) -> Result<crate::domain::Conversation> {
+        use std::sync::LazyLock;
+        static CHANNEL_THREAD_LOCK: LazyLock<parking_lot::Mutex<()>> =
+            LazyLock::new(|| parking_lot::Mutex::new(()));
+        let _guard = CHANNEL_THREAD_LOCK.lock();
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(&format!(
             "SELECT {CONVERSATION_COLUMNS} FROM conversations \
@@ -6149,6 +6478,72 @@ mod tests {
     }
 
     #[test]
+    fn memory_mutations_bump_the_agent_revision() {
+        let db = test_db();
+        let agent = db.create_agent(&agent_input("Memória")).expect("agent");
+        assert_eq!(db.get_agent(&agent.id).expect("get").unwrap().memory_revision, 0);
+        let memory = db
+            .create_agent_memory(
+                &agent.id,
+                &crate::agents::AgentMemoryInput {
+                    kind: "fact".to_string(),
+                    content: "Prefere Rust.".to_string(),
+                    source_conversation_id: None,
+                    pinned: false,
+                }
+                .normalize()
+                .expect("normalize"),
+            )
+            .expect("memory");
+        assert_eq!(db.get_agent(&agent.id).expect("get").unwrap().memory_revision, 1);
+        db.clear_agent_memories(&agent.id).expect("clear");
+        assert_eq!(db.get_agent(&agent.id).expect("get").unwrap().memory_revision, 2);
+        db.delete_agent_memory(&agent.id, &memory.id)
+            .expect_err("memory already deleted");
+    }
+
+    #[test]
+    fn agent_task_conversation_binding_is_atomic_and_idempotent() {
+        let db = test_db();
+        let owner = db.create_agent(&agent_input("Dona")).expect("agent");
+        let input = crate::agents::AgentTaskInput {
+            to_agent_id: owner.id.clone(),
+            title: "Vincular thread".to_string(),
+            brief: "Faça algo.".to_string(),
+            ..crate::agents::AgentTaskInput::default()
+        }
+        .normalize()
+        .expect("input");
+        let task = db
+            .create_agent_task(&input, None, None, true, now_ms())
+            .expect("task");
+        let conversation = db
+            .create_agent_conversation(&owner.id, "Tarefa: Vincular thread")
+            .expect("conversation");
+
+        db.set_agent_task_conversation(&task.id, &conversation.id, now_ms())
+            .expect("binding");
+        let bound_task = db.get_agent_task(&task.id).expect("task").expect("exists");
+        assert_eq!(bound_task.conversation_id.as_deref(), Some(conversation.id.as_str()));
+        let bound_conversation = db
+            .get_conversation(&conversation.id)
+            .expect("conversation")
+            .expect("exists");
+        assert_eq!(bound_conversation.task_id.as_deref(), Some(task.id.as_str()));
+
+        db.set_agent_task_conversation(&task.id, &conversation.id, now_ms())
+            .expect("idempotent");
+        assert_eq!(
+            db.get_agent_task(&task.id)
+                .expect("task")
+                .expect("exists")
+                .conversation_id
+                .as_deref(),
+            Some(conversation.id.as_str())
+        );
+    }
+
+    #[test]
     fn agent_tasks_claim_transition_handoff_and_events() {
         let db = test_db();
         let first = db.create_agent(&agent_input("Ana")).expect("agent");
@@ -6177,7 +6572,7 @@ mod tests {
         .normalize()
         .expect("input");
         let task = db
-            .create_agent_task(&input, Some(&first.id), false, now_ms())
+            .create_agent_task(&input, Some(&first.id), None, false, now_ms())
             .expect("task");
         assert_eq!(task.status, "queued");
         assert_eq!(task.owner_agent_id, second.id);
@@ -6189,7 +6584,7 @@ mod tests {
         assert!(db.claim_agent_task(&task.id, now_ms()).is_err());
         let lease_before = claimed.lease_until.expect("lease");
         assert!(db
-            .renew_agent_task_lease(&task.id, now_ms() + 1_000)
+            .renew_agent_task_lease(&task.id, &second.id, now_ms() + 1_000)
             .expect("renew"));
         let renewed = db
             .get_agent_task(&task.id)
@@ -6200,6 +6595,8 @@ mod tests {
         let waiting = db
             .transition_agent_task(
                 &task.id,
+                Some(claimed.version),
+                Some(&second.id),
                 "waiting_approval",
                 "agent",
                 serde_json::json!({ "reason": "precisa de acesso" }),
@@ -6209,20 +6606,30 @@ mod tests {
             )
             .expect("waiting");
         assert_eq!(waiting.status, "waiting_approval");
-        db.transition_agent_task(
-            &task.id,
-            "running",
-            "user",
-            serde_json::json!({}),
-            None,
-            None,
-            now_ms(),
-        )
-        .expect("resume");
+        let _resumed = db
+            .transition_agent_task(
+                &task.id,
+                Some(waiting.version),
+                Some(&second.id),
+                "running",
+                "user",
+                serde_json::json!({}),
+                None,
+                None,
+                now_ms(),
+            )
+            .expect("resume");
+
+        let conversation = db
+            .create_agent_conversation(&second.id, "Tarefa: Revisar contrato")
+            .expect("conversation");
+        db.set_agent_task_conversation(&task.id, &conversation.id, now_ms())
+            .expect("bind");
 
         let handoff = db
             .handoff_agent_task(
                 &task.id,
+                &second.id,
                 &first.id,
                 "agent",
                 "Precisa da visão de engenharia.",
@@ -6230,40 +6637,32 @@ mod tests {
             )
             .expect("handoff");
         assert_eq!(handoff.owner_agent_id, first.id);
-        assert_eq!(handoff.status, "handoff_pending");
+        assert_eq!(handoff.status, "accepted");
         assert_eq!(handoff.handoff_count, 1);
+        assert_eq!(handoff.conversation_id, None);
+        assert!(handoff.brief.contains("## Handoff"));
         assert!(db
-            .handoff_agent_task(&task.id, &second.id, "agent", "de novo", now_ms())
+            .handoff_agent_task(&task.id, &second.id, &first.id, "agent", "de novo", now_ms())
             .is_err());
         assert!(db
             .list_queued_agent_tasks(now_ms(), 10)
             .expect("queued")
             .iter()
-            .all(|entry| entry.id != task.id));
+            .any(|entry| entry.id == task.id));
+        let detached = db
+            .get_conversation(&conversation.id)
+            .expect("conversation")
+            .expect("exists");
+        assert_eq!(detached.task_id, None);
 
-        db.transition_agent_task(
-            &task.id,
-            "accepted",
-            "agent",
-            serde_json::json!({}),
-            None,
-            None,
-            now_ms(),
-        )
-        .expect("accept");
-        db.transition_agent_task(
-            &task.id,
-            "running",
-            "system",
-            serde_json::json!({}),
-            None,
-            None,
-            now_ms(),
-        )
-        .expect("run again");
+        let claimed_again = db.claim_agent_task(&task.id, now_ms()).expect("claim again");
+        assert_eq!(claimed_again.owner_agent_id, first.id);
+        assert_eq!(claimed_again.status, "running");
         let done = db
             .transition_agent_task(
                 &task.id,
+                Some(claimed_again.version),
+                Some(&first.id),
                 "done",
                 "agent",
                 serde_json::json!({ "usage": { "totalTokens": 120 } }),
@@ -6276,10 +6675,10 @@ mod tests {
         assert_eq!(done.result.as_deref(), Some("Contrato revisado; 3 riscos."));
         assert_eq!(done.result_artifact_ids, vec!["artifact-1".to_string()]);
         assert!(!db
-            .renew_agent_task_lease(&task.id, now_ms())
+            .renew_agent_task_lease(&task.id, &first.id, now_ms())
             .expect("renew after done"));
         let events = db.list_agent_task_events(&task.id).expect("events");
-        assert!(events.len() >= 6);
+        assert!(events.len() >= 7);
         assert_eq!(
             db.list_agent_tasks(Some("done"), Some(&first.id), None, Some(10))
                 .expect("list")
@@ -6301,7 +6700,7 @@ mod tests {
             }
             .normalize()
             .expect("input");
-            db.create_agent_task(&input, None, true, now_ms())
+            db.create_agent_task(&input, None, None, true, now_ms())
                 .expect("task");
         }
         let input = crate::agents::AgentTaskInput {
@@ -6313,8 +6712,67 @@ mod tests {
         .normalize()
         .expect("input");
         assert!(db
-            .create_agent_task(&input, None, true, now_ms())
+            .create_agent_task(&input, None, None, true, now_ms())
             .is_err());
+    }
+
+    #[test]
+    fn agent_task_sweep_fails_expired_queued_and_recovers_expired_leases() {
+        let db = test_db();
+        let owner = db.create_agent(&agent_input("Sweep")).expect("agent");
+        let input = crate::agents::AgentTaskInput {
+            to_agent_id: owner.id.clone(),
+            title: "Expira".to_string(),
+            brief: "Faça algo.".to_string(),
+            deadline_minutes: Some(1),
+            ..crate::agents::AgentTaskInput::default()
+        }
+        .normalize()
+        .expect("input");
+        let expired = db
+            .create_agent_task(&input, None, None, true, now_ms())
+            .expect("task");
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "UPDATE agent_tasks SET deadline_at = ?1 WHERE id = ?2",
+                params![now_ms() - 1_000, &expired.id],
+            )
+            .expect("expire");
+        }
+        let swept = db.sweep_agent_tasks(now_ms()).expect("sweep");
+        assert!(swept.iter().any(|task| task.id == expired.id && task.status == "failed"));
+        assert_eq!(
+            db.get_agent_task(&expired.id)
+                .expect("task")
+                .expect("exists")
+                .result
+                .as_deref(),
+            Some("AGENT_TASK_DEADLINE")
+        );
+
+        let running_input = crate::agents::AgentTaskInput {
+            to_agent_id: owner.id.clone(),
+            title: "Lease".to_string(),
+            brief: "Faça algo.".to_string(),
+            ..crate::agents::AgentTaskInput::default()
+        }
+        .normalize()
+        .expect("input");
+        let running = db
+            .create_agent_task(&running_input, None, None, true, now_ms())
+            .expect("task");
+        let claimed = db.claim_agent_task(&running.id, now_ms()).expect("claim");
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "UPDATE agent_tasks SET lease_until = ?1 WHERE id = ?2",
+                params![now_ms() - 1_000, &claimed.id],
+            )
+            .expect("expire lease");
+        }
+        let swept = db.sweep_agent_tasks(now_ms()).expect("sweep");
+        assert!(swept.iter().any(|task| task.id == running.id && task.status == "queued"));
     }
 
     #[test]
@@ -6499,6 +6957,55 @@ mod tests {
         assert!(actions
             .iter()
             .any(|action| action.id == stale.id && action.result == "interrupted"));
+    }
+
+    #[test]
+    fn agent_daily_usage_ignores_rows_before_the_window() {
+        let db = test_db();
+        let agent = db.create_agent(&agent_input("Diário")).expect("agent");
+        let conversation = db
+            .create_agent_conversation(&agent.id, "Thread")
+            .expect("thread");
+        let usage = UsageInfo {
+            input_tokens: Some(10),
+            output_tokens: Some(5),
+            total_tokens: Some(15),
+            cost: Some(0.5),
+            ..UsageInfo::default()
+        };
+        db.record_usage(
+            &conversation.id,
+            "old",
+            "opencode-go",
+            "glm-5.3-flash",
+            &usage,
+        )
+        .expect("old usage");
+        db.record_usage(
+            &conversation.id,
+            "today",
+            "opencode-go",
+            "glm-5.3-flash",
+            &usage,
+        )
+        .expect("today usage");
+        let now = now_ms();
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "UPDATE usage_log SET created_at = ?1 WHERE message_id = 'old'",
+                [now - 86_400_000],
+            )
+            .expect("shift old usage");
+        }
+        let all = db.get_agent_usage(&agent.id).expect("all usage");
+        assert_eq!(all.turns, 2);
+        let today = db
+            .agent_usage_since(&agent.id, crate::domain::local_day_start_ms(now))
+            .expect("daily usage");
+        assert_eq!(today.turns, 1);
+        assert_eq!(today.total_tokens, 15);
+        assert!((today.cost - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]

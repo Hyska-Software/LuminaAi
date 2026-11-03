@@ -163,7 +163,8 @@ export function AgentHome({ agent }: { agent: Agent }) {
       (conversation) =>
         conversation.mode === 'agent' &&
         conversation.agentId === agent.id &&
-        !conversation.channelId,
+        !conversation.channelId &&
+        !conversation.taskId,
     )
     .sort(
       (left, right) =>

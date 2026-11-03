@@ -144,14 +144,12 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "send_message".to_string(),
-            description: "Post a message to a shared channel (optionally linked to a task)."
-                .to_string(),
+            description: "Post a message to a shared channel.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "channelId": { "type": "string" },
-                    "content": { "type": "string" },
-                    "taskId": { "type": "string" }
+                    "content": { "type": "string" }
                 },
                 "required": ["channelId", "content"],
                 "additionalProperties": false
@@ -162,10 +160,6 @@ pub fn definitions() -> Vec<ToolDefinition> {
 
 pub fn is_delegation_tool(name: &str) -> bool {
     TOOL_NAMES.contains(&name)
-}
-
-pub fn tool_names() -> &'static [&'static str] {
-    TOOL_NAMES
 }
 
 fn ok_task(db: &Db, task_id: &str) -> ToolOutcome {
@@ -199,6 +193,16 @@ fn owner_check(
     Ok(task)
 }
 
+fn task_visible(
+    task: &crate::agents::AgentTask,
+    agent_id: &str,
+    conversation: &crate::domain::Conversation,
+) -> bool {
+    task.owner_agent_id == agent_id
+        || task.created_by_agent_id.as_deref() == Some(agent_id)
+        || (task.channel_id.is_some() && task.channel_id == conversation.channel_id)
+}
+
 pub fn run(
     db: &Db,
     agent_id: &str,
@@ -211,11 +215,7 @@ pub fn run(
         Ok(None) => return ToolOutcome::error("AGENT_NOT_FOUND: agente não existe"),
         Err(error) => return ToolOutcome::error(format!("{error:#}")),
     };
-    if !agent.capabilities.delegation {
-        return ToolOutcome::error(
-            "AGENT_CAPABILITY_DENIED: a delegação não está habilitada para este agente",
-        );
-    }
+    let delegation = agent.capabilities.delegation;
     let conversation = match db.get_conversation(conversation_id) {
         Ok(Some(conversation)) => conversation,
         Ok(None) => return ToolOutcome::error("AGENT_TASK_INVALID: conversa não encontrada"),
@@ -224,21 +224,38 @@ pub fn run(
     let now = crate::domain::now_ms();
     match tool {
         "delegate_task" => {
+            if !delegation {
+                return ToolOutcome::error(
+                    "AGENT_CAPABILITY_DENIED: a delegação não está habilitada para este agente",
+                );
+            }
             let Some(to_agent) = json_str(args, "toAgentId") else {
                 return ToolOutcome::error("o argumento `toAgentId` é obrigatório");
             };
+            if to_agent == agent_id {
+                return ToolOutcome::error(
+                    "AGENT_TASK_INVALID: o destino não pode ser o próprio agente",
+                );
+            }
             let Some(title) = json_str(args, "title") else {
                 return ToolOutcome::error("o argumento `title` é obrigatório");
             };
             let Some(brief) = json_str(args, "brief") else {
                 return ToolOutcome::error("o argumento `brief` é obrigatório");
             };
+            let inherited_channel = conversation.channel_id.clone().or_else(|| {
+                conversation
+                    .task_id
+                    .as_deref()
+                    .and_then(|task_id| db.get_agent_task(task_id).ok().flatten())
+                    .and_then(|task| task.channel_id)
+            });
             let input = AgentTaskInput {
                 to_agent_id: to_agent,
                 title,
                 brief,
                 acceptance: json_str(args, "acceptance").unwrap_or_default(),
-                channel_id: conversation.channel_id.clone(),
+                channel_id: inherited_channel,
                 parent_task_id: conversation.task_id.clone(),
                 max_turns: args.get("maxTurns").and_then(Value::as_u64).map(|v| v as u32),
                 max_tokens: args.get("maxTokens").and_then(Value::as_u64).map(|v| v as u32),
@@ -252,7 +269,7 @@ pub fn run(
                 Ok(input) => input,
                 Err(error) => return ToolOutcome::error(error),
             };
-            match db.create_agent_task(&input, Some(agent_id), false, now) {
+            match db.create_agent_task(&input, Some(agent_id), Some(conversation_id), false, now) {
                 Ok(task) => ToolOutcome {
                     content: serde_json::to_string_pretty(&task).unwrap_or_else(|_| "{}".to_string()),
                     summary: Some(format!("Delegada para {}", task.owner_agent_id)),
@@ -263,19 +280,13 @@ pub fn run(
         }
         "task_list" => {
             let status = json_str(args, "status");
-            let owner = json_str(args, "ownerAgentId");
-            let channel = conversation.channel_id.as_deref().map(str::to_string);
-            match db.list_agent_tasks(
-                status.as_deref(),
-                owner.as_deref(),
-                json_str(args, "channelId").as_deref().or(channel.as_deref()),
-                Some(
-                    args.get("limit")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(50)
-                        .clamp(1, 100) as u32,
-                ),
-            ) {
+            let channel = conversation.channel_id.as_deref();
+            let limit = args
+                .get("limit")
+                .and_then(Value::as_u64)
+                .unwrap_or(50)
+                .clamp(1, 100) as u32;
+            match db.list_agent_tasks_visible(agent_id, channel, status.as_deref(), limit) {
                 Ok(tasks) => ToolOutcome {
                     content: serde_json::to_string_pretty(&tasks)
                         .unwrap_or_else(|_| "[]".to_string()),
@@ -290,18 +301,25 @@ pub fn run(
                 return ToolOutcome::error("o argumento `taskId` é obrigatório");
             };
             match db.get_agent_task(&task_id) {
-                Ok(Some(task)) => match db.list_agent_task_events(&task_id) {
-                    Ok(events) => ToolOutcome {
-                        content: serde_json::to_string_pretty(&json!({
-                            "task": task,
-                            "events": events,
-                        }))
-                        .unwrap_or_else(|_| "{}".to_string()),
-                        summary: Some(format!("Tarefa · {}", task.status)),
-                        ..Default::default()
-                    },
-                    Err(error) => ToolOutcome::error(format!("{error:#}")),
-                },
+                Ok(Some(task)) => {
+                    if !task_visible(&task, agent_id, &conversation) {
+                        return ToolOutcome::error(
+                            "AGENT_TASK_FORBIDDEN: esta tarefa não pertence ao seu escopo",
+                        );
+                    }
+                    match db.list_agent_task_events(&task_id) {
+                        Ok(events) => ToolOutcome {
+                            content: serde_json::to_string_pretty(&json!({
+                                "task": task,
+                                "events": events,
+                            }))
+                            .unwrap_or_else(|_| "{}".to_string()),
+                            summary: Some(format!("Tarefa · {}", task.status)),
+                            ..Default::default()
+                        },
+                        Err(error) => ToolOutcome::error(format!("{error:#}")),
+                    }
+                }
                 Ok(None) => ToolOutcome::error(format!(
                     "AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"
                 )),
@@ -312,11 +330,14 @@ pub fn run(
             let Some(task_id) = json_str(args, "taskId") else {
                 return ToolOutcome::error("o argumento `taskId` é obrigatório");
             };
-            if let Err(outcome) = owner_check(db, &task_id, agent_id) {
-                return outcome;
-            }
+            let task = match owner_check(db, &task_id, agent_id) {
+                Ok(task) => task,
+                Err(outcome) => return outcome,
+            };
             match db.transition_agent_task(
                 &task_id,
+                Some(task.version),
+                Some(agent_id),
                 "accepted",
                 "agent",
                 json!({ "acceptedBy": agent_id }),
@@ -332,12 +353,15 @@ pub fn run(
             let Some(task_id) = json_str(args, "taskId") else {
                 return ToolOutcome::error("o argumento `taskId` é obrigatório");
             };
-            if let Err(outcome) = owner_check(db, &task_id, agent_id) {
-                return outcome;
-            }
+            let task = match owner_check(db, &task_id, agent_id) {
+                Ok(task) => task,
+                Err(outcome) => return outcome,
+            };
             let reason = json_str(args, "reason").unwrap_or_else(|| "sem motivo".to_string());
             match db.transition_agent_task(
                 &task_id,
+                Some(task.version),
+                Some(agent_id),
                 "declined",
                 "agent",
                 json!({ "reason": reason }),
@@ -350,6 +374,11 @@ pub fn run(
             }
         }
         "handoff_task" => {
+            if !delegation {
+                return ToolOutcome::error(
+                    "AGENT_CAPABILITY_DENIED: a delegação não está habilitada para este agente",
+                );
+            }
             let Some(task_id) = json_str(args, "taskId") else {
                 return ToolOutcome::error("o argumento `taskId` é obrigatório");
             };
@@ -362,7 +391,7 @@ pub fn run(
             let summary = json_str(args, "summary").unwrap_or_default();
             let next_steps = json_str(args, "nextSteps").unwrap_or_default();
             let combined = format!("{summary}\n\nPróximos passos: {next_steps}");
-            match db.handoff_agent_task(&task_id, &to_agent, "agent", &combined, now) {
+            match db.handoff_agent_task(&task_id, agent_id, &to_agent, "agent", &combined, now) {
                 Ok(_) => ok_task(db, &task_id),
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
@@ -371,9 +400,10 @@ pub fn run(
             let Some(task_id) = json_str(args, "taskId") else {
                 return ToolOutcome::error("o argumento `taskId` é obrigatório");
             };
-            if let Err(outcome) = owner_check(db, &task_id, agent_id) {
-                return outcome;
-            }
+            let task = match owner_check(db, &task_id, agent_id) {
+                Ok(task) => task,
+                Err(outcome) => return outcome,
+            };
             let Some(status) = json_str(args, "status") else {
                 return ToolOutcome::error("o argumento `status` é obrigatório");
             };
@@ -388,6 +418,8 @@ pub fn run(
             let progress = json_str(args, "progress").unwrap_or_default();
             match db.transition_agent_task(
                 &task_id,
+                Some(task.version),
+                Some(agent_id),
                 &status,
                 "agent",
                 json!({ "progress": progress }),
@@ -403,9 +435,10 @@ pub fn run(
             let Some(task_id) = json_str(args, "taskId") else {
                 return ToolOutcome::error("o argumento `taskId` é obrigatório");
             };
-            if let Err(outcome) = owner_check(db, &task_id, agent_id) {
-                return outcome;
-            }
+            let task = match owner_check(db, &task_id, agent_id) {
+                Ok(task) => task,
+                Err(outcome) => return outcome,
+            };
             let Some(result) = json_str(args, "result") else {
                 return ToolOutcome::error("o argumento `result` é obrigatório");
             };
@@ -423,8 +456,30 @@ pub fn run(
                         .collect()
                 })
                 .unwrap_or_default();
+            for artifact_id in &artifacts {
+                let stored = match db.get_artifact(artifact_id) {
+                    Ok(Some(stored)) => stored,
+                    Ok(None) => {
+                        return ToolOutcome::error(format!(
+                            "AGENT_TASK_INVALID: artefato `{artifact_id}` não existe"
+                        ));
+                    }
+                    Err(error) => return ToolOutcome::error(format!("{error:#}")),
+                };
+                let belongs = stored.artifact.conversation_id.as_deref()
+                    == Some(conversation_id)
+                    || task.conversation_id.as_deref()
+                        == stored.artifact.conversation_id.as_deref();
+                if !belongs {
+                    return ToolOutcome::error(format!(
+                        "AGENT_TASK_INVALID: artefato `{artifact_id}` não pertence a esta tarefa"
+                    ));
+                }
+            }
             match db.transition_agent_task(
                 &task_id,
+                Some(task.version),
+                Some(agent_id),
                 "done",
                 "agent",
                 json!({ "result": result }),
@@ -437,6 +492,11 @@ pub fn run(
             }
         }
         "send_message" => {
+            if !delegation {
+                return ToolOutcome::error(
+                    "AGENT_CAPABILITY_DENIED: a delegação não está habilitada para este agente",
+                );
+            }
             let Some(channel_id) = json_str(args, "channelId") else {
                 return ToolOutcome::error("o argumento `channelId` é obrigatório");
             };
@@ -445,6 +505,11 @@ pub fn run(
             };
             if content.trim().is_empty() {
                 return ToolOutcome::error("a mensagem não pode ser vazia");
+            }
+            if content.chars().count() > 16_000 {
+                return ToolOutcome::error(
+                    "AGENT_CHANNEL_INVALID: a mensagem passa de 16.000 caracteres",
+                );
             }
             match db.get_agent_channel(&channel_id) {
                 Ok(Some(channel)) => {
@@ -564,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    fn handoff_waits_for_target_acceptance_and_is_not_scheduled() {
+    fn handoff_transfers_immediately_and_requires_a_new_owner_thread() {
         let db = Db::open_in_memory().expect("db");
         let first = agent(&db, "Ana", true);
         let second = agent(&db, "Bia", true);
@@ -608,12 +673,12 @@ mod tests {
             }),
         );
         assert!(!handoff.is_error, "{}", handoff.content);
-        assert_eq!(task_status(&db, &task_id), "handoff_pending");
+        assert_eq!(task_status(&db, &task_id), "accepted");
         assert!(db
             .list_queued_agent_tasks(crate::domain::now_ms(), 10)
             .expect("queued")
             .iter()
-            .all(|entry| entry.id != task_id));
+            .any(|entry| entry.id == task_id));
         let wrong_owner = run(
             &db,
             &second.id,
@@ -646,7 +711,7 @@ mod tests {
             }),
         );
         assert!(!second_handoff.is_error, "{}", second_handoff.content);
-        assert_eq!(task_status(&db, &task_id), "handoff_pending");
+        assert_eq!(task_status(&db, &task_id), "accepted");
         let declined = run(
             &db,
             &second.id,
@@ -687,22 +752,89 @@ mod tests {
             &conversation.id,
             "delegate_task",
             &serde_json::json!({
-                "toAgentId": second.id,
-                "title": "Própria",
+                "toAgentId": third.id,
+                "title": "De terceiros",
                 "brief": "Faça.",
             }),
         );
         assert!(!delegated.is_error, "{}", delegated.content);
         let value: serde_json::Value = serde_json::from_str(&delegated.content).expect("json");
         let task_id = value["id"].as_str().expect("id").to_string();
+        let self_delegation = run(
+            &db,
+            &second.id,
+            &conversation.id,
+            "delegate_task",
+            &serde_json::json!({
+                "toAgentId": second.id,
+                "title": "Própria",
+                "brief": "Faça.",
+            }),
+        );
+        assert!(self_delegation.is_error);
+        assert!(self_delegation.content.contains("AGENT_TASK_INVALID"));
         let forbidden = run(
             &db,
-            &third.id,
+            &first.id,
             &conversation.id,
             "finish_task",
             &serde_json::json!({ "taskId": task_id, "result": "não sou o dono" }),
         );
         assert!(forbidden.is_error);
         assert!(forbidden.content.contains("AGENT_TASK_FORBIDDEN"));
+    }
+
+    #[test]
+    fn task_get_and_list_do_not_leak_other_agents_work() {
+        let db = Db::open_in_memory().expect("db");
+        let first = agent(&db, "Ana", true);
+        let second = agent(&db, "Bia", true);
+        let third = agent(&db, "Caio", true);
+        let origin = db
+            .create_agent_conversation(&first.id, "Origem")
+            .expect("origin");
+        let outsider = db
+            .create_agent_conversation(&third.id, "Fora")
+            .expect("outsider");
+        let delegated = run(
+            &db,
+            &first.id,
+            &origin.id,
+            "delegate_task",
+            &serde_json::json!({
+                "toAgentId": second.id,
+                "title": "Confidencial",
+                "brief": "Só para Bia.",
+            }),
+        );
+        assert!(!delegated.is_error, "{}", delegated.content);
+        let value: serde_json::Value = serde_json::from_str(&delegated.content).expect("json");
+        let task_id = value["id"].as_str().expect("id").to_string();
+        assert_eq!(
+            db.get_agent_task(&task_id)
+                .expect("task")
+                .expect("exists")
+                .origin_conversation_id
+                .as_deref(),
+            Some(origin.id.as_str())
+        );
+        let forbidden = run(
+            &db,
+            &third.id,
+            &outsider.id,
+            "task_get",
+            &serde_json::json!({ "taskId": task_id }),
+        );
+        assert!(forbidden.is_error);
+        assert!(forbidden.content.contains("AGENT_TASK_FORBIDDEN"));
+        let list = run(
+            &db,
+            &third.id,
+            &outsider.id,
+            "task_list",
+            &serde_json::json!({}),
+        );
+        assert!(!list.is_error, "{}", list.content);
+        assert_eq!(list.content.trim(), "[]");
     }
 }

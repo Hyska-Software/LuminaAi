@@ -702,6 +702,8 @@ pub async fn summarize_manual_for_conversation(
         }
     }
     let mcp_prompt_section = mcp_tools_prompt_section(&mcp_tools, options.delegation_depth);
+    let mut tool_prompts = super::code_tool_prompts(&ctx, settings, options.delegation_depth);
+    tool_prompts.retain(|prompt| crate::tools::tool_allowed(&options, prompt.name));
     let snapshot = code_prompt_snapshot(
         &deps.db,
         conversation,
@@ -711,6 +713,7 @@ pub async fn summarize_manual_for_conversation(
         settings,
         &options,
         &tool_definitions,
+        &tool_prompts,
         &mcp_prompt_section,
         agent.as_ref(),
     );

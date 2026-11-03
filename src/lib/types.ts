@@ -894,6 +894,7 @@ export interface Agent {
   starters: string[];
   capabilities: AgentCapabilities;
   memoryEnabled: boolean;
+  memoryRevision?: number;
   /** Optional workspace for Code-profile turns (files/shell/approvals). */
   workspaceId: string | null;
   permissionMode: PermissionMode;
@@ -1034,6 +1035,7 @@ export interface AgentTask {
   maxCost: number;
   deadlineAt: number | null;
   conversationId: string | null;
+  originConversationId: string | null;
   result: string | null;
   resultArtifactIds: string[];
   leaseUntil: number | null;
@@ -1076,6 +1078,7 @@ export interface AgentTaskUpdatedEvent {
   ownerAgentId: string;
   status: string;
   title: string;
+  originConversationId?: string | null;
 }
 
 export interface AgentUsage {
@@ -1195,6 +1198,8 @@ export interface Conversation {
   agentId?: string | null;
   /** Shared channel that owns this hidden agent thread. */
   channelId?: string | null;
+  /** Task that owns this hidden agent thread. */
+  taskId?: string | null;
 }
 
 export interface ConversationDetail {

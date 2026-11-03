@@ -151,10 +151,10 @@ export function Composer() {
 
   const isStreaming = streaming !== null;
   const providerBlocked = selectedProvider !== undefined && !providerReady;
-  const canSend =
-    !isStreaming &&
-    !providerBlocked &&
-    (value.trim().length > 0 || mentioned.length > 0 || pendingAttachments.length > 0);
+  const hasDraft =
+    value.trim().length > 0 || mentioned.length > 0 || pendingAttachments.length > 0;
+  const canQueue = isAgentLayout && isStreaming && !providerBlocked && hasDraft;
+  const canSend = !isStreaming && !providerBlocked && hasDraft;
 
   const slashQuery = menu?.kind === 'slash' ? menu.query : '';
   const slashCommands = useMemo(() => filterSlashCommands(slashQuery), [slashQuery]);
@@ -479,19 +479,22 @@ export function Composer() {
     [activeIndex, menu, optionCount],
   );
 
-  const submit = useCallback(() => {
-    if (!canSend) return;
+  const submit = useCallback(async () => {
+    if (!canSend && !canQueue) return;
     const text = composeMessage(value, mentioned);
     if (!text && pendingAttachments.length === 0) return;
     const goalRequest = goalIntent;
+    const accepted = await useChatStore
+      .getState()
+      .send(text, goalRequest ? { goalRequest: true } : undefined);
+    if (!accepted) return;
     setValue('');
     setMentioned([]);
     setMenu(null);
     setGoalIntent(false);
     requestAnimationFrame(resizeTextarea);
     window.dispatchEvent(new CustomEvent('lumina:scroll-bottom'));
-    void useChatStore.getState().send(text, goalRequest ? { goalRequest: true } : undefined);
-  }, [canSend, goalIntent, mentioned, pendingAttachments.length, resizeTextarea, value]);
+  }, [canQueue, canSend, goalIntent, mentioned, pendingAttachments.length, resizeTextarea, value]);
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;
@@ -798,18 +801,36 @@ export function Composer() {
             )}
 
             {isStreaming ? (
-              <button
-                type="button"
-                onClick={() => void useChatStore.getState().stop()}
-                aria-label="Parar resposta"
-                className={cn(
-                  'flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background',
-                  'transition-colors duration-150 hover:bg-foreground/90',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                )}
-              >
-                <Square className="size-3.5 fill-current" strokeWidth={2} />
-              </button>
+              <div className="flex items-center gap-1.5">
+                {canQueue ? (
+                  <button
+                    type="button"
+                    onClick={() => void submit()}
+                    aria-label="Enfileirar mensagem"
+                    title="Enfileirar mensagem"
+                    className={cn(
+                      'flex size-8 shrink-0 items-center justify-center rounded-full transition-[background-color,color,transform] duration-150',
+                      'bg-linear-to-br from-accent to-accent-hover text-accent-foreground hover:brightness-105',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                      !reduceMotion && 'active:scale-95',
+                    )}
+                  >
+                    <ArrowUp className="size-4" strokeWidth={2.25} />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void useChatStore.getState().stop()}
+                  aria-label="Parar resposta"
+                  className={cn(
+                    'flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background',
+                    'transition-colors duration-150 hover:bg-foreground/90',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                  )}
+                >
+                  <Square className="size-3.5 fill-current" strokeWidth={2} />
+                </button>
+              </div>
             ) : (
               <button
                 type="button"

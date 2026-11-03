@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { compactAgentQueue, useAgentQueueStore, type AgentQueueItem } from '../agentQueueStore';
+import { compactAgentQueue, sanitizeAgentQueue, useAgentQueueStore, type AgentQueueItem } from '../agentQueueStore';
 
 function item(id: string, conversationId = 'conv-1'): AgentQueueItem {
   return {
@@ -58,5 +58,33 @@ describe('agentQueueStore', () => {
     ]);
     queue.clear('conv-1');
     expect(useAgentQueueStore.getState().count('conv-1')).toBe(0);
+  });
+
+  it('puts a rejected item back at the front', () => {
+    const queue = useAgentQueueStore.getState();
+    queue.enqueue(item('a'));
+    queue.enqueue(item('b'));
+    queue.enqueueFront(item('a'));
+    expect(useAgentQueueStore.getState().byConversation['conv-1'].map((entry) => entry.id)).toEqual([
+      'a',
+      'b',
+    ]);
+  });
+
+  it('drops malformed persisted state instead of throwing', () => {
+    const sanitized = sanitizeAgentQueue({
+      byConversation: {
+        'conv-1': [{ id: 'broken' }, item('ok')],
+        'conv-2': 'not-an-array',
+      },
+      pausedByConversation: { 'conv-1': true, 'conv-2': true },
+    });
+    expect(sanitized.byConversation['conv-1'].map((entry) => entry.id)).toEqual(['ok']);
+    expect(sanitized.byConversation['conv-2']).toBeUndefined();
+    expect(sanitized.pausedByConversation).toEqual({ 'conv-1': true });
+    expect(sanitizeAgentQueue(null)).toEqual({
+      byConversation: {},
+      pausedByConversation: {},
+    });
   });
 });

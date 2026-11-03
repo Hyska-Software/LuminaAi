@@ -361,7 +361,7 @@ os.chmod(p,0o755)"#;
                 rules: Vec::new(), jobs: None, questions: None, turn_kind: crate::domain::TurnKind::User,
                 mcp: None, subagent: None, enabled_tools: Arc::new(Default::default()),
                 subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-                subagent_slots: Arc::new(tokio::sync::Semaphore::new(1)), skills_roots: Vec::new(),
+                subagent_slots: Arc::new(tokio::sync::Semaphore::new(1)), skills_roots: Vec::new(), allowed_skills: None,
             };
             let blocked = crate::tools::code::computer::run(&ctx, "computer_screenshot", &serde_json::json!({})).await;
             if !blocked.is_error || !blocked.content.contains("COMPUTER_PAUSED") {

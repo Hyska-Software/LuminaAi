@@ -43,12 +43,13 @@ function bootstrap(): Promise<void> {
     applyFontScale(settings.fontScale);
     await useChatStore.getState().init();
     await useAgentStore.getState().initialize();
+    // A webview reload must reattach turns that kept running in Rust before a
+    // persisted FIFO decides that a thread is idle.
+    await useChatStore.getState().reattachTurns();
     // Persisted agent FIFOs resume when the app opens straight into Agentes.
     if (useUiStore.getState().layoutMode === 'agent') {
       await useChatStore.getState().drainAgentQueues();
     }
-    // A webview reload must reattach turns that kept running in Rust.
-    await useChatStore.getState().reattachTurns();
   })();
   return bootstrapPromise;
 }
@@ -247,6 +248,11 @@ export default function App() {
       window.dispatchEvent(
         new CustomEvent('lumina:agent-task-updated', { detail: event.payload }),
       );
+      if (event.payload.originConversationId) {
+        void useChatStore
+          .getState()
+          .reloadConversation(event.payload.originConversationId);
+      }
       void useChatStore.getState().refreshConversations();
       void useAgentStore.getState().refresh();
       const settings = useAppStore.getState().settings;
@@ -302,6 +308,30 @@ export default function App() {
         });
         void api.notifyDesktop(title, event.payload.title);
       })();
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* event bridge unavailable outside Tauri */
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Shared channel messages are appended by user posts, task results and the
+  // `send_message` tool. Mirror the Rust event on the renderer bus.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<{ channelId: string }>('lumina:agent-channel-updated', (event) => {
+      if (disposed) return;
+      window.dispatchEvent(
+        new CustomEvent('lumina:agent-channel-updated', { detail: event.payload }),
+      );
     })
       .then((fn) => {
         if (disposed) fn();

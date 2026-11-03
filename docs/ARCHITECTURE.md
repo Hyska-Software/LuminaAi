@@ -439,7 +439,9 @@ explícita; config <app-data>/mcp.json; indisponíveis em subagentes).
 8. **Contexto**: medidor (`context_stats`), poda de resultados antigos e compactação por resumo
    (`harness/code/compaction.rs`, template de 8 seções, persistido em `session_summaries` e
    aplicado nos turnos seguintes).
-9. **Terminal PTY**: src-tauri/src/terminal/** (portable-pty/ConPTY) com open_terminal/write_terminal/esize_terminal/close_terminal/list_terminals e Channel<TerminalEvent>; o painel abre em xterm.js no cwd do workspace (terminal do usuário; o agente usa un_command/jobs).
+9. **Terminal PTY**: src-tauri/src/terminal/** (portable-pty/ConPTY) com open_terminal/write_terminal/
+esize_terminal/close_terminal/list_terminals e Channel<TerminalEvent>; o painel abre em xterm.js no cwd do workspace (terminal do usuário; o agente usa 
+un_command/jobs).
 10. **Fecho do turno**: `file_journal` → `workspace_changes`, `context_stats`, `turn/ended` em
    `code_events` e cancelamento das aprovações pendentes da sessão. O transcript do Code
    termina cada turno com o card de resumo de arquivos alterados (dados das presentations
@@ -488,16 +490,22 @@ Contrato completo: **`docs/AGENTS.md`**. Resumo:
 - **Concorrência**: `chatStore.streamsByConversation` mantém um stream por
   conversa; `streaming` é a fatia visível de `activeId`. Várias threads de agente
   rodam ao mesmo tempo, com erro/notificação por thread.
-- **Fila**: FIFO por thread em `agentQueueStore` (persistida); cada `done` drena
-  o próprio FIFO, inclusive em segundo plano. Filas persistidas são retomadas ao
-  abrir/entrar no layout Agentes.
-- **Rotinas**: `agent_routines` + agendador Rust (enquanto o app está aberto);
-  cada run é um turno normal na thread dedicada.
-- **Canais**: `agent_channels` + membros + mensagens; cada membro responde em
-  sua thread privada oculta e a resposta é publicada no histórico compartilhado.
-- **Delegação**: `agent_tasks`/`agent_task_events` com dono, lease, orçamento e
-  máquina de estados; tools `delegate_task`/`handoff_task`/`finish_task`; runner
-  Rust a cada 5 s sob o governador (`docs/TASKS.md`).
+- **Fila**: FIFO por thread em `agentQueueStore` (persistida e sanitizada);
+  `done` drena, `error` tenta o próximo e `cancelled` pausa; o composer oferece
+  enfileirar durante o streaming. O backend aceita um turno por conversa
+  (`register_if_idle`).
+- **Rotinas**: `agent_routines` + agendador Rust em paralelo (enquanto o app
+  está aberto); cada run é um turno normal na thread dedicada, sob o governador
+  e com lease/sweep.
+- **Canais**: `agent_channels` + membros + mensagens; só os membros mencionados
+  (ou todos, sem menção) respondem em threads privadas; o histórico entra como
+  `surface_item` volátil e um evento `lumina:agent-channel-updated` atualiza a
+  view.
+- **Delegação**: `agent_tasks`/`agent_task_events` com dono, lease, orçamento,
+  deadline, `origin_conversation_id` e máquina de estados; tools
+  `delegate_task`/`handoff_task`/`finish_task`; handoff imediato e resultado
+  entregue como mensagem `system` na origem; runner Rust a cada 5 s em paralelo
+  sob o governador (`docs/TASKS.md`).
 - **Computer use**: screenshot/clique/teclado/janelas/UI tree local no Windows e
   Docker gráfico (Xvfb + noVNC); input sempre com aprovação
   (`RiskClass::Computer`), contrato em `docs/COMPUTER.md`.

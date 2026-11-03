@@ -662,7 +662,7 @@ export function AgentEditorDialog() {
                   checked={form.capabilities.delegation ?? false}
                   onCheckedChange={(checked) => setCapability('delegation', checked)}
                   label="Delegar tarefas"
-                  description="Permite criar, aceitar, transferir e concluir tarefas para outros agentes."
+                  description="Permite criar e transferir tarefas para outros agentes e postar no canal. Concluir uma tarefa atribuída já é permitido a qualquer agente."
                 />
                 <Switch
                   checked={form.capabilities.computerUse ?? false}

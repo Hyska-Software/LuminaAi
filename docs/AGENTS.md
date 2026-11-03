@@ -81,7 +81,10 @@ o turno real.
 - `webSearch` → gate de `web_search`;
 - `fileAccess` → gate de `create_file`;
 - `codeExecution` → gate de `run_code` (além do gate global);
-- `delegation` → gate das tools de tarefas (`delegate_task` etc.);
+- `delegation` → gate de `delegate_task`/`handoff_task`/`send_message`; as tools
+  de dono (`task_list`, `task_get`, `accept_task`, `decline_task`, `update_task`,
+  `finish_task`) ficam disponíveis para qualquer agente concluir trabalho
+  atribuído;
 - `computerUse`/`screenCapture` → gate das tools de computer use;
 - `dockerExecution` → permite `agents.docker_image` como override de imagem;
 - `skills: null` herda todas; `Some([...])` é allowlist (`Some([])` nega todas);
@@ -111,10 +114,12 @@ persona vinculada à conversa. `TurnOptions` carrega esses campos com
 - No início do turno, o harness carrega as memórias e injeta um bloco
   `surface_item kind="memory"` na **cauda volátil** do histórico. Nunca entra no
   system prompt congelado.
-- O bloco leva uma revisão (`quantidade:maior_updated_at`); uma mudança no
-  conjunto gera um novo item. Apenas o item de memória mais recente é
-  renderizado (`load_surface_items`), então fatos apagados não sobrevivem em
-  blocos antigos.
+- O bloco leva uma revisão monotônica (`agents.memory_revision`) gerada por
+  qualquer create/update/delete/clear; uma mudança no conjunto gera um novo
+  item mesmo quando a memória apagada era a mais recente. Apenas o item de
+  memória mais recente é renderizado (`load_surface_items`), então fatos
+  apagados não sobrevivem em blocos antigos. Desligar a memória remove os
+  `surface_items` antigos das threads do agente.
 - Orçamento de contexto: 8 KiB; memórias fixadas primeiro, depois as mais
   recentes. O agente é instruído a não guardar segredos, credenciais, estado
   transitório ou transcripts.
@@ -126,7 +131,9 @@ o renderer envia o perfil Chat e a conversa não tem pasta selecionada:
 
 - Sem workspace explícito, o backend cria e reutiliza
   `<app-data>/agent-workspaces/<sha256 do id da conversa>`, sem registrar essa
-  pasta como workspace visível no Code. Conversas diferentes usam pastas distintas.
+  pasta como workspace visível no Code. Conversas diferentes usam pastas
+  distintas. O prompt identifica a pasta como **Pasta do agente**, informa que
+  ela persiste entre turnos e não imprime mais “No workspace is open”.
 - O editor do agente e o cabeçalho da conversa permitem escolher uma pasta sem
   abrir o Code; uma pasta externa precisa estar marcada como confiável. A troca
   da pasta da conversa é recusada enquanto qualquer turno dela estiver ativo.
@@ -174,13 +181,13 @@ com erro — o fallback é de rota, não um retry infinito.
 - `chatStore.streamsByConversation` guarda **um stream por conversa** (turno
   ativo). `streaming` é só a fatia visível de `activeId`; trocar de thread
   reata o stream daquela conversa e nunca apaga o de outra.
-- Várias threads de agente rodam ao mesmo tempo (o backend já registra turnos
-  por conversa). Enviar em uma thread ocupada enfileira só aquela thread; o
-  composer/stop refletem a thread visível.
+- Várias threads de agente rodam ao mesmo tempo. O backend aceita **um turno
+  por conversa** (`register_if_idle`); o renderer enfileira só a thread ocupada.
 - `agentQueueStore` persiste a fila em `localStorage` (`lumina.agent-queue.v1`).
-  O `done` de cada thread drena o próprio FIFO, inclusive em segundo plano; as
-  filas persistidas são retomadas ao abrir o app no layout Agentes e ao entrar
-  no layout.
+  O composer oferece **Enfileirar mensagem** enquanto há streaming no layout
+  Agentes; `done` drena o FIFO, `error` tenta o próximo item e `cancelled` pausa
+  a fila para o Stop não iniciar a próxima mensagem. As filas persistidas são
+  sanitizadas ao reidratar e retomadas depois do `reattachTurns`.
 - A sidebar mostra o contador da fila e um spinner por thread/agente que está
   respondendo (lido do mapa, não do stream visível); threads com aprovação
   pendente, pergunta pendente ou último turno com erro exibem um ícone de
@@ -191,13 +198,15 @@ com erro — o fallback é de rota, não um retry infinito.
   em segundo plano não pinta o banner por cima de outra conversa.
 - O backend aplica `ConcurrencyGovernor`: `maxConcurrentTurns` global (padrão
   10, faixa 1–32) e `maxConcurrentTurnsPerAgent` por agente (padrão 1, faixa
-  1–4); turnos além do limite aguardam com o token de cancelamento
-  (Stop/Cancelar libera).
-- `agentDailyCostLimitUsd` bloqueia novos turnos com `BUDGET_EXCEEDED` quando o
-  custo do dia atinge o limite.
-- Sidebar tem Stop por thread; o diálogo **Atividade** lista todos os streams
-  (inclusive em segundo plano), aprovações/perguntas pendentes e tarefas
-  aguardando o usuário, e oferece “Parar tudo”.
+  1–4) em turnos manuais, tarefas, canais e rotinas; turnos além do limite
+  aguardam com o token de cancelamento (Stop/Cancelar libera).
+- `agentDailyCostLimitUsd` é aplicado no harness por **dia local** (todas as
+  threads do agente) e bloqueia novos turnos com `BUDGET_EXCEEDED`; canais e
+  rotinas passam pelo mesmo gate.
+- Sidebar tem Stop por thread; o diálogo **Atividade** lista os streams do
+  renderer **e** turnos de task/rotina/canal registrados no backend, além de
+  aprovações/perguntas e tarefas aguardando o usuário, e oferece “Parar tudo”
+  (com `cancel_all_turns`).
 - Aprovação/pergunta em thread de fundo gera toast + notificação do SO via
   `notify_desktop`; conclusão/falha de thread não ativa também notifica. O toast
   tem ação **Abrir** e há dedupe de 5 s por conversa/categoria.
@@ -228,12 +237,17 @@ com erro — o fallback é de rota, não um retry infinito.
 ## 8. Canais (agentes no mesmo thread)
 
 - Criados na sidebar (Canais → +) com até 6 agentes.
-- Publicar um texto: Grava a mensagem `user`, e cada membro executa um turno em
-  sua thread privada oculta com o histórico compartilhado injetado. A resposta
-  é publicada no canal. Como os turnos são sequenciais, o segundo agente vê a
-  resposta do primeiro.
+- Publicar um texto: Grava a mensagem `user`, e cada membro **mencionado**
+  (ou todos, quando não há `@nome`/`@everyone`) executa um turno em sua thread
+  privada oculta. O histórico compartilhado entra como `surface_item`
+  `kind="channel"` (volátil, últimas 24 mensagens/12 KiB, delimitado e marcado
+  como não confiável), não como mensagem `user` duplicada. A resposta é
+  publicada no canal e um evento `lumina:agent-channel-updated` atualiza a view;
+  como os turnos são sequenciais, o segundo agente vê a resposta do primeiro.
 - Threads de canal são ocultas das listas/paleta (`channelId`), mas preservadas
-  ao sair do canal; excluir o canal remove as threads derivadas.
+  ao sair do canal; excluir o canal remove as threads derivadas. A criação da
+  thread do membro é serializada para não duplicar histórico em posts
+  concorrentes.
 - Erros de um agente não derrubam os demais: vêm em `errors` e aparecem no
   painel do canal. Respostas de canal são não assistidas: aprovações/perguntas
   falham fechado em vez de bloquear o canal.
@@ -265,17 +279,24 @@ com erro — o fallback é de rota, não um retry infinito.
 Contrato completo: `docs/TASKS.md`.
 
 - `agent_tasks` + `agent_task_events`; dono único, brief, aceite, orçamento,
-  deadline, lease/version e profundidade máxima 2.
-- Tools (capability `delegation`): `delegate_task`, `task_list`, `task_get`,
-  `accept_task`, `decline_task`, `handoff_task`, `update_task`, `finish_task`,
-  `send_message`.
-- O scheduler Rust roda tarefas a cada 5 s sob o governador de concorrência,
-  cria/reusa thread oculta com `task_id`, renova o lease, roda múltiplos turnos
-  com orçamento e publica o resultado no canal.
-- Handoff entra em `handoff_pending` até o destino aceitar; cancelamento
-  interrompe o turno real.
+  deadline, lease/version, `origin_conversation_id` e profundidade máxima 2.
+- Tools de criação/transferência (capability `delegation`): `delegate_task`,
+  `handoff_task`, `send_message`. Tools de dono, sempre disponíveis:
+  `task_list`, `task_get`, `accept_task`, `decline_task`, `update_task`,
+  `finish_task` (escopo por dono/criador/canal).
+- O scheduler Rust roda tarefas a cada 5 s em paralelo sob o governador,
+  recupera leases expirados, aplica deadline, cria/reusa thread oculta com
+  `task_id`, roda múltiplos turnos com orçamento e publica o resultado no canal.
+- Handoff é **imediato**: muda o dono, zera `conversation_id` (o novo dono ganha
+  thread própria; a antiga é desvinculada) e o destino pode recusar no primeiro
+  turno com `decline_task`. Ao terminar, o resultado é entregue como mensagem
+  `system` na conversa de origem; não inicia um turno automático.
+- `waiting_input`/`waiting_approval`/`review` param o runner; **Retomar**
+  (`resume_agent_task`) devolve a tarefa para a fila. `run_agent_task_now` inicia
+  em background e retorna sem bloquear; `cancel_agent_task` encerra o turno real.
 - UI: menu do agente → **Tarefas**; botão **Quadro de tarefas** na sidebar com
-  colunas e ações; diálogo **Atividade** centraliza pendências.
+  colunas (incluindo encerradas), retomar, reatribuir e cancelar; diálogo
+  **Atividade** centraliza pendências e turnos de fundo.
 
 ## 9.2 Computer use
 

@@ -23,29 +23,18 @@ import { api } from '@/lib/api';
 import { selectActiveAgents, useAgentStore } from '@/lib/store';
 import type { Agent, AgentTask, AgentTaskStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
-
-const STATUS_META: Record<AgentTaskStatus, { label: string; tone: string }> = {
-  queued: { label: 'Na fila', tone: 'text-foreground-muted' },
-  accepted: { label: 'Aceita', tone: 'text-accent' },
-  running: { label: 'Executando', tone: 'text-accent' },
-  waiting_input: { label: 'Aguardando resposta', tone: 'text-warning' },
-  waiting_approval: { label: 'Aguardando aprovação', tone: 'text-warning' },
-  review: { label: 'Em revisão', tone: 'text-accent' },
-  handoff_pending: { label: 'Aguardando aceite', tone: 'text-warning' },
-  done: { label: 'Concluída', tone: 'text-success' },
-  cancelled: { label: 'Cancelada', tone: 'text-foreground-subtle' },
-  failed: { label: 'Falhou', tone: 'text-danger' },
-  declined: { label: 'Recusada', tone: 'text-danger' },
-};
+import {
+  TASK_RESUMABLE_STATUSES,
+  TASK_STATUS_META,
+} from './agentTaskStatus';
 
 function taskTone(status: string): string {
-  return STATUS_META[status as AgentTaskStatus]?.tone ?? 'text-foreground-muted';
+  return TASK_STATUS_META[status as AgentTaskStatus]?.tone ?? 'text-foreground-muted';
 }
 
 function taskLabel(status: string): string {
-  return STATUS_META[status as AgentTaskStatus]?.label ?? status;
+  return TASK_STATUS_META[status as AgentTaskStatus]?.label ?? status;
 }
-
 export function AgentTasksDialog({
   agent,
   open,
@@ -85,12 +74,14 @@ export function AgentTasksDialog({
 
   useEffect(() => {
     if (!open) return;
-    setForm((current) => ({
-      ...current,
-      toAgentId: current.toAgentId || agent?.id || '',
-    }));
+    setForm((current) => {
+      const fallback = agents.find((entry) => entry.id !== agent?.id)?.id ?? '';
+      const keepsCurrent =
+        current.toAgentId && current.toAgentId !== agent?.id ? current.toAgentId : fallback;
+      return { ...current, toAgentId: keepsCurrent };
+    });
     void load();
-  }, [open, load, agent?.id]);
+  }, [open, load, agent?.id, agents]);
 
   useEffect(() => {
     if (!open) return;
@@ -102,6 +93,10 @@ export function AgentTasksDialog({
   const create = async () => {
     if (!form.toAgentId || !form.title.trim() || !form.brief.trim()) {
       toast.error('Preencha agente destino, título e brief');
+      return;
+    }
+    if (form.toAgentId === agent?.id) {
+      toast.error('Escolha outro agente como dono da tarefa');
       return;
     }
     setCreating(true);
@@ -134,10 +129,23 @@ export function AgentTasksDialog({
     try {
       const updated = await api.runAgentTaskNow(task.id);
       setTasks((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      toast.success('Tarefa executada', { description: task.title });
+      toast.success('Tarefa iniciada', { description: task.title });
     } catch (caught) {
-      toast.error('A tarefa falhou', { description: String(caught) });
+      toast.error('A tarefa não iniciou', { description: String(caught) });
       await load();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const resume = async (task: AgentTask) => {
+    setBusyId(task.id);
+    try {
+      const updated = await api.resumeAgentTask(task.id);
+      setTasks((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      toast.success('Tarefa retomada', { description: task.title });
+    } catch (caught) {
+      toast.error('Não foi possível retomar', { description: String(caught) });
     } finally {
       setBusyId(null);
     }
@@ -213,6 +221,7 @@ export function AgentTasksDialog({
                       <p className="mt-1 text-[10px] text-foreground-subtle">
                         Orçamento: {task.maxTurns} turnos · US$ {task.maxCost.toFixed(2)} ·{' '}
                         {task.resultArtifactIds.length} artefato(s)
+                        {task.deadlineAt ? ` · prazo ${new Date(task.deadlineAt).toLocaleString()}` : ''}
                       </p>
                       {task.result ? (
                         <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-[11px] text-foreground-muted">
@@ -235,6 +244,17 @@ export function AgentTasksDialog({
                       )}
                       Executar
                     </Button>
+                    {TASK_RESUMABLE_STATUSES.includes(task.status) ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busyId === task.id}
+                        onClick={() => void resume(task)}
+                      >
+                        <Play className="mr-1.5 size-3.5" />
+                        Retomar
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
                       variant="ghost"
@@ -284,6 +304,7 @@ export function AgentTasksDialog({
                 id="task-brief"
                 rows={3}
                 maxLength={16000}
+                value={form.brief}
                 className="min-h-20 resize-y text-[12px]"
                 placeholder="O que deve ser feito, com que contexto e restrições."
                 onChange={(event) => setForm((current) => ({ ...current, brief: event.target.value }))}
@@ -295,6 +316,7 @@ export function AgentTasksDialog({
                 id="task-acceptance"
                 rows={2}
                 maxLength={8000}
+                value={form.acceptance}
                 className="min-h-14 resize-y text-[12px]"
                 placeholder="Como saber que está pronto (teste, link, diff…)."
                 onChange={(event) =>

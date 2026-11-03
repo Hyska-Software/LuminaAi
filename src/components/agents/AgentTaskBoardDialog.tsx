@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Ban, ListChecks, Loader2, RefreshCw } from 'lucide-react';
+import { Ban, ListChecks, Loader2, Play, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -14,37 +14,27 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  NativeSelect,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { selectActiveAgents, useAgentStore, useChatStore, useUiStore } from '@/lib/store';
 import type { Agent, AgentTask } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import {
+  TASK_BOARD_COLUMNS,
+  TASK_RESUMABLE_STATUSES,
+  TASK_STATUS_META,
+} from './agentTaskStatus';
 
-const COLUMNS: Array<{
-  id: string;
-  title: string;
-  statuses: AgentTask['status'][];
-}> = [
-  { id: 'queued', title: 'Em fila', statuses: ['queued', 'accepted'] },
-  { id: 'running', title: 'Em andamento', statuses: ['running'] },
-  {
-    id: 'waiting',
-    title: 'Aguardando',
-    statuses: ['waiting_input', 'waiting_approval', 'handoff_pending'],
-  },
-  { id: 'review', title: 'Revisão', statuses: ['review'] },
-  { id: 'done', title: 'Concluídas', statuses: ['done'] },
-];
-
-const CANCELLABLE = new Set([
-  'queued',
-  'accepted',
-  'running',
-  'waiting_input',
-  'waiting_approval',
-  'handoff_pending',
-  'review',
-]);
+const CANCELLABLE: Record<string, true> = {
+  queued: true,
+  accepted: true,
+  running: true,
+  waiting_input: true,
+  waiting_approval: true,
+  handoff_pending: true,
+  review: true,
+};
 
 /** Global kanban of delegated tasks across every agent/channel. */
 export function AgentTaskBoardDialog({
@@ -117,6 +107,37 @@ export function AgentTaskBoardDialog({
     }
   };
 
+  const resume = async (task: AgentTask) => {
+    setBusyId(task.id);
+    try {
+      const updated = await api.resumeAgentTask(task.id);
+      setTasks((current) =>
+        current.map((entry) => (entry.id === updated.id ? updated : entry)),
+      );
+      toast.success('Tarefa retomada');
+    } catch (caught) {
+      toast.error('Não foi possível retomar', { description: String(caught) });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const reassign = async (task: AgentTask, toAgentId: string) => {
+    if (!toAgentId || toAgentId === task.ownerAgentId) return;
+    setBusyId(task.id);
+    try {
+      const updated = await api.reassignAgentTask(task.id, toAgentId);
+      setTasks((current) =>
+        current.map((entry) => (entry.id === updated.id ? updated : entry)),
+      );
+      toast.success('Tarefa transferida', { description: updated.title });
+    } catch (caught) {
+      toast.error('Não foi possível transferir', { description: String(caught) });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl">
@@ -155,8 +176,8 @@ export function AgentTaskBoardDialog({
             {error}
           </p>
         ) : null}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {COLUMNS.map((column) => {
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          {TASK_BOARD_COLUMNS.map((column) => {
             const entries = tasks.filter((task) => column.statuses.includes(task.status));
             return (
               <section
@@ -194,28 +215,58 @@ export function AgentTaskBoardDialog({
                             {agent?.name ?? task.ownerAgentId}
                           </p>
                           <p className="mt-1 flex flex-wrap gap-1 text-[10px] text-foreground-subtle">
-                            <Badge tone={task.status === 'done' ? 'success' : 'neutral'}>
-                              {task.status}
+                            <Badge tone={TASK_STATUS_META[task.status].badge}>
+                              {TASK_STATUS_META[task.status].label}
                             </Badge>
                             <span>{task.maxTurns} turno(s)</span>
                             <span>US$ {task.maxCost.toFixed(2)}</span>
                           </p>
                         </button>
-                        {CANCELLABLE.has(task.status) ? (
+                        {TASK_RESUMABLE_STATUSES.includes(task.status) ? (
                           <Button
                             size="sm"
                             variant="ghost"
                             className="mt-1.5 w-full"
                             disabled={busyId === task.id}
-                            onClick={() => void cancel(task)}
+                            onClick={() => void resume(task)}
                           >
-                            {busyId === task.id ? (
-                              <Loader2 className="mr-1.5 size-3 animate-spin" />
-                            ) : (
-                              <Ban className="mr-1.5 size-3" />
-                            )}
-                            Cancelar
+                            <Play className="mr-1.5 size-3" />
+                            Retomar
                           </Button>
+                        ) : null}
+                        {CANCELLABLE[task.status] ? (
+                          <>
+                            <NativeSelect
+                              aria-label={`Reatribuir ${task.title}`}
+                              className="mt-1.5 w-full text-[11px]"
+                              value=""
+                              disabled={busyId === task.id}
+                              onChange={(event) => void reassign(task, event.target.value)}
+                            >
+                              <option value="">Reatribuir…</option>
+                              {agents
+                                .filter((entry) => entry.id !== task.ownerAgentId)
+                                .map((entry) => (
+                                  <option key={entry.id} value={entry.id}>
+                                    {entry.name}
+                                  </option>
+                                ))}
+                            </NativeSelect>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="mt-1.5 w-full"
+                              disabled={busyId === task.id}
+                              onClick={() => void cancel(task)}
+                            >
+                              {busyId === task.id ? (
+                                <Loader2 className="mr-1.5 size-3 animate-spin" />
+                              ) : (
+                                <Ban className="mr-1.5 size-3" />
+                              )}
+                              Cancelar
+                            </Button>
+                          </>
                         ) : null}
                       </article>
                     );

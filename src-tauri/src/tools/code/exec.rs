@@ -1056,6 +1056,12 @@ async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         }
         let path = entry.path();
         let relative = safe_path::to_relative(&root, path);
+        if is_secret_path(&relative) {
+            continue;
+        }
+        if safe_path::resolve(&root, &relative, safe_path::Access::Read).is_err() {
+            continue;
+        }
         if let Some(glob) = &glob {
             if !glob.is_match(relative.as_str()) {
                 continue;
@@ -1367,6 +1373,14 @@ fn project_post_write_hooks(root: &Path) -> Vec<String> {
 /// são configurados pelo usuário no próprio workspace (`.lumina/hooks.json`) e
 /// não mutam a decisão da política: falha vira aviso, nunca erro do turno.
 async fn with_post_write_hooks(ctx: &ToolCtx, relative: &str, content: String) -> String {
+    if !ctx.settings.shell_enabled
+        || ctx
+            .workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.internal)
+    {
+        return content;
+    }
     let Ok(root) = writable_root(ctx) else {
         return content;
     };
@@ -1596,9 +1610,10 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
 /// monta o `ToolRuntime` equivalente e delega para `tools::execute`.
 async fn bridge_chat_tool(ctx: &ToolCtx, name: &str, args: &Value) -> ToolOutcome {
     let mut options = crate::domain::TurnOptions::default();
-    options.web_search = true;
+    options.web_search = ctx.settings.web_search_enabled;
     options.create_files = false;
     options.run_code = false;
+    options.allowed_skills = ctx.allowed_skills.clone();
     options.max_steps = 1;
     let runtime = crate::tools::ToolRuntime {
         db: ctx.db.clone(),
@@ -2349,6 +2364,30 @@ async fn git_status(ctx: &ToolCtx, _args: &Value) -> ToolOutcome {
     )
 }
 
+fn redact_secret_diff(diff: &str) -> String {
+    let mut out = String::new();
+    let mut skipping = false;
+    for line in diff.lines() {
+        if let Some(rest) = line.strip_prefix("diff --git ") {
+            let path = rest
+                .split_whitespace()
+                .last()
+                .unwrap_or("")
+                .trim_start_matches("b/");
+            skipping = is_secret_path(path);
+            if skipping {
+                out.push_str(&format!("[arquivo sensível omitido: {path}]\n"));
+                continue;
+            }
+        }
+        if !skipping {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 async fn git_diff(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let root = match workspace_root(ctx) {
         Ok(root) => root,
@@ -2380,7 +2419,7 @@ async fn git_diff(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let content = if diff.trim().is_empty() {
         "(sem alterações)\n".to_string()
     } else {
-        diff
+        redact_secret_diff(&diff)
     };
     finish(
         ctx,
@@ -3194,6 +3233,7 @@ mod tests {
                 workspace: Some(WorkspaceHandle {
                     root: self.root.clone(),
                     trusted: true,
+                    internal: false,
                     permission_mode: PermissionMode::Edit,
                 }),
                 settings: Settings::default(),
@@ -3218,6 +3258,7 @@ mod tests {
                     crate::harness::code::subagent::MAX_CONCURRENT_SUBAGENTS,
                 )),
                 skills_roots: Vec::new(),
+                allowed_skills: None,
             }
         }
 
@@ -3365,6 +3406,17 @@ mod tests {
         assert!(!outcome.is_error, "{}", outcome.content);
         assert!(outcome.content.contains("src/a.ts:2: fn foo()"), "{}", outcome.content);
         assert!(outcome.content.contains("src/a.ts:1- const x"), "{}", outcome.content);
+    }
+
+    #[tokio::test]
+    async fn search_text_skips_secret_files() {
+        let fixture = Fixture::new();
+        fixture.write("id_rsa", "SECRET KEY MATERIAL\n");
+        fixture.write("src/a.ts", "export const a = 1;\n");
+        let ctx = fixture.ctx();
+        let outcome = call(&ctx, "search_text", json!({ "query": "SECRET" })).await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(!outcome.content.contains("SECRET KEY MATERIAL"), "{}", outcome.content);
     }
 
     #[tokio::test]
@@ -4091,6 +4143,27 @@ mod tests {
     }
 
 
+
+    #[tokio::test]
+    async fn internal_agent_workspace_never_runs_project_hooks() {
+        let fixture = Fixture::new();
+        fixture.write(
+            ".lumina/hooks.json",
+            r#"{"postWrite":["echo hook-run >> hook.log"]}"#,
+        );
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let mut ctx = fixture.ctx();
+        ctx.workspace.as_mut().expect("workspace").internal = true;
+        let outcome = call(
+            &ctx,
+            "write_file",
+            json!({ "path": "src/novo.ts", "content": "export const a = 1;\n" }),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(!outcome.content.contains("Hooks do projeto"), "{}", outcome.content);
+        assert!(!fixture.root.join("hook.log").exists());
+    }
 
     #[tokio::test]
     async fn code_profile_reuses_chat_skills_catalog() {

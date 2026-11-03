@@ -300,6 +300,7 @@ mod tests {
                 crate::harness::code::subagent::MAX_CONCURRENT_SUBAGENTS,
             )),
             skills_roots: Vec::new(),
+            allowed_skills: None,
             emit: None,
             rules: Vec::new(),
         }

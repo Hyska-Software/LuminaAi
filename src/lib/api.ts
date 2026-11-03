@@ -245,6 +245,7 @@ export const api = {
   createAgentTask: (input: AgentTaskInput) =>
     invoke<AgentTask>('create_agent_task', { input }),
   cancelAgentTask: (taskId: string) => invoke<AgentTask>('cancel_agent_task', { taskId }),
+  resumeAgentTask: (taskId: string) => invoke<AgentTask>('resume_agent_task', { taskId }),
   reassignAgentTask: (taskId: string, toAgentId: string) =>
     invoke<AgentTask>('reassign_agent_task', { taskId, toAgentId }),
   runAgentTaskNow: (taskId: string) => invoke<AgentTask>('run_agent_task_now', { taskId }),
@@ -320,6 +321,7 @@ export const api = {
 
   /* -------- turn streaming -------- */
   cancelTurn: (turnId: string) => invoke<boolean>('cancel_turn', { turnId }),
+  cancelAllTurns: () => invoke<number>('cancel_all_turns'),
   cancelConversation: (conversationId: string) =>
     invoke<number>('cancel_conversation', { conversationId }),
   listActiveTurns: () => invoke<ActiveTurnInfo[]>('list_active_turns'),

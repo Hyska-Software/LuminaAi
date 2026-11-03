@@ -33,6 +33,7 @@ function task(overrides: Partial<AgentTask>): AgentTask {
     maxCost: 0.5,
     deadlineAt: null,
     conversationId: null,
+    originConversationId: null,
     result: null,
     resultArtifactIds: [],
     leaseUntil: null,
@@ -69,6 +70,7 @@ describe('AgentTaskBoardDialog', () => {
     expect(screen.getByText('Aguardando')).toBeTruthy();
     expect(screen.getByText('Revisão')).toBeTruthy();
     expect(screen.getByText('Concluídas')).toBeTruthy();
+    expect(screen.getByText('Encerradas')).toBeTruthy();
   });
 
   it('cancela uma tarefa com confirmação e atualiza o status', async () => {

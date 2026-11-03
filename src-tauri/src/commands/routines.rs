@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio_util::sync::CancellationToken;
 
 use crate::agents::{routine_next_run_at, AgentRoutine, AgentRoutineInput, AgentRoutineRun};
 use crate::domain::{TurnKind, TurnOptions, TurnPayload, TurnProfile};
@@ -141,12 +140,12 @@ pub async fn scheduler_tick(app: AppHandle) {
         }
     };
     for routine in due {
-        if let Err(error) = execute_routine(&app, &routine).await {
-            eprintln!(
-                "lumina: rotina `{}` falhou: {error}",
-                routine.title
-            );
-        }
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) = execute_routine(&app, &routine).await {
+                eprintln!("lumina: rotina `{}` falhou: {error}", routine.title);
+            }
+        });
     }
 }
 
@@ -199,7 +198,24 @@ async fn execute_routine(app: &AppHandle, routine: &AgentRoutine) -> Result<(), 
 
     // Mark the next schedule before the model call so a crash cannot run the
     // same slot twice; the status is replaced with the real result below.
-    let next = routine_next_run_at(
+    let settings = crate::config::load_settings(app);
+    let limits = crate::concurrency::TurnLimits {
+        global: settings.max_concurrent_turns.max(1) as usize,
+        per_agent: settings.max_concurrent_turns_per_agent.max(1) as usize,
+    };
+    let Some(_permit) = state
+        .governor
+        .try_acquire(Some(agent.id.clone()), limits)
+    else {
+        // No slot right now: leave `next_run_at` due so the next tick retries.
+        return Ok(());
+    };
+    let turn_id = uuid::Uuid::new_v4().to_string();
+    let Some(cancel) = state.register_turn_if_idle(&turn_id, &conversation.id) else {
+        return Ok(());
+    };
+    let _turn_guard = state.turn_guard(&turn_id);
+    let mut next = routine_next_run_at(
         &routine.schedule_kind,
         routine.interval_minutes,
         routine.hour,
@@ -218,11 +234,6 @@ async fn execute_routine(app: &AppHandle, routine: &AgentRoutine) -> Result<(), 
         .start_agent_routine_run(&routine.id, Some(&conversation.id), now_ms())
         .ok();
 
-    let profile = if conversation.workspace_id.is_some() {
-        TurnProfile::Code
-    } else {
-        TurnProfile::Chat
-    };
     let payload = TurnPayload {
         conversation_id: conversation.id.clone(),
         content: routine.prompt.clone(),
@@ -231,12 +242,11 @@ async fn execute_routine(app: &AppHandle, routine: &AgentRoutine) -> Result<(), 
         model_id: agent.model_id.clone(),
         reasoning: agent.reasoning.clone(),
         options: TurnOptions::default(),
-        profile,
+        profile: TurnProfile::Code,
         turn_kind: TurnKind::User,
         goal_request: false,
-        turn_id: Some(uuid::Uuid::new_v4().to_string()),
+        turn_id: Some(turn_id),
     };
-    let settings = crate::config::load_settings(app);
     let deps = HarnessDeps {
         app: Some(app.clone()),
         db: db.clone(),
@@ -263,14 +273,32 @@ async fn execute_routine(app: &AppHandle, routine: &AgentRoutine) -> Result<(), 
         payload,
         settings,
         Arc::new(SilentEmitter),
-        CancellationToken::new(),
+        cancel.clone(),
     )
     .await;
 
     let (status, error) = match result {
-        Ok(_) => ("ok", None),
+        Ok(result) if result.error.is_none() && !cancel.is_cancelled() => ("ok", None),
+        Ok(result) => (
+            "error",
+            Some(
+                result
+                    .error
+                    .unwrap_or_else(|| "a rotina foi cancelada".to_string()),
+            ),
+        ),
         Err(error) => ("error", Some(format!("{error:#}"))),
     };
+    // A run longer than the interval must not start again immediately.
+    if next <= now_ms() {
+        next = routine_next_run_at(
+            &routine.schedule_kind,
+            routine.interval_minutes,
+            routine.hour,
+            routine.minute,
+            now_ms(),
+        );
+    }
     let _ = db.mark_agent_routine_run(
         &routine.id,
         Some(&conversation.id),

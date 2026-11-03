@@ -281,7 +281,7 @@ describe('Composer — menção @arquivo', () => {
   });
 
   it('navega com setas e insere chip com Enter, enviando [arquivo: path]', async () => {
-    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(undefined);
+    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(true);
     render(<Composer />);
 
     openMentionMenu();
@@ -428,7 +428,7 @@ describe('Composer — comandos /', () => {
   });
 
   it('comandos de preenchimento (/review) colocam o prompt no composer sem enviar', async () => {
-    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(undefined);
+    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(true);
     render(<Composer />);
 
     typeInComposer('/review');
@@ -519,7 +519,7 @@ describe('Composer — comando /goal', () => {
   });
 
   it('ativa o chip /goal sem alterar nem preencher a mensagem do usuário', async () => {
-    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(undefined);
+    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(true);
     render(<Composer />);
 
     typeInComposer('/goal');
@@ -541,7 +541,7 @@ describe('Composer — comando /goal', () => {
   });
 
   it('envia a mensagem intacta com goalRequest=true e limpa o badge', async () => {
-    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(undefined);
+    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(true);
     render(<Composer />);
 
     typeInComposer('/goal');
@@ -568,7 +568,7 @@ describe('Composer — comando /goal', () => {
   });
 
   it('remover o badge volta ao turno normal', async () => {
-    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(undefined);
+    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(true);
     render(<Composer />);
 
     typeInComposer('/goal');

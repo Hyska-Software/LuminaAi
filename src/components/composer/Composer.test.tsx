@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type {
   Agent,
   CacheStats,
@@ -512,5 +512,20 @@ describe('Composer — indicador de execução', () => {
 
     expect(composerActivity().getAttribute('data-active')).toBe('true');
     expect(composerActivity().getAttribute('data-motion')).toBe('reduced');
+  });
+
+  it('oferece enfileirar no layout Agentes durante o streaming', async () => {
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1' });
+    useChatStore.setState({ streaming: streamingState(), activeId: 'conv-1' });
+    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(true);
+    render(<Composer />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Mensagem para o agente' }), {
+      target: { value: 'Olá' },
+    });
+    const queue = screen.getByRole('button', { name: 'Enfileirar mensagem' });
+    expect(queue).toBeTruthy();
+    fireEvent.click(queue);
+    await waitFor(() => expect(send).toHaveBeenCalled());
   });
 });

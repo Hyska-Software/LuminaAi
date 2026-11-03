@@ -1935,7 +1935,7 @@ mod tests {
                 data_dir: temp.path().to_path_buf(), approval: None, observed: None, emit: None, rules: Vec::new(),
                 jobs: None, questions: None, turn_kind: crate::domain::TurnKind::User, mcp: None, subagent: None,
                 enabled_tools: Arc::new(Default::default()), subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-                subagent_slots: Arc::new(tokio::sync::Semaphore::new(1)), skills_roots: Vec::new(),
+                subagent_slots: Arc::new(tokio::sync::Semaphore::new(1)), skills_roots: Vec::new(), allowed_skills: None,
             };
             for entry in if order == "panel-first" { ["panel", "agent"] } else { ["agent", "panel"] } {
                 if entry == "panel" {
@@ -2144,7 +2144,7 @@ mod tests {
             approval: None, observed: None, emit: None, rules: Vec::new(), jobs: None, questions: None,
             turn_kind: crate::domain::TurnKind::User, mcp: None, subagent: None,
             enabled_tools: Arc::new(Default::default()), subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            subagent_slots: Arc::new(tokio::sync::Semaphore::new(1)), skills_roots: Vec::new(),
+            subagent_slots: Arc::new(tokio::sync::Semaphore::new(1)), skills_roots: Vec::new(), allowed_skills: None,
         };
         let (started, ready) = tokio::sync::oneshot::channel();
         let agent = tokio::spawn(async move {

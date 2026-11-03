@@ -34,6 +34,7 @@ import {
 import { resolveSidePanelLayout, useViewportWidth } from '@/lib/sidePanel';
 import type { Agent, AgentChannel, Conversation } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { TASK_ATTENTION_STATUSES } from './agentTaskStatus';
 
 const PANEL_TABS: ReadonlyArray<{ id: AgentPanelTab; label: string; icon: LucideIcon }> = [
   { id: 'screen', label: 'Tela', icon: Monitor },
@@ -87,24 +88,31 @@ export function AgentPanel() {
   );
 
   const loadActivityCount = useCallback(async () => {
-    const streams = Object.keys(useChatStore.getState().streamsByConversation).length;
+    const agentConversationIds = new Set(
+      conversations.filter((entry) => entry.mode === 'agent').map((entry) => entry.id),
+    );
+    const streams = Object.keys(useChatStore.getState().streamsByConversation).filter((id) =>
+      agentConversationIds.has(id),
+    ).length;
     let pending = 0;
-    for (const session of Object.values(useCodeStore.getState().byConversation)) {
+    for (const [conversationId, session] of Object.entries(
+      useCodeStore.getState().byConversation,
+    )) {
+      if (!agentConversationIds.has(conversationId)) continue;
       pending += session.approvals.length + session.questions.length;
     }
     let tasks = 0;
     try {
       const list = await api.listAgentTasks(activeAgentId ? { ownerAgentId: activeAgentId } : {});
-      tasks = list.filter((task) =>
-        ['waiting_input', 'waiting_approval', 'handoff_pending', 'review'].includes(task.status),
-      ).length;
+      tasks = list.filter((task) => TASK_ATTENTION_STATUSES.includes(task.status)).length;
     } catch {
       tasks = 0;
     }
     setActivityCount(streams + pending + tasks);
-  }, [activeAgentId]);
+  }, [activeAgentId, conversations]);
 
   useEffect(() => {
+    if (!open) return;
     void loadActivityCount();
     const interval = window.setInterval(() => void loadActivityCount(), 15_000);
     const reload = () => void loadActivityCount();
@@ -115,7 +123,7 @@ export function AgentPanel() {
       window.removeEventListener('lumina:agent-task-updated', reload);
       window.removeEventListener('lumina:agent-routine-run', reload);
     };
-  }, [loadActivityCount]);
+  }, [open, loadActivityCount]);
 
   const layout = useMemo(
     () =>

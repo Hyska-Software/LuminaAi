@@ -572,7 +572,8 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         (conversation) =>
           conversation.mode === 'agent' &&
           conversation.agentId === agentId &&
-          !conversation.channelId,
+          !conversation.channelId &&
+          !conversation.taskId,
       )
       .sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.updatedAt - left.updatedAt);
 

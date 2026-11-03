@@ -10,9 +10,17 @@ pub(crate) fn prepare(data_dir: &Path, conversation_id: &str) -> anyhow::Result<
     let root = data_dir.canonicalize().context("resolve application data directory")?;
     let parent = root.join("agent-workspaces");
     create_child(&root, &parent)?;
+    let target = path(&root, conversation_id);
+    create_child(&parent, &target)
+}
+
+/// Path of the internal workspace without creating it. Used by cleanup paths.
+pub(crate) fn path(data_dir: &Path, conversation_id: &str) -> PathBuf {
     let name: String = Sha256::digest(conversation_id.as_bytes())
-        .iter().map(|byte| format!("{byte:02x}")).collect();
-    create_child(&parent, &parent.join(name))
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    data_dir.join("agent-workspaces").join(name)
 }
 
 fn create_child(parent: &Path, child: &Path) -> anyhow::Result<PathBuf> {

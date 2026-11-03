@@ -15,8 +15,9 @@ import {
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAgentStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
-import type { AgentTask, Conversation } from '@/lib/types';
+import type { ActiveTurnInfo, AgentTask, Conversation } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { TASK_ATTENTION_STATUSES, TASK_STATUS_META } from './agentTaskStatus';
 
 function elapsedLabel(startedAt: number): string {
   const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
@@ -25,12 +26,6 @@ function elapsedLabel(startedAt: number): string {
   return `${minutes}m ${seconds % 60}s`;
 }
 
-const ATTENTION_STATUSES = new Set([
-  'waiting_input',
-  'waiting_approval',
-  'review',
-  'handoff_pending',
-]);
 
 /** Global view of active turns, pending approvals/questions and tasks needing a human. */
 export function AgentActivityDialog({
@@ -48,25 +43,47 @@ export function AgentActivityDialog({
   const agents = useAgentStore((state) => state.agentsById);
   const codeSessions = useCodeStore((state) => state.byConversation);
   const [tasks, setTasks] = useState<AgentTask[]>([]);
+  const [tasksError, setTasksError] = useState<string | null>(null);
+  const [activeTurns, setActiveTurns] = useState<ActiveTurnInfo[]>([]);
+  const [, setClock] = useState(0);
 
   const loadTasks = useCallback(async () => {
     try {
       const list = await api.listAgentTasks();
-      setTasks(list.filter((task) => ATTENTION_STATUSES.has(task.status)));
+      setTasks(list.filter((task) => TASK_ATTENTION_STATUSES.includes(task.status)));
+      setTasksError(null);
+    } catch (error) {
+      setTasksError(String(error));
+    }
+  }, []);
+
+  const loadActiveTurns = useCallback(async () => {
+    try {
+      setActiveTurns(await api.listActiveTurns());
     } catch {
-      setTasks([]);
+      setActiveTurns([]);
     }
   }, []);
 
   useEffect(() => {
     if (!open) return;
     void loadTasks();
+    void loadActiveTurns();
     const reload = () => void loadTasks();
     window.addEventListener('lumina:agent-task-updated', reload);
-    return () => window.removeEventListener('lumina:agent-task-updated', reload);
-  }, [open, loadTasks]);
+    const poll = window.setInterval(() => void loadActiveTurns(), 2000);
+    const clock = window.setInterval(() => setClock((value) => value + 1), 1000);
+    return () => {
+      window.clearInterval(poll);
+      window.clearInterval(clock);
+      window.removeEventListener('lumina:agent-task-updated', reload);
+    };
+  }, [open, loadTasks, loadActiveTurns]);
 
   const entries = Object.values(streams);
+  const backgroundTurns = activeTurns.filter(
+    (turn) => !streams[turn.conversationId],
+  );
   const approvals = Object.values(codeSessions).flatMap((session) =>
     session.approvals.map((approval) => ({ conversationId: session.conversationId, approval })),
   );
@@ -104,7 +121,7 @@ export function AgentActivityDialog({
           </DialogDescription>
         </DialogHeader>
         <AgentDialogBody className="space-y-5">
-          {entries.length > 0 ? (
+          {entries.length + backgroundTurns.length > 0 ? (
             <section aria-labelledby="activity-running" className="space-y-2">
               <h3
                 id="activity-running"
@@ -138,6 +155,38 @@ export function AgentActivityDialog({
                       variant="ghost"
                       className={cn('shrink-0')}
                       onClick={() => void stopConversation(stream.conversationId)}
+                    >
+                      <Square className="mr-1.5 size-3.5" />
+                      Parar
+                    </Button>
+                  </article>
+                );
+              })}
+              {backgroundTurns.map((turn) => {
+                const conversation = conversations.find(
+                  (entry) => entry.id === turn.conversationId,
+                );
+                const agent = conversation?.agentId ? agents[conversation.agentId] : undefined;
+                return (
+                  <article
+                    key={turn.turnId}
+                    className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
+                  >
+                    {agent ? <AgentAvatar emoji={agent.emoji} size="sm" /> : null}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-medium text-foreground">
+                        {agent?.name ?? 'Agente'} · {conversation?.title ?? turn.conversationId}
+                      </p>
+                      <p className="flex items-center gap-1.5 text-[11px] text-foreground-muted">
+                        <Timer className="size-3" />
+                        {elapsedLabel(turn.startedAt)} · tarefa/rotina em segundo plano
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className={cn('shrink-0')}
+                      onClick={() => void stopConversation(turn.conversationId)}
                     >
                       <Square className="mr-1.5 size-3.5" />
                       Parar
@@ -197,6 +246,11 @@ export function AgentActivityDialog({
             </section>
           ) : null}
 
+          {tasksError ? (
+            <p role="alert" className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] text-danger">
+              Não foi possível carregar as tarefas: {tasksError}
+            </p>
+          ) : null}
           {tasks.length > 0 ? (
             <section aria-labelledby="activity-tasks" className="space-y-2">
               <h3
@@ -221,16 +275,17 @@ export function AgentActivityDialog({
                       {task.title}
                     </span>
                     <span className="block truncate text-[11px] text-foreground-muted">
-                      {agents[task.ownerAgentId]?.name ?? 'Agente'} · {task.status}
+                      {agents[task.ownerAgentId]?.name ?? 'Agente'} ·{' '}
+                      {TASK_STATUS_META[task.status].label}
                     </span>
                   </span>
-                  <Badge tone="neutral">Abrir</Badge>
+                  <Badge tone={TASK_STATUS_META[task.status].badge}>Abrir</Badge>
                 </button>
               ))}
             </section>
           ) : null}
 
-          {entries.length + approvals.length + questions.length + tasks.length === 0 ? (
+          {entries.length + backgroundTurns.length + approvals.length + questions.length + tasks.length === 0 ? (
             <p className="py-8 text-center text-[13px] text-foreground-muted">
               Nada pendente. Turnos, aprovações e tarefas aparecem aqui.
             </p>
@@ -239,7 +294,7 @@ export function AgentActivityDialog({
         <DialogFooter>
           <Button
             variant="danger"
-            disabled={entries.length === 0}
+            disabled={entries.length + backgroundTurns.length === 0}
             onClick={() => void stopAll()}
           >
             <Square className="mr-1.5 size-4" />

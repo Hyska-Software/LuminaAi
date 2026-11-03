@@ -44,6 +44,9 @@ pub struct CodeTurnContext {
     pub workspace: Option<Workspace>,
     pub root: Option<PathBuf>,
     pub trusted: bool,
+    /// App-owned per-conversation folder created for an agent without an
+    /// explicit workspace. It is a real tool root but not a visible workspace.
+    pub internal: bool,
     pub permission_mode: PermissionMode,
     pub git: Option<GitInfo>,
     pub project: Option<crate::workspace::project::ProjectProfile>,
@@ -71,7 +74,8 @@ impl CodeTurnContext {
             workspace_name: self
                 .workspace
                 .as_ref()
-                .map(|workspace| workspace.name.clone()),
+                .map(|workspace| workspace.name.clone())
+                .or_else(|| self.internal.then(|| "Pasta do agente".to_string())),
             workspace_path: self
                 .root
                 .as_ref()
@@ -97,6 +101,7 @@ impl CodeTurnContext {
         Some(crate::tools::registry::WorkspaceHandle {
             root,
             trusted: self.trusted,
+            internal: self.internal,
             permission_mode: self.permission_mode,
         })
     }
@@ -386,5 +391,20 @@ mod tests {
         assert!(tree.contains("src/"));
         assert!(!tree.contains("node_modules"));
         assert!(context.workspace.is_some());
+    }
+
+    #[test]
+    fn internal_workspace_is_named_for_the_prompt() {
+        let context = CodeTurnContext {
+            internal: true,
+            root: Some(std::path::PathBuf::from("C:/lumina/agent-workspaces/abc")),
+            ..CodeTurnContext::default()
+        };
+        let prompt = context.prompt_context();
+        assert_eq!(prompt.workspace_name.as_deref(), Some("Pasta do agente"));
+        assert_eq!(
+            prompt.workspace_path.as_deref(),
+            Some("C:/lumina/agent-workspaces/abc")
+        );
     }
 }

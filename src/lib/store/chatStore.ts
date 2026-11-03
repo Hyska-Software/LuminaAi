@@ -26,7 +26,7 @@ import { defaultSelection, findModelIn, getModel } from '../catalog';
 import { filterConversationsForLayout } from '../conversations';
 import { reasoningForModel } from '../modelMenu';
 import { shouldContinueGoal } from '../goalRunner';
-import { useAgentQueueStore, compactAgentQueue } from './agentQueueStore';
+import { useAgentQueueStore, compactAgentQueue, type AgentQueueItem } from './agentQueueStore';
 import { useAgentStore } from './agentStore';
 import { useAppStore } from './appStore';
 import { isCodeEvent, useCodeStore } from './codeStore';
@@ -45,6 +45,8 @@ export interface StreamingState {
   turnKind: TurnKind;
   /** Live child agents of this turn, keyed by the parent `task` call id. */
   subagents?: Record<string, SubagentLiveState>;
+  /** Queue item that started this turn; re-enqueued on TURN_BUSY. */
+  queuedItem?: AgentQueueItem;
 }
 
 interface ChatState {
@@ -125,7 +127,7 @@ interface ChatState {
   addAttachments: (paths: string[]) => Promise<void>;
   removeAttachment: (id: string) => Promise<void>;
   clearAttachments: () => void;
-  send: (content: string, options?: SendOptions) => Promise<void>;
+  send: (content: string, options?: SendOptions) => Promise<boolean>;
   /** Drains the next queued message of a conversation (no-op when busy/paused). */
   processQueue: (conversationId?: string | null) => Promise<void>;
   /** Resumes every persisted agent queue that is idle and unpaused. */
@@ -134,6 +136,8 @@ interface ChatState {
   applyExternalTurnEvent: (payload: TurnEventBusPayload) => Promise<void>;
   /** Rebuilds streams/messages of turns still running in Rust after a reload. */
   reattachTurns: () => Promise<void>;
+  /** Reloads a conversation's messages without touching an active stream. */
+  reloadConversation: (conversationId: string) => Promise<void>;
   regenerate: () => Promise<void>;
   editAndResend: (messageId: string, content: string) => Promise<void>;
   stop: () => Promise<void>;
@@ -686,6 +690,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
       mode: 'new' | 'regenerate';
       /** Rodada automática: remove os otimistas se o turno nem começou. */
       removeOnFailure?: boolean;
+      /** Item que iniciou este turno; reenfileirado quando o backend recusa. */
+      queueItem?: AgentQueueItem;
     },
   ) => {
     let local_turn_id: string | null = payload.turnId ?? null;
@@ -991,10 +997,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
             status: 'cancelled',
           }));
           setStream(context.conversationId, null);
+          if (useAgentQueueStore.getState().count(context.conversationId) > 0) {
+            useAgentQueueStore.getState().pause(context.conversationId, true);
+          }
           void syncArtifacts(context.conversationId);
           void useCodeStore.getState().refresh(context.conversationId);
           break;
-        case 'error':
+        case 'error': {
           flush();
           finished = true;
           terminal = 'error';
@@ -1004,6 +1013,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
             ...message,
             status: message.content ? 'complete' : 'error',
           }));
+          const queuedItem = get().streamsByConversation[context.conversationId]?.queuedItem;
           setStream(context.conversationId, null);
           // A background failure must not paint the error banner over the
           // thread the user is reading; it still gets the toast below.
@@ -1017,7 +1027,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
           void syncArtifacts(context.conversationId);
           void useCodeStore.getState().refresh(context.conversationId);
           toast.error('Falha na resposta', { description: event.hint ?? event.message });
+          if (event.code === 'TURN_BUSY' && queuedItem) {
+            useAgentQueueStore.getState().enqueueFront(queuedItem);
+            useAgentQueueStore.getState().pause(context.conversationId, true);
+          } else {
+            void get().processQueue(context.conversationId);
+          }
           break;
+        }
         case 'subagent_started':
           patchStream(context.conversationId, (stream) => ({
             ...stream,
@@ -1208,6 +1225,17 @@ export const useChatStore = create<ChatState>()((set, get) => {
     } catch (error) {
       flush();
       const message = error instanceof Error ? error.message : String(error);
+      if (context.queueItem && message.includes('TURN_BUSY')) {
+        removeMessage(context.conversationId, context.optimisticUserId ?? '');
+        removeMessage(context.conversationId, context.assistantId);
+        setStream(context.conversationId, null);
+        useAgentQueueStore.getState().enqueueFront(context.queueItem);
+        useAgentQueueStore.getState().pause(context.conversationId, true);
+        toast.info('Thread ocupada', {
+          description: 'A mensagem voltou para a fila; retome quando o turno atual terminar.',
+        });
+        return;
+      }
       // Rodada de objetivo que nem começou (preflight/harness recusou): não
       // deixa mensagens otimistas órfãs no transcript.
       if (context.removeOnFailure && !started) {
@@ -1278,10 +1306,11 @@ export const useChatStore = create<ChatState>()((set, get) => {
       selection: ModelSelection;
       reasoning: ReasoningSelection | null;
       options?: SendOptions;
+      queueItem?: AgentQueueItem;
     },
     clearPendingAttachments = true,
   ) => {
-    const { conversationId, content, attachments, selection, reasoning, options } = input;
+    const { conversationId, content, attachments, selection, reasoning, options, queueItem } = input;
     const turnId = newId();
     localTurnIds.add(turnId);
     const now = Date.now();
@@ -1327,6 +1356,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       startedAt: now,
       turnKind: 'user',
       subagents: {},
+      ...(queueItem ? { queuedItem: queueItem } : {}),
     };
     set((s) => ({
       messagesByConversation: {
@@ -1363,6 +1393,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       userMessageId: null,
       optimisticUserId,
       mode: 'new',
+      queueItem,
     });
   };
 
@@ -1387,7 +1418,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
       toast.error('A fila está pausada: restaure o agente para continuar');
       return;
     }
-    queue.dequeue(target);
+    try {
+      const active = await api.listActiveTurns();
+      if (active.some((turn) => turn.conversationId === target)) return;
+    } catch {
+      /* backend may be unavailable in tests; the turn event still guards */
+    }
+    if (useAgentQueueStore.getState().isPaused(target)) return;
     const selection: ModelSelection = {
       providerId: item.providerId || agent?.providerId || useAppStore.getState().selection.providerId,
       modelId: item.modelId || agent?.modelId || useAppStore.getState().selection.modelId,
@@ -1405,7 +1442,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
         turnOptions: item.turnOptions,
         goalRequest: item.goalRequest,
       },
+      queueItem: item,
     }, false);
+    queue.dequeue(target);
   };
 
   /**
@@ -1887,7 +1926,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       const state = get();
       const trimmed = content.trim();
       const attachments = state.pendingAttachments;
-      if (!trimmed && !attachments.length) return;
+      if (!trimmed && !attachments.length) return false;
       // Only the conversation being sent to is busy. A background agent turn
       // never blocks another thread.
       const activeStream = selectActiveStream(state);
@@ -1907,7 +1946,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
             toast.error('Fila cheia', {
               description: `Esta thread já tem ${queueLimit} mensagens na fila. Aguarde ou limpe a fila.`,
             });
-            return;
+            return false;
           }
           const agent = useAgentStore.getState().agentsById[agentId];
           useAgentQueueStore.getState().enqueue({
@@ -1927,10 +1966,10 @@ export const useChatStore = create<ChatState>()((set, get) => {
           toast.info('Mensagem na fila', {
             description: 'Ela será enviada quando a resposta atual terminar.',
           });
-          return;
+          return true;
         }
         toast.info('Aguarde a resposta atual terminar');
-        return;
+        return false;
       }
 
       const app = useAppStore.getState();
@@ -1965,7 +2004,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
                 ? 'Entre com o ChatGPT (Configurações → Provedores) ou adicione uma API key.'
                 : 'Adicione a API key deste provedor em Configurações → Provedores.',
           });
-          return;
+          return false;
         }
       }
       let conversationId: string;
@@ -1973,7 +2012,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         conversationId = await ensureConversation(deriveTitle(trimmed || attachments[0]?.name || 'Nova conversa'), selection);
       } catch (error) {
         toast.error('Não foi possível criar a conversa', { description: String(error) });
-        return;
+        return false;
       }
 
       startTurn({
@@ -1984,6 +2023,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         reasoning,
         options,
       });
+      return true;
     },
 
     regenerate: async () => {
@@ -2107,6 +2147,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (conversationId) {
         setStream(conversationId, { ...streaming, phase: 'starting' });
       }
+      if (useAgentQueueStore.getState().count(streaming.conversationId) > 0) {
+        useAgentQueueStore.getState().pause(streaming.conversationId, true);
+      }
       // Parar uma rodada do objetivo também pausa a continuidade automática:
       // sem isso o próximo `done` retomaria sozinho o que o usuário parou.
       if (streaming.turnKind === 'goal_round') {
@@ -2125,6 +2168,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (!streaming) {
         // The renderer may have reloaded and lost the stream object while the
         // Rust side still owns the turn; the conversation-level cancel covers it.
+        if (useAgentQueueStore.getState().count(conversationId) > 0) {
+          useAgentQueueStore.getState().pause(conversationId, true);
+        }
         try {
           await api.cancelConversation(conversationId);
         } catch (error) {
@@ -2133,6 +2179,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
         return;
       }
       setStream(conversationId, { ...streaming, phase: 'starting' });
+      if (useAgentQueueStore.getState().count(conversationId) > 0) {
+        useAgentQueueStore.getState().pause(conversationId, true);
+      }
       if (streaming.turnKind === 'goal_round') {
         void useCodeStore.getState().updateGoal(streaming.conversationId, 'pause');
       }
@@ -2145,6 +2194,15 @@ export const useChatStore = create<ChatState>()((set, get) => {
 
     stopAllTurns: async () => {
       const ids = Object.keys(get().streamsByConversation);
+      const queue = useAgentQueueStore.getState();
+      for (const id of Object.keys(queue.byConversation)) {
+        if ((queue.byConversation[id]?.length ?? 0) > 0) queue.pause(id, true);
+      }
+      try {
+        await api.cancelAllTurns();
+      } catch (error) {
+        console.error('cancel all failed', error);
+      }
       await Promise.all(ids.map((id) => get().stopConversation(id)));
     },
 
@@ -2571,8 +2629,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
       }
     },
 
-    syncArtifacts,
+    reloadConversation: async (conversationId) => {
+      if (selectConversationStream(get(), conversationId)) return;
+      await loadConversationIntoCache(conversationId);
+    },
 
+    syncArtifacts,
     messagesFor: (conversationId) =>
       conversationId ? (get().messagesByConversation[conversationId] ?? EMPTY) : EMPTY,
   };

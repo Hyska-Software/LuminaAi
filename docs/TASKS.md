@@ -1,9 +1,9 @@
 # Tarefas delegadas — contrato
 
 > Estado: schema, máquina de estados, tools, scheduler em background, múltiplos
-> turnos com orçamento, cancelamento real, lease heartbeat, handoff com aceite e
-> quadro kanban global. Tarefas são trabalho durável com dono, orçamento e
-> thread própria.
+> turnos com orçamento, cancelamento real, lease heartbeat, handoff imediato,
+> retomada e quadro kanban global. Tarefas são trabalho durável com dono,
+> orçamento e thread própria.
 
 ## Modelo
 
@@ -15,7 +15,8 @@
 - `status`: `queued | accepted | running | waiting_input | waiting_approval |
   review | handoff_pending | done | cancelled | failed | declined`;
 - `max_turns`, `max_tokens`, `max_cost`, `deadline_at`;
-- `conversation_id` (thread oculta), `result`, `result_artifact_ids`;
+- `conversation_id` (thread oculta), `origin_conversation_id` (quem delegou),
+  `result`, `result_artifact_ids`;
 - `lease_until`, `handoff_count`, `version`.
 
 `agent_task_events` registra cada transição (from/to, ator, payload JSON) para
@@ -23,74 +24,89 @@ auditoria. `conversations.task_id` liga a thread à tarefa.
 
 ## Transições
 
-- `queued → accepted | declined | cancelled | failed`
-- `accepted → running | review | done | handoff_pending | cancelled | failed`
+- `queued → accepted | running | declined | cancelled | failed`
+- `accepted → running | review | done | declined | handoff_pending | cancelled |
+  failed`
 - `running → waiting_input | waiting_approval | review | done | handoff_pending |
-  queued | failed | cancelled`
-- `waiting_* → running | handoff_pending | cancelled | failed`
-- `review → running | done | handoff_pending | failed | cancelled`
-- `handoff_pending → accepted | declined | cancelled | failed`
+  queued | accepted | declined | failed | cancelled`
+- `waiting_* → queued | running | accepted | handoff_pending | cancelled |
+  failed`
+- `review → queued | running | accepted | done | handoff_pending | failed |
+  cancelled`
+- `handoff_pending → accepted | running | queued | declined | cancelled |
+  failed` (linhas legadas; novas transferências já entram `accepted`)
 
-`version`/`lease_until` evitam dois runners na mesma tarefa. O claim expira em
-30 min; o runner renova o lease a cada 5 min e cancela o turno se a renovação
-falhar (outro runner assumiu ou a tarefa foi cancelada).
+`version`/`lease_until` evitam dois runners na mesma tarefa. O claim usa CAS;
+o lease expira em 30 min, o runner renova a cada 5 min e o sweep recupera
+`running` com lease vencido. `queued`/`accepted` com deadline vencido viram
+`failed` (`AGENT_TASK_DEADLINE`).
 
-## Tools (capability `delegation`)
+## Tools
 
-- `delegate_task` — cria tarefa para outro agente; herda canal e tarefa-pai da
-  conversa atual.
-- `task_list` / `task_get` — consulta tarefas e histórico.
+Criação/transferência (capability `delegation`): `delegate_task`,
+`handoff_task`, `send_message`.
+Dono (sempre disponíveis): `task_list`, `task_get`, `accept_task`,
+`decline_task`, `update_task`, `finish_task`.
+
+- `delegate_task` — cria tarefa para outro agente; rejeita auto-delegação,
+  herda canal (inclusive de uma thread de tarefa) e tarefa-pai.
+- `task_list` / `task_get` — escopados ao dono/criador/canal do chamador.
 - `accept_task` / `decline_task` — aceite/recusa pelo dono.
-- `handoff_task` — transfere para outro agente; máximo 3 por tarefa; entra em
-  `handoff_pending` e **não** é executada até o destino aceitar.
+- `handoff_task` — transfere imediatamente (máx. 3), zera `conversation_id` e
+  exige que o destino seja membro do canal; recusa no primeiro turno é possível.
 - `update_task` — progresso (`running`, `waiting_input`, `waiting_approval`,
   `review`).
-- `finish_task` — resultado + artefatos; só o dono.
-- `send_message` — publica no canal se o agente for membro.
+- `finish_task` — resultado + artefatos validados; só o dono.
+- `send_message` — publica no canal se o agente for membro (16k chars).
 
 Limites:
 
 - 3 tarefas abertas por agente;
 - profundidade de delegação 2;
 - 3 handoffs por tarefa;
-- orçamento por tarefa (turnos/tokens/custo) e limite diário global por agente;
+- orçamento por tarefa (turnos/tokens/custo), deadline e limite diário local
+  por agente;
 - tarefas não assistidas rodam com `approvals: None`/`questions: None`.
 
 ## Runner
 
 `commands/tasks.rs`:
 
-- tick a cada 5 s; `handoff_pending` nunca é pego pelo scheduler;
-- pega tarefas `queued`/`accepted` e tenta um slot do `ConcurrencyGovernor`
-  (global e por agente);
-- `claim` atômico + heartbeat de lease;
+- tick a cada 5 s em paralelo; faz sweep de deadline/lease e não espera uma
+  tarefa terminar para pegar as próximas;
+- pega `queued`/`accepted` e adquire um slot do `ConcurrencyGovernor` por turno;
+- `claim` CAS + heartbeat de lease por dono; nunca reutiliza a thread de outro
+  dono (handoff cria thread nova);
 - cria/reusa a thread da tarefa (`mode=agent`, `task_id`);
-- roda até `max_turns` turnos reais, checando custo/tokens acumulados antes de
-  cada continuação; estouro vira `failed` com `AGENT_TASK_BUDGET`;
-- `finish_task` encerra o loop; se o agente devolver texto final sem chamar a
-  tool, o runner consolida esse texto como resultado;
+- roda até `max_turns` (16 passos por turno), checando deadline/custo/tokens
+  antes de cada continuação; `TurnResult.error` vira falha, não sucesso;
+- para em `waiting_input`/`waiting_approval`/`review`; `resume_agent_task`
+  devolve para `queued`;
+- `run_agent_task_now` inicia em background e retorna sem bloquear;
 - `cancel_agent_task` cancela o turno/conversa antes de mudar o status e o
   runner não escreve transição terminal depois do cancelamento;
-- transiciona para `done`/`failed`; publica no canal quando aplicável;
-- emite `lumina:agent-task-updated`.
+- terminais entregam uma mensagem `system` em `origin_conversation_id`
+  (resultado como dados, não instrução) e publicam no canal quando aplicável;
+- emite `lumina:agent-task-updated` (com `originConversationId`) no claim, em
+  cada transição relevante e no fim.
 
 ## UI
 
 - Menu do agente → **Tarefas** (`AgentTasksDialog`): lista, cria, executa agora,
-  cancela e mostra orçamento/resultado.
+  retoma, cancela e mostra orçamento/resultado/deadline.
 - Botão **Quadro de tarefas** no topo da sidebar (`AgentTaskBoardDialog`):
-  colunas Em fila / Em andamento / Aguardando / Revisão / Concluídas, cards com
-  dono/orçamento/status, abrir thread e cancelar.
-- Diálogo **Atividade** lista turnos ativos, aprovações/perguntas pendentes e
-  tarefas aguardando o usuário.
+  colunas Em fila / Em andamento / Aguardando / Revisão / Concluídas /
+  Encerradas, cards com dono/orçamento/status, abrir thread, retomar,
+  reatribuir e cancelar.
+- Diálogo **Atividade** lista turnos do renderer e turnos de fundo registrados
+  no backend, aprovações/perguntas pendentes e tarefas aguardando o usuário.
 - Canal: mensagens de tarefa usam o mesmo histórico; o resultado é publicado
-  como mensagem do agente.
+  como mensagem do agente e emite `lumina:agent-channel-updated`.
 - Eventos atualizam o renderer via `lumina:agent-task-updated`.
 
 ## Limitações atuais
 
-- O quadro é global (sidebar), não embutido por canal; menções `@agente` e
-  reassign visual ainda não existem.
+- O quadro é global (sidebar), não embutido por canal.
 - Aprovações de tarefa em background dependem do card/notificação; não há
-  “reassign” automático por falha.
+  reassign automático por falha.
 - O scheduler só roda com o app aberto (local-first).

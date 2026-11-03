@@ -67,30 +67,19 @@ pub async fn run_turn(
         .turn_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let cancel = state.register_turn(&turn_id, &payload.conversation_id);
+    let Some(cancel) = state.register_turn_if_idle(&turn_id, &payload.conversation_id) else {
+        return Err(
+            "TURN_BUSY: já existe um turno em andamento nesta conversa; aguarde terminar"
+                .to_string(),
+        );
+    };
+    let _turn_guard = state.turn_guard(&turn_id);
     let settings = crate::config::load_settings(&app);
     let conversation = state
         .db
         .get_conversation(&payload.conversation_id)
         .map_err(|error| format!("{error:#}"))?
         .ok_or_else(|| format!("conversa não encontrada: {}", payload.conversation_id))?;
-    // Cost guard: unattended/background turns must stop at the configured daily
-    // cap instead of silently spending past it.
-    if let Some(agent_id) = conversation.agent_id.as_deref() {
-        if let Some(limit) = settings.agent_daily_cost_limit_usd {
-            let usage = state
-                .db
-                .get_agent_usage(agent_id)
-                .map_err(|error| format!("{error:#}"))?;
-            if usage.cost >= limit {
-                state.finish_turn(&turn_id);
-                return Err(format!(
-                    "BUDGET_EXCEEDED: o agente já usou US$ {:.2} do limite diário de US$ {:.2}",
-                    usage.cost, limit
-                ));
-            }
-        }
-    }
     let agent_key = conversation.agent_id.clone();
     let limits = crate::concurrency::TurnLimits {
         global: settings.max_concurrent_turns.max(1) as usize,
@@ -177,6 +166,11 @@ pub fn cancel_turn(state: State<'_, AppState>, turn_id: String) -> bool {
 }
 
 /// Cancels every active turn of one conversation (background-thread Stop).
+#[tauri::command]
+pub fn cancel_all_turns(state: State<'_, AppState>) -> usize {
+    state.cancel_all()
+}
+
 #[tauri::command]
 pub fn cancel_conversation(state: State<'_, AppState>, conversation_id: String) -> usize {
     state.cancel_conversation(&conversation_id)

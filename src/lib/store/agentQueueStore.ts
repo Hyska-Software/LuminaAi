@@ -25,6 +25,8 @@ interface AgentQueueState {
   pausedByConversation: Record<string, boolean>;
 
   enqueue: (item: AgentQueueItem) => void;
+  /** Puts an item back at the head (used when TURN_BUSY rejects a drained item). */
+  enqueueFront: (item: AgentQueueItem) => void;
   dequeue: (conversationId: string) => AgentQueueItem | null;
   peek: (conversationId: string) => AgentQueueItem | null;
   remove: (conversationId: string, itemId: string) => void;
@@ -47,6 +49,19 @@ export const useAgentQueueStore = create<AgentQueueState>()(
             [item.conversationId]: [
               ...(state.byConversation[item.conversationId] ?? []),
               item,
+            ],
+          },
+        })),
+
+      enqueueFront: (item) =>
+        set((state) => ({
+          byConversation: {
+            ...state.byConversation,
+            [item.conversationId]: [
+              item,
+              ...(state.byConversation[item.conversationId] ?? []).filter(
+                (entry) => entry.id !== item.id,
+              ),
             ],
           },
         })),
@@ -98,6 +113,12 @@ export const useAgentQueueStore = create<AgentQueueState>()(
     }),
     {
       name: 'lumina.agent-queue.v1',
+      version: 1,
+      migrate: (persisted) => sanitizeAgentQueue(persisted) as AgentQueueState,
+      merge: (persisted, current) => ({
+        ...current,
+        ...sanitizeAgentQueue(persisted),
+      }),
       partialize: (state) => ({
         byConversation: state.byConversation,
         pausedByConversation: state.pausedByConversation,
@@ -112,7 +133,65 @@ export function compactAgentQueue(): void {
   const byConversation = Object.fromEntries(
     Object.entries(state.byConversation).filter(([, items]) => items.length > 0),
   );
-  if (Object.keys(byConversation).length !== Object.keys(state.byConversation).length) {
-    useAgentQueueStore.setState({ byConversation });
+  const pausedByConversation = Object.fromEntries(
+    Object.entries(state.pausedByConversation).filter(
+      ([conversationId, paused]) => paused && (byConversation[conversationId]?.length ?? 0) > 0,
+    ),
+  );
+  if (
+    Object.keys(byConversation).length !== Object.keys(state.byConversation).length ||
+    Object.keys(pausedByConversation).length !==
+      Object.keys(state.pausedByConversation).length
+  ) {
+    useAgentQueueStore.setState({ byConversation, pausedByConversation });
   }
+}
+
+function isQueueItem(value: unknown): value is AgentQueueItem {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<AgentQueueItem>;
+  return (
+    typeof item.id === 'string' &&
+    typeof item.conversationId === 'string' &&
+    typeof item.agentId === 'string' &&
+    typeof item.content === 'string' &&
+    Array.isArray(item.attachments) &&
+    typeof item.providerId === 'string' &&
+    typeof item.modelId === 'string'
+  );
+}
+
+/** Drops malformed localStorage data instead of crashing the whole app. */
+export function sanitizeAgentQueue(value: unknown): {
+  byConversation: Record<string, AgentQueueItem[]>;
+  pausedByConversation: Record<string, boolean>;
+} {
+  if (!value || typeof value !== 'object') {
+    return { byConversation: {}, pausedByConversation: {} };
+  }
+  const raw = value as {
+    byConversation?: unknown;
+    pausedByConversation?: unknown;
+  };
+  const byConversation: Record<string, AgentQueueItem[]> = {};
+  if (raw.byConversation && typeof raw.byConversation === 'object') {
+    for (const [conversationId, items] of Object.entries(
+      raw.byConversation as Record<string, unknown>,
+    )) {
+      if (!Array.isArray(items)) continue;
+      const clean = items.filter(isQueueItem);
+      if (clean.length > 0) byConversation[conversationId] = clean;
+    }
+  }
+  const pausedByConversation: Record<string, boolean> = {};
+  if (raw.pausedByConversation && typeof raw.pausedByConversation === 'object') {
+    for (const [conversationId, paused] of Object.entries(
+      raw.pausedByConversation as Record<string, unknown>,
+    )) {
+      if (paused === true && byConversation[conversationId]) {
+        pausedByConversation[conversationId] = true;
+      }
+    }
+  }
+  return { byConversation, pausedByConversation };
 }
