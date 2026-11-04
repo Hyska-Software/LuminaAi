@@ -202,8 +202,6 @@ CREATE TABLE IF NOT EXISTS agent_channels (
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_channels_dm_key
-  ON agent_channels(dm_key) WHERE dm_key IS NOT NULL;
 CREATE TABLE IF NOT EXISTS agent_channel_members (
   channel_id  TEXT NOT NULL REFERENCES agent_channels(id) ON DELETE CASCADE,
   agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -7385,6 +7383,35 @@ mod tests {
         db.delete_agent_channel(&channel.id).expect("delete channel");
         assert!(db.list_agent_channels().expect("channels").is_empty());
         assert!(db.get_conversation(&thread.id).expect("get").is_none());
+    }
+
+    #[test]
+    fn opens_legacy_agent_channels_without_dm_key() {
+        let temp = TempDir::new("lumina-db-legacy-channels");
+        let path = temp.path.join("lumina.db");
+        {
+            let conn = rusqlite::Connection::open(&path).expect("legacy connection");
+            conn.execute_batch(
+                "CREATE TABLE agent_channels (
+                   id TEXT PRIMARY KEY,
+                   name TEXT NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL
+                 );",
+            )
+            .expect("legacy channels table");
+        }
+        let db = Db::open(&path).expect("migrate legacy channels");
+        let channel = db
+            .create_agent_channel(
+                &crate::agents::AgentChannelInput {
+                    name: "Geral".to_string(),
+                    member_ids: Vec::new(),
+                },
+                now_ms(),
+            )
+            .expect("create");
+        assert_eq!(channel.kind, "channel");
     }
 
     #[test]
