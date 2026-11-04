@@ -747,6 +747,9 @@ pub struct AgentChannel {
     pub name: String,
     /// `channel` (group) or `dm` (direct agent-to-agent).
     pub kind: String,
+    /// Manual position inside the Canais section (0 = recency order).
+    #[serde(default)]
+    pub sort_order: i64,
     pub member_ids: Vec<String>,
     pub created_at: i64,
     pub updated_at: i64,

@@ -183,6 +183,11 @@ pub async fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<Workspace
     state.db.list_workspaces().map_err(map_err)
 }
 
+#[tauri::command]
+pub fn reorder_workspaces(state: State<'_, AppState>, ids: Vec<String>) -> Result<(), String> {
+    state.db.reorder_workspaces(&ids).map_err(map_err)
+}
+
 /// Workspace + contexto (git/projeto) para o header do layout Code.
 #[tauri::command]
 pub async fn get_workspace_context(

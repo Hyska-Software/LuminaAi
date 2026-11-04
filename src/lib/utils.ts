@@ -124,6 +124,33 @@ export function groupConversations(conversations: Conversation[]): ConversationG
   return groups;
 }
 
+/** Sidebar order: pinned first, then manual position, then recency. */
+export function compareConversationOrder(left: Conversation, right: Conversation): number {
+  return (
+    Number(right.pinned) - Number(left.pinned) ||
+    (left.sortOrder ?? 0) - (right.sortOrder ?? 0) ||
+    right.updatedAt - left.updatedAt
+  );
+}
+
+/** Manual position without separating pinned rows (Code sessions). */
+export function compareConversationPosition(left: Conversation, right: Conversation): number {
+  return (left.sortOrder ?? 0) - (right.sortOrder ?? 0) || right.updatedAt - left.updatedAt;
+}
+
+/** Runs async tasks one at a time, preserving the call order. */
+export function createSerialRunner(): <T>(task: () => Promise<T>) => Promise<T> {
+  let tail: Promise<unknown> = Promise.resolve();
+  return <T>(task: () => Promise<T>) => {
+    const run = tail.then(task, task);
+    tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+}
+
 export async function copyText(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {

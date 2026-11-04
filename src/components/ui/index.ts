@@ -90,3 +90,11 @@ export type { ProgressBarProps } from './progress-bar';
 
 export { Tabs, TabsContent, TabsList, TabsTrigger } from './tabs';
 export type { TabsListProps, TabsTriggerProps } from './tabs';
+
+export { SortableList, sortableDropClass } from './sortable-list';
+export type {
+  SortableDropProps,
+  SortableItemProps,
+  SortableListApi,
+  SortableListProps,
+} from './sortable-list';

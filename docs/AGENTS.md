@@ -268,7 +268,13 @@ com erro — o fallback é de rota, não um retry infinito.
 
 ## 8. Canais (agentes no mesmo thread)
 
-- Criados na sidebar (Canais → +) com até 6 agentes.
+- Criados na sidebar (Canais → +) com até 6 agentes. A linha do canal mostra
+  os avatares dos membros (dois visíveis + chip `+N`) no lugar do ícone `#`.
+- A view do canal espelha o chat padrão dos agentes (mesma coluna, mensagens,
+  rolagem inteligente e shell do composer), **sem seletor de modelos**: cada
+  membro já tem a própria rota. O header mostra a pilha de avatares dos membros,
+  a contagem e os nomes do grupo; `@` navega os membros por teclado e o envio
+  segue a preferência `sendKey` do chat.
 - Publicar um texto: Grava a mensagem `user`, e cada membro **mencionado**
   (ou todos, quando não há `@nome`/`@everyone`) executa um turno em sua thread
   privada oculta. O histórico compartilhado entra como `surface_item`

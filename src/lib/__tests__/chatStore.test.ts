@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => {
     renameConversation: vi.fn(),
     deleteConversation: vi.fn(),
     setConversationPinned: vi.fn(),
+    reorderConversations: vi.fn(),
     setConversationCodeLinked: vi.fn(),
     setConversationModel: vi.fn(),
     searchConversations: vi.fn(),
@@ -752,6 +753,35 @@ describe('chatStore other actions', () => {
   it('ships the DeepSeek V4.1 Flash model in the bundled catalog', () => {
     const go = catalog.providers.find((provider) => provider.id === 'opencode-go');
     expect(go?.models.some((model) => model.id === 'deepseek-v4.1-flash')).toBe(true);
+  });
+
+  it('reorderConversations updates positions and persists', async () => {
+    const first = conversation({ id: 'a', updatedAt: 20 });
+    const second = conversation({ id: 'b', updatedAt: 10 });
+    useChatStore.setState({ conversations: [first, second] });
+    mocks.api.reorderConversations.mockResolvedValue(undefined);
+
+    await useChatStore.getState().reorderConversations(['b', 'a']);
+
+    expect(mocks.api.reorderConversations).toHaveBeenCalledWith(['b', 'a']);
+    expect(useChatStore.getState().conversations.map((item) => item.id)).toEqual(['b', 'a']);
+    expect(useChatStore.getState().conversations[0].sortOrder).toBe(0);
+  });
+
+  it('reorderConversations reverts and refreshes when the backend fails', async () => {
+    const first = conversation({ id: 'a', updatedAt: 20 });
+    const second = conversation({ id: 'b', updatedAt: 10 });
+    useChatStore.setState({ conversations: [first, second] });
+    mocks.api.reorderConversations.mockRejectedValue(new Error('falhou'));
+    mocks.api.listConversations.mockResolvedValue([first, second]);
+
+    await useChatStore.getState().reorderConversations(['b', 'a']);
+
+    expect(toast.error).toHaveBeenCalledWith(
+      'Não foi possível reordenar as conversas',
+      expect.anything(),
+    );
+    expect(useChatStore.getState().conversations.map((item) => item.id)).toEqual(['a', 'b']);
   });
 });
 

@@ -20,7 +20,7 @@ import type {
   TurnResult,
   TurnKind,
 } from '../types';
-import { deriveTitle, newId } from '../utils';
+import { deriveTitle, newId, compareConversationOrder, createSerialRunner } from '../utils';
 import { inputFromAgent } from '../agentInput';
 import { defaultSelection, findModelIn, getModel } from '../catalog';
 import { filterConversationsForLayout } from '../conversations';
@@ -32,6 +32,8 @@ import { useAppStore } from './appStore';
 import { isCodeEvent, useCodeStore } from './codeStore';
 import { useCacheStore } from './cacheStore';
 import { useUiStore, type LayoutMode } from './uiStore';
+
+const runReorder = createSerialRunner();
 
 export interface StreamingState {
   turnId: string;
@@ -107,6 +109,8 @@ interface ChatState {
   deleteConversation: (id: string) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   togglePinned: (id: string) => Promise<void>;
+  /** Persists the manual order of one sidebar section. */
+  reorderConversations: (ids: string[]) => Promise<void>;
   /**
    * Applies a model/provider choice (and its thinking mode).
    *
@@ -1197,7 +1201,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
             ? state.conversations.map((c) => (c.id === result.conversation!.id ? result.conversation! : c))
             : [result.conversation!, ...state.conversations];
           return {
-            conversations: conversations.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt),
+            conversations: conversations.sort(compareConversationOrder),
           };
         });
       }
@@ -1749,6 +1753,28 @@ export const useChatStore = create<ChatState>()((set, get) => {
         await refreshList();
       } catch (error) {
         toast.error('Não foi possível fixar', { description: String(error) });
+      }
+    },
+
+    reorderConversations: async (ids) => {
+      const positions = new Map(ids.map((id, index) => [id, index]));
+      if (positions.size === 0) return;
+      const previous = get().conversations;
+      set((state) => ({
+        conversations: state.conversations
+          .map((conversation) =>
+            positions.has(conversation.id)
+              ? { ...conversation, sortOrder: positions.get(conversation.id)! }
+              : conversation,
+          )
+          .sort(compareConversationOrder),
+      }));
+      try {
+        await runReorder(() => api.reorderConversations(ids));
+      } catch (error) {
+        set({ conversations: previous });
+        toast.error('Não foi possível reordenar as conversas', { description: String(error) });
+        void get().refreshConversations();
       }
     },
 

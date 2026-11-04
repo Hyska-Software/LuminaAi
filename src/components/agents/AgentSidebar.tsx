@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
   Activity,
@@ -41,6 +41,7 @@ import { toast } from 'sonner';
 
 import { api } from '@/lib/api';
 import { AgentAvatar } from './AgentAvatar';
+import { AgentAvatarStack } from './AgentAvatarStack';
 import { AgentActivityDots } from './AgentActivityDots';
 import { AgentActivityDialog } from './AgentActivityDialog';
 import { AgentChannelDialog } from './AgentChannelDialog';
@@ -65,7 +66,10 @@ import {
   DropdownMenuTrigger,
   IconButton,
   Input,
+  SortableList,
+  sortableDropClass,
 } from '@/components/ui';
+import type { SortableListApi } from '@/components/ui';
 import {
   selectActiveAgents,
   selectArchivedAgents,
@@ -77,7 +81,18 @@ import {
   useUiStore,
 } from '@/lib/store';
 import type { Agent, AgentChannel, Conversation } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { cn, compareConversationOrder, createSerialRunner } from '@/lib/utils';
+
+const runChannelReorder = createSerialRunner();
+
+function sortChannels(channels: AgentChannel[]): AgentChannel[] {
+  return [...channels].sort(
+    (left, right) =>
+      (left.sortOrder ?? 0) - (right.sortOrder ?? 0) ||
+      right.updatedAt - left.updatedAt ||
+      left.id.localeCompare(right.id),
+  );
+}
 
 export interface AgentSidebarProps {
   className?: string;
@@ -87,6 +102,7 @@ export interface AgentSidebarProps {
 function ThreadRow({
   conversation,
   active,
+  sortable,
   onSelect,
   onTogglePin,
   onStartRename,
@@ -96,6 +112,7 @@ function ThreadRow({
 }: {
   conversation: Conversation;
   active: boolean;
+  sortable: SortableListApi;
   onSelect: () => void;
   onTogglePin: () => void;
   onStartRename: () => void;
@@ -117,15 +134,20 @@ function ThreadRow({
   const awaitingAnswer = (session?.questions.length ?? 0) > 0;
   const failed = Boolean(session?.error);
   return (
-    <div className="group/thread relative flex items-center">
+    <div
+      {...sortable.dropProps(conversation.id)}
+      className={cn('group/thread relative flex items-center', sortableDropClass)}
+    >
       <button
         type="button"
+        {...sortable.itemProps(conversation.id)}
         onClick={onSelect}
         aria-current={active ? 'page' : undefined}
         title={conversation.title}
         className={cn(
           'flex h-8 w-full min-w-0 items-center gap-2 rounded-lg pl-7 pr-8 text-left text-[12px]',
           'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+          !sortable.disabled && 'cursor-grab active:cursor-grabbing',
           active
             ? 'bg-surface-active text-foreground'
             : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
@@ -228,6 +250,9 @@ function AgentRow({
   expanded,
   threads,
   activeThreadId,
+  sortable,
+  threadsDisabled,
+  onReorderThreads,
   onSelect,
   onToggle,
   onNewThread,
@@ -254,6 +279,9 @@ function AgentRow({
   expanded: boolean;
   threads: Conversation[];
   activeThreadId: string | null;
+  sortable: SortableListApi;
+  threadsDisabled: boolean;
+  onReorderThreads: (ids: string[]) => void;
   onSelect: () => void;
   onToggle: () => void;
   onNewThread: () => void;
@@ -285,7 +313,7 @@ function AgentRow({
     ),
   );
   return (
-    <div>
+    <div {...sortable.dropProps(agent.id)} className={sortableDropClass}>
       <div className="group relative flex items-center">
         <button
           type="button"
@@ -298,11 +326,13 @@ function AgentRow({
         </button>
         <button
           type="button"
+          {...sortable.itemProps(agent.id)}
           onClick={onSelect}
           aria-current={active ? 'true' : undefined}
           className={cn(
             'flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 text-left',
             'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+            !sortable.disabled && 'cursor-grab active:cursor-grabbing',
             active ? 'bg-surface-active' : 'hover:bg-surface-hover',
           )}
         >
@@ -414,19 +444,35 @@ function AgentRow({
       </div>
       {expanded ? (
         <div className="mb-1 space-y-0.5">
-          {shown.map((thread) => (
-            <ThreadRow
-              key={thread.id}
-              conversation={thread}
-              active={activeThreadId === thread.id}
-              onSelect={() => onOpenThread(thread.id)}
-              onTogglePin={() => onToggleThreadPin(thread)}
-              onStartRename={() => onStartThreadRename(thread)}
-              onExport={() => onExportThread(thread)}
-              onDelete={() => onDeleteThread(thread)}
-              onStop={() => onStopThread(thread)}
-            />
-          ))}
+          {shown.length > 0 ? (
+            <SortableList
+              ids={shown.map((thread) => thread.id)}
+              label={`Conversas de ${agent.name}`}
+              itemLabel={(id) => threads.find((thread) => thread.id === id)?.title ?? id}
+              disabled={threadsDisabled}
+              lockedCount={shown.filter((thread) => thread.pinned).length}
+              onReorder={onReorderThreads}
+            >
+              {(threadSortable) => (
+                <div ref={threadSortable.containerRef} className="space-y-0.5">
+                  {shown.map((thread) => (
+                    <ThreadRow
+                      key={thread.id}
+                      conversation={thread}
+                      active={activeThreadId === thread.id}
+                      sortable={threadSortable}
+                      onSelect={() => onOpenThread(thread.id)}
+                      onTogglePin={() => onToggleThreadPin(thread)}
+                      onStartRename={() => onStartThreadRename(thread)}
+                      onExport={() => onExportThread(thread)}
+                      onDelete={() => onDeleteThread(thread)}
+                      onStop={() => onStopThread(thread)}
+                    />
+                  ))}
+                </div>
+              )}
+            </SortableList>
+          ) : null}
           {threads.length > shown.length ? (
             <button
               type="button"
@@ -446,38 +492,63 @@ function AgentRow({
   );
 }
 
+/** Overlapping member thumbnails shown on a channel row (2 + overflow chip). */
+function ChannelMemberStack({ members, active }: { members: Agent[]; active: boolean }) {
+  return (
+    <AgentAvatarStack
+      members={members}
+      ringClassName={
+        active
+          ? 'ring-surface-active'
+          : 'ring-surface group-hover/channel:ring-surface-hover'
+      }
+    />
+  );
+}
+
 function ChannelRow({
   channel,
+  members,
   active,
   label,
   pending,
+  sortable,
   onSelect,
   onEdit,
 }: {
   channel: AgentChannel;
+  members: Agent[];
   active: boolean;
   label: string;
   pending: number;
+  sortable: SortableListApi;
   onSelect: () => void;
   onEdit: () => void;
 }) {
   const dm = channel.kind === 'dm';
   return (
-    <div className="group/channel relative flex items-center">
+    <div
+      {...sortable.dropProps(channel.id)}
+      className={cn('group/channel relative flex items-center', sortableDropClass)}
+    >
       <button
         type="button"
+        {...sortable.itemProps(channel.id)}
         onClick={onSelect}
         aria-current={active ? 'page' : undefined}
         title={label}
         className={cn(
           'flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 pr-8 text-left text-[12px]',
           'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+          !sortable.disabled && 'cursor-grab active:cursor-grabbing',
           active
             ? 'bg-surface-active text-foreground'
             : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
         )}
       >
-        {dm ? (
+        {members.length > 0 ? (
+          <ChannelMemberStack members={members} active={active} />
+        ) : dm ? (
           <MessageCircle aria-hidden className="size-3.5 shrink-0 text-accent" />
         ) : (
           <Hash aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
@@ -487,11 +558,7 @@ function ChannelRow({
           <span className="shrink-0 rounded-full bg-accent px-1.5 text-[10px] font-medium text-background">
             {pending}
           </span>
-        ) : (
-          <span className="shrink-0 text-[10px] text-foreground-subtle">
-            {channel.memberIds.length}
-          </span>
-        )}
+        ) : null}
       </button>
       {dm ? null : (
         <button
@@ -543,12 +610,14 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const [deleteThreadTarget, setDeleteThreadTarget] = useState<Conversation | null>(null);
   const [deleteThreadBusy, setDeleteThreadBusy] = useState(false);
   const agents = useAgentStore(useShallow(selectActiveAgents));
+  const agentsById = useAgentStore((state) => state.agentsById);
   const status = useAgentStore((state) => state.status);
   const storeError = useAgentStore((state) => state.error);
   const refresh = useAgentStore((state) => state.refresh);
   const pinned = useAgentStore(useShallow(selectPinnedAgents));
   const archived = useAgentStore(useShallow(selectArchivedAgents));
   const pin = useAgentStore((state) => state.pin);
+  const reorderAgents = useAgentStore((state) => state.reorder);
   const archive = useAgentStore((state) => state.archive);
   const restore = useAgentStore((state) => state.restore);
   const remove = useAgentStore((state) => state.remove);
@@ -576,35 +645,31 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
     }
   }, [activeAgentId]);
 
-  useEffect(() => {
-    let disposed = false;
-    const load = () => {
-      void Promise.all([api.listAgentChannels(), api.listAgentChannelInboxCounts()])
-        .then(([list, counts]) => {
-          if (disposed) return;
-          setChannels(list);
-          setInboxCounts(
-            Object.fromEntries(counts.map((entry) => [entry.channelId, entry.pending])),
-          );
-        })
-        .catch(() => {
-          if (!disposed) {
-            setChannels([]);
-            setInboxCounts({});
-          }
-        });
-    };
-    load();
-    window.addEventListener('lumina:channels-changed', load);
-    window.addEventListener('lumina:agent-channel-updated', load);
-    window.addEventListener('lumina:agent-inbox-updated', load);
-    return () => {
-      disposed = true;
-      window.removeEventListener('lumina:channels-changed', load);
-      window.removeEventListener('lumina:agent-channel-updated', load);
-      window.removeEventListener('lumina:agent-inbox-updated', load);
-    };
+  const loadChannels = useCallback(() => {
+    void Promise.all([api.listAgentChannels(), api.listAgentChannelInboxCounts()])
+      .then(([list, counts]) => {
+        setChannels(sortChannels(list));
+        setInboxCounts(
+          Object.fromEntries(counts.map((entry) => [entry.channelId, entry.pending])),
+        );
+      })
+      .catch(() => {
+        setChannels([]);
+        setInboxCounts({});
+      });
   }, []);
+
+  useEffect(() => {
+    loadChannels();
+    window.addEventListener('lumina:channels-changed', loadChannels);
+    window.addEventListener('lumina:agent-channel-updated', loadChannels);
+    window.addEventListener('lumina:agent-inbox-updated', loadChannels);
+    return () => {
+      window.removeEventListener('lumina:channels-changed', loadChannels);
+      window.removeEventListener('lumina:agent-channel-updated', loadChannels);
+      window.removeEventListener('lumina:agent-inbox-updated', loadChannels);
+    };
+  }, [loadChannels]);
 
   const threadsFor = (agentId: string) =>
     conversations
@@ -615,7 +680,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           !conversation.channelId &&
           !conversation.taskId,
       )
-      .sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.updatedAt - left.updatedAt);
+      .sort(compareConversationOrder);
 
   const groups = useMemo(() => {
     const byDepartment = new Map<string, Agent[]>();
@@ -680,6 +745,14 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
     onClose?.();
   };
 
+  const channelLabel = (channel: AgentChannel) =>
+    channel.kind === 'dm'
+      ? channel.memberIds
+          .map((id) => agents.find((agent) => agent.id === id)?.name)
+          .filter(Boolean)
+          .join(' ↔ ') || channel.name
+      : channel.name;
+
   const newThread = (agent: Agent) => {
     setActiveAgentId(agent.id);
     void startNewConversation('agent', { agentId: agent.id });
@@ -694,6 +767,35 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
 
   const toggleThreadPinned = (thread: Conversation) => {
     void useChatStore.getState().togglePinned(thread.id);
+  };
+
+  const handleReorderAgents = (ids: string[]) => {
+    void reorderAgents(ids).catch((error) => {
+      toast.error('Não foi possível reordenar os agentes', { description: String(error) });
+    });
+  };
+
+  const handleReorderChannels = (ids: string[]) => {
+    const positions = new Map(ids.map((id, index) => [id, index]));
+    setChannels((current) =>
+      sortChannels(
+        current.map((channel) =>
+          positions.has(channel.id)
+            ? { ...channel, sortOrder: positions.get(channel.id)! }
+            : channel,
+        ),
+      ),
+    );
+    void runChannelReorder(() => api.reorderAgentChannels(ids)).catch((error) => {
+      toast.error('Não foi possível reordenar os canais', { description: String(error) });
+      loadChannels();
+    });
+  };
+
+  const handleReorderThreads = (agent: Agent, visibleIds: string[]) => {
+    const full = threadsFor(agent.id).map((thread) => thread.id);
+    const hidden = full.filter((id) => !visibleIds.includes(id));
+    void useChatStore.getState().reorderConversations([...visibleIds, ...hidden]);
   };
 
   const stopThread = (thread: Conversation) => {
@@ -954,29 +1056,39 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
               {normalizedQuery ? 'Nenhum canal encontrado.' : 'Nenhum canal ainda.'}
             </p>
           ) : (
-            <div className="space-y-0.5">
-              {visibleChannels.map((channel) => (
-                <ChannelRow
-                  key={channel.id}
-                  channel={channel}
-                  active={activeChannelId === channel.id}
-                  label={
-                    channel.kind === 'dm'
-                      ? channel.memberIds
-                          .map((id) => agents.find((agent) => agent.id === id)?.name)
-                          .filter(Boolean)
-                          .join(' ↔ ') || channel.name
-                      : channel.name
-                  }
-                  pending={inboxCounts[channel.id] ?? 0}
-                  onSelect={() => selectChannel(channel)}
-                  onEdit={() => {
-                    setEditingChannel(channel);
-                    setChannelDialogOpen(true);
-                  }}
-                />
-              ))}
-            </div>
+            <SortableList
+              ids={visibleChannels.map((channel) => channel.id)}
+              label="Canais"
+              itemLabel={(id) => {
+                const channel = visibleChannels.find((item) => item.id === id);
+                return channel ? channelLabel(channel) : id;
+              }}
+              disabled={normalizedQuery.length > 0}
+              onReorder={handleReorderChannels}
+            >
+              {(sortable) => (
+                <div ref={sortable.containerRef} className="space-y-0.5">
+                  {visibleChannels.map((channel) => (
+                    <ChannelRow
+                      key={channel.id}
+                      channel={channel}
+                      members={channel.memberIds
+                        .map((id) => agentsById[id])
+                        .filter((member): member is Agent => Boolean(member))}
+                      active={activeChannelId === channel.id}
+                      label={channelLabel(channel)}
+                      pending={inboxCounts[channel.id] ?? 0}
+                      sortable={sortable}
+                      onSelect={() => selectChannel(channel)}
+                      onEdit={() => {
+                        setEditingChannel(channel);
+                        setChannelDialogOpen(true);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </SortableList>
           )}
         </section>
 
@@ -1000,43 +1112,58 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
               <Pin className="size-3" />
               Fixados
             </p>
-            {visiblePinned.map((agent) => (
-              <AgentRow
-                key={agent.id}
-                agent={agent}
-                active={activeAgentId === agent.id}
-                expanded={expanded.has(agent.id) || Boolean(normalizedQuery)}
-                threads={threadsFor(agent.id)}
-                activeThreadId={activeId}
-                onSelect={() => selectAgent(agent)}
-                onToggle={() =>
-                  setExpanded((current) => {
-                    const next = new Set(current);
-                    if (next.has(agent.id)) next.delete(agent.id);
-                    else next.add(agent.id);
-                    return next;
-                  })
-                }
-                onNewThread={() => newThread(agent)}
-                onEdit={() => openEditor({ mode: 'edit', agentId: agent.id })}
-                onAvatar={() => openAvatarEditor(agent.id)}
-                onRevise={() => setRevisionAgent(agent)}
-                onDuplicate={() => void duplicateAgent(agent)}
-                onExport={() => void exportAgent(agent)}
-                onPin={() => void togglePinned(agent)}
-                onArchive={() => void archiveAgent(agent)}
-                onDelete={() => setDeleteTarget(agent)}
-                onOpenThread={(threadId) => openThread(agent, threadId)}
-                onToggleThreadPin={toggleThreadPinned}
-                onStartThreadRename={startThreadRename}
-                onExportThread={(thread) => void exportThread(thread)}
-                onDeleteThread={setDeleteThreadTarget}
-                onStopThread={stopThread}
-                onShowAllThreads={() => setAllThreadsAgent(agent)}
-                onRoutines={() => setRoutinesAgent(agent)}
-                onTasks={() => setTasksAgent(agent)}
-              />
-            ))}
+            <SortableList
+              ids={visiblePinned.map((agent) => agent.id)}
+              label="Fixados"
+              itemLabel={(id) => visiblePinned.find((agent) => agent.id === id)?.name ?? id}
+              disabled={normalizedQuery.length > 0}
+              onReorder={handleReorderAgents}
+            >
+              {(sortable) => (
+                <div ref={sortable.containerRef} className="space-y-0.5">
+                  {visiblePinned.map((agent) => (
+                    <AgentRow
+                      key={agent.id}
+                      agent={agent}
+                      active={activeAgentId === agent.id}
+                      expanded={expanded.has(agent.id) || Boolean(normalizedQuery)}
+                      threads={threadsFor(agent.id)}
+                      activeThreadId={activeId}
+                      sortable={sortable}
+                      threadsDisabled={normalizedQuery.length > 0}
+                      onReorderThreads={(ids) => handleReorderThreads(agent, ids)}
+                      onSelect={() => selectAgent(agent)}
+                      onToggle={() =>
+                        setExpanded((current) => {
+                          const next = new Set(current);
+                          if (next.has(agent.id)) next.delete(agent.id);
+                          else next.add(agent.id);
+                          return next;
+                        })
+                      }
+                      onNewThread={() => newThread(agent)}
+                      onEdit={() => openEditor({ mode: 'edit', agentId: agent.id })}
+                      onAvatar={() => openAvatarEditor(agent.id)}
+                      onRevise={() => setRevisionAgent(agent)}
+                      onDuplicate={() => void duplicateAgent(agent)}
+                      onExport={() => void exportAgent(agent)}
+                      onPin={() => void togglePinned(agent)}
+                      onArchive={() => void archiveAgent(agent)}
+                      onDelete={() => setDeleteTarget(agent)}
+                      onOpenThread={(threadId) => openThread(agent, threadId)}
+                      onToggleThreadPin={toggleThreadPinned}
+                      onStartThreadRename={startThreadRename}
+                      onExportThread={(thread) => void exportThread(thread)}
+                      onDeleteThread={setDeleteThreadTarget}
+                      onStopThread={stopThread}
+                      onShowAllThreads={() => setAllThreadsAgent(agent)}
+                      onRoutines={() => setRoutinesAgent(agent)}
+                      onTasks={() => setTasksAgent(agent)}
+                    />
+                  ))}
+                </div>
+              )}
+            </SortableList>
           </section>
         ) : null}
 
@@ -1045,43 +1172,58 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
             <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
               {group.department}
             </p>
-            {group.agents.map((agent) => (
-              <AgentRow
-                key={agent.id}
-                agent={agent}
-                active={activeAgentId === agent.id}
-                expanded={expanded.has(agent.id) || Boolean(normalizedQuery)}
-                threads={threadsFor(agent.id)}
-                activeThreadId={activeId}
-                onSelect={() => selectAgent(agent)}
-                onToggle={() =>
-                  setExpanded((current) => {
-                    const next = new Set(current);
-                    if (next.has(agent.id)) next.delete(agent.id);
-                    else next.add(agent.id);
-                    return next;
-                  })
-                }
-                onNewThread={() => newThread(agent)}
-                onEdit={() => openEditor({ mode: 'edit', agentId: agent.id })}
-                onAvatar={() => openAvatarEditor(agent.id)}
-                onRevise={() => setRevisionAgent(agent)}
-                onDuplicate={() => void duplicateAgent(agent)}
-                onExport={() => void exportAgent(agent)}
-                onPin={() => void togglePinned(agent)}
-                onArchive={() => void archiveAgent(agent)}
-                onDelete={() => setDeleteTarget(agent)}
-                onOpenThread={(threadId) => openThread(agent, threadId)}
-                onToggleThreadPin={toggleThreadPinned}
-                onStartThreadRename={startThreadRename}
-                onExportThread={(thread) => void exportThread(thread)}
-                onDeleteThread={setDeleteThreadTarget}
-                onStopThread={stopThread}
-                onShowAllThreads={() => setAllThreadsAgent(agent)}
-                onRoutines={() => setRoutinesAgent(agent)}
-                onTasks={() => setTasksAgent(agent)}
-              />
-            ))}
+            <SortableList
+              ids={group.agents.map((agent) => agent.id)}
+              label={group.department}
+              itemLabel={(id) => group.agents.find((agent) => agent.id === id)?.name ?? id}
+              disabled={normalizedQuery.length > 0}
+              onReorder={handleReorderAgents}
+            >
+              {(sortable) => (
+                <div ref={sortable.containerRef} className="space-y-0.5">
+                  {group.agents.map((agent) => (
+                    <AgentRow
+                      key={agent.id}
+                      agent={agent}
+                      active={activeAgentId === agent.id}
+                      expanded={expanded.has(agent.id) || Boolean(normalizedQuery)}
+                      threads={threadsFor(agent.id)}
+                      activeThreadId={activeId}
+                      sortable={sortable}
+                      threadsDisabled={normalizedQuery.length > 0}
+                      onReorderThreads={(ids) => handleReorderThreads(agent, ids)}
+                      onSelect={() => selectAgent(agent)}
+                      onToggle={() =>
+                        setExpanded((current) => {
+                          const next = new Set(current);
+                          if (next.has(agent.id)) next.delete(agent.id);
+                          else next.add(agent.id);
+                          return next;
+                        })
+                      }
+                      onNewThread={() => newThread(agent)}
+                      onEdit={() => openEditor({ mode: 'edit', agentId: agent.id })}
+                      onAvatar={() => openAvatarEditor(agent.id)}
+                      onRevise={() => setRevisionAgent(agent)}
+                      onDuplicate={() => void duplicateAgent(agent)}
+                      onExport={() => void exportAgent(agent)}
+                      onPin={() => void togglePinned(agent)}
+                      onArchive={() => void archiveAgent(agent)}
+                      onDelete={() => setDeleteTarget(agent)}
+                      onOpenThread={(threadId) => openThread(agent, threadId)}
+                      onToggleThreadPin={toggleThreadPinned}
+                      onStartThreadRename={startThreadRename}
+                      onExportThread={(thread) => void exportThread(thread)}
+                      onDeleteThread={setDeleteThreadTarget}
+                      onStopThread={stopThread}
+                      onShowAllThreads={() => setAllThreadsAgent(agent)}
+                      onRoutines={() => setRoutinesAgent(agent)}
+                      onTasks={() => setTasksAgent(agent)}
+                    />
+                  ))}
+                </div>
+              )}
+            </SortableList>
           </section>
         ))}
 
@@ -1314,22 +1456,38 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
               </p>
             ) : null}
             {allThreadsAgent
-              ? threadsFor(allThreadsAgent.id).map((thread) => (
-                  <ThreadRow
-                    key={thread.id}
-                    conversation={thread}
-                    active={activeId === thread.id}
-                    onSelect={() => {
-                      openThread(allThreadsAgent, thread.id);
-                      setAllThreadsAgent(null);
-                    }}
-                    onTogglePin={() => toggleThreadPinned(thread)}
-                    onStartRename={() => startThreadRename(thread)}
-                    onExport={() => void exportThread(thread)}
-                    onDelete={() => setDeleteThreadTarget(thread)}
-                    onStop={() => stopThread(thread)}
-                  />
-                ))
+              ? (
+                  <SortableList
+                    ids={threadsFor(allThreadsAgent.id).map((thread) => thread.id)}
+                    label={`Conversas de ${allThreadsAgent.name}`}
+                    itemLabel={(id) =>
+                      threadsFor(allThreadsAgent.id).find((thread) => thread.id === id)?.title ?? id
+                    }
+                    onReorder={(ids) => void useChatStore.getState().reorderConversations(ids)}
+                  >
+                    {(sortable) => (
+                      <div ref={sortable.containerRef} className="space-y-0.5">
+                        {threadsFor(allThreadsAgent.id).map((thread) => (
+                          <ThreadRow
+                            key={thread.id}
+                            conversation={thread}
+                            active={activeId === thread.id}
+                            sortable={sortable}
+                            onSelect={() => {
+                              openThread(allThreadsAgent, thread.id);
+                              setAllThreadsAgent(null);
+                            }}
+                            onTogglePin={() => toggleThreadPinned(thread)}
+                            onStartRename={() => startThreadRename(thread)}
+                            onExport={() => void exportThread(thread)}
+                            onDelete={() => setDeleteThreadTarget(thread)}
+                            onStop={() => stopThread(thread)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </SortableList>
+                )
               : null}
           </AgentDialogBody>
           <DialogFooter>

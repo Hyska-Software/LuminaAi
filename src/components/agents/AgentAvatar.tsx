@@ -4,10 +4,11 @@ import { DEFAULT_AGENT_AVATAR } from '@/lib/agentAvatar';
 import type { AgentAvatar as AgentAvatarSpec, AgentAvatarShape } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
-export type AgentAvatarSize = 'sm' | 'md' | 'lg' | 'xl' | 'tile';
+export type AgentAvatarSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'tile';
 export type AgentAvatarActivity = 'idle' | 'running';
 
 const BOX: Record<AgentAvatarSize, string> = {
+  xs: 'size-5 text-[12px]',
   sm: 'size-7 text-[15px]',
   md: 'size-9 text-[20px]',
   lg: 'size-14 text-[30px]',

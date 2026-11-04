@@ -304,6 +304,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             pinned: false,
+            sort_order: 0,
             provider_id: "opencode-go".to_string(),
             model_id: "deepseek-v4.1-flash".to_string(),
             message_count: 0,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Conversation } from '@/lib/types';
 import {
   cn,
+  createSerialRunner,
   deriveTitle,
   formatBytes,
   formatCost,
@@ -188,5 +189,31 @@ describe('groupConversations', () => {
 
   it('returns no groups for an empty list', () => {
     expect(groupConversations([])).toEqual([]);
+  });
+});
+
+describe('createSerialRunner', () => {
+  it('runs tasks in call order even when the first is slow', async () => {
+    const run = createSerialRunner();
+    const events: string[] = [];
+    const slow = run(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      events.push('slow');
+    });
+    const fast = run(async () => {
+      events.push('fast');
+    });
+    await Promise.all([slow, fast]);
+    expect(events).toEqual(['slow', 'fast']);
+  });
+
+  it('keeps running after a rejection', async () => {
+    const run = createSerialRunner();
+    await expect(
+      run(async () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+    await expect(run(async () => 'ok')).resolves.toBe('ok');
   });
 });

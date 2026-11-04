@@ -302,6 +302,8 @@ export interface Workspace {
   updatedAt: number;
   lastOpenedAt?: number | null;
   pinned?: boolean;
+  /** Posição manual dentro da seção da sidebar (0 = ordem por recência). */
+  sortOrder?: number;
   trusted?: boolean;
   git?: GitInfo | null;
 }
@@ -1039,6 +1041,8 @@ export interface AgentChannel {
   id: string;
   name: string;
   kind?: 'channel' | 'dm';
+  /** Posição manual na seção Canais (0 = ordem por recência). */
+  sortOrder?: number;
   memberIds: string[];
   createdAt: number;
   updatedAt: number;
@@ -1274,6 +1278,8 @@ export interface Conversation {
   createdAt: number;
   updatedAt: number;
   pinned: boolean;
+  /** Posição manual dentro da seção da sidebar (0 = ordem por recência). */
+  sortOrder?: number;
   providerId: string;
   modelId: string;
   messageCount: number;

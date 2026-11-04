@@ -38,6 +38,9 @@ pub struct Conversation {
     pub updated_at: i64,
     #[serde(default)]
     pub pinned: bool,
+    /// Manual position inside its sidebar section (0 = recency order).
+    #[serde(default)]
+    pub sort_order: i64,
     pub provider_id: String,
     pub model_id: String,
     #[serde(default)]
@@ -1793,6 +1796,9 @@ pub struct Workspace {
     pub last_opened_at: Option<i64>,
     #[serde(default)]
     pub pinned: bool,
+    /// Manual position inside the sidebar (0 = recency order).
+    #[serde(default)]
+    pub sort_order: i64,
     /// Aprovado pelo usuário na primeira abertura ("Confiar nesta pasta").
     #[serde(default)]
     pub trusted: bool,
@@ -2580,6 +2586,7 @@ mod tests {
             created_at: 1_700_000_000_000,
             updated_at: 1_700_000_001_000,
             pinned: false,
+            sort_order: 0,
             provider_id: "opencode-go".into(),
             model_id: "glm-5.3-flash".into(),
             message_count: 3,

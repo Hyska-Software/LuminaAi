@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   createConversation: vi.fn(),
   exportConversation: vi.fn(),
   setConversationCodeLinked: vi.fn(),
+  reorderConversations: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -354,5 +355,30 @@ describe('Sidebar — sessões separadas Chat/Code', () => {
     await waitFor(() =>
       expect(mocks.setConversationCodeLinked).toHaveBeenCalledWith('shared-1', false),
     );
+  });
+});
+
+describe('Sidebar — reordenação por teclado', () => {
+  it('move a conversa dentro da seção e persiste a ordem', async () => {
+    const now = Date.now();
+    mocks.reorderConversations.mockResolvedValue(undefined);
+    useChatStore.setState({
+      conversations: [
+        conversation({ id: 'c-1', title: 'Primeira', updatedAt: now }),
+        conversation({ id: 'c-2', title: 'Segunda', updatedAt: now - 1_000 }),
+      ],
+      activeId: null,
+    });
+    render(<Sidebar />);
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Primeira' }), {
+      key: 'ArrowDown',
+      altKey: true,
+    });
+
+    await waitFor(() =>
+      expect(mocks.reorderConversations).toHaveBeenCalledWith(['c-2', 'c-1']),
+    );
+    expect(useChatStore.getState().conversations.map((item) => item.id)).toEqual(['c-2', 'c-1']);
   });
 });

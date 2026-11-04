@@ -193,6 +193,7 @@ export const api = {
     invoke<string>('import_agent_avatar_image', { path }),
   setAgentPinned: (agentId: string, pinned: boolean) =>
     invoke<Agent>('set_agent_pinned', { agentId, pinned }),
+  reorderAgents: (ids: string[]) => invoke<void>('reorder_agents', { ids }),
   archiveAgent: (agentId: string) => invoke<Agent>('archive_agent', { agentId }),
   restoreAgent: (agentId: string) => invoke<Agent>('restore_agent', { agentId }),
   deleteAgent: (agentId: string) => invoke<void>('delete_agent', { agentId }),
@@ -266,6 +267,7 @@ export const api = {
     invoke<AgentTask>('reassign_agent_task', { taskId, toAgentId }),
   runAgentTaskNow: (taskId: string) => invoke<AgentTask>('run_agent_task_now', { taskId }),
   listAgentChannels: () => invoke<AgentChannel[]>('list_agent_channels'),
+  reorderAgentChannels: (ids: string[]) => invoke<void>('reorder_agent_channels', { ids }),
   createAgentChannel: (input: AgentChannelInput) =>
     invoke<AgentChannel>('create_agent_channel', { input }),
   updateAgentChannel: (channelId: string, input: AgentChannelInput) =>
@@ -289,6 +291,7 @@ export const api = {
   deleteConversation: (id: string) => invoke<void>('delete_conversation', { id }),
   setConversationPinned: (id: string, pinned: boolean) =>
     invoke<void>('set_conversation_pinned', { id, pinned }),
+  reorderConversations: (ids: string[]) => invoke<void>('reorder_conversations', { ids }),
   /** Compartilha uma sessão do Chat com o layout Code (ou remove o vínculo). */
   setConversationCodeLinked: (id: string, linked: boolean) =>
     invoke<Conversation>('set_conversation_code_linked', { id, linked }),
@@ -463,6 +466,7 @@ export const api = {
   addWorkspace: (path: string, trusted = false) =>
     invoke<Workspace>('add_workspace', { path, trusted }),
   listWorkspaces: () => invoke<Workspace[]>('list_workspaces'),
+  reorderWorkspaces: (ids: string[]) => invoke<void>('reorder_workspaces', { ids }),
   getWorkspace: (id: string) => invoke<WorkspaceContext | null>('get_workspace_context', { id }),
   renameWorkspace: (id: string, name: string) =>
     invoke<Workspace>('rename_workspace', { id, name }),

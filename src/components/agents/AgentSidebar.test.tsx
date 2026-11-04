@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   exportConversation: vi.fn(),
   importAgent: vi.fn(),
   listAgentThreads: vi.fn(),
+  reorderAgents: vi.fn(),
+  reorderConversations: vi.fn(),
+  reorderAgentChannels: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -222,6 +225,23 @@ describe('AgentSidebar — management and channels', () => {
     await waitFor(() => expect(mocks.importAgent).toHaveBeenCalled());
   });
 
+  it('mostra as miniaturas dos membros e o excedente no canal', async () => {
+    const memberIds = ['agent-1', 'agent-2', 'agent-3', 'agent-4'];
+    useAgentStore.setState({
+      agentsById: Object.fromEntries(
+        memberIds.map((id, index) => [id, agent({ id, name: `Agente ${index + 1}` })]),
+      ),
+      orderedIds: memberIds,
+    });
+    mocks.listAgentChannels.mockResolvedValue([channel({ memberIds })]);
+    render(<AgentSidebar />);
+
+    const row = await screen.findByRole('button', { name: 'Lançamento' });
+    // Two overlapping avatars plus the overflow chip ("+2") replace the # icon.
+    expect(row.querySelectorAll('[data-avatar-kind]')).toHaveLength(2);
+    expect(within(row).getByText('+2')).toBeTruthy();
+  });
+
   it('selects a channel and exposes it in the sidebar', async () => {
     mocks.listAgentChannels.mockResolvedValue([channel()]);
     render(<AgentSidebar />);
@@ -229,5 +249,93 @@ describe('AgentSidebar — management and channels', () => {
     fireEvent.click(rows[0]);
     expect(useUiStore.getState().activeChannelId).toBe('channel-1');
     expect(useUiStore.getState().activeAgentId).toBeNull();
+  });
+});
+
+describe('AgentSidebar — reordenação por teclado', () => {
+  it('move o agente dentro do departamento e persiste a ordem', async () => {
+    const first = agent({ id: 'agent-1', name: 'Ana', sortOrder: 1 });
+    const second = agent({ id: 'agent-2', name: 'Bia', sortOrder: 2 });
+    mocks.listAgents.mockResolvedValue([first, second]);
+    mocks.reorderAgents.mockResolvedValue(undefined);
+    useAgentStore.setState({
+      agentsById: { 'agent-1': first, 'agent-2': second },
+      orderedIds: ['agent-1', 'agent-2'],
+      status: 'ready',
+      error: null,
+      mutationById: {},
+      initialized: true,
+    });
+    useChatStore.setState({ conversations: [], activeId: null });
+
+    render(<AgentSidebar />);
+
+    fireEvent.keyDown(screen.getByRole('button', { name: /^Ana/ }), {
+      key: 'ArrowDown',
+      altKey: true,
+    });
+
+    await waitFor(() =>
+      expect(mocks.reorderAgents).toHaveBeenCalledWith(['agent-2', 'agent-1']),
+    );
+  });
+
+  it('move a conversa dentro do agente e preserva as ocultas', async () => {
+    const threads = Array.from({ length: 6 }, (_, index) =>
+      thread({
+        id: `thread-${index + 1}`,
+        title: `Conversa ${index + 1}`,
+        updatedAt: 100 - index,
+      }),
+    );
+    mocks.reorderConversations.mockResolvedValue(undefined);
+    useChatStore.setState({ conversations: threads, activeId: null });
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1', activeChannelId: null });
+
+    render(<AgentSidebar />);
+
+    fireEvent.keyDown(screen.getByRole('button', { name: /^Conversa 1/ }), {
+      key: 'ArrowDown',
+      altKey: true,
+    });
+
+    await waitFor(() =>
+      expect(mocks.reorderConversations).toHaveBeenCalledWith([
+        'thread-2',
+        'thread-1',
+        'thread-3',
+        'thread-4',
+        'thread-5',
+        'thread-6',
+      ]),
+    );
+  });
+});
+
+describe('AgentSidebar — canais reordenáveis', () => {
+  it('move o canal dentro de Canais e persiste a ordem', async () => {
+    const first = channel({
+      id: 'channel-1',
+      name: 'Analises',
+      updatedAt: 20,
+      sortOrder: 0,
+    });
+    const second = channel({
+      id: 'channel-2',
+      name: 'Canal',
+      updatedAt: 10,
+      sortOrder: 1,
+    });
+    mocks.listAgentChannels.mockResolvedValue([first, second]);
+    mocks.reorderAgentChannels.mockResolvedValue(undefined);
+
+    render(<AgentSidebar />);
+
+    const button = await screen.findByRole('button', { name: /^Analises/ });
+    fireEvent.keyDown(button, { key: 'ArrowDown', altKey: true });
+
+    await waitFor(() =>
+      expect(mocks.reorderAgentChannels).toHaveBeenCalledWith(['channel-2', 'channel-1']),
+    );
   });
 });

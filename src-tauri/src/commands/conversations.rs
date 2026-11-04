@@ -216,6 +216,14 @@ pub fn set_conversation_pinned(
     state.db.set_pinned(&id, pinned).map_err(to_error)
 }
 
+#[tauri::command]
+pub fn reorder_conversations(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> Result<(), String> {
+    state.db.reorder_conversations(&ids).map_err(to_error)
+}
+
 /// Compartilha uma sessão do Chat com o layout Code (`linked = true`) ou
 /// desfaz o vínculo (`linked = false`). Só sessões criadas no Chat podem ser
 /// compartilhadas; o backend devolve a conversa atualizada.
@@ -648,6 +656,7 @@ mod tests {
                 created_at: 1_700_000_000_000,
                 updated_at: 1_700_000_002_000,
                 pinned: false,
+                sort_order: 0,
                 provider_id: "opencode-go".to_string(),
                 model_id: "glm-5.3-flash".to_string(),
                 message_count: 2,

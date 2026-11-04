@@ -153,6 +153,11 @@ pub fn set_agent_pinned(
 }
 
 #[tauri::command]
+pub fn reorder_agents(state: State<'_, AppState>, ids: Vec<String>) -> Result<(), String> {
+    state.db.reorder_agents(&ids).map_err(to_error)
+}
+
+#[tauri::command]
 pub fn archive_agent(state: State<'_, AppState>, agent_id: String) -> Result<Agent, String> {
     state.db.archive_agent(&agent_id).map_err(to_error)
 }

@@ -2,19 +2,24 @@ import { create } from 'zustand';
 
 import { api } from '@/lib/api';
 import type { Agent, AgentAvatar, AgentInput } from '@/lib/types';
+import { createSerialRunner } from '@/lib/utils';
 
 let initializePromise: Promise<void> | null = null;
 const avatarSequence = new Map<string, number>();
+const runReorder = createSerialRunner();
 
 function sortAgents(agents: Agent[]): Agent[] {
   return [...agents].sort((left, right) => {
     if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
+    const nameOrder = left.name.localeCompare(right.name, 'pt-BR', { sensitivity: 'base' });
+    if (left.pinned) {
+      return left.sortOrder - right.sortOrder || nameOrder;
+    }
     const department = left.department.localeCompare(right.department, 'pt-BR', {
       sensitivity: 'base',
     });
     if (department !== 0) return department;
-    if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
-    return left.name.localeCompare(right.name, 'pt-BR', { sensitivity: 'base' });
+    return left.sortOrder - right.sortOrder || nameOrder;
   });
 }
 
@@ -32,6 +37,7 @@ interface AgentState {
   update: (id: string, input: AgentInput) => Promise<Agent>;
   updateAvatar: (id: string, avatar: AgentAvatar) => Promise<void>;
   pin: (id: string, pinned: boolean) => Promise<void>;
+  reorder: (ids: string[]) => Promise<void>;
   archive: (id: string) => Promise<void>;
   restore: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
@@ -155,6 +161,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         const mutationById = { ...state.mutationById };
         delete mutationById[id];
         return { mutationById };
+      });
+      throw error;
+    }
+  },
+
+  reorder: async (ids) => {
+    const positions = new Map(ids.map((id, index) => [id, index]));
+    if (positions.size === 0) return;
+    const previous = get().agentsById;
+    set((state) => {
+      const agentsById = { ...state.agentsById };
+      for (const [id, index] of positions) {
+        const agent = agentsById[id];
+        if (agent) agentsById[id] = { ...agent, sortOrder: index };
+      }
+      return {
+        agentsById,
+        orderedIds: sortAgents(Object.values(agentsById)).map((agent) => agent.id),
+      };
+    });
+    try {
+      await runReorder(() => api.reorderAgents(ids));
+    } catch (error) {
+      set({
+        agentsById: previous,
+        orderedIds: sortAgents(Object.values(previous)).map((agent) => agent.id),
       });
       throw error;
     }

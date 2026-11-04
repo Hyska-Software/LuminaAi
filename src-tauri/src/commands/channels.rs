@@ -166,6 +166,11 @@ pub fn list_agent_channels(state: State<'_, AppState>) -> Result<Vec<AgentChanne
 }
 
 #[tauri::command]
+pub fn reorder_agent_channels(state: State<'_, AppState>, ids: Vec<String>) -> Result<(), String> {
+    state.db.reorder_agent_channels(&ids).map_err(to_error)
+}
+
+#[tauri::command]
 pub fn create_agent_channel(
     state: State<'_, AppState>,
     input: AgentChannelInput,

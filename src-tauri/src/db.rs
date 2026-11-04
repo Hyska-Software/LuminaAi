@@ -38,7 +38,7 @@ use crate::domain::{
 const CONVERSATION_COLUMNS: &str = "id, title, created_at, updated_at, pinned, \
      provider_id, model_id, message_count, preview, mode, code_linked, workspace_id, \
      agent_kind, permission_mode, parent_conversation_id, subagent_task_call_id, subagent_type, \
-     agent_id, channel_id, task_id";
+     agent_id, channel_id, task_id, sort_order";
 
 const AGENT_COLUMNS: &str = "a.id, a.name, a.role, a.description, a.avatar_json, a.department, \
      a.pinned, a.sort_order, a.provider_id, a.model_id, a.fallback_provider_id, \
@@ -62,7 +62,7 @@ const AGENT_INBOX_ITEM_COLUMNS: &str = "i.id, i.recipient_agent_id, i.sender_age
      m.content, i.status, i.attempts, i.last_error, i.created_at, i.delivered_at";
 
 const WORKSPACE_COLUMNS: &str = "id, name, path, created_at, updated_at, last_opened_at, \
-     pinned, trusted";
+     pinned, trusted, sort_order";
 
 const MESSAGE_COLUMNS: &str = "id, conversation_id, role, content, reasoning, status, \
      tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, created_at, \
@@ -199,6 +199,7 @@ CREATE TABLE IF NOT EXISTS agent_channels (
   name        TEXT NOT NULL,
   kind        TEXT NOT NULL DEFAULT 'channel',
   dm_key      TEXT,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
@@ -380,6 +381,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL,
   pinned        INTEGER NOT NULL DEFAULT 0,
+  sort_order    INTEGER NOT NULL DEFAULT 0,
   provider_id   TEXT NOT NULL,
   model_id      TEXT NOT NULL,
   message_count INTEGER NOT NULL DEFAULT 0,
@@ -503,7 +505,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
   updated_at     INTEGER NOT NULL,
   last_opened_at INTEGER,
   pinned         INTEGER NOT NULL DEFAULT 0,
-  trusted        INTEGER NOT NULL DEFAULT 0
+  trusted        INTEGER NOT NULL DEFAULT 0,
+  sort_order     INTEGER NOT NULL DEFAULT 0
 );
 
 -- Trilha persistida do agente de código: um evento por passo/ferramenta, com
@@ -1228,6 +1231,13 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         "task_id",
         "ALTER TABLE conversations ADD COLUMN task_id TEXT",
     )?;
+    // Manual sidebar order (0 = fall back to recency).
+    ensure_column(
+        conn,
+        "conversations",
+        "sort_order",
+        "ALTER TABLE conversations ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+    )?;
     ensure_column(
         conn,
         "agent_tasks",
@@ -1257,6 +1267,12 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         "agent_channels",
         "dm_key",
         "ALTER TABLE agent_channels ADD COLUMN dm_key TEXT",
+    )?;
+    ensure_column(
+        conn,
+        "agent_channels",
+        "sort_order",
+        "ALTER TABLE agent_channels ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
     )?;
     ensure_column(
         conn,
@@ -1756,6 +1772,7 @@ fn conversation_from_row(row: &Row<'_>) -> rusqlite::Result<Conversation> {
         agent_id: row.get(17)?,
         channel_id: row.get(18)?,
         task_id: row.get(19)?,
+        sort_order: row.get(20)?,
     })
 }
 
@@ -1991,6 +2008,7 @@ fn workspace_from_row(row: &Row<'_>) -> rusqlite::Result<Workspace> {
         last_opened_at: row.get(5)?,
         pinned: row.get::<_, i64>(6)? != 0,
         trusted: row.get::<_, i64>(7)? != 0,
+        sort_order: row.get(8)?,
         // `git` é detectado em memória pelo módulo `workspace`; não é coluna.
         git: None,
     })
@@ -2436,6 +2454,17 @@ pub(crate) fn remove_artifact_files(artifact_id: &str, path: &str) {
     }
 }
 
+/// Adds the manual sidebar position to `workspaces` on databases created
+/// before drag-and-drop. New databases already have it from `SCHEMA`.
+fn migrate_workspaces_schema(conn: &Connection) -> Result<()> {
+    ensure_column(
+        conn,
+        "workspaces",
+        "sort_order",
+        "ALTER TABLE workspaces ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+    )
+}
+
 /* ------------------------------------------------------------------ */
 /* Db                                                                  */
 /* ------------------------------------------------------------------ */
@@ -2471,6 +2500,8 @@ impl Db {
         migrate_messages_schema(conn)?;
         // Separação Chat/Code: conversas antigas viram mode='chat', sem vínculo.
         migrate_conversations_schema(conn)?;
+        // Ordem manual da sidebar de projetos: coluna aditiva em `workspaces`.
+        migrate_workspaces_schema(conn)?;
         // Avatares: emoji legado vira `avatar_json` e a coluna antiga é removida.
         migrate_agents_avatar_schema(conn)?;
         // Biblioteca: `favorite` + `conversation_id` nullable (uploads do usuário).
@@ -2499,7 +2530,7 @@ impl Db {
         let sql = format!(
             "SELECT {CONVERSATION_COLUMNS} FROM conversations \
              WHERE parent_conversation_id IS NULL \
-             ORDER BY pinned DESC, updated_at DESC"
+             ORDER BY pinned DESC, sort_order ASC, updated_at DESC"
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], |row| conversation_from_row(row))?;
@@ -2521,8 +2552,9 @@ impl Db {
              FROM agents a LEFT JOIN conversations c \
                ON c.agent_id = a.id AND c.channel_id IS NULL AND c.task_id IS NULL \
              WHERE {filter} GROUP BY a.id \
-             ORDER BY a.pinned DESC, a.department COLLATE NOCASE, a.sort_order, \
-             a.name COLLATE NOCASE"
+             ORDER BY a.pinned DESC, \
+             CASE WHEN a.pinned = 1 THEN '' ELSE a.department END COLLATE NOCASE, \
+             a.sort_order, a.name COLLATE NOCASE"
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = match id {
@@ -4645,9 +4677,10 @@ impl Db {
     pub fn list_agent_channels(&self) -> Result<Vec<AgentChannel>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT c.id, c.name, c.kind, c.created_at, c.updated_at, MAX(m.created_at) \
+            "SELECT c.id, c.name, c.kind, c.created_at, c.updated_at, MAX(m.created_at), \
+             c.sort_order \
              FROM agent_channels c LEFT JOIN agent_channel_messages m ON m.channel_id = c.id \
-             GROUP BY c.id ORDER BY c.updated_at DESC, c.id",
+             GROUP BY c.id ORDER BY c.sort_order ASC, c.updated_at DESC, c.id",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -4657,18 +4690,20 @@ impl Db {
                 row.get::<_, i64>(3)?,
                 row.get::<_, i64>(4)?,
                 row.get::<_, Option<i64>>(5)?,
+                row.get::<_, i64>(6)?,
             ))
         })?;
         let base = rows.collect::<rusqlite::Result<Vec<_>>>()?;
         drop(stmt);
         drop(conn);
         let mut channels = Vec::with_capacity(base.len());
-        for (id, name, kind, created_at, updated_at, last_message_at) in base {
+        for (id, name, kind, created_at, updated_at, last_message_at, sort_order) in base {
             channels.push(AgentChannel {
                 member_ids: self.channel_members(&id)?,
                 id,
                 name,
                 kind,
+                sort_order,
                 created_at,
                 updated_at,
                 last_message_at,
@@ -4682,6 +4717,10 @@ impl Db {
             .list_agent_channels()?
             .into_iter()
             .find(|channel| channel.id == id))
+    }
+
+    pub fn reorder_agent_channels(&self, ids: &[String]) -> anyhow::Result<()> {
+        self.apply_sort_order("agent_channels", ids)
     }
 
     pub fn create_agent_channel(&self, input: &AgentChannelInput, now: i64) -> Result<AgentChannel> {
@@ -5559,6 +5598,39 @@ impl Db {
         Ok(())
     }
 
+    /// Rewrites `sort_order` for the given ids in the received order. Unknown
+    /// ids are ignored; the transaction keeps a section from being half-sorted.
+    fn apply_sort_order(&self, table: &'static str, ids: &[String]) -> anyhow::Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock();
+        let tx = conn
+            .unchecked_transaction()
+            .context("falha ao abrir a transação de reordenação")?;
+        for (index, id) in ids.iter().enumerate() {
+            tx.execute(
+                &format!("UPDATE {table} SET sort_order = ?2 WHERE id = ?1"),
+                params![id, index as i64],
+            )
+            .with_context(|| format!("falha ao reordenar {table}"))?;
+        }
+        tx.commit().context("falha ao confirmar a reordenação")?;
+        Ok(())
+    }
+
+    pub fn reorder_conversations(&self, ids: &[String]) -> anyhow::Result<()> {
+        self.apply_sort_order("conversations", ids)
+    }
+
+    pub fn reorder_workspaces(&self, ids: &[String]) -> anyhow::Result<()> {
+        self.apply_sort_order("workspaces", ids)
+    }
+
+    pub fn reorder_agents(&self, ids: &[String]) -> anyhow::Result<()> {
+        self.apply_sort_order("agents", ids)
+    }
+
     pub fn search_conversations(&self, query: &str) -> anyhow::Result<Vec<Conversation>> {
         let query = query.trim();
         if query.is_empty() {
@@ -5570,12 +5642,13 @@ impl Db {
             "SELECT DISTINCT c.id, c.title, c.created_at, c.updated_at, c.pinned, \
              c.provider_id, c.model_id, c.message_count, c.preview, c.mode, c.code_linked, \
              c.workspace_id, c.agent_kind, c.permission_mode, c.parent_conversation_id, \
-             c.subagent_task_call_id, c.subagent_type, c.agent_id, c.channel_id, c.task_id \
+             c.subagent_task_call_id, c.subagent_type, c.agent_id, c.channel_id, c.task_id, \
+             c.sort_order \
              FROM conversations c \
              LEFT JOIN messages m ON m.conversation_id = c.id \
              WHERE c.parent_conversation_id IS NULL \
                AND (c.title LIKE ?1 ESCAPE '\\' OR m.content LIKE ?1 ESCAPE '\\') \
-             ORDER BY c.pinned DESC, c.updated_at DESC"
+             ORDER BY c.pinned DESC, c.sort_order ASC, c.updated_at DESC"
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([&pattern], |row| conversation_from_row(row))?;
@@ -5669,7 +5742,7 @@ impl Db {
         let conn = self.conn.lock();
         let sql = format!(
             "SELECT {WORKSPACE_COLUMNS} FROM workspaces \
-             ORDER BY pinned DESC, COALESCE(last_opened_at, 0) DESC, \
+             ORDER BY pinned DESC, sort_order ASC, COALESCE(last_opened_at, 0) DESC, \
              name COLLATE NOCASE ASC"
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -5790,7 +5863,7 @@ impl Db {
         let sql = format!(
             "SELECT {CONVERSATION_COLUMNS} FROM conversations WHERE workspace_id = ?1 \
              AND parent_conversation_id IS NULL \
-             ORDER BY pinned DESC, updated_at DESC"
+             ORDER BY pinned DESC, sort_order ASC, updated_at DESC"
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([workspace_id], |row| conversation_from_row(row))?;
@@ -10225,6 +10298,162 @@ mod tests {
             .list_subagent_conversations(&parent.id)
             .expect("subagentes")
             .is_empty());
+    }
+
+    #[test]
+    fn reorder_conversations_assigns_positions() {
+        let db = test_db();
+        let first = db
+            .create_conversation("Primeira", "opencode-go", "glm-5.3-flash")
+            .expect("primeira");
+        let second = db
+            .create_conversation("Segunda", "opencode-go", "glm-5.3-flash")
+            .expect("segunda");
+        let third = db
+            .create_conversation("Terceira", "opencode-go", "glm-5.3-flash")
+            .expect("terceira");
+
+        db.reorder_conversations(&[
+            second.id.clone(),
+            third.id.clone(),
+            first.id.clone(),
+        ])
+        .expect("reordenar");
+
+        let listed = db.list_conversations().expect("listar");
+        let ids = listed.iter().map(|item| item.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![second.id.as_str(), third.id.as_str(), first.id.as_str()]
+        );
+        assert_eq!(
+            listed.iter().map(|item| item.sort_order).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+    }
+
+    #[test]
+    fn reorder_with_unknown_ids_is_ignored() {
+        let db = test_db();
+        let first = db
+            .create_conversation("Primeira", "opencode-go", "glm-5.3-flash")
+            .expect("primeira");
+        let second = db
+            .create_conversation("Segunda", "opencode-go", "glm-5.3-flash")
+            .expect("segunda");
+
+        db.reorder_conversations(&[
+            first.id.clone(),
+            "conversa-inexistente".to_string(),
+            second.id.clone(),
+        ])
+        .expect("reordenar com id desconhecido");
+
+        let listed = db.list_conversations().expect("listar");
+        let ids = listed.iter().map(|item| item.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids, vec![first.id.as_str(), second.id.as_str()]);
+    }
+
+    #[test]
+    fn reorder_workspaces_assigns_positions() {
+        let db = test_db();
+        let first = db
+            .create_workspace("Primeiro", "C:\\projetos\\primeiro")
+            .expect("primeiro");
+        let second = db
+            .create_workspace("Segundo", "C:\\projetos\\segundo")
+            .expect("segundo");
+        let third = db
+            .create_workspace("Terceiro", "C:\\projetos\\terceiro")
+            .expect("terceiro");
+
+        db.reorder_workspaces(&[
+            third.id.clone(),
+            first.id.clone(),
+            second.id.clone(),
+        ])
+        .expect("reordenar");
+
+        let listed = db.list_workspaces().expect("listar");
+        let ids = listed.iter().map(|item| item.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![third.id.as_str(), first.id.as_str(), second.id.as_str()]
+        );
+        assert_eq!(
+            listed.iter().map(|item| item.sort_order).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+    }
+
+    #[test]
+    fn reorder_agents_orders_sections() {
+        let db = test_db();
+        let first = db.create_agent(&agent_input("Ana")).expect("ana");
+        let second = db.create_agent(&agent_input("Bia")).expect("bia");
+        let third = db.create_agent(&agent_input("Caio")).expect("caio");
+
+        db.reorder_agents(&[third.id.clone(), first.id.clone(), second.id.clone()])
+            .expect("reordenar departamento");
+        let listed = db.list_agents(false).expect("listar");
+        let ids = listed.iter().map(|item| item.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![third.id.as_str(), first.id.as_str(), second.id.as_str()]
+        );
+
+        let mut other_department = agent_input("Dora");
+        other_department.department = "Qualidade".to_string();
+        let fourth = db.create_agent(&other_department).expect("dora");
+        db.set_agent_pinned(&first.id, true).expect("fixar ana");
+        db.set_agent_pinned(&fourth.id, true).expect("fixar dora");
+        db.reorder_agents(&[fourth.id.clone(), first.id.clone()])
+            .expect("reordenar fixados");
+
+        let listed = db.list_agents(false).expect("listar fixados");
+        let pinned = listed
+            .iter()
+            .filter(|item| item.pinned)
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(pinned, vec![fourth.id.as_str(), first.id.as_str()]);
+    }
+
+    #[test]
+    fn reorder_agent_channels_assigns_positions() {
+        let db = test_db();
+        let agent = db.create_agent(&agent_input("Ana")).expect("agent");
+        let channel_input = |name: &str| crate::agents::AgentChannelInput {
+            name: name.to_string(),
+            member_ids: vec![agent.id.clone()],
+        };
+        let first = db
+            .create_agent_channel(&channel_input("Primeiro"), now_ms())
+            .expect("primeiro");
+        let second = db
+            .create_agent_channel(&channel_input("Segundo"), now_ms())
+            .expect("segundo");
+        let third = db
+            .create_agent_channel(&channel_input("Terceiro"), now_ms())
+            .expect("terceiro");
+
+        db.reorder_agent_channels(&[
+            third.id.clone(),
+            first.id.clone(),
+            second.id.clone(),
+        ])
+        .expect("reordenar");
+
+        let listed = db.list_agent_channels().expect("listar");
+        let ids = listed.iter().map(|item| item.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![third.id.as_str(), first.id.as_str(), second.id.as_str()]
+        );
+        assert_eq!(
+            listed.iter().map(|item| item.sort_order).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
     }
 
     #[test]

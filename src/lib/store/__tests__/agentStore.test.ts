@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   updateAgent: vi.fn(),
   setAgentAvatar: vi.fn(),
   setAgentPinned: vi.fn(),
+  reorderAgents: vi.fn(),
   archiveAgent: vi.fn(),
   restoreAgent: vi.fn(),
   deleteAgent: vi.fn(),
@@ -98,6 +99,7 @@ beforeEach(() => {
   mocks.updateAgent.mockReset();
   mocks.setAgentAvatar.mockReset();
   mocks.setAgentPinned.mockReset();
+  mocks.reorderAgents.mockReset();
   mocks.archiveAgent.mockReset();
   mocks.restoreAgent.mockReset();
   mocks.deleteAgent.mockReset();
@@ -160,6 +162,24 @@ describe('agentStore', () => {
     await expect(useAgentStore.getState().archive('agent-1')).rejects.toThrow('backend offline');
     expect(useAgentStore.getState().agentsById['agent-1'].archivedAt).toBeNull();
     expect(useAgentStore.getState().mutationById['agent-1']).toBeUndefined();
+  });
+
+  it('reorders optimistically and rolls back when the backend fails', async () => {
+    seed([
+      agent({ id: 'a', name: 'Ana', sortOrder: 1 }),
+      agent({ id: 'b', name: 'Bia', sortOrder: 2 }),
+    ]);
+    mocks.reorderAgents.mockResolvedValue(undefined);
+
+    await useAgentStore.getState().reorder(['b', 'a']);
+
+    expect(mocks.reorderAgents).toHaveBeenCalledWith(['b', 'a']);
+    expect(useAgentStore.getState().orderedIds).toEqual(['b', 'a']);
+    expect(useAgentStore.getState().agentsById.b.sortOrder).toBe(0);
+
+    mocks.reorderAgents.mockRejectedValue(new Error('falhou'));
+    await expect(useAgentStore.getState().reorder(['a', 'b'])).rejects.toThrow('falhou');
+    expect(useAgentStore.getState().orderedIds).toEqual(['b', 'a']);
   });
 
   it('updates the avatar optimistically and rolls back on failure', async () => {
