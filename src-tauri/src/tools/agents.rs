@@ -17,6 +17,7 @@ const BASE_TOOLS: &[&str] = &[
     "agent_usage",
     "agent_inbox",
     "agent_message",
+    "create_agent",
 ];
 const ROUTINE_TOOLS: &[&str] = &[
     "routine_list",
@@ -84,6 +85,61 @@ pub fn definitions(agent: &Agent) -> Vec<ToolDefinition> {
                     "content": { "type": "string", "maxLength": 16000 }
                 },
                 "required": ["toAgentId", "content"],
+                "additionalProperties": false
+            }),
+        });
+    }
+    if agent.capabilities.create_agents {
+        tools.push(ToolDefinition {
+            name: "create_agent".to_string(),
+            description: "Create a new persistent persona on the team. The caller's provider/model \
+                          are used when omitted. The new agent has its own memory/workspace and \
+                          appears in the Agentes layout immediately. An optional routine can be \
+                          attached when the caller also has `automation`."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "maxLength": 80 },
+                    "role": { "type": "string", "maxLength": 120 },
+                    "description": { "type": "string", "maxLength": 1000 },
+                    "emoji": { "type": "string", "maxLength": 16 },
+                    "department": { "type": "string", "maxLength": 80 },
+                    "providerId": { "type": "string" },
+                    "modelId": { "type": "string" },
+                    "fallbackProviderId": { "type": "string" },
+                    "fallbackModelId": { "type": "string" },
+                    "reasoning": { "type": "object" },
+                    "instructions": { "type": "string", "maxLength": 16000 },
+                    "starters": { "type": "array", "items": { "type": "string" }, "maxItems": 8 },
+                    "capabilities": { "type": "object" },
+                    "memoryEnabled": { "type": "boolean" },
+                    "workspaceId": { "type": "string" },
+                    "permissionMode": {
+                        "type": "string",
+                        "enum": ["read_only", "edit", "autonomous", "review"]
+                    },
+                    "dockerImage": { "type": "string" },
+                    "computerEnvironment": {
+                        "type": "string",
+                        "enum": ["auto", "private_desktop", "this_computer", "browser", "off"]
+                    },
+                    "routine": {
+                        "type": "object",
+                        "properties": {
+                            "title": { "type": "string", "maxLength": 80 },
+                            "prompt": { "type": "string", "maxLength": 8192 },
+                            "scheduleKind": { "type": "string", "enum": ["interval", "daily"] },
+                            "intervalMinutes": { "type": "integer", "minimum": 5, "maximum": 10080 },
+                            "hour": { "type": "integer", "minimum": 0, "maximum": 23 },
+                            "minute": { "type": "integer", "minimum": 0, "maximum": 59 },
+                            "enabled": { "type": "boolean" }
+                        },
+                        "required": ["title", "prompt", "scheduleKind"],
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["name"],
                 "additionalProperties": false
             }),
         });
@@ -183,6 +239,14 @@ pub fn guidance(agent: &Agent) -> Vec<(&'static str, &'static str)> {
             "agent_message",
             "Use direct messages for a short, targeted question to one agent. For owned work with \
              acceptance criteria, use `delegate_task` instead.",
+        ));
+    }
+    if agent.capabilities.create_agents {
+        items.push((
+            "create_agent",
+            "Create an agent only when a durable role is missing. Fill instructions and role; do \
+             not grant capabilities you would not use yourself, and ask the user before creating \
+             an autonomous agent.",
         ));
     }
     if agent.capabilities.automation {
@@ -518,6 +582,113 @@ fn agent_inbox(db: &Db, agent_id: &str, args: &Value) -> ToolOutcome {
     }
 }
 
+fn create_agent_tool(
+    db: &Db,
+    caller: &Agent,
+    args: &Value,
+    hooks: Option<&dyn AgentHooks>,
+) -> ToolOutcome {
+    let Some(hooks) = hooks else {
+        return ToolOutcome::error(
+            "AGENT_CREATE_UNAVAILABLE: criação de agentes exige o runtime do app",
+        );
+    };
+    let Some(name) = json_str(args, "name") else {
+        return ToolOutcome::error("o argumento `name` é obrigatório");
+    };
+    if args.get("routine").is_some() && !caller.capabilities.automation {
+        return ToolOutcome::error(
+            "AGENT_CAPABILITY_DENIED: criar rotina para outro agente exige a capability automation",
+        );
+    }
+    let provider_id = json_str(args, "providerId")
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| caller.provider_id.clone());
+    let model_id = json_str(args, "modelId")
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| caller.model_id.clone());
+    let capabilities = args
+        .get("capabilities")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<crate::agents::AgentCapabilities>(value).ok())
+        .unwrap_or_default();
+    let reasoning = args
+        .get("reasoning")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok());
+    let starters = args
+        .get("starters")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|starter| !starter.is_empty())
+                .take(8)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let permission_mode = args
+        .get("permissionMode")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default();
+    let input = crate::agents::AgentInput {
+        name,
+        role: json_str(args, "role").unwrap_or_default(),
+        description: json_str(args, "description").unwrap_or_default(),
+        emoji: json_str(args, "emoji")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "🤖".to_string()),
+        department: json_str(args, "department")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "Geral".to_string()),
+        provider_id,
+        model_id,
+        fallback_provider_id: json_str(args, "fallbackProviderId").filter(|value| !value.trim().is_empty()),
+        fallback_model_id: json_str(args, "fallbackModelId").filter(|value| !value.trim().is_empty()),
+        reasoning,
+        instructions: json_str(args, "instructions").unwrap_or_default(),
+        starters,
+        capabilities,
+        memory_enabled: args
+            .get("memoryEnabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        workspace_id: json_str(args, "workspaceId").filter(|value| !value.trim().is_empty()),
+        permission_mode,
+        docker_image: json_str(args, "dockerImage").filter(|value| !value.trim().is_empty()),
+        computer_environment: json_str(args, "computerEnvironment")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "auto".to_string()),
+    };
+    match hooks.create_agent(&input) {
+        Ok(agent) => {
+            hooks.agent_created(&agent);
+            let routine = args.get("routine").and_then(|routine_args| {
+                routine_input(routine_args, None)
+                    .ok()
+                    .and_then(|input| db.create_agent_routine(&agent.id, &input, crate::domain::now_ms()).ok())
+            });
+            let routine_warning = args.get("routine").is_some() && routine.is_none();
+            ToolOutcome {
+                content: serde_json::to_string_pretty(&json!({
+                    "created": true,
+                    "agent": agent,
+                    "routine": routine,
+                    "routineWarning": routine_warning.then_some("rotina não foi criada; verifique os argumentos"),
+                }))
+                .unwrap_or_else(|_| "{\"created\":true}".to_string()),
+                summary: Some(format!("Agente criado: {}", agent.name)),
+                ..Default::default()
+            }
+        }
+        Err(error) => ToolOutcome::error(error),
+    }
+}
+
 pub fn run(
     db: &Db,
     agent_id: &str,
@@ -545,6 +716,14 @@ pub fn run_with_hooks(
         "agent_directory" => directory(db, agent_id).unwrap_or_else(|outcome| outcome),
         "agent_usage" => usage(db, agent_id, settings),
         "agent_inbox" => agent_inbox(db, agent_id, args),
+        "create_agent" => {
+            if !agent.capabilities.create_agents {
+                return ToolOutcome::error(
+                    "AGENT_CAPABILITY_DENIED: a criação de agentes não está habilitada",
+                );
+            }
+            create_agent_tool(db, &agent, args, hooks)
+        }
         "agent_message" => {
             if !agent.capabilities.delegation {
                 return ToolOutcome::error(
@@ -683,6 +862,7 @@ mod tests {
             capabilities: AgentCapabilities {
                 automation,
                 delegation: true,
+                create_agents: true,
                 ..AgentCapabilities::default()
             },
             memory_enabled: false,
@@ -710,6 +890,62 @@ mod tests {
             .collect();
         assert!(names.contains(&"routine_create".to_string()));
         assert!(names.contains(&"routine_delete".to_string()));
+    }
+
+    struct CreatingHooks {
+        db: std::sync::Arc<Db>,
+    }
+
+    impl AgentHooks for CreatingHooks {
+        fn task_updated(&self, _task: &crate::agents::AgentTask) {}
+        fn channel_updated(&self, _channel_id: &str) {}
+        fn cancel_conversation(&self, _conversation_id: &str) {}
+        fn create_agent(
+            &self,
+            input: &crate::agents::AgentInput,
+        ) -> Result<crate::agents::Agent, String> {
+            self.db.create_agent(input).map_err(|error| error.to_string())
+        }
+    }
+
+    #[test]
+    fn create_agent_accepts_the_full_profile() {
+        let db = std::sync::Arc::new(Db::open_in_memory().expect("db"));
+        let creator = agent(&db, "Recrutador", true);
+        let hooks = CreatingHooks { db: db.clone() };
+        let created = run_with_hooks(
+            &db,
+            &creator.id,
+            "create_agent",
+            &json!({
+                "name": "Garimpeiro",
+                "role": "Prospecção",
+                "description": "Encontra clientes e personaliza contato.",
+                "emoji": "🔎",
+                "department": "Vendas",
+                "instructions": "Pesquise o cliente antes de escrever.",
+                "starters": ["Encontre 5 clientes."],
+                "memoryEnabled": true,
+                "permissionMode": "edit",
+                "capabilities": { "webSearch": true, "fileAccess": true, "codeExecution": false },
+                "routine": {
+                    "title": "Prospecção diária",
+                    "prompt": "Encontre 5 clientes e prepare o contato.",
+                    "scheduleKind": "daily",
+                    "hour": 9,
+                    "minute": 0
+                }
+            }),
+            &Settings::default(),
+            Some(&hooks),
+        );
+        assert!(!created.is_error, "{}", created.content);
+        let agents = db.list_agents(false).expect("agents");
+        let created = agents.iter().find(|agent| agent.name == "Garimpeiro").expect("created");
+        assert_eq!(created.department, "Vendas");
+        assert_eq!(created.provider_id, creator.provider_id);
+        assert!(!created.capabilities.code_execution);
+        assert_eq!(db.list_agent_routines(&created.id).expect("routines").len(), 1);
     }
 
     #[test]
@@ -740,6 +976,25 @@ mod tests {
         );
         assert!(!inbox.is_error, "{}", inbox.content);
         assert!(inbox.content.contains("Revise o rascunho?"));
+        let pending = db.list_pending_agent_inbox(10).expect("pending");
+        assert!(db
+            .claim_agent_inbox(&pending[0].id, crate::domain::now_ms())
+            .expect("claim"));
+        db.finish_agent_inbox(
+            &pending[0].id,
+            "delivered",
+            None,
+            crate::domain::now_ms(),
+        )
+        .expect("finish");
+        assert_eq!(
+            db.list_agent_inbox(&recipient.id, 10)
+                .expect("inbox")
+                .first()
+                .expect("inbox item")
+                .status,
+            "delivered"
+        );
         let read = run(
             &db,
             &recipient.id,
@@ -748,7 +1003,7 @@ mod tests {
             &Settings::default(),
         );
         assert!(!read.is_error, "{}", read.content);
-        assert!(read.content.contains("Ana"));
+        assert!(read.content.contains("Revise o rascunho?"));
         let self_message = run(
             &db,
             &sender.id,

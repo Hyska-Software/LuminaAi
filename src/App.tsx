@@ -327,6 +327,18 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
+    void listen<{ agentId: string; name: string }>('lumina:agent-created', (event) => {
+      if (disposed) return;
+      window.dispatchEvent(new CustomEvent('lumina:agent-created', { detail: event.payload }));
+      void useAgentStore.getState().refresh();
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* event bridge unavailable outside Tauri */
+      });
     void listen<{ channelId: string }>('lumina:agent-channel-updated', (event) => {
       if (disposed) return;
       window.dispatchEvent(

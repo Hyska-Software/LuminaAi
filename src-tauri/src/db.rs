@@ -1070,6 +1070,12 @@ fn migrate_artifacts_schema(conn: &Connection) -> Result<()> {
         "favorite",
         "ALTER TABLE artifacts ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0",
     )?;
+    ensure_column(
+        conn,
+        "artifacts",
+        "task_id",
+        "ALTER TABLE artifacts ADD COLUMN task_id TEXT",
+    )?;
 
     let conversation_id_is_required = table_columns(conn, "artifacts")?
         .iter()
@@ -1097,12 +1103,13 @@ fn migrate_artifacts_schema(conn: &Connection) -> Result<()> {
            size            INTEGER NOT NULL,
            created_at      INTEGER NOT NULL,
            path            TEXT NOT NULL,
-           favorite        INTEGER NOT NULL DEFAULT 0
+           favorite        INTEGER NOT NULL DEFAULT 0,
+           task_id         TEXT
          );
          INSERT INTO artifacts_new (id, conversation_id, message_id, name, mime_type, kind,
-                                    language, size, created_at, path, favorite)
+                                    language, size, created_at, path, favorite, task_id)
            SELECT id, conversation_id, message_id, name, mime_type, kind, language, size,
-                  created_at, path, favorite
+                  created_at, path, favorite, task_id
            FROM artifacts;
          DROP TABLE artifacts;
          ALTER TABLE artifacts_new RENAME TO artifacts;",
@@ -1110,6 +1117,10 @@ fn migrate_artifacts_schema(conn: &Connection) -> Result<()> {
     .context("falha ao reconstruir a tabela artifacts para aceitar uploads da biblioteca")?;
     tx.commit()
         .context("falha ao confirmar a migração da tabela artifacts")?;
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id);",
+    )
+    .context("falha ao recriar o índice de task_id em artifacts")?;
     Ok(())
 }
 
@@ -7377,6 +7388,59 @@ mod tests {
     }
 
     #[test]
+    fn event_routines_are_not_scheduled_and_record_channel_events() {
+        let db = test_db();
+        let agent = db.create_agent(&agent_input("Eventos")).expect("agent");
+        let routine = db
+            .create_agent_routine(
+                &agent.id,
+                &crate::agents::AgentRoutineInput {
+                    title: "Reagir ao canal".to_string(),
+                    prompt: "Leia a mensagem.".to_string(),
+                    schedule_kind: "interval".to_string(),
+                    interval_minutes: 60,
+                    hour: 9,
+                    minute: 0,
+                    enabled: true,
+                    trigger_kind: "event".to_string(),
+                    event_kind: "channel.message".to_string(),
+                    event_filter_json: "{}".to_string(),
+                }
+                .normalize()
+                .expect("input"),
+                now_ms(),
+            )
+            .expect("routine");
+        assert_eq!(routine.next_run_at, 0);
+        assert!(db.list_due_agent_routines(now_ms()).expect("due").is_empty());
+        assert_eq!(
+            db.list_event_routines("channel.message")
+                .expect("event routines")
+                .len(),
+            1
+        );
+        let channel = db
+            .create_agent_channel(
+                &crate::agents::AgentChannelInput {
+                    name: "Geral".to_string(),
+                    member_ids: vec![agent.id.clone()],
+                },
+                now_ms(),
+            )
+            .expect("channel");
+        db.append_agent_channel_message(&channel.id, "user", None, "oi", now_ms())
+            .expect("message");
+        let events = db.list_unprocessed_agent_events(10).expect("events");
+        assert!(events.iter().any(|event| event.kind == "channel.message"));
+        assert!(events
+            .iter()
+            .any(|event| crate::agents::event_filter_matches(
+                &routine.event_filter_json,
+                &event.payload
+            )));
+    }
+
+    #[test]
     fn memory_mutations_bump_the_agent_revision() {
         let db = test_db();
         let agent = db.create_agent(&agent_input("Memória")).expect("agent");
@@ -7437,6 +7501,56 @@ mod tests {
             .expect("exists")
             .source_agent_id
             .is_none());
+    }
+
+    #[test]
+    fn task_workspace_is_stored_for_handoff_continuity() {
+        let db = test_db();
+        let owner = db.create_agent(&agent_input("Dona")).expect("agent");
+        let input = crate::agents::AgentTaskInput {
+            to_agent_id: owner.id.clone(),
+            title: "Workspace".to_string(),
+            brief: "Compartilhe arquivos.".to_string(),
+            workspace_id: Some("workspace-1".to_string()),
+            ..crate::agents::AgentTaskInput::default()
+        }
+        .normalize()
+        .expect("input");
+        let task = db
+            .create_agent_task(&input, None, None, true, now_ms())
+            .expect("task");
+        assert_eq!(task.workspace_id.as_deref(), Some("workspace-1"));
+        assert_eq!(task.retry_count, 0);
+    }
+
+    #[test]
+    fn task_artifacts_are_owned_by_the_task_across_handoff() {
+        let db = test_db();
+        let owner = db.create_agent(&agent_input("Dona")).expect("agent");
+        let input = crate::agents::AgentTaskInput {
+            to_agent_id: owner.id.clone(),
+            title: "Artefato".to_string(),
+            brief: "Produza o arquivo.".to_string(),
+            ..crate::agents::AgentTaskInput::default()
+        }
+        .normalize()
+        .expect("input");
+        let task = db
+            .create_agent_task(&input, None, None, true, now_ms())
+            .expect("task");
+        let conversation = db
+            .create_agent_conversation(&owner.id, "Tarefa: Artefato")
+            .expect("conversation");
+        db.set_agent_task_conversation(&task.id, &conversation.id, now_ms())
+            .expect("bind");
+        db.insert_artifact(&stored_artifact("art-task", &conversation.id))
+            .expect("artifact");
+        assert!(db
+            .artifact_belongs_to_task("art-task", &task.id)
+            .expect("belongs"));
+        assert!(!db
+            .artifact_belongs_to_task("art-task", "another-task")
+            .expect("belongs"));
     }
 
     #[test]

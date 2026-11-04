@@ -859,6 +859,8 @@ export interface AgentCapabilities {
   sharedMemory?: boolean;
   /** Escrita de skills do usuário. */
   skillsWrite?: boolean;
+  /** Criação de novos agentes pela tool create_agent. */
+  createAgents?: boolean;
   /** Computer use visual (screenshot + input). */
   computerUse?: boolean;
   /** Captura de tela sem input. */

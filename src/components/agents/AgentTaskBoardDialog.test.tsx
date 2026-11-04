@@ -75,6 +75,15 @@ describe('AgentTaskBoardDialog', () => {
     expect(screen.getByText('Encerradas')).toBeTruthy();
   });
 
+  it('filtra por canal quando recebe channelId', async () => {
+    render(<AgentTaskBoardDialog open onOpenChange={() => {}} channelId="channel-1" />);
+    await screen.findByText('Preparar entrega');
+    expect(mocks.listAgentTasks).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      ownerAgentId: undefined,
+    });
+  });
+
   it('cancela uma tarefa com confirmação e atualiza o status', async () => {
     mocks.cancelAgentTask.mockResolvedValue(
       task({ id: 'running', title: 'Analisar contrato', status: 'cancelled' }),

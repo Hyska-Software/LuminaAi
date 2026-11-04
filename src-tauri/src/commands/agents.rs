@@ -112,10 +112,18 @@ pub fn get_agent(state: State<'_, AppState>, agent_id: String) -> Result<Agent, 
 
 #[tauri::command]
 pub fn create_agent(state: State<'_, AppState>, input: AgentInput) -> Result<Agent, String> {
+    create_agent_validated(&state, input)
+}
+
+/// Shared by the Tauri command and the `create_agent` tool.
+pub(crate) fn create_agent_validated(
+    state: &AppState,
+    input: AgentInput,
+) -> Result<Agent, String> {
     let input = crate::agents::normalize_input(input).map_err(to_error)?;
-    validate_model(&state, &input)?;
-    validate_fallback(&state, &input)?;
-    validate_workspace(&state, &input)?;
+    validate_model(state, &input)?;
+    validate_fallback(state, &input)?;
+    validate_workspace(state, &input)?;
     state.db.create_agent(&input).map_err(to_error)
 }
 

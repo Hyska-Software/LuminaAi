@@ -2331,20 +2331,6 @@ pub async fn run_turn(
     // memory set produce a new item while an unchanged set stays in the older
     // history item (no cache churn).
     if let Some(agent) = agent.as_ref().filter(|agent| agent.memory_enabled) {
-        let memories = deps
-            .db
-            .list_agent_memories(&agent.id)
-            .unwrap_or_default();
-        let memory_text = crate::agents::render_memory_context(agent, &memories);
-        if let Some(item) = insert_surface_item_kind(
-            &deps.db,
-            &conversation.id,
-            &user_message.id,
-            SURFACE_KIND_MEMORY,
-            &memory_text,
-        ) {
-            history.push(render_surface_item(&item));
-        }
         if agent.capabilities.shared_memory {
             let shared = deps.db.list_agent_shared_memories().unwrap_or_default();
             if !shared.is_empty() {
@@ -2359,6 +2345,20 @@ pub async fn run_turn(
                     history.push(render_surface_item(&item));
                 }
             }
+        }
+        let memories = deps
+            .db
+            .list_agent_memories(&agent.id)
+            .unwrap_or_default();
+        let memory_text = crate::agents::render_memory_context(agent, &memories);
+        if let Some(item) = insert_surface_item_kind(
+            &deps.db,
+            &conversation.id,
+            &user_message.id,
+            SURFACE_KIND_MEMORY,
+            &memory_text,
+        ) {
+            history.push(render_surface_item(&item));
         }
     }
     if let Some(event_context) = options
@@ -4309,6 +4309,9 @@ pub(crate) fn code_agent_allowed_tools(
     }
     if agent.capabilities.delegation && agent.capabilities.allows_tool("agent_message") {
         allowed.push("agent_message".to_string());
+    }
+    if agent.capabilities.create_agents && agent.capabilities.allows_tool("create_agent") {
+        allowed.push("create_agent".to_string());
     }
     if agent.capabilities.automation {
         for name in [

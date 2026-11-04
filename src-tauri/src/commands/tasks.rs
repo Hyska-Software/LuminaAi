@@ -371,6 +371,12 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
                 &format!("AGENT_TASK_WORKSPACE_UNAVAILABLE: {error:#}"),
             );
         }
+    } else if let Err(error) = state.db.set_conversation_workspace(&conversation.id, None) {
+        return finish_failure(
+            app,
+            &task,
+            &format!("AGENT_TASK_WORKSPACE_UNAVAILABLE: {error:#}"),
+        );
     }
 
     let turn_id = uuid::Uuid::new_v4().to_string();

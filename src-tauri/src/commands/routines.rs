@@ -263,7 +263,7 @@ async fn execute_routine_inner(
             next,
             now_ms(),
         );
-        emit_run(app, routine, None, "blocked", Some(error.clone()));
+        emit_run(app, routine, None, "blocked", Some(error.clone()), None);
         return Err(error);
     }
 
@@ -311,6 +311,7 @@ async fn execute_routine_inner(
             Some(&conversation.id),
             "blocked",
             Some("sem slot de concorrência".to_string()),
+            event,
         );
         return Ok(());
     };
@@ -335,6 +336,7 @@ async fn execute_routine_inner(
             Some(&conversation.id),
             "blocked",
             Some("thread ocupada".to_string()),
+            event,
         );
         return Ok(());
     };
@@ -462,7 +464,14 @@ async fn execute_routine_inner(
     if let Some(run_id) = run_id.as_deref() {
         let _ = db.finish_agent_routine_run(run_id, status, error.as_deref(), now_ms());
     }
-    emit_run(app, routine, Some(&conversation.id), status, error.clone());
+    emit_run(
+        app,
+        routine,
+        Some(&conversation.id),
+        status,
+        error.clone(),
+        event,
+    );
     if let Some(error) = error {
         Err(error)
     } else {
@@ -476,6 +485,7 @@ fn emit_run(
     conversation_id: Option<&str>,
     status: &str,
     error: Option<String>,
+    event: Option<&AgentEvent>,
 ) {
     let _ = app.emit(
         "lumina:agent-routine-run",
@@ -486,8 +496,8 @@ fn emit_run(
             title: routine.title.clone(),
             status: status.to_string(),
             error,
-            event_kind: None,
-            event_id: None,
+            event_kind: event.map(|event| event.kind.clone()),
+            event_id: event.map(|event| event.id.clone()),
         },
     );
 }

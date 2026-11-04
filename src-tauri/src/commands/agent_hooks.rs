@@ -52,4 +52,19 @@ impl AgentHooks for AppAgentHooks {
             crate::domain::now_ms(),
         );
     }
+
+    fn create_agent(
+        &self,
+        input: &crate::agents::AgentInput,
+    ) -> Result<crate::agents::Agent, String> {
+        let state = self.app.state::<AppState>();
+        crate::commands::agents::create_agent_validated(&state, input.clone())
+    }
+
+    fn agent_created(&self, agent: &crate::agents::Agent) {
+        let _ = self.app.emit(
+            "lumina:agent-created",
+            serde_json::json!({ "agentId": agent.id, "name": agent.name }),
+        );
+    }
 }

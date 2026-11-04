@@ -186,6 +186,7 @@ impl AgentRoutineInput {
                 }
             }
             self.interval_minutes = 0;
+            return Ok(self);
         } else {
             self.event_kind.clear();
             self.event_filter_json = "{}".to_string();
@@ -886,6 +887,9 @@ pub struct AgentCapabilities {
     /// Allows `skill_save` to write user skills under `<app-data>/skills`.
     #[serde(default)]
     pub skills_write: bool,
+    /// Allows `create_agent` to add new personas to the team.
+    #[serde(default)]
+    pub create_agents: bool,
     /// Allows visual computer-use tools (screenshot/click/type/key).
     #[serde(default)]
     pub computer_use: bool,
@@ -918,6 +922,7 @@ impl Default for AgentCapabilities {
             automation: false,
             shared_memory: false,
             skills_write: false,
+            create_agents: false,
             computer_use: false,
             screen_capture: false,
             browser_use: false,
@@ -1622,6 +1627,15 @@ mod tests {
         let normalized = normalize_input(duplicate).expect("valid");
         assert_eq!(normalized.fallback_provider_id, None);
         assert_eq!(normalized.fallback_model_id, None);
+    }
+
+    #[test]
+    fn workspace_execution_locks_are_shared_per_key() {
+        let first = workspace_execution_lock("task:alpha");
+        let second = workspace_execution_lock("task:alpha");
+        let other = workspace_execution_lock("task:beta");
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        assert!(!std::sync::Arc::ptr_eq(&first, &other));
     }
 
     #[test]

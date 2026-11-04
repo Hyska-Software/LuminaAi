@@ -48,6 +48,7 @@ const CAPABILITIES: Array<{ key: keyof AgentPanelContext['agent']['capabilities'
   { key: 'automation', label: 'Automações' },
   { key: 'sharedMemory', label: 'Memória equipe' },
   { key: 'skillsWrite', label: 'Skills (escrita)' },
+  { key: 'createAgents', label: 'Criar agentes' },
   { key: 'computerUse', label: 'Computador' },
   { key: 'screenCapture', label: 'Tela (leitura)' },
   { key: 'browserUse', label: 'Navegador' },

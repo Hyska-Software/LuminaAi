@@ -47,6 +47,7 @@ const DEFAULT_CAPABILITIES: AgentCapabilities = {
   automation: false,
   sharedMemory: false,
   skillsWrite: false,
+  createAgents: false,
   computerUse: false,
   screenCapture: false,
   browserUse: false,
@@ -105,6 +106,7 @@ const TOOL_OPTIONS: Array<{ name: string; label: string; group: string }> = [
   { name: 'agent_usage', label: 'Uso do agente', group: 'Agentes' },
   { name: 'agent_inbox', label: 'Inbox direto', group: 'Agentes' },
   { name: 'agent_message', label: 'Mensagem direta', group: 'Agentes' },
+  { name: 'create_agent', label: 'Criar agente', group: 'Agentes' },
   { name: 'routine_list', label: 'Listar rotinas', group: 'Automação' },
   { name: 'routine_create', label: 'Criar rotina', group: 'Automação' },
   { name: 'routine_update', label: 'Editar rotina', group: 'Automação' },
@@ -695,6 +697,12 @@ export function AgentEditorDialog() {
                   onCheckedChange={(checked) => setCapability('skillsWrite', checked)}
                   label="Escrever skills"
                   description="Permite salvar SKILL.md em <app-data>/skills, com histórico de versões."
+                />
+                <Switch
+                  checked={form.capabilities.createAgents ?? false}
+                  onCheckedChange={(checked) => setCapability('createAgents', checked)}
+                  label="Criar agentes"
+                  description="Permite criar novos agentes persistentes com perfil, instruções, modelo e capabilities."
                 />
                 <Switch
                   checked={form.capabilities.computerUse ?? false}

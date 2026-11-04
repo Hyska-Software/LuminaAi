@@ -32,6 +32,16 @@ pub trait AgentHooks: Send + Sync {
     fn task_updated(&self, task: &crate::agents::AgentTask);
     fn channel_updated(&self, channel_id: &str);
     fn cancel_conversation(&self, conversation_id: &str);
+    /// Creates a persona through the production command validation. Tests and
+    /// read-only harnesses keep the default failure.
+    fn create_agent(
+        &self,
+        _input: &crate::agents::AgentInput,
+    ) -> Result<crate::agents::Agent, String> {
+        Err("AGENT_CREATE_UNAVAILABLE: criação de agentes indisponível neste runtime".to_string())
+    }
+    /// Emitted after a tool-created persona so the renderer refreshes the team.
+    fn agent_created(&self, _agent: &crate::agents::Agent) {}
 }
 
 /// Upper bound for the text fed back to the model from a single tool call.
