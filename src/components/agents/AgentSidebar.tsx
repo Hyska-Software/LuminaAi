@@ -15,7 +15,6 @@ import {
   Hash,
   ListChecks,
   ListTree,
-  Loader2,
   MessageCircle,
   MessageCircleQuestion,
   MessageSquare,
@@ -42,6 +41,7 @@ import { toast } from 'sonner';
 
 import { api } from '@/lib/api';
 import { AgentAvatar } from './AgentAvatar';
+import { AgentActivityDots } from './AgentActivityDots';
 import { AgentActivityDialog } from './AgentActivityDialog';
 import { AgentChannelDialog } from './AgentChannelDialog';
 import { AgentDialogBody } from './AgentDialogBody';
@@ -146,7 +146,7 @@ function ThreadRow({
           </span>
         ) : null}
         {busy ? (
-          <Loader2 aria-label="Respondendo" className="size-3 shrink-0 animate-spin text-accent" />
+          <AgentActivityDots label="Respondendo" />
         ) : awaitingApproval ? (
           <ShieldAlert
             aria-label="Aguardando aprovação"
@@ -306,12 +306,16 @@ function AgentRow({
             active ? 'bg-surface-active' : 'hover:bg-surface-hover',
           )}
         >
-          <AgentAvatar avatar={agent.avatar} size="sm" />
+          <AgentAvatar
+            avatar={agent.avatar}
+            size="sm"
+            activity={busy ? 'running' : 'idle'}
+          />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
               <span className="truncate text-[13px] font-medium text-foreground">{agent.name}</span>
               {busy ? (
-                <Loader2 aria-label="Respondendo" className="size-3 shrink-0 animate-spin text-accent" />
+                <AgentActivityDots label="Respondendo" />
               ) : null}
               {agent.pinned ? <Pin className="size-2.5 shrink-0 text-foreground-subtle" /> : null}
               {agent.computerEnvironment !== 'auto' ||

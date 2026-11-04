@@ -156,9 +156,11 @@ function Mouth({ shape, fill }: { shape: AgentAvatarExpressionSpec['mouth']; fil
 export function AgentMascot({
   avatar,
   className,
+  running = false,
 }: {
   avatar: MascotAvatar;
   className?: string;
+  running?: boolean;
 }) {
   const rawId = useId();
   const gradientId = `agent-avatar-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
@@ -194,7 +196,9 @@ export function AgentMascot({
         />
       ))}
       <g transform={`translate(${body.face.x} ${body.face.y}) scale(${body.face.scale})`}>
-        <Eyes shape={expression.eyes} fill={features} />
+        <g className={running ? 'agent-avatar-eyes-running' : undefined}>
+          <Eyes shape={expression.eyes} fill={features} />
+        </g>
         <Mouth shape={expression.mouth} fill={features} />
       </g>
     </svg>

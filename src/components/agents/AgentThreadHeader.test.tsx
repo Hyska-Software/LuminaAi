@@ -15,6 +15,7 @@ vi.mock('./AgentConversationWorkspace', () => ({
 
 import { AgentThreadHeader } from './AgentThreadHeader';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import type { StreamingState } from '@/lib/store';
 import type { Agent, Conversation } from '@/lib/types';
 
 const agent: Agent = {
@@ -71,6 +72,19 @@ const conversation: Conversation = {
   workspaceId: null,
 };
 
+function stream(): StreamingState {
+  return {
+    turnId: 'turn-1',
+    conversationId: 'conv-1',
+    assistantId: 'assistant-1',
+    userMessageId: null,
+    phase: 'tool',
+    step: 1,
+    startedAt: 1,
+    turnKind: 'user',
+  };
+}
+
 describe('AgentThreadHeader', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -102,5 +116,23 @@ describe('AgentThreadHeader', () => {
     const status = await screen.findByRole('group', { name: 'Computer use ativo' });
     expect(status.closest('header')).not.toBeNull();
     expect(screen.getByText('Irineu')).toBeTruthy();
+  });
+
+  it('anima o avatar e mostra o chip Executando durante o turno', () => {
+    useChatStore.setState({ streamsByConversation: { 'conv-1': stream() } });
+    const { container } = render(
+      <AgentThreadHeader agent={agent} conversation={conversation} onBack={vi.fn()} />,
+    );
+    expect(container.querySelector('[data-activity="running"]')).not.toBeNull();
+    expect(screen.getByRole('status', { name: 'Executando' })).toBeTruthy();
+    expect(screen.getByText('Executando')).toBeTruthy();
+  });
+
+  it('mantém o header idle sem turno ativo', () => {
+    const { container } = render(
+      <AgentThreadHeader agent={agent} conversation={conversation} onBack={vi.fn()} />,
+    );
+    expect(container.querySelector('[data-activity="running"]')).toBeNull();
+    expect(screen.queryByRole('status', { name: 'Executando' })).toBeNull();
   });
 });

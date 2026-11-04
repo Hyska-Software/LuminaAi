@@ -25,6 +25,7 @@ vi.mock('sonner', () => ({
 }));
 
 import { emptyCodeSession, useAgentStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
+import type { StreamingState } from '@/lib/store';
 import type { Agent, AgentChannel, Conversation } from '@/lib/types';
 import { AgentSidebar } from './AgentSidebar';
 
@@ -93,6 +94,20 @@ function channel(overrides: Partial<AgentChannel> = {}): AgentChannel {
   };
 }
 
+function stream(overrides: Partial<StreamingState> = {}): StreamingState {
+  return {
+    turnId: 'turn-1',
+    conversationId: 'thread-1',
+    assistantId: 'assistant-1',
+    userMessageId: null,
+    phase: 'tool',
+    step: 1,
+    startedAt: 1,
+    turnKind: 'user',
+    ...overrides,
+  };
+}
+
 function openMenu(trigger: HTMLElement): void {
   fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
 }
@@ -119,6 +134,7 @@ beforeEach(() => {
     conversations: [thread()],
     activeId: null,
     messagesByConversation: {},
+    streamsByConversation: {},
     streaming: null,
   });
   useCodeStore.setState({ byConversation: {} });
@@ -168,6 +184,23 @@ describe('AgentSidebar — thread status', () => {
     });
     render(<AgentSidebar />);
     expect(await screen.findByLabelText('Último turno falhou')).toBeTruthy();
+  });
+
+  it('anima o avatar e mostra os pontos quando uma thread está rodando', async () => {
+    useChatStore.setState({ streamsByConversation: { 'thread-1': stream() } });
+    const { container } = render(<AgentSidebar />);
+    await screen.findByText('Planejamento');
+    expect(container.querySelector('[data-activity="running"]')).not.toBeNull();
+    expect(
+      screen.getAllByRole('status', { name: 'Respondendo' }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('mantém o avatar idle quando nenhuma thread está rodando', async () => {
+    const { container } = render(<AgentSidebar />);
+    await screen.findByText('Planejamento');
+    expect(container.querySelector('[data-activity="running"]')).toBeNull();
+    expect(screen.queryAllByRole('status', { name: 'Respondendo' })).toHaveLength(0);
   });
 });
 

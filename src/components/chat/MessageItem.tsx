@@ -207,6 +207,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
       <AgentAvatar
         avatar={conversationAgent.avatar}
         size="sm"
+        activity={isStreaming ? 'running' : 'idle'}
         className="mt-0.5"
       />
     ) : (

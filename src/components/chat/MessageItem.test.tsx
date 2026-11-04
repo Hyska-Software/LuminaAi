@@ -91,6 +91,35 @@ describe('MessageItem — avatar do agente', () => {
     expect(screen.getByText('🔎')).toBeTruthy();
     expect(container.querySelector('img[src*="lumina-mark"]')).toBeNull();
   });
+
+  it('anima o avatar do agente enquanto a mensagem está em streaming', () => {
+    useUiStore.setState({ layoutMode: 'agent' });
+    useChatStore.setState({
+      conversations: [{ id: 'conv-agent', agentId: 'agent-1' } as Conversation],
+    });
+    useAgentStore.setState({
+      agentsById: {
+        'agent-1': {
+          id: 'agent-1',
+          avatar: { kind: 'emoji', value: '🔎', shape: 'rounded' },
+        } as Agent,
+      },
+    });
+
+    const entry = message({
+      id: 'a-agent',
+      conversationId: 'conv-agent',
+      role: 'assistant',
+      content: 'Analisando…',
+    });
+    const { container, rerender } = render(
+      <MessageItem message={entry} isStreaming isGroupStart />,
+    );
+    expect(container.querySelector('[data-activity="running"]')).not.toBeNull();
+
+    rerender(<MessageItem message={entry} isStreaming={false} isGroupStart />);
+    expect(container.querySelector('[data-activity="idle"]')).not.toBeNull();
+  });
 });
 
 describe('MessageItem — readOnly', () => {

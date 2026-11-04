@@ -1,6 +1,7 @@
 import { ArrowLeft, FolderKanban, PanelRight, Pencil } from 'lucide-react';
 
 import { AgentAvatar } from './AgentAvatar';
+import { AgentActivityDots } from './AgentActivityDots';
 import { AgentComputerControl } from './AgentComputerControl';
 import { AgentConversationWorkspace } from './AgentConversationWorkspace';
 import { modelLabel } from './agentUtils';
@@ -34,9 +35,21 @@ export function AgentThreadHeader({
       <IconButton label="Voltar para o agente" size="sm" variant="ghost" onClick={onBack}>
         <ArrowLeft className="size-4" />
       </IconButton>
-      <AgentAvatar avatar={agent.avatar} size="sm" />
+      <AgentAvatar
+        avatar={agent.avatar}
+        size="sm"
+        activity={turnActive ? 'running' : 'idle'}
+      />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-medium text-foreground">{agent.name}</p>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-[13px] font-medium text-foreground">{agent.name}</span>
+          {turnActive ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent-soft px-1.5 py-0.5 text-[9px] font-medium text-accent">
+              <AgentActivityDots label="Executando" />
+              <span aria-hidden>Executando</span>
+            </span>
+          ) : null}
+        </span>
         <p className="truncate text-[11px] text-foreground-muted">
           {conversation.title} · {modelLabel(providers, conversation.providerId, conversation.modelId)}
         </p>

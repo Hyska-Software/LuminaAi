@@ -1,12 +1,20 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
+
+const motion = vi.hoisted(() => ({ reduced: false }));
+vi.mock('@/components/layout/hooks', () => ({
+  useReduceMotion: () => motion.reduced,
+}));
 
 import { AgentAvatar } from './AgentAvatar';
 import { DEFAULT_AGENT_AVATAR } from '@/lib/agentAvatar';
 import type { AgentAvatar as AgentAvatarSpec } from '@/lib/types';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  motion.reduced = false;
+});
 
 function outer(container: HTMLElement): HTMLElement {
   const element = container.querySelector<HTMLElement>('[data-avatar-kind]');
@@ -88,6 +96,40 @@ describe('AgentAvatar', () => {
     expect(blackEyes).toHaveLength(2);
     expect(blackEyes.every((eye) => eye.getAttribute('fill') === '#111114')).toBe(true);
     expect(black.container.querySelectorAll('svg g circle')).toHaveLength(0);
+  });
+
+  it('marca execução com distorção e piscada no mascote', () => {
+    const { container } = render(
+      <AgentAvatar avatar={DEFAULT_AGENT_AVATAR} activity="running" />,
+    );
+    const element = outer(container);
+    expect(element.getAttribute('data-activity')).toBe('running');
+    expect(element.getAttribute('data-motion')).toBe('animated');
+    expect(element.className).toContain('agent-avatar-running');
+    expect(element.querySelector('g.agent-avatar-eyes-running')).not.toBeNull();
+  });
+
+  it('mantém o estado estático quando reduceMotion está ativo', () => {
+    motion.reduced = true;
+    const { container } = render(
+      <AgentAvatar avatar={DEFAULT_AGENT_AVATAR} activity="running" />,
+    );
+    const element = outer(container);
+    expect(element.getAttribute('data-activity')).toBe('running');
+    expect(element.getAttribute('data-motion')).toBe('reduced');
+    expect(element.className).not.toContain('agent-avatar-running');
+    expect(element.className).toContain('ring-2');
+    expect(element.className).toContain('ring-accent/40');
+    expect(element.querySelector('g.agent-avatar-eyes-running')).toBeNull();
+  });
+
+  it('não anima quando o avatar está idle', () => {
+    const { container } = render(<AgentAvatar avatar={DEFAULT_AGENT_AVATAR} />);
+    const element = outer(container);
+    expect(element.getAttribute('data-activity')).toBe('idle');
+    expect(element.getAttribute('data-motion')).toBe('idle');
+    expect(element.className).not.toContain('agent-avatar-running');
+    expect(element.querySelector('g.agent-avatar-eyes-running')).toBeNull();
   });
 
   it('aplica os tamanhos previstos', () => {
