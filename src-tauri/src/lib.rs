@@ -200,6 +200,8 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::agents::get_agent,
             commands::agents::create_agent,
             commands::agents::update_agent,
+            commands::agents::set_agent_avatar,
+            commands::agents::import_agent_avatar_image,
             commands::agents::set_agent_pinned,
             commands::agents::archive_agent,
             commands::agents::restore_agent,

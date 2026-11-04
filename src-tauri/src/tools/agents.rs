@@ -270,7 +270,7 @@ fn agent_json(agent: &Agent, channel_ids: &[String]) -> Value {
         "name": agent.name,
         "role": agent.role,
         "description": agent.description,
-        "emoji": agent.emoji,
+        "avatar": agent.avatar.summary(),
         "department": agent.department,
         "providerId": agent.provider_id,
         "modelId": agent.model_id,
@@ -634,14 +634,16 @@ fn create_agent_tool(
         .get("permissionMode")
         .cloned()
         .and_then(|value| serde_json::from_value(value).ok())
-        .unwrap_or_default();
+        .unwrap_or(crate::domain::PermissionMode::Autonomous);
     let input = crate::agents::AgentInput {
         name,
         role: json_str(args, "role").unwrap_or_default(),
         description: json_str(args, "description").unwrap_or_default(),
-        emoji: json_str(args, "emoji")
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "🤖".to_string()),
+        avatar: crate::agents::AgentAvatar::emoji(
+            json_str(args, "emoji")
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "🤖".to_string()),
+        ),
         department: json_str(args, "department")
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "Geral".to_string()),
@@ -676,7 +678,7 @@ fn create_agent_tool(
             ToolOutcome {
                 content: serde_json::to_string_pretty(&json!({
                     "created": true,
-                    "agent": agent,
+                    "agent": agent_json(&agent, &[]),
                     "routine": routine,
                     "routineWarning": routine_warning.then_some("rotina não foi criada; verifique os argumentos"),
                 }))
@@ -850,7 +852,7 @@ mod tests {
             name: name.to_string(),
             role: "Assistente".to_string(),
             description: String::new(),
-            emoji: "🤖".to_string(),
+            avatar: crate::agents::AgentAvatar::emoji("🤖"),
             department: "Geral".to_string(),
             provider_id: "opencode-go".to_string(),
             model_id: "deepseek-v4.1-flash".to_string(),
@@ -872,6 +874,19 @@ mod tests {
             computer_environment: "auto".to_string(),
         })
         .expect("agent")
+    }
+
+    #[test]
+    fn agent_json_never_exposes_image_data_urls() {
+        let db = Db::open_in_memory().expect("db");
+        let created = agent(&db, "Ana", false);
+        let avatar = crate::agents::AgentAvatar::image("data:image/png;base64,AAAA");
+        let updated = db
+            .update_agent_avatar(&created.id, &avatar)
+            .expect("avatar");
+        let json = agent_json(&updated, &[]).to_string();
+        assert!(json.contains("\"kind\":\"image\""));
+        assert!(!json.contains("data:"));
     }
 
     #[test]
@@ -926,7 +941,6 @@ mod tests {
                 "instructions": "Pesquise o cliente antes de escrever.",
                 "starters": ["Encontre 5 clientes."],
                 "memoryEnabled": true,
-                "permissionMode": "edit",
                 "capabilities": { "webSearch": true, "fileAccess": true, "codeExecution": false },
                 "routine": {
                     "title": "Prospecção diária",
@@ -944,6 +958,7 @@ mod tests {
         let created = agents.iter().find(|agent| agent.name == "Garimpeiro").expect("created");
         assert_eq!(created.department, "Vendas");
         assert_eq!(created.provider_id, creator.provider_id);
+        assert_eq!(created.permission_mode, crate::domain::PermissionMode::Autonomous);
         assert!(!created.capabilities.code_execution);
         assert_eq!(db.list_agent_routines(&created.id).expect("routines").len(), 1);
     }

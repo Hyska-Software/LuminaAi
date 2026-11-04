@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 
 import { api } from '@/lib/api';
-import type { Agent, AgentInput } from '@/lib/types';
+import type { Agent, AgentAvatar, AgentInput } from '@/lib/types';
 
 let initializePromise: Promise<void> | null = null;
+const avatarSequence = new Map<string, number>();
 
 function sortAgents(agents: Agent[]): Agent[] {
   return [...agents].sort((left, right) => {
@@ -29,6 +30,7 @@ interface AgentState {
   refresh: () => Promise<void>;
   create: (input: AgentInput) => Promise<Agent>;
   update: (id: string, input: AgentInput) => Promise<Agent>;
+  updateAvatar: (id: string, avatar: AgentAvatar) => Promise<void>;
   pin: (id: string, pinned: boolean) => Promise<void>;
   archive: (id: string) => Promise<void>;
   restore: (id: string) => Promise<void>;
@@ -104,6 +106,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         delete mutationById[id];
         return { mutationById };
       });
+      throw error;
+    }
+  },
+
+  updateAvatar: async (id, avatar) => {
+    const current = get().agentsById[id];
+    if (!current) return;
+    const previous = current.avatar;
+    const sequence = (avatarSequence.get(id) ?? 0) + 1;
+    avatarSequence.set(id, sequence);
+    set((state) => ({
+      agentsById: { ...state.agentsById, [id]: { ...state.agentsById[id], avatar } },
+    }));
+    try {
+      const agent = await api.setAgentAvatar(id, avatar);
+      if (avatarSequence.get(id) !== sequence) return;
+      set((state) => ({ agentsById: { ...state.agentsById, [id]: agent } }));
+    } catch (error) {
+      if (avatarSequence.get(id) === sequence) {
+        set((state) => ({
+          agentsById: {
+            ...state.agentsById,
+            [id]: { ...state.agentsById[id], avatar: previous },
+          },
+        }));
+      }
       throw error;
     }
   },

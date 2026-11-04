@@ -34,7 +34,7 @@ export function AgentThreadHeader({
       <IconButton label="Voltar para o agente" size="sm" variant="ghost" onClick={onBack}>
         <ArrowLeft className="size-4" />
       </IconButton>
-      <AgentAvatar emoji={agent.emoji} size="sm" />
+      <AgentAvatar avatar={agent.avatar} size="sm" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-medium text-foreground">{agent.name}</p>
         <p className="truncate text-[11px] text-foreground-muted">

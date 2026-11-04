@@ -21,6 +21,7 @@ import {
   MessageSquare,
   MessageSquarePlus,
   Monitor,
+  Palette,
   Pencil,
   Pin,
   PinOff,
@@ -231,6 +232,7 @@ function AgentRow({
   onToggle,
   onNewThread,
   onEdit,
+  onAvatar,
   onRevise,
   onDuplicate,
   onExport,
@@ -256,6 +258,7 @@ function AgentRow({
   onToggle: () => void;
   onNewThread: () => void;
   onEdit: () => void;
+  onAvatar: () => void;
   onRevise: () => void;
   onDuplicate: () => void;
   onExport: () => void;
@@ -303,7 +306,7 @@ function AgentRow({
             active ? 'bg-surface-active' : 'hover:bg-surface-hover',
           )}
         >
-          <AgentAvatar emoji={agent.emoji} size="sm" />
+          <AgentAvatar avatar={agent.avatar} size="sm" />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
               <span className="truncate text-[13px] font-medium text-foreground">{agent.name}</span>
@@ -372,6 +375,9 @@ function AgentRow({
             </DropdownMenuItem>
             <DropdownMenuItem icon={<Pencil className="size-3.5" />} onSelect={onEdit}>
               Editar agente
+            </DropdownMenuItem>
+            <DropdownMenuItem icon={<Palette className="size-3.5" />} onSelect={onAvatar}>
+              Personalizar avatar
             </DropdownMenuItem>
             <DropdownMenuItem icon={<WandSparkles className="size-3.5" />} onSelect={onRevise}>
               Editar com IA
@@ -549,6 +555,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const setActiveAgentId = useUiStore((state) => state.setActiveAgentId);
   const setActiveChannelId = useUiStore((state) => state.setActiveChannelId);
   const openEditor = useUiStore((state) => state.openAgentEditor);
+  const openAvatarEditor = useUiStore((state) => state.openAgentAvatarEditor);
   const openSettings = useUiStore((state) => state.openSettings);
   const startNewConversation = useChatStore((state) => state.startNewConversation);
   const clearActiveConversation = useChatStore((state) => state.clearActiveConversation);
@@ -1008,6 +1015,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                 }
                 onNewThread={() => newThread(agent)}
                 onEdit={() => openEditor({ mode: 'edit', agentId: agent.id })}
+                onAvatar={() => openAvatarEditor(agent.id)}
                 onRevise={() => setRevisionAgent(agent)}
                 onDuplicate={() => void duplicateAgent(agent)}
                 onExport={() => void exportAgent(agent)}
@@ -1052,6 +1060,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                 }
                 onNewThread={() => newThread(agent)}
                 onEdit={() => openEditor({ mode: 'edit', agentId: agent.id })}
+                onAvatar={() => openAvatarEditor(agent.id)}
                 onRevise={() => setRevisionAgent(agent)}
                 onDuplicate={() => void duplicateAgent(agent)}
                 onExport={() => void exportAgent(agent)}
@@ -1145,7 +1154,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                     key={agent.id}
                     className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
                   >
-                    <AgentAvatar emoji={agent.emoji} size="sm" />
+                    <AgentAvatar avatar={agent.avatar} size="sm" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px] font-medium">{agent.name}</p>
                       <p className="truncate text-[11px] text-foreground-muted">
@@ -1199,7 +1208,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                     key={agent.id}
                     className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
                   >
-                    <AgentAvatar emoji={agent.emoji} size="sm" />
+                    <AgentAvatar avatar={agent.avatar} size="sm" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px] font-medium">{agent.name}</p>
                       <p className="truncate text-[11px] text-foreground-muted">

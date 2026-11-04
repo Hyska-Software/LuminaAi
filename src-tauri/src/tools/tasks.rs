@@ -784,7 +784,7 @@ mod tests {
             name: name.to_string(),
             role: "Engenheiro".to_string(),
             description: String::new(),
-            emoji: "🛠️".to_string(),
+            avatar: crate::agents::AgentAvatar::emoji("🛠️"),
             department: "Geral".to_string(),
             provider_id: "opencode-go".to_string(),
             model_id: "deepseek-v4.1-flash".to_string(),

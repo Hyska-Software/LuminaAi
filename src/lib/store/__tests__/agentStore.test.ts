@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
   createAgent: vi.fn(),
   updateAgent: vi.fn(),
+  setAgentAvatar: vi.fn(),
   setAgentPinned: vi.fn(),
   archiveAgent: vi.fn(),
   restoreAgent: vi.fn(),
@@ -26,7 +27,7 @@ const input: AgentInput = {
   name: 'Irineu',
   role: 'Engenheiro',
   description: 'Backend.',
-  emoji: '🛠️',
+  avatar: { kind: 'emoji', value: '🛠️', shape: 'rounded' },
   department: 'Engenharia',
   providerId: 'opencode-go',
   modelId: 'glm-5.3-flash',
@@ -51,7 +52,7 @@ const agent = (overrides: Partial<Agent> = {}): Agent => ({
   name: 'Irineu',
   role: 'Engenheiro',
   description: 'Backend.',
-  emoji: '🛠️',
+  avatar: { kind: 'emoji', value: '🛠️', shape: 'rounded' },
   department: 'Engenharia',
   pinned: false,
   sortOrder: 1,
@@ -95,6 +96,7 @@ beforeEach(() => {
   mocks.listAgents.mockReset();
   mocks.createAgent.mockReset();
   mocks.updateAgent.mockReset();
+  mocks.setAgentAvatar.mockReset();
   mocks.setAgentPinned.mockReset();
   mocks.archiveAgent.mockReset();
   mocks.restoreAgent.mockReset();
@@ -158,5 +160,31 @@ describe('agentStore', () => {
     await expect(useAgentStore.getState().archive('agent-1')).rejects.toThrow('backend offline');
     expect(useAgentStore.getState().agentsById['agent-1'].archivedAt).toBeNull();
     expect(useAgentStore.getState().mutationById['agent-1']).toBeUndefined();
+  });
+
+  it('updates the avatar optimistically and rolls back on failure', async () => {
+    seed([agent()]);
+    const next = {
+      kind: 'mascot',
+      shape: 'mascot',
+      body: 'star',
+      expression: 'happy',
+      color: 'red',
+    } as const;
+    mocks.setAgentAvatar.mockResolvedValue(agent({ avatar: next }));
+    const pending = useAgentStore.getState().updateAvatar('agent-1', next);
+    expect(useAgentStore.getState().agentsById['agent-1'].avatar).toEqual(next);
+    await pending;
+    expect(useAgentStore.getState().agentsById['agent-1'].avatar).toEqual(next);
+
+    const failing = {
+      ...next,
+      color: 'green',
+    } as const;
+    mocks.setAgentAvatar.mockRejectedValue(new Error('falhou'));
+    await expect(useAgentStore.getState().updateAvatar('agent-1', failing)).rejects.toThrow(
+      'falhou',
+    );
+    expect(useAgentStore.getState().agentsById['agent-1'].avatar).toEqual(next);
   });
 });

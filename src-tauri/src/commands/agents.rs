@@ -7,8 +7,8 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::agents::{
-    Agent, AgentExportDocument, AgentInput, AgentMemory, AgentMemoryInput, AgentRevision,
-    AgentSharedMemory, AgentThreadCursor, AgentThreadPage, AgentUsage,
+    Agent, AgentAvatar, AgentExportDocument, AgentInput, AgentMemory, AgentMemoryInput,
+    AgentRevision, AgentSharedMemory, AgentThreadCursor, AgentThreadPage, AgentUsage,
 };
 use crate::harness::{self, HarnessDeps};
 use crate::state::AppState;
@@ -279,7 +279,7 @@ pub fn duplicate_agent(state: State<'_, AppState>, agent_id: String) -> Result<A
         name,
         role: current.role,
         description: current.description,
-        emoji: current.emoji,
+        avatar: current.avatar,
         department: current.department,
         provider_id: current.provider_id,
         model_id: current.model_id,
@@ -300,6 +300,34 @@ pub fn duplicate_agent(state: State<'_, AppState>, agent_id: String) -> Result<A
     validate_fallback(&state, &input)?;
     validate_workspace(&state, &input)?;
     state.db.create_agent(&input).map_err(to_error)
+}
+
+#[tauri::command]
+pub fn set_agent_avatar(
+    state: State<'_, AppState>,
+    agent_id: String,
+    avatar: AgentAvatar,
+) -> Result<Agent, String> {
+    let avatar = crate::agents::normalize_avatar(avatar).map_err(to_error)?;
+    state
+        .db
+        .update_agent_avatar(&agent_id, &avatar)
+        .map_err(to_error)
+}
+
+#[tauri::command]
+pub fn import_agent_avatar_image(path: String) -> Result<String, String> {
+    let metadata = std::fs::metadata(&path)
+        .map_err(|error| format!("falha ao ler a imagem: {error}"))?;
+    if !metadata.is_file() {
+        return Err("AGENT_AVATAR_INVALID: o caminho não é um arquivo.".to_string());
+    }
+    if metadata.len() > 10 * 1024 * 1024 {
+        return Err("AGENT_AVATAR_TOO_LARGE: a imagem passa de 10 MB.".to_string());
+    }
+    let bytes =
+        std::fs::read(&path).map_err(|error| format!("falha ao ler a imagem: {error}"))?;
+    crate::agents::normalize_avatar_image(&bytes).map_err(to_error)
 }
 
 fn safe_file_stem(value: &str) -> String {
@@ -486,7 +514,7 @@ pub async fn suggest_agent(
         name,
         role,
         description,
-        emoji,
+        avatar: crate::agents::AgentAvatar::emoji(emoji),
         department,
         provider_id,
         model_id,
@@ -498,7 +526,7 @@ pub async fn suggest_agent(
         capabilities: crate::agents::AgentCapabilities::default(),
         memory_enabled: false,
         workspace_id: None,
-        permission_mode: crate::domain::PermissionMode::Edit,
+        permission_mode: crate::domain::PermissionMode::Autonomous,
         docker_image: None,
         computer_environment: "auto".to_string(),
     };
@@ -536,7 +564,12 @@ pub async fn revise_agent(
         ));
     }
     let before = AgentInput::from(&agent);
-    let current = serde_json::to_string_pretty(&before)
+    let mut context = serde_json::to_value(&before)
+        .map_err(|error| format!("AGENT_REVISION_FAILED: {error}"))?;
+    if let Some(object) = context.as_object_mut() {
+        object.remove("avatar");
+    }
+    let current = serde_json::to_string_pretty(&context)
         .map_err(|error| format!("AGENT_REVISION_FAILED: {error}"))?;
     let deps = HarnessDeps {
         app: Some(app.clone()),
@@ -559,7 +592,7 @@ pub async fn revise_agent(
     };
     let system = "You revise an existing AI agent for Lumina, a desktop AI workspace. \
                   The current configuration is JSON. Reply with ONLY one JSON object containing \
-                  only the fields you changed. Allowed keys: name, role, description, emoji, \
+                  only the fields you changed. Allowed keys: name, role, description, \
                   department, instructions, starters (array of 1-3 strings), memoryEnabled. \
                   Keep the identity unless the user explicitly asks to change it. Write in \
                   Brazilian Portuguese. Never add tools, permissions, model routes or claims \
@@ -629,7 +662,12 @@ pub fn import_agent(
         .map_err(|error| format!("caminho inválido: {error}"))?;
     let raw = std::fs::read_to_string(&path)
         .map_err(|error| format!("falha ao ler {}: {error}", path.display()))?;
-    let document: AgentExportDocument = serde_json::from_str(&raw)
+    let mut value: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|error| format!("AGENT_IMPORT_INVALID: JSON inválido: {error}"))?;
+    if value.get("version").and_then(|version| version.as_u64()) == Some(1) {
+        crate::agents::upgrade_agent_export_v1(&mut value)?;
+    }
+    let document: AgentExportDocument = serde_json::from_value(value)
         .map_err(|error| format!("AGENT_IMPORT_INVALID: JSON inválido: {error}"))?;
     let document = document.normalize()?;
     validate_model(&state, &document.agent)?;

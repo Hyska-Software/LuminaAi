@@ -184,6 +184,8 @@ interface UiState {
   activeChannelId: string | null;
   /** Diálogo de criação/edição de agente (volátil). */
   agentEditor: AgentEditorState | null;
+  /** Quick avatar editor: agent id or `null` (volatile). */
+  agentAvatarEditor: string | null;
   /** Center surface inside the Code layout; reset to `session` on demand. */
   codeView: CodeView;
   /** Diff aberto como aba central (`null` = nenhum; pode ficar em segundo plano). */
@@ -251,6 +253,8 @@ interface UiState {
   setActiveChannelId: (channelId: string | null) => void;
   openAgentEditor: (target: AgentEditorState) => void;
   closeAgentEditor: () => void;
+  openAgentAvatarEditor: (agentId: string) => void;
+  closeAgentAvatarEditor: () => void;
   /** Switches the Code center between the agent session and the Skills page. */
   setCodeView: (view: CodeView) => void;
   /** Abre o diff de um arquivo como aba central (codeView vira diff). */
@@ -385,6 +389,7 @@ export const useUiStore = create<UiState>()(
       activeAgentId: null,
       activeChannelId: null,
       agentEditor: null,
+      agentAvatarEditor: null,
       codeView: 'session',
       codeDiffTab: null,
       codeFileTabs: [],
@@ -439,6 +444,8 @@ export const useUiStore = create<UiState>()(
         })),
       openAgentEditor: (agentEditor) => set({ agentEditor }),
       closeAgentEditor: () => set({ agentEditor: null }),
+      openAgentAvatarEditor: (agentAvatarEditor) => set({ agentAvatarEditor }),
+      closeAgentAvatarEditor: () => set({ agentAvatarEditor: null }),
       setCodeView: (codeView) =>
         set({
           codeView:

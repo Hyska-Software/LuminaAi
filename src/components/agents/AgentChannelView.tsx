@@ -8,17 +8,20 @@ import { AgentPanelButton, AgentPanelOpener } from './AgentPanelToggle';
 import { Markdown } from '@/components/chat/Markdown';
 import { Button, IconButton, Textarea } from '@/components/ui';
 import { api } from '@/lib/api';
+import { agentAvatarForEmoji, DEFAULT_AGENT_AVATAR } from '@/lib/agentAvatar';
 import { useAgentStore, useUiStore } from '@/lib/store';
-import type { AgentChannel, AgentChannelMessage } from '@/lib/types';
+import type { AgentAvatar as AgentAvatarSpec, AgentChannel, AgentChannelMessage } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 function messageAuthor(
   message: AgentChannelMessage,
-  names: Map<string, { name: string; emoji: string }>,
-): { name: string; emoji: string } {
-  if (message.role === 'user') return { name: 'Você', emoji: '🧑' };
-  if (message.agentId) return names.get(message.agentId) ?? { name: 'Agente', emoji: '🤖' };
-  return { name: 'Sistema', emoji: '⚙️' };
+  names: Map<string, { name: string; avatar: AgentAvatarSpec }>,
+): { name: string; avatar: AgentAvatarSpec } {
+  if (message.role === 'user') return { name: 'Você', avatar: agentAvatarForEmoji('🧑') };
+  if (message.agentId) {
+    return names.get(message.agentId) ?? { name: 'Agente', avatar: DEFAULT_AGENT_AVATAR };
+  }
+  return { name: 'Sistema', avatar: agentAvatarForEmoji('⚙️') };
 }
 
 /**
@@ -50,16 +53,19 @@ export function AgentChannelView({
   const setActiveChannelId = useUiStore((state) => state.setActiveChannelId);
 
   const names = useMemo(() => {
-    const map = new Map<string, { name: string; emoji: string }>();
+    const map = new Map<string, { name: string; avatar: AgentAvatarSpec }>();
     for (const [id, agent] of Object.entries(agents)) {
-      map.set(id, { name: agent.name, emoji: agent.emoji });
+      map.set(id, { name: agent.name, avatar: agent.avatar });
     }
     return map;
   }, [agents]);
   const members = useMemo(
     () =>
       (channel?.memberIds ?? [])
-        .map((id) => ({ id, ...(names.get(id) ?? { name: 'Agente', emoji: '🤖' }) }))
+        .map((id) => ({
+          id,
+          ...(names.get(id) ?? { name: 'Agente', avatar: DEFAULT_AGENT_AVATAR }),
+        }))
         .filter((member) => member.name !== 'Agente'),
     [channel?.memberIds, names],
   );
@@ -238,7 +244,7 @@ export function AgentChannelView({
                   key={message.id}
                   className={cn('flex min-w-0 gap-2.5', own && 'flex-row-reverse')}
                 >
-                  <AgentAvatar emoji={author.emoji} size="sm" />
+                  <AgentAvatar avatar={author.avatar} size="sm" />
                   <div className={cn('min-w-0 max-w-[85%]', own && 'text-right')}>
                     <p className="mb-0.5 text-[10px] font-medium text-foreground-subtle">
                       {author.name}
@@ -305,7 +311,7 @@ export function AgentChannelView({
                       insertMention(member.name);
                     }}
                   >
-                    <AgentAvatar emoji={member.emoji} size="sm" />
+                    <AgentAvatar avatar={member.avatar} size="sm" />
                     <span className="truncate">{member.name}</span>
                   </button>
                 ))}

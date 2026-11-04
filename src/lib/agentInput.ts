@@ -9,7 +9,7 @@ export function inputFromAgent(agent: Agent): AgentInput {
     name: agent.name,
     role: agent.role,
     description: agent.description,
-    emoji: agent.emoji,
+    avatar: agent.avatar,
     department: agent.department,
     providerId: agent.providerId,
     modelId: agent.modelId,

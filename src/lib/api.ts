@@ -4,6 +4,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import type {
   Agent,
+  AgentAvatar,
   AgentChannel,
   AgentChannelInput,
   AgentChannelMessage,
@@ -186,6 +187,10 @@ export const api = {
   createAgent: (input: AgentInput) => invoke<Agent>('create_agent', { input }),
   updateAgent: (agentId: string, input: AgentInput) =>
     invoke<Agent>('update_agent', { agentId, input }),
+  setAgentAvatar: (agentId: string, avatar: AgentAvatar) =>
+    invoke<Agent>('set_agent_avatar', { agentId, avatar }),
+  importAgentAvatarImage: (path: string) =>
+    invoke<string>('import_agent_avatar_image', { path }),
   setAgentPinned: (agentId: string, pinned: boolean) =>
     invoke<Agent>('set_agent_pinned', { agentId, pinned }),
   archiveAgent: (agentId: string) => invoke<Agent>('archive_agent', { agentId }),

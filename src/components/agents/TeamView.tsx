@@ -41,7 +41,7 @@ function AgentCard({
         aria-label={`Abrir agente ${agent.name}`}
         className="flex min-w-0 items-start gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       >
-        <AgentAvatar emoji={agent.emoji} />
+        <AgentAvatar avatar={agent.avatar} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[15px] font-semibold tracking-tight text-foreground">
             {agent.name}
@@ -133,7 +133,7 @@ export function TeamView() {
         name: template.name,
         role: template.role,
         description: template.description,
-        emoji: template.emoji,
+        avatar: template.avatar,
         department: template.department,
         providerId: provider.id,
         modelId: provider.defaultModelId,
@@ -143,7 +143,7 @@ export function TeamView() {
         capabilities: templateCapabilities(template),
         memoryEnabled: template.memoryEnabled ?? false,
         workspaceId: null,
-        permissionMode: 'edit',
+        permissionMode: 'autonomous',
       });
       setActiveAgentId(agent.id);
       clearActiveConversation();
@@ -174,9 +174,7 @@ export function TeamView() {
                 onClick={() => void createFromTemplate(template)}
                 className="rounded-xl border border-border bg-surface-raised/60 p-4 text-left transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
               >
-                <span aria-hidden className="text-[19px]">
-                  {template.emoji}
-                </span>
+                <AgentAvatar avatar={template.avatar} size="md" />
                 <span className="mt-2 block text-[13px] font-medium">{template.name}</span>
                 <span className="mt-1 block text-[12px] leading-relaxed text-foreground-muted">
                   {template.description}

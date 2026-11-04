@@ -231,7 +231,7 @@ export function AgentTaskBoardDialog({
                             {task.title}
                           </p>
                           <p className="mt-1 flex items-center gap-1.5 truncate text-[10px] text-foreground-muted">
-                            {agent ? <AgentAvatar emoji={agent.emoji} size="sm" /> : null}
+                            {agent ? <AgentAvatar avatar={agent.avatar} size="sm" /> : null}
                             {agent?.name ?? task.ownerAgentId}
                           </p>
                           <p className="mt-1 flex flex-wrap gap-1 text-[10px] text-foreground-subtle">

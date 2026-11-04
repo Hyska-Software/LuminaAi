@@ -139,7 +139,7 @@ export function AgentActivityDialog({
                     key={stream.turnId}
                     className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
                   >
-                    {agent ? <AgentAvatar emoji={agent.emoji} size="sm" /> : null}
+                    {agent ? <AgentAvatar avatar={agent.avatar} size="sm" /> : null}
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px] font-medium text-foreground">
                         {agent?.name ?? 'Sessão'} · {conversation?.title ?? stream.conversationId}
@@ -172,7 +172,7 @@ export function AgentActivityDialog({
                     key={turn.turnId}
                     className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
                   >
-                    {agent ? <AgentAvatar emoji={agent.emoji} size="sm" /> : null}
+                    {agent ? <AgentAvatar avatar={agent.avatar} size="sm" /> : null}
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px] font-medium text-foreground">
                         {agent?.name ?? 'Agente'} · {conversation?.title ?? turn.conversationId}

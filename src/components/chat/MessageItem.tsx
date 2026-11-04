@@ -7,9 +7,10 @@ import { AttachmentChips } from '@/components/composer/AttachmentChips';
 import { useReduceMotion } from '@/components/layout/hooks';
 import { Badge, Button, IconButton, Spinner } from '@/components/ui';
 import { findModel, getModel } from '@/lib/catalog';
-import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { useAppStore, useAgentStore, useChatStore, useUiStore } from '@/lib/store';
 import type { ChatMessage } from '@/lib/types';
 import { cn, copyText, formatDuration, formatTokens } from '@/lib/utils';
+import { AgentAvatar } from '@/components/agents/AgentAvatar';
 import { CitationChips } from './CitationChips';
 import { BrandMark } from './BrandMark';
 import { GoalRoundDivider } from './GoalRoundDivider';
@@ -189,9 +190,28 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   const showTokenUsage = useAppStore((state) => state.settings.showTokenUsage);
   const artifacts = useUiStore((state) => state.artifacts);
   const layoutMode = useUiStore((state) => state.layoutMode);
+  const conversationAgentId = useChatStore(
+    (state) =>
+      state.conversations.find((entry) => entry.id === message.conversationId)?.agentId ??
+      null,
+  );
+  const conversationAgent = useAgentStore((state) =>
+    conversationAgentId ? (state.agentsById[conversationAgentId] ?? null) : null,
+  );
   /* The Code workbench is task-focused: the assistant avatar (brand mark) adds
-     chrome without information, so it only belongs to the Chat layout. */
+     chrome without information, so it only belongs to the Chat layout. In the
+     Agentes layout the avatar is the persona, not the Lumina brand. */
   const showAssistantAvatar = layoutMode !== 'code';
+  const assistantAvatar =
+    layoutMode === 'agent' && conversationAgent ? (
+      <AgentAvatar
+        avatar={conversationAgent.avatar}
+        size="sm"
+        className="mt-0.5"
+      />
+    ) : (
+      <BrandMark size={24} className="mt-0.5" animated={isStreaming} />
+    );
   // Workspace da sessão: com ele o resumo do turno abre o diff de cada arquivo
   // como aba central (WORKBENCH §7.2); sem workspace o card é informativo.
   const workspaceId = useChatStore(
@@ -231,9 +251,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
       transition={reduceMotion ? { duration: 0 } : MESSAGE_MOTION.transition}
       className={cn('group/message flex items-start gap-3', isGroupStart ? 'mt-7' : 'mt-3')}
     >
-      {showAssistantAvatar ? (
-        <BrandMark size={24} className="mt-0.5" animated={isStreaming} />
-      ) : null}
+      {showAssistantAvatar ? assistantAvatar : null}
 
       <div className="min-w-0 flex-1">
         {reasoning || reasoningActive || toolCalls.length > 0 ? (

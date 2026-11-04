@@ -1,3 +1,4 @@
+import { AgentAvatarDialog } from '@/components/agents/AgentAvatarDialog';
 import { AgentWorkspace } from '@/components/agents/AgentWorkspace';
 import { ChatView } from '@/components/chat/ChatView';
 import { SubagentChatView } from '@/components/agent/SubagentChatView';
@@ -45,7 +46,14 @@ export function WorkspaceCenter() {
   /** Sessão ativa no Code (dona do objetivo exibido no painel central). */
   const activeId = useChatStore((state) => state.activeId);
 
-  if (layoutMode === 'agent') return <AgentWorkspace />;
+  if (layoutMode === 'agent') {
+    return (
+      <>
+        <AgentWorkspace />
+        <AgentAvatarDialog />
+      </>
+    );
+  }
 
   const isCode = layoutMode === 'code';
   const showSkills = isCode ? codeView === 'skills' : activeView === 'skills';

@@ -86,7 +86,7 @@ const agentRecord = (overrides: Partial<Agent> = {}): Agent => ({
   name: 'Irineu',
   role: 'Engenheiro',
   description: '',
-  emoji: '🛠️',
+  avatar: { kind: 'emoji', value: '🛠️', shape: 'rounded' },
   department: 'Engenharia',
   pinned: false,
   sortOrder: 1,

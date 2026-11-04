@@ -1870,7 +1870,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("temporary directory");
         let db = Arc::new(crate::db::Db::open_in_memory().expect("database"));
         let input = crate::agents::normalize_input(crate::agents::AgentInput {
-            name: "Agent".into(), role: "Assistant".into(), description: String::new(), emoji: String::new(),
+            name: "Agent".into(), role: "Assistant".into(), description: String::new(), avatar: crate::agents::AgentAvatar::emoji(""),
             department: "General".into(), provider_id: "provider".into(), model_id: "model".into(),
             fallback_provider_id: None, fallback_model_id: None, reasoning: None, instructions: String::new(),
             starters: Vec::new(), capabilities: crate::agents::AgentCapabilities { browser_use: true, ..Default::default() }, memory_enabled: false, workspace_id: None,

@@ -3,7 +3,6 @@ import { Ban, Loader2, Play, Plus, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 
-import { AgentAvatar } from './AgentAvatar';
 import { AgentDialogBody } from './AgentDialogBody';
 import {
   Badge,

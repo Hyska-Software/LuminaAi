@@ -60,9 +60,23 @@ export function AgentWelcome({
 }) {
   const providers = useAppStore((state) => state.providers);
   const usage = useAgentUsage(agent.id, agent.updatedAt);
+  const openAvatarEditor = useUiStore((state) => state.openAgentAvatarEditor);
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col items-center px-6 pb-6 pt-10 text-center sm:pt-14">
-      <AgentAvatar emoji={agent.emoji} size="lg" className="rounded-2xl" />
+      <button
+        type="button"
+        aria-label={`Personalizar avatar de ${agent.name}`}
+        onClick={() => openAvatarEditor(agent.id)}
+        className="group relative rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+      >
+        <AgentAvatar avatar={agent.avatar} size="lg" />
+        <span
+          aria-hidden
+          className="absolute -bottom-1 -right-1 flex size-6 items-center justify-center rounded-full border border-border bg-surface-raised text-foreground-muted opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+        >
+          <Pencil className="size-3" />
+        </span>
+      </button>
       <h1 className="mt-4 text-2xl font-semibold tracking-tight text-foreground">{agent.name}</h1>
       <p className="mt-1 text-[13px] text-foreground-muted">
         {agent.role}

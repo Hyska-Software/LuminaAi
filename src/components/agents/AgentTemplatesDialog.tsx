@@ -1,5 +1,6 @@
 import { Bot, Sparkles } from 'lucide-react';
 
+import { AgentAvatar } from './AgentAvatar';
 import { AgentDialogBody } from './AgentDialogBody';
 import { AGENT_TEMPLATES, type AgentTemplate } from '@/lib/agentTemplates';
 import {
@@ -51,7 +52,7 @@ export function AgentTemplatesDialog({
                     aria-hidden
                     className="flex size-8 items-center justify-center rounded-lg border border-border bg-surface-raised text-[17px]"
                   >
-                    {template.emoji}
+                    <AgentAvatar avatar={template.avatar} size="sm" />
                   </span>
                   <span className="min-w-0">
                     <span className="block truncate text-[13px] font-semibold text-foreground">

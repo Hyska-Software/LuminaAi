@@ -40,7 +40,7 @@ const CONVERSATION_COLUMNS: &str = "id, title, created_at, updated_at, pinned, \
      agent_kind, permission_mode, parent_conversation_id, subagent_task_call_id, subagent_type, \
      agent_id, channel_id, task_id";
 
-const AGENT_COLUMNS: &str = "a.id, a.name, a.role, a.description, a.emoji, a.department, \
+const AGENT_COLUMNS: &str = "a.id, a.name, a.role, a.description, a.avatar_json, a.department, \
      a.pinned, a.sort_order, a.provider_id, a.model_id, a.fallback_provider_id, \
      a.fallback_model_id, a.reasoning_json, a.instructions, a.prompt_version, a.starters_json, \
      a.capabilities_json, a.memory_enabled, a.memory_revision, a.workspace_id, a.permission_mode, a.docker_image, \
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS agents (
   name              TEXT NOT NULL,
   role              TEXT NOT NULL DEFAULT '',
   description       TEXT NOT NULL DEFAULT '',
-  emoji             TEXT NOT NULL DEFAULT '🤖',
+  avatar_json       TEXT NOT NULL DEFAULT '{\"kind\":\"mascot\",\"body\":\"mascot\",\"expression\":\"neutral\",\"color\":\"blue\",\"shape\":\"mascot\"}',
   department        TEXT NOT NULL DEFAULT 'Geral',
   pinned            INTEGER NOT NULL DEFAULT 0,
   sort_order        INTEGER NOT NULL DEFAULT 0,
@@ -1373,6 +1373,46 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Migrates legacy emoji avatars into `avatar_json` and drops the old column.
+/// Idempotent: new databases already have `avatar_json` and no `emoji`.
+fn migrate_agents_avatar_schema(conn: &Connection) -> Result<()> {
+    let has_emoji = table_columns(conn, "agents")?
+        .iter()
+        .any(|(name, _)| name == "emoji");
+    ensure_column(
+        conn,
+        "agents",
+        "avatar_json",
+        "ALTER TABLE agents ADD COLUMN avatar_json TEXT",
+    )?;
+    if has_emoji {
+        let rows = {
+            let mut stmt =
+                conn.prepare("SELECT id, emoji FROM agents WHERE avatar_json IS NULL")?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        for (id, emoji) in rows {
+            let avatar = crate::agents::AgentAvatar::emoji(emoji);
+            conn.execute(
+                "UPDATE agents SET avatar_json = ?2 WHERE id = ?1",
+                params![id, serde_json::to_string(&avatar)?],
+            )?;
+        }
+        conn.execute("ALTER TABLE agents DROP COLUMN emoji", [])?;
+    }
+    let fallback = serde_json::to_string(&crate::agents::AgentAvatar::default())?;
+    conn.execute(
+        "UPDATE agents SET avatar_json = ?1 WHERE avatar_json IS NULL",
+        params![fallback],
+    )?;
+    Ok(())
+}
+
 /// Migração aditiva e idempotente da tabela `usage_log`: bancos criados antes do
 /// cache de prompt ganham as colunas de cache do §5.3 do plano. Nenhuma linha é
 /// perdida; reabrir o banco não recria nada. As colunas novas são preenchidas
@@ -1723,12 +1763,17 @@ fn agent_from_row(row: &Row<'_>) -> rusqlite::Result<Agent> {
     let reasoning_json: Option<String> = row.get(12)?;
     let starters_json: String = row.get(15)?;
     let capabilities_json: String = row.get(16)?;
+    let avatar_json: Option<String> = row.get(4)?;
+    let avatar = avatar_json
+        .as_deref()
+        .and_then(|value| serde_json::from_str(value).ok())
+        .unwrap_or_default();
     Ok(Agent {
         id: row.get(0)?,
         name: row.get(1)?,
         role: row.get(2)?,
         description: row.get(3)?,
-        emoji: row.get(4)?,
+        avatar,
         department: row.get(5)?,
         pinned: row.get::<_, i64>(6)? != 0,
         sort_order: row.get(7)?,
@@ -2426,6 +2471,8 @@ impl Db {
         migrate_messages_schema(conn)?;
         // Separação Chat/Code: conversas antigas viram mode='chat', sem vínculo.
         migrate_conversations_schema(conn)?;
+        // Avatares: emoji legado vira `avatar_json` e a coluna antiga é removida.
+        migrate_agents_avatar_schema(conn)?;
         // Biblioteca: `favorite` + `conversation_id` nullable (uploads do usuário).
         migrate_artifacts_schema(conn)?;
         // Cache de prompt: colunas aditivas em `usage_log` (as tabelas novas são
@@ -2512,6 +2559,7 @@ impl Db {
             .transpose()?;
         let starters = serde_json::to_string(&input.starters)?;
         let capabilities = serde_json::to_string(&input.capabilities)?;
+        let avatar = serde_json::to_string(&input.avatar)?;
         {
             let conn = self.conn.lock();
             let sort_order: i64 = conn.query_row(
@@ -2520,7 +2568,7 @@ impl Db {
                 |row| row.get(0),
             )?;
             conn.execute(
-                "INSERT INTO agents (id, name, role, description, emoji, department, pinned, \
+                "INSERT INTO agents (id, name, role, description, avatar_json, department, pinned, \
                  sort_order, provider_id, model_id, fallback_provider_id, fallback_model_id, \
                  reasoning_json, instructions, prompt_version, starters_json, capabilities_json, \
                  memory_enabled, workspace_id, permission_mode, docker_image, \
@@ -2531,7 +2579,7 @@ impl Db {
                     &input.name,
                     &input.role,
                     &input.description,
-                    &input.emoji,
+                    &avatar,
                     &input.department,
                     sort_order,
                     &input.provider_id,
@@ -2577,10 +2625,11 @@ impl Db {
             .transpose()?;
         let starters = serde_json::to_string(&input.starters)?;
         let capabilities = serde_json::to_string(&input.capabilities)?;
+        let avatar = serde_json::to_string(&input.avatar)?;
         let memory_disabled = current.memory_enabled && !input.memory_enabled;
         let conn = self.conn.lock();
         conn.execute(
-            "UPDATE agents SET name = ?2, role = ?3, description = ?4, emoji = ?5, \
+            "UPDATE agents SET name = ?2, role = ?3, description = ?4, avatar_json = ?5, \
              department = ?6, provider_id = ?7, model_id = ?8, fallback_provider_id = ?9, \
              fallback_model_id = ?10, reasoning_json = ?11, instructions = ?12, \
              prompt_version = ?13, starters_json = ?14, capabilities_json = ?15, \
@@ -2591,7 +2640,7 @@ impl Db {
                 &input.name,
                 &input.role,
                 &input.description,
-                &input.emoji,
+                &avatar,
                 &input.department,
                 &input.provider_id,
                 &input.model_id,
@@ -2615,6 +2664,31 @@ impl Db {
         if memory_disabled {
             let _ = self.delete_agent_surface_items(id, "memory");
         }
+        self.get_agent(id)?
+            .ok_or_else(|| anyhow::anyhow!("AGENT_NOT_FOUND: agente `{id}` não existe"))
+    }
+
+    pub fn update_agent_avatar(
+        &self,
+        id: &str,
+        avatar: &crate::agents::AgentAvatar,
+    ) -> Result<Agent> {
+        let current = self
+            .get_agent(id)?
+            .ok_or_else(|| anyhow::anyhow!("AGENT_NOT_FOUND: agente `{id}` não existe"))?;
+        if current.is_archived() {
+            return Err(anyhow::anyhow!(
+                "AGENT_ARCHIVED: restaure o agente antes de editá-lo"
+            ));
+        }
+        let json = serde_json::to_string(avatar)?;
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE agents SET avatar_json = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, json, now_ms()],
+        )
+        .context("falha ao atualizar o avatar do agente")?;
+        drop(conn);
         self.get_agent(id)?
             .ok_or_else(|| anyhow::anyhow!("AGENT_NOT_FOUND: agente `{id}` não existe"))
     }
@@ -7239,7 +7313,7 @@ mod tests {
             name: name.to_string(),
             role: "Engenheiro".to_string(),
             description: "Cuida do backend.".to_string(),
-            emoji: "🛠️".to_string(),
+            avatar: crate::agents::AgentAvatar::emoji("🛠️"),
             department: "Engenharia".to_string(),
             provider_id: "opencode-go".to_string(),
             model_id: "glm-5.3-flash".to_string(),
@@ -7280,6 +7354,71 @@ mod tests {
         model_edit.model_id = "deepseek-v4.1-flash".to_string();
         let model_updated = db.update_agent(&created.id, &model_edit).expect("model update");
         assert_eq!(model_updated.prompt_version, 2);
+    }
+
+    #[test]
+    fn migrates_legacy_agent_emoji_to_avatar_and_drops_the_column() {
+        let conn = Connection::open_in_memory().expect("in-memory connection");
+        conn.execute_batch(SCHEMA).expect("schema");
+        conn.execute("ALTER TABLE agents DROP COLUMN avatar_json", [])
+            .expect("drop avatar_json");
+        conn.execute(
+            "ALTER TABLE agents ADD COLUMN emoji TEXT NOT NULL DEFAULT '🤖'",
+            [],
+        )
+        .expect("add emoji");
+        conn.execute(
+            "INSERT INTO agents (id, name, role, provider_id, model_id, emoji, created_at, updated_at) \
+             VALUES ('legacy-agent', 'Legacy', 'Assistant', 'opencode-go', 'glm-5.3-flash', '🛠️', 1, 1)",
+            [],
+        )
+        .expect("legacy row");
+
+        Db::init_connection(&conn).expect("migration");
+        Db::init_connection(&conn).expect("idempotent migration");
+
+        let columns = table_columns(&conn, "agents").expect("columns");
+        assert!(!columns.iter().any(|(name, _)| name == "emoji"));
+        let raw: String = conn
+            .query_row(
+                "SELECT avatar_json FROM agents WHERE id = 'legacy-agent'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("avatar_json");
+        let avatar: crate::agents::AgentAvatar = serde_json::from_str(&raw).expect("avatar");
+        match &avatar.source {
+            crate::agents::AgentAvatarSource::Emoji { value } => assert_eq!(value, "🛠️"),
+            other => panic!("unexpected avatar: {other:?}"),
+        }
+        assert_eq!(avatar.shape, crate::agents::AgentAvatarShape::Rounded);
+
+        let db = Db {
+            conn: parking_lot::Mutex::new(conn),
+        };
+        let agent = db
+            .get_agent("legacy-agent")
+            .expect("get legacy")
+            .expect("legacy row preserved");
+        assert_eq!(agent.avatar, avatar);
+    }
+
+    #[test]
+    fn update_agent_avatar_persists_without_bumping_prompt_version() {
+        let db = test_db();
+        let created = db.create_agent(&agent_input("Irineu")).expect("create");
+        assert_eq!(created.avatar, crate::agents::AgentAvatar::emoji("🛠️"));
+        let avatar = crate::agents::AgentAvatar::image("data:image/png;base64,AAAA");
+        let updated = db
+            .update_agent_avatar(&created.id, &avatar)
+            .expect("avatar update");
+        assert_eq!(updated.avatar, avatar);
+        assert_eq!(updated.prompt_version, created.prompt_version);
+
+        let mut edit = agent_input("Irineu");
+        edit.avatar = crate::agents::AgentAvatar::default();
+        let full = db.update_agent(&created.id, &edit).expect("full update");
+        assert_eq!(full.avatar, crate::agents::AgentAvatar::default());
     }
 
     #[test]

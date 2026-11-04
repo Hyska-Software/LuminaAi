@@ -3,6 +3,8 @@ import { Bot, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { AgentMemoryPanel } from './AgentMemoryPanel';
+import { AgentAvatar } from './AgentAvatar';
+import { AgentAvatarPicker } from './AgentAvatarPicker';
 import { AgentWorkspacePicker } from './AgentWorkspacePicker';
 import { inputFromAgent } from './agentUtils';
 import {
@@ -25,9 +27,11 @@ import {
 } from '@/components/ui';
 import { ThinkingSelector } from '@/components/models/ThinkingSelector';
 import { api } from '@/lib/api';
+import { DEFAULT_AGENT_AVATAR } from '@/lib/agentAvatar';
 import { reasoningForModel } from '@/lib/modelMenu';
 import { selectAgent, useAgentStore, useAppStore, useUiStore } from '@/lib/store';
 import type {
+  AgentAvatar as AgentAvatarSpec,
   AgentCapabilities,
   AgentInput,
   ComputerEnvironment,
@@ -127,7 +131,7 @@ interface FormState {
   name: string;
   role: string;
   description: string;
-  emoji: string;
+  avatar: AgentAvatarSpec;
   department: string;
   providerId: string;
   modelId: string;
@@ -149,7 +153,7 @@ function emptyForm(providerId: string, modelId: string): FormState {
     name: '',
     role: 'Assistente',
     description: '',
-    emoji: '🤖',
+    avatar: DEFAULT_AGENT_AVATAR,
     department: 'Geral',
     providerId,
     modelId,
@@ -161,7 +165,7 @@ function emptyForm(providerId: string, modelId: string): FormState {
     capabilities: { ...DEFAULT_CAPABILITIES },
     memoryEnabled: false,
     workspaceId: '',
-    permissionMode: 'edit',
+    permissionMode: 'autonomous',
     dockerImage: '',
     computerEnvironment: 'auto',
   };
@@ -221,7 +225,7 @@ export function AgentEditorDialog() {
         name: input.name,
         role: input.role,
         description: input.description,
-        emoji: input.emoji,
+        avatar: input.avatar,
         department: input.department,
         providerId: input.providerId,
         modelId: input.modelId,
@@ -243,7 +247,7 @@ export function AgentEditorDialog() {
         name: draft.name,
         role: draft.role,
         description: draft.description,
-        emoji: draft.emoji,
+        avatar: draft.avatar,
         department: draft.department,
         providerId: draft.providerId,
         modelId: draft.modelId,
@@ -252,7 +256,7 @@ export function AgentEditorDialog() {
         reasoning: draft.reasoning,
         instructions: draft.instructions,
         starters: draft.starters.join('\n'),
-        capabilities: draft.capabilities,
+        capabilities: { ...DEFAULT_CAPABILITIES, ...draft.capabilities },
         memoryEnabled: draft.memoryEnabled,
         workspaceId: draft.workspaceId ?? '',
         permissionMode: draft.permissionMode,
@@ -365,7 +369,7 @@ export function AgentEditorDialog() {
       name: form.name.trim(),
       role: form.role.trim(),
       description: form.description.trim(),
-      emoji: form.emoji.trim() || '🤖',
+      avatar: form.avatar,
       department: form.department.trim() || 'Geral',
       providerId: form.providerId,
       modelId: form.modelId,
@@ -419,6 +423,7 @@ export function AgentEditorDialog() {
           <div className="shrink-0 px-6">
             <TabsList className="w-full justify-start overflow-x-auto scrollbar-none">
               <TabsTrigger value="identity">Identidade</TabsTrigger>
+              <TabsTrigger value="avatar">Avatar</TabsTrigger>
               <TabsTrigger value="model">Modelo</TabsTrigger>
               <TabsTrigger value="behavior">Comportamento</TabsTrigger>
               <TabsTrigger value="capabilities">Capacidades</TabsTrigger>
@@ -431,25 +436,28 @@ export function AgentEditorDialog() {
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-5 pt-4"
           >
             <TabsContent value="identity" className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-[1fr_5rem]">
-                <div className="space-y-1.5">
-                  <Label htmlFor="agent-name">Nome</Label>
-                  <Input
-                    id="agent-name"
-                    value={form.name}
-                    maxLength={40}
-                    placeholder="Ex.: Irineu"
-                    onChange={(event) => set('name', event.target.value)}
-                  />
+              <div className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3">
+                <AgentAvatar avatar={form.avatar} size="md" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] font-medium text-foreground">Avatar</p>
+                  <p className="text-[11px] text-foreground-subtle">
+                    Mascote, cor, expressão ou imagem.
+                  </p>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="agent-emoji">Emoji</Label>
-                  <Input
-                    id="agent-emoji"
-                    value={form.emoji}
-                    onChange={(event) => set('emoji', event.target.value)}
-                  />
-                </div>
+                <Button size="sm" variant="secondary" onClick={() => setTab('avatar')}>
+                  Personalizar
+                </Button>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="agent-name">Nome</Label>
+                <Input
+                  id="agent-name"
+                  value={form.name}
+                  maxLength={40}
+                  placeholder="Ex.: Irineu"
+                  onChange={(event) => set('name', event.target.value)}
+                />
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
@@ -493,6 +501,13 @@ export function AgentEditorDialog() {
                   definido abaixo.
                 </div>
               </div>
+            </TabsContent>
+
+            <TabsContent value="avatar" className="space-y-4">
+              <AgentAvatarPicker
+                value={form.avatar}
+                onChange={(avatar) => set('avatar', avatar)}
+              />
             </TabsContent>
 
             <TabsContent value="model" className="space-y-4">

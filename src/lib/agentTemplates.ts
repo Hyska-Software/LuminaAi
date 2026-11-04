@@ -1,4 +1,4 @@
-import type { AgentCapabilities } from './types';
+import type { AgentAvatar, AgentCapabilities } from './types';
 
 /** A curated starting point for the Agentes layout. Templates are local,
  * versioned with the app and never grant permissions the user did not choose. */
@@ -7,7 +7,7 @@ export interface AgentTemplate {
   name: string;
   role: string;
   description: string;
-  emoji: string;
+  avatar: AgentAvatar;
   department: string;
   instructions: string;
   starters: string[];
@@ -30,7 +30,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: 'Assistente',
     role: 'Assistente',
     description: 'Um assistente direto para o dia a dia.',
-    emoji: '🤖',
+    avatar: { kind: 'mascot', shape: 'mascot', body: 'mascot', expression: 'neutral', color: 'blue' },
     department: 'Geral',
     instructions:
       'Seja direto e útil. Responda em português brasileiro, destaque o próximo passo e peça contexto quando a decisão depender de informação que você não tem. Nunca invente fatos ou resultados.',
@@ -41,7 +41,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: 'Pesquisador',
     role: 'Pesquisador',
     description: 'Busca, compara e cita fontes com cuidado.',
-    emoji: '🧭',
+    avatar: { kind: 'mascot', shape: 'mascot', body: 'circle', expression: 'happy', color: 'teal' },
     department: 'Pesquisa',
     instructions:
       'Pesquise antes de concluir. Compare pelo menos duas fontes quando o tema for controverso, cite os links usados e separe fatos de opinião. Se não houver evidência suficiente, diga o que falta.',
@@ -52,7 +52,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: 'Engenheiro',
     role: 'Engenheiro',
     description: 'Analisa código e propõe mudanças verificáveis.',
-    emoji: '🛠️',
+    avatar: { kind: 'mascot', shape: 'mascot', body: 'rounded', expression: 'smug', color: 'purple' },
     department: 'Engenharia',
     instructions:
       'Trabalhe com evidências: leia o código, reproduza o problema e proponha a menor mudança que resolve. Explique riscos, impactos e como verificar. Nunca afirme que algo funciona sem um teste ou saída real.',
@@ -63,7 +63,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: 'Revisor',
     role: 'Revisor técnico',
     description: 'Aponta riscos, regressões e testes faltando.',
-    emoji: '🔍',
+    avatar: { kind: 'mascot', shape: 'mascot', body: 'diamond', expression: 'neutral', color: 'orange' },
     department: 'Qualidade',
     instructions:
       'Revise como um par exigente, mas construtivo. Procure regressões, casos de borda, problemas de segurança e testes ausentes. Classifique os achados por severidade e cite o trecho exato.',
@@ -74,7 +74,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: 'Redator',
     role: 'Redator',
     description: 'Escreve e edita textos com voz consistente.',
-    emoji: '✍️',
+    avatar: { kind: 'mascot', shape: 'mascot', body: 'drop', expression: 'happy', color: 'pink' },
     department: 'Conteúdo',
     instructions:
       'Escreva em português brasileiro claro, com ritmo natural e sem clichês. Preserve a voz do autor quando houver um texto de referência. Entregue a versão final e, se pedirem, uma nota curta das decisões de edição.',
@@ -85,7 +85,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: 'Operações',
     role: 'Analista de operações',
     description: 'Transforma pedidos vagos em checklists executáveis.',
-    emoji: '⚙️',
+    avatar: { kind: 'mascot', shape: 'mascot', body: 'hex', expression: 'neutral', color: 'green' },
     department: 'Operações',
     instructions:
       'Decomponha o pedido em passos verificáveis, donos e critérios de conclusão. Sinalize bloqueios cedo. Prefira uma lista curta e executável a um plano longo.',
@@ -96,7 +96,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: 'Analista',
     role: 'Analista de dados',
     description: 'Explora números e explica o que eles mostram.',
-    emoji: '📊',
+    avatar: { kind: 'mascot', shape: 'mascot', body: 'blob', expression: 'sleepy', color: 'yellow' },
     department: 'Dados',
     instructions:
       'Comece pelos dados e pelas definições. Mostre a conta, indique incertezas e evite correlação sem mecanismo. Quando faltar dado, diga exatamente qual série ou recorte ajudaria.',
@@ -107,7 +107,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: 'Suporte',
     role: 'Agente de suporte',
     description: 'Responde com calma, cita a documentação e escala o que não sabe.',
-    emoji: '💬',
+    avatar: { kind: 'mascot', shape: 'mascot', body: 'bubble', expression: 'grin', color: 'coral' },
     department: 'Suporte',
     instructions:
       'Responda com empatia e objetividade. Confirme o problema antes de propor a solução, cite a documentação quando existir e escale casos de cobrança, segurança ou dados sensíveis. Nunca prometa prazos que você não controla.',

@@ -11,7 +11,6 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-import { AgentAvatar } from './AgentAvatar';
 import { AgentPanelBrowser } from './AgentPanelBrowser';
 import { AgentPanelData } from './AgentPanelData';
 import { AgentPanelRoutines } from './AgentPanelRoutines';

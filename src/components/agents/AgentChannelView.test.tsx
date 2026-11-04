@@ -33,7 +33,7 @@ function agent(id: string, name: string): Agent {
     name,
     role: '',
     description: '',
-    emoji: '🤖',
+    avatar: { kind: 'emoji', value: '🤖', shape: 'rounded' },
     department: 'Geral',
     pinned: false,
     sortOrder: 0,

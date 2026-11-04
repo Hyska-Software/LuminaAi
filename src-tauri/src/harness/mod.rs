@@ -5493,7 +5493,7 @@ mod agent_loop_tests {
             name: "Reserva".to_string(),
             role: "Engenheiro".to_string(),
             description: String::new(),
-            emoji: "🧭".to_string(),
+            avatar: crate::agents::AgentAvatar::emoji("🧭"),
             department: "Geral".to_string(),
             provider_id: "missing-provider".to_string(),
             model_id: "missing-model".to_string(),
@@ -5567,7 +5567,7 @@ mod agent_loop_tests {
         let temp = TempDb::new();
         let input = crate::agents::normalize_input(crate::agents::AgentInput {
             name: "Assistant".into(), role: "Assistant".into(), description: String::new(),
-            emoji: String::new(), department: "General".into(), provider_id: "opencode-go".into(),
+            avatar: crate::agents::AgentAvatar::emoji(""), department: "General".into(), provider_id: "opencode-go".into(),
             model_id: "deepseek-v4.1-flash".into(), fallback_provider_id: None, fallback_model_id: None,
             reasoning: None, instructions: String::new(), starters: Vec::new(),
             capabilities: crate::agents::AgentCapabilities {

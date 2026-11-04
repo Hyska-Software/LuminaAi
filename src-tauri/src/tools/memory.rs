@@ -370,7 +370,7 @@ mod tests {
             name: "Irineu".to_string(),
             role: "Engenheiro".to_string(),
             description: String::new(),
-            emoji: "🤖".to_string(),
+            avatar: crate::agents::AgentAvatar::emoji("🤖"),
             department: "Geral".to_string(),
             provider_id: "opencode-go".to_string(),
             model_id: "glm-5.3-flash".to_string(),

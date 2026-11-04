@@ -38,11 +38,21 @@ Arquivos principais:
 
 ### `agents`
 
-Identidade (`name`, `role`, `description`, `emoji`, `department`), modelo
+Identidade (`name`, `role`, `description`, `avatar_json`, `department`), modelo
 (`provider_id`, `model_id`, `reasoning_json`), modelo de reserva opcional
 (`fallback_provider_id`, `fallback_model_id`), instruções, `prompt_version`,
 starters, `capabilities_json`, `memory_enabled`, `workspace_id`,
 `permission_mode`, `docker_image`, pin/ordem e arquivamento.
+
+- `avatar_json` guarda o avatar da persona em três origens: `mascot` (corpo,
+  expressão e cor desenhados em SVG; olhos e boca usam uma única cor automática,
+  branca em corpos escuros e preta em corpos claros), `image` (data URL
+  normalizada) e `emoji` (avatares legados). O formato é
+  `mascot | circle | rounded | square`. O diálogo "Avatar" (clique no avatar da
+  home ou menu da sidebar) persiste na hora; a aba Avatar do editor persiste no
+  Salvar. Trocar o avatar **não** sobe `prompt_version`.
+- Imagens: PNG/JPEG são centro-cortados e redimensionados para 256×256; GIF/WebP
+  animados até 512 KB preservam a animação; a entrada aceita até 10 MB.
 
 - `prompt_version` sobe quando um campo que muda o prompt muda (nome, papel,
   descrição, instruções, memória). A snapshot key do Chat/Code inclui
@@ -283,16 +293,18 @@ com erro — o fallback é de rota, não um retry infinito.
 - “Editar com IA” (`revise_agent`) recebe um pedido em linguagem natural,
   devolve um patch JSON, normaliza/valida no backend e abre um diálogo com o
   **diff campo a campo** (antes/depois). Só `name`, `role`, `description`,
-  `emoji`, `department`, `instructions`, `starters` e `memoryEnabled` são
-  revisáveis; rota, reserva, workspace, permissões e capabilities continuam no
+  `department`, `instructions`, `starters` e `memoryEnabled` são revisáveis;
+  avatar, rota, reserva, workspace, permissões e capabilities continuam no
   editor estruturado. Aplicar chama o mesmo `update_agent` do editor.
-- Duplicar agente copia configuração (não conversas nem memórias).
+- Duplicar agente copia configuração (não conversas nem memórias), incluindo o
+  avatar.
 - Uso por agente: `get_agent_usage`/`list_agent_usage` agregam `usage_log` por
   `conversations.agent_id` (turnos, tokens de entrada/saída/raciocínio, total,
   custo e última atividade). A Equipe e a home do agente mostram esses números;
   threads de rotina/canal entram no mesmo agregado.
-- Exportar gera um documento `lumina-agent` versionado (JSON) com configuração
-  + memórias; importar valida versão, modelo/workspace e recria o agente.
+- Exportar gera um documento `lumina-agent` **versão 2** (JSON) com configuração
+  + memórias; a importação ainda lê documentos versão 1 convertendo o `emoji`
+  antigo em avatar. Importar valida versão, modelo/workspace e recria o agente.
 - Skills/tools/MCP e workspace são escolhidos no editor; permissões continuam
   limitadas pelo backend.
 

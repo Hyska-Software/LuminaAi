@@ -8,8 +8,8 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
-import type { ChatMessage } from '@/lib/types';
-import { useChatStore, useUiStore, type StreamingState } from '@/lib/store';
+import type { Agent, ChatMessage, Conversation } from '@/lib/types';
+import { useAgentStore, useChatStore, useUiStore, type StreamingState } from '@/lib/store';
 import { MessageItem } from './MessageItem';
 
 function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
@@ -53,6 +53,44 @@ afterEach(() => {
   cleanup();
   useChatStore.setState({ streaming: null });
   useUiStore.setState({ layoutMode: 'chat' });
+});
+
+describe('MessageItem — avatar do agente', () => {
+  it('usa o ícone do agente no layout Agentes em vez do logo do app', () => {
+    useUiStore.setState({ layoutMode: 'agent' });
+    useChatStore.setState({
+      conversations: [
+        {
+          id: 'conv-agent',
+          agentId: 'agent-1',
+        } as Conversation,
+      ],
+    });
+    useAgentStore.setState({
+      agentsById: {
+        'agent-1': {
+          id: 'agent-1',
+          avatar: { kind: 'emoji', value: '🔎', shape: 'rounded' },
+        } as Agent,
+      },
+    });
+
+    const { container } = render(
+      <MessageItem
+        message={message({
+          id: 'a-agent',
+          conversationId: 'conv-agent',
+          role: 'assistant',
+          content: 'Notícias analisadas.',
+        })}
+        isStreaming={false}
+        isGroupStart
+      />,
+    );
+
+    expect(screen.getByText('🔎')).toBeTruthy();
+    expect(container.querySelector('img[src*="lumina-mark"]')).toBeNull();
+  });
 });
 
 describe('MessageItem — readOnly', () => {

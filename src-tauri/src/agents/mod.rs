@@ -10,6 +10,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{PermissionMode, ReasoningSelection};
 
+pub mod avatar;
+pub use avatar::{
+    normalize_avatar, normalize_avatar_image, AgentAvatar, AgentAvatarShape, AgentAvatarSource,
+};
+
 /// Serializes workspace changes with every running turn of an agent thread.
 pub(crate) fn workspace_gate(conversation_id: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
     use std::collections::HashMap;
@@ -257,7 +262,37 @@ pub struct AgentExportDocument {
     pub memories: Vec<AgentMemoryInput>,
 }
 
-pub const AGENT_EXPORT_VERSION: u32 = 1;
+pub const AGENT_EXPORT_VERSION: u32 = 2;
+
+/// Upgrades a version-1 `lumina-agent` document in place: the old `emoji`
+/// field becomes an emoji avatar and the version moves to 2.
+pub fn upgrade_agent_export_v1(value: &mut serde_json::Value) -> Result<(), String> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "AGENT_IMPORT_INVALID: o documento precisa ser um objeto JSON.".to_string())?;
+    if object.get("kind").and_then(|value| value.as_str()) != Some("lumina-agent") {
+        return Err("AGENT_IMPORT_INVALID: o arquivo não é um agente do Lumina.".to_string());
+    }
+    if object.get("version").and_then(|value| value.as_u64()) != Some(1) {
+        return Err("AGENT_IMPORT_INVALID: versão de documento não suportada.".to_string());
+    }
+    let agent = object
+        .get_mut("agent")
+        .and_then(|value| value.as_object_mut())
+        .ok_or_else(|| "AGENT_IMPORT_INVALID: o documento não tem um agente.".to_string())?;
+    let emoji = agent
+        .remove("emoji")
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "🤖".to_string());
+    let avatar = serde_json::to_value(AgentAvatar::emoji(emoji))
+        .map_err(|error| format!("AGENT_IMPORT_INVALID: avatar inválido: {error}"))?;
+    agent.insert("avatar".to_string(), avatar);
+    object.insert(
+        "version".to_string(),
+        serde_json::json!(AGENT_EXPORT_VERSION),
+    );
+    Ok(())
+}
 
 impl AgentExportDocument {
     pub fn from_agent(agent: &Agent, memories: &[AgentMemory]) -> Self {
@@ -268,7 +303,7 @@ impl AgentExportDocument {
                 name: agent.name.clone(),
                 role: agent.role.clone(),
                 description: agent.description.clone(),
-                emoji: agent.emoji.clone(),
+                avatar: agent.avatar.clone(),
                 department: agent.department.clone(),
                 provider_id: agent.provider_id.clone(),
                 model_id: agent.model_id.clone(),
@@ -344,7 +379,6 @@ const REVISABLE_FIELDS: &[(&str, &str)] = &[
     ("name", "Nome"),
     ("role", "Papel"),
     ("description", "Descrição"),
-    ("emoji", "Emoji"),
     ("department", "Departamento"),
     ("instructions", "Instruções"),
     ("starters", "Sugestões"),
@@ -394,9 +428,6 @@ pub fn apply_agent_revision(
     if let Some(value) = object.get("description").and_then(|value| value.as_str()) {
         updated.description = value.to_string();
     }
-    if let Some(value) = object.get("emoji").and_then(|value| value.as_str()) {
-        updated.emoji = value.to_string();
-    }
     if let Some(value) = object.get("department").and_then(|value| value.as_str()) {
         updated.department = value.to_string();
     }
@@ -424,7 +455,7 @@ impl From<&Agent> for AgentInput {
             name: agent.name.clone(),
             role: agent.role.clone(),
             description: agent.description.clone(),
-            emoji: agent.emoji.clone(),
+            avatar: agent.avatar.clone(),
             department: agent.department.clone(),
             provider_id: agent.provider_id.clone(),
             model_id: agent.model_id.clone(),
@@ -945,7 +976,7 @@ pub struct AgentInput {
     #[serde(default)]
     pub description: String,
     #[serde(default)]
-    pub emoji: String,
+    pub avatar: AgentAvatar,
     #[serde(default)]
     pub department: String,
     pub provider_id: String,
@@ -987,7 +1018,7 @@ pub struct Agent {
     pub name: String,
     pub role: String,
     pub description: String,
-    pub emoji: String,
+    pub avatar: AgentAvatar,
     pub department: String,
     pub pinned: bool,
     pub sort_order: i64,
@@ -1082,7 +1113,7 @@ pub fn normalize_input(mut input: AgentInput) -> Result<AgentInput, String> {
     input.name = clean(&input.name);
     input.role = clean(&input.role);
     input.description = clean(&input.description);
-    input.emoji = clean(&input.emoji);
+    input.avatar = normalize_avatar(input.avatar)?;
     input.department = clean(&input.department);
     input.provider_id = clean(&input.provider_id);
     input.model_id = clean(&input.model_id);
@@ -1137,12 +1168,6 @@ pub fn normalize_input(mut input: AgentInput) -> Result<AgentInput, String> {
     }
     if input.description.chars().count() > 500 {
         return Err("AGENT_VALIDATION: a descrição passa de 500 caracteres.".to_string());
-    }
-    if input.emoji.is_empty() {
-        input.emoji = "🤖".to_string();
-    }
-    if input.emoji.len() > 64 {
-        return Err("AGENT_VALIDATION: o emoji é grande demais.".to_string());
     }
     if input.department.is_empty() {
         input.department = "Geral".to_string();
@@ -1359,7 +1384,7 @@ mod tests {
             name: "Irineu".to_string(),
             role: "Engenheiro".to_string(),
             description: "Backend e produto.".to_string(),
-            emoji: "🛠️".to_string(),
+            avatar: AgentAvatar::emoji("🛠️"),
             department: "Engenharia".to_string(),
             provider_id: "opencode-go".to_string(),
             model_id: "glm-5.3-flash".to_string(),
@@ -1383,7 +1408,7 @@ mod tests {
             name: "Irineu".to_string(),
             role: "Engenheiro".to_string(),
             description: "Backend e produto.".to_string(),
-            emoji: "🛠️".to_string(),
+            avatar: AgentAvatar::emoji("🛠️"),
             department: "Engenharia".to_string(),
             pinned: false,
             sort_order: 1,
@@ -1422,15 +1447,49 @@ mod tests {
     }
 
     #[test]
+    fn upgrades_a_v1_export_document_to_an_emoji_avatar() {
+        let mut value = serde_json::json!({
+            "version": 1,
+            "kind": "lumina-agent",
+            "agent": {
+                "name": "Irineu",
+                "role": "Engenheiro",
+                "description": "Backend.",
+                "emoji": "🛠️",
+                "department": "Engenharia",
+                "providerId": "opencode-go",
+                "modelId": "glm-5.3-flash",
+                "reasoning": null,
+                "instructions": "Seja direto.",
+                "starters": [],
+                "capabilities": {},
+                "memoryEnabled": false,
+                "workspaceId": null,
+                "permissionMode": "edit",
+                "dockerImage": null,
+                "computerEnvironment": "auto"
+            },
+            "memories": []
+        });
+        upgrade_agent_export_v1(&mut value).expect("upgrade");
+        assert_eq!(value["version"], serde_json::json!(2));
+        let document: AgentExportDocument = serde_json::from_value(value).expect("document");
+        assert_eq!(document.agent.avatar, AgentAvatar::emoji("🛠️"));
+    }
+
+    #[test]
     fn normalization_trims_and_validates_limits() {
         let mut value = input();
         value.name = "  Irineu  ".to_string();
-        value.emoji = "".to_string();
+        value.avatar = AgentAvatar::emoji("");
         value.department = "".to_string();
         value.starters = vec!["  a  ".to_string(), "a".to_string(), "b".to_string()];
         let normalized = normalize_input(value).expect("valid");
         assert_eq!(normalized.name, "Irineu");
-        assert_eq!(normalized.emoji, "🤖");
+        match normalized.avatar.source {
+            AgentAvatarSource::Emoji { value } => assert_eq!(value, "🤖"),
+            other => panic!("unexpected avatar: {other:?}"),
+        }
         assert_eq!(normalized.department, "Geral");
         assert_eq!(normalized.starters, vec!["a".to_string(), "b".to_string()]);
 
@@ -1463,8 +1522,16 @@ mod tests {
 
         next.instructions = current.instructions.clone();
         next.model_id = "other".to_string();
-        next.emoji = "🧭".to_string();
+        next.avatar = AgentAvatar::emoji("🧭");
         assert!(!prompt_fields_changed(&current, &next));
+    }
+
+    #[test]
+    fn conversational_diff_ignores_the_avatar() {
+        let before = input();
+        let mut after = input();
+        after.avatar = AgentAvatar::default();
+        assert!(agent_changes(&before, &after).expect("diff").is_empty());
     }
 
     #[test]
@@ -1627,6 +1694,16 @@ mod tests {
         let normalized = normalize_input(duplicate).expect("valid");
         assert_eq!(normalized.fallback_provider_id, None);
         assert_eq!(normalized.fallback_model_id, None);
+    }
+
+    #[test]
+    fn new_agents_enable_basic_actions_by_default() {
+        let capabilities = AgentCapabilities::default();
+        assert!(capabilities.web_search);
+        assert!(capabilities.file_access);
+        assert!(capabilities.code_execution);
+        assert!(!capabilities.computer_use);
+        assert!(!capabilities.create_agents);
     }
 
     #[test]

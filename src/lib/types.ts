@@ -882,12 +882,61 @@ export type ComputerEnvironment =
   | 'browser'
   | 'off';
 
+export type AgentAvatarShape = 'mascot' | 'circle' | 'rounded' | 'square';
+export type AgentAvatarBody =
+  | 'mascot'
+  | 'circle'
+  | 'bubble'
+  | 'rounded'
+  | 'square'
+  | 'drop'
+  | 'blob'
+  | 'hex'
+  | 'diamond'
+  | 'star';
+export type AgentAvatarExpression =
+  | 'neutral'
+  | 'happy'
+  | 'grin'
+  | 'wink'
+  | 'surprised'
+  | 'angry'
+  | 'sad'
+  | 'sleepy'
+  | 'smug'
+  | 'dizzy';
+export type AgentAvatarColor =
+  | 'green'
+  | 'blue'
+  | 'red'
+  | 'orange'
+  | 'purple'
+  | 'teal'
+  | 'pink'
+  | 'yellow'
+  | 'emerald'
+  | 'coral'
+  | 'gray'
+  | 'silver';
+
+/** Visual identity of an agent: built-in mascot, uploaded image or legacy emoji. */
+export type AgentAvatar = (
+  | {
+      kind: 'mascot';
+      body: AgentAvatarBody;
+      expression: AgentAvatarExpression;
+      color: AgentAvatarColor;
+    }
+  | { kind: 'image'; dataUrl: string }
+  | { kind: 'emoji'; value: string }
+) & { shape: AgentAvatarShape };
+
 export interface Agent {
   id: string;
   name: string;
   role: string;
   description: string;
-  emoji: string;
+  avatar: AgentAvatar;
   department: string;
   pinned: boolean;
   sortOrder: number;
@@ -921,7 +970,7 @@ export interface AgentInput {
   name: string;
   role: string;
   description: string;
-  emoji: string;
+  avatar: AgentAvatar;
   department: string;
   providerId: string;
   modelId: string;
