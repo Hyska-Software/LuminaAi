@@ -67,26 +67,27 @@ describe('AgentAvatar', () => {
     expect(container.querySelector('path')?.getAttribute('fill')).toBe('#5865F2');
   });
 
-  it('usa uma única cor de olho, sem pupila, por contraste com o corpo', () => {
-    const dark = render(<AgentAvatar avatar={DEFAULT_AGENT_AVATAR} />);
-    const darkEyes = Array.from(dark.container.querySelectorAll('svg g ellipse'));
-    expect(darkEyes).toHaveLength(2);
-    expect(darkEyes.every((eye) => eye.getAttribute('fill') === '#FFFFFF')).toBe(true);
-    expect(dark.container.querySelectorAll('svg g circle')).toHaveLength(0);
-    dark.unmount();
+  it('usa uma única cor de olho, sem pupila, escolhida pelo usuário', () => {
+    const white = render(<AgentAvatar avatar={DEFAULT_AGENT_AVATAR} />);
+    const whiteEyes = Array.from(white.container.querySelectorAll('svg g ellipse'));
+    expect(whiteEyes).toHaveLength(2);
+    expect(whiteEyes.every((eye) => eye.getAttribute('fill') === '#FFFFFF')).toBe(true);
+    expect(white.container.querySelectorAll('svg g circle')).toHaveLength(0);
+    white.unmount();
 
-    const lightAvatar: AgentAvatarSpec = {
+    const blackAvatar: AgentAvatarSpec = {
       kind: 'mascot',
       shape: 'mascot',
       body: 'mascot',
       expression: 'neutral',
-      color: 'yellow',
+      color: 'blue',
+      face: 'black',
     };
-    const light = render(<AgentAvatar avatar={lightAvatar} />);
-    const lightEyes = Array.from(light.container.querySelectorAll('svg g ellipse'));
-    expect(lightEyes).toHaveLength(2);
-    expect(lightEyes.every((eye) => eye.getAttribute('fill') === '#111114')).toBe(true);
-    expect(light.container.querySelectorAll('svg g circle')).toHaveLength(0);
+    const black = render(<AgentAvatar avatar={blackAvatar} />);
+    const blackEyes = Array.from(black.container.querySelectorAll('svg g ellipse'));
+    expect(blackEyes).toHaveLength(2);
+    expect(blackEyes.every((eye) => eye.getAttribute('fill') === '#111114')).toBe(true);
+    expect(black.container.querySelectorAll('svg g circle')).toHaveLength(0);
   });
 
   it('aplica os tamanhos previstos', () => {

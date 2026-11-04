@@ -170,6 +170,7 @@ describe('agentStore', () => {
       body: 'star',
       expression: 'happy',
       color: 'red',
+      face: 'white',
     } as const;
     mocks.setAgentAvatar.mockResolvedValue(agent({ avatar: next }));
     const pending = useAgentStore.getState().updateAvatar('agent-1', next);

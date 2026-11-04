@@ -35,6 +35,14 @@ pub enum AgentAvatarShape {
     Square,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentAvatarFace {
+    #[default]
+    White,
+    Black,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentAvatarBody {
@@ -89,6 +97,8 @@ pub enum AgentAvatarSource {
         body: AgentAvatarBody,
         expression: AgentAvatarExpression,
         color: AgentAvatarColor,
+        #[serde(default)]
+        face: AgentAvatarFace,
     },
     Image {
         #[serde(rename = "dataUrl")]
@@ -114,6 +124,7 @@ impl Default for AgentAvatar {
                 body: AgentAvatarBody::Mascot,
                 expression: AgentAvatarExpression::Neutral,
                 color: AgentAvatarColor::Blue,
+                face: AgentAvatarFace::White,
             },
             shape: AgentAvatarShape::Mascot,
         }
@@ -309,6 +320,16 @@ mod tests {
         0x00, 0xFF, 0xFF, 0xFF, 0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2C, 0x00, 0x00,
         0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3B,
     ];
+
+    #[test]
+    fn legacy_mascot_without_face_defaults_to_white() {
+        let json = r#"{"kind":"mascot","body":"mascot","expression":"neutral","color":"blue","shape":"mascot"}"#;
+        let avatar: AgentAvatar = serde_json::from_str(json).expect("legacy avatar");
+        match avatar.source {
+            AgentAvatarSource::Mascot { face, .. } => assert_eq!(face, AgentAvatarFace::White),
+            other => panic!("unexpected source: {other:?}"),
+        }
+    }
 
     #[test]
     fn avatar_serde_roundtrip_keeps_data_url_field_name() {

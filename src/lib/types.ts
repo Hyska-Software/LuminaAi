@@ -883,6 +883,7 @@ export type ComputerEnvironment =
   | 'off';
 
 export type AgentAvatarShape = 'mascot' | 'circle' | 'rounded' | 'square';
+export type AgentAvatarFace = 'white' | 'black';
 export type AgentAvatarBody =
   | 'mascot'
   | 'circle'
@@ -926,6 +927,7 @@ export type AgentAvatar = (
       body: AgentAvatarBody;
       expression: AgentAvatarExpression;
       color: AgentAvatarColor;
+      face: AgentAvatarFace;
     }
   | { kind: 'image'; dataUrl: string }
   | { kind: 'emoji'; value: string }

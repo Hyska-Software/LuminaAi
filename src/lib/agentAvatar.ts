@@ -3,6 +3,7 @@ import type {
   AgentAvatarBody,
   AgentAvatarColor,
   AgentAvatarExpression,
+  AgentAvatarFace,
   AgentAvatarShape,
 } from './types';
 
@@ -33,6 +34,11 @@ export const AGENT_AVATAR_SHAPES: readonly { value: AgentAvatarShape; label: str
   { value: 'circle', label: 'Círculo' },
   { value: 'rounded', label: 'Arredondado' },
   { value: 'square', label: 'Quadrado' },
+];
+
+export const AGENT_AVATAR_FACES: readonly { value: AgentAvatarFace; label: string }[] = [
+  { value: 'white', label: 'Branco' },
+  { value: 'black', label: 'Preto' },
 ];
 
 /* Avatar colours are content, not UI chrome: the palette is intentionally
@@ -144,6 +150,7 @@ export const DEFAULT_AGENT_AVATAR: AgentAvatar = {
   body: 'mascot',
   expression: 'neutral',
   color: 'blue',
+  face: 'white',
 };
 
 export const AGENT_AVATAR_BODY_BY_ID = new Map(
@@ -168,28 +175,8 @@ export function isMascotAvatar(
 
 export function mascotVariant(
   avatar: AgentAvatar,
-  patch: Partial<Pick<AgentAvatar & { kind: 'mascot' }, 'body' | 'expression' | 'color'>>,
+  patch: Partial<Pick<AgentAvatar & { kind: 'mascot' }, 'body' | 'expression' | 'color' | 'face'>>,
 ): AgentAvatar {
   return isMascotAvatar(avatar) ? { ...avatar, ...patch } : avatar;
 }
 
-function linearChannel(value: number): number {
-  const channel = value / 255;
-  return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-}
-
-/**
- * Single feature colour (eyes and mouth) with enough contrast against the
- * body. Dark bodies get white features; light bodies get near-black features.
- * This intentionally does not follow the app theme: the avatar body colour is
- * the background that matters.
- */
-export function featuresColorFor(color: AgentAvatarColor): string {
-  const spec = AGENT_AVATAR_COLOR_BY_ID.get(color) ?? AGENT_AVATAR_COLOR_BY_ID.get('blue')!;
-  const hex = spec.hex.replace('#', '');
-  const red = linearChannel(Number.parseInt(hex.slice(0, 2), 16));
-  const green = linearChannel(Number.parseInt(hex.slice(2, 4), 16));
-  const blue = linearChannel(Number.parseInt(hex.slice(4, 6), 16));
-  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-  return luminance > 0.45 ? '#111114' : '#FFFFFF';
-}

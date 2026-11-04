@@ -4,7 +4,6 @@ import {
   AGENT_AVATAR_BODY_BY_ID,
   AGENT_AVATAR_COLOR_BY_ID,
   AGENT_AVATAR_EXPRESSION_BY_ID,
-  featuresColorFor,
   type AgentAvatarExpressionSpec,
 } from '@/lib/agentAvatar';
 import type { AgentAvatar as AgentAvatarSpec } from '@/lib/types';
@@ -167,7 +166,7 @@ export function AgentMascot({
   const expression = AGENT_AVATAR_EXPRESSION_BY_ID.get(avatar.expression) ?? FALLBACK_EXPRESSION;
   const color = AGENT_AVATAR_COLOR_BY_ID.get(avatar.color) ?? FALLBACK_COLOR;
   const fill = color.gradient ? `url(#${gradientId})` : color.hex;
-  const features = featuresColorFor(avatar.color);
+  const features = avatar.face === 'black' ? '#111114' : '#FFFFFF';
 
   return (
     <svg

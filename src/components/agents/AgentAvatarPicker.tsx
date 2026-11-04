@@ -10,6 +10,7 @@ import {
   AGENT_AVATAR_BODIES,
   AGENT_AVATAR_COLORS,
   AGENT_AVATAR_EXPRESSIONS,
+  AGENT_AVATAR_FACES,
   AGENT_AVATAR_SHAPES,
   DEFAULT_AGENT_AVATAR,
   isMascotAvatar,
@@ -17,6 +18,7 @@ import {
 } from '@/lib/agentAvatar';
 import type {
   AgentAvatar as AgentAvatarSpec,
+  AgentAvatarFace,
   AgentAvatarShape,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -122,6 +124,21 @@ export function AgentAvatarPicker({
 
       {mascot ? (
         <>
+          <section className="space-y-2">
+            <p className={LABEL}>Cor dos olhos</p>
+            <SegmentedControl
+              options={[...AGENT_AVATAR_FACES]}
+              value={mascot.face}
+              onChange={(face) =>
+                onChange(mascotVariant(mascot, { face: face as AgentAvatarFace }))
+              }
+              ariaLabel="Cor dos olhos"
+              size="sm"
+              fullWidth
+              disabled={disabled}
+            />
+          </section>
+
           <section className="space-y-2">
             <p className={LABEL}>Expressão</p>
             <div role="group" aria-label="Expressão" className="grid grid-cols-5 gap-2">

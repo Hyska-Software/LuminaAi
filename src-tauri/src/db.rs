@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS agents (
   name              TEXT NOT NULL,
   role              TEXT NOT NULL DEFAULT '',
   description       TEXT NOT NULL DEFAULT '',
-  avatar_json       TEXT NOT NULL DEFAULT '{\"kind\":\"mascot\",\"body\":\"mascot\",\"expression\":\"neutral\",\"color\":\"blue\",\"shape\":\"mascot\"}',
+  avatar_json       TEXT NOT NULL DEFAULT '{\"kind\":\"mascot\",\"body\":\"mascot\",\"expression\":\"neutral\",\"color\":\"blue\",\"face\":\"white\",\"shape\":\"mascot\"}',
   department        TEXT NOT NULL DEFAULT 'Geral',
   pinned            INTEGER NOT NULL DEFAULT 0,
   sort_order        INTEGER NOT NULL DEFAULT 0,

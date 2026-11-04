@@ -53,6 +53,12 @@ describe('AgentAvatarPicker', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ shape: 'square' }));
   });
 
+  it('troca a cor dos olhos para preto', () => {
+    const onChange = renderPicker();
+    fireEvent.click(screen.getByRole('radio', { name: 'Preto' }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ face: 'black' }));
+  });
+
   it('redefine para o mascote padrão', () => {
     const onChange = renderPicker({
       kind: 'emoji',

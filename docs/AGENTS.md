@@ -45,9 +45,9 @@ starters, `capabilities_json`, `memory_enabled`, `workspace_id`,
 `permission_mode`, `docker_image`, pin/ordem e arquivamento.
 
 - `avatar_json` guarda o avatar da persona em três origens: `mascot` (corpo,
-  expressão e cor desenhados em SVG; olhos e boca usam uma única cor automática,
-  branca em corpos escuros e preta em corpos claros), `image` (data URL
-  normalizada) e `emoji` (avatares legados). O formato é
+  expressão e cor desenhados em SVG; olhos e boca usam uma única cor escolhida
+  pelo usuário, Branco ou Preto, sem pupila), `image` (data URL normalizada) e
+  `emoji` (avatares legados). O formato é
   `mascot | circle | rounded | square`. O diálogo "Avatar" (clique no avatar da
   home ou menu da sidebar) persiste na hora; a aba Avatar do editor persiste no
   Salvar. Trocar o avatar **não** sobe `prompt_version`.
