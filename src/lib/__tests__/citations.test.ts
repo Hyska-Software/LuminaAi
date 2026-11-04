@@ -79,7 +79,7 @@ describe('conversationCitations', () => {
     expect(sources.map((entry) => entry.id)).toEqual(['cit-1', 'cit-2', 'cit-4']);
   });
 
-  it('caps the inline chips at eight sources', () => {
-    expect(MAX_INLINE_CITATIONS).toBe(8);
+  it('caps the inline chips at two sources', () => {
+    expect(MAX_INLINE_CITATIONS).toBe(2);
   });
 });
