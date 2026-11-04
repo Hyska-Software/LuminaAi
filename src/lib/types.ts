@@ -1041,6 +1041,8 @@ export interface AgentChannel {
   id: string;
   name: string;
   kind?: 'channel' | 'dm';
+  /** Agent that answers first and may delegate work to other members. */
+  leaderAgentId?: string | null;
   /** Posição manual na seção Canais (0 = ordem por recência). */
   sortOrder?: number;
   memberIds: string[];
@@ -1052,6 +1054,7 @@ export interface AgentChannel {
 export interface AgentChannelInput {
   name: string;
   memberIds: string[];
+  leaderAgentId?: string | null;
 }
 
 export interface AgentChannelMessage {

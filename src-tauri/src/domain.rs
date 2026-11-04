@@ -666,6 +666,9 @@ pub struct TurnOptions {
     /// a persisted user message. Internal: only the channel runner sets it.
     #[serde(skip)]
     pub channel_context: Option<String>,
+    /// Channel leader turn. Internal: only the channel runner sets this.
+    #[serde(skip)]
+    pub channel_leader: bool,
     /// Internal event payload for event-triggered routines; injected as a
     /// `surface_item kind="event"`, never trusted as instructions.
     #[serde(skip)]
@@ -719,6 +722,7 @@ impl Default for TurnOptions {
             temperature: None,
             system_prompt_override: None,
             channel_context: None,
+            channel_leader: false,
             event_context: None,
             regenerate: false,
             delegation_depth: 0,

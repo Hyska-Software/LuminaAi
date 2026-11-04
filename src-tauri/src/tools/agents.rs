@@ -1040,6 +1040,7 @@ mod tests {
                 &crate::agents::AgentChannelInput {
                     name: "Entrega".to_string(),
                     member_ids: vec![first.id.clone(), second.id.clone()],
+                    leader_agent_id: None,
                 },
                 crate::domain::now_ms(),
             )

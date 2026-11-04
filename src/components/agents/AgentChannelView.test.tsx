@@ -135,6 +135,17 @@ describe('AgentChannelView — chat parity', () => {
     expect(header?.querySelectorAll('[data-avatar-kind]')).toHaveLength(2);
   });
 
+  it('mostra o líder no header do canal', async () => {
+    mocks.listAgentChannels.mockResolvedValue([{ ...channel, leaderAgentId: 'agent-1' }]);
+    const { container } = render(
+      <AgentChannelView channelId="channel-1" onBack={() => {}} onEdit={() => {}} />,
+    );
+    await screen.findByText('Líder · Ana');
+    const header = container.querySelector('header');
+    expect(header).not.toBeNull();
+    expect(within(header as HTMLElement).getByText('2 agentes · Ana, Bia')).toBeTruthy();
+  });
+
   it('usa o composer do chat (envio redondo) sem seletor de modelos', async () => {
     render(<AgentChannelView channelId="channel-1" onBack={() => {}} onEdit={() => {}} />);
     const composer = await screen.findByLabelText('Mensagem para o canal Lançamento');

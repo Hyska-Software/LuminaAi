@@ -239,6 +239,30 @@ pub async fn run_agent_task_now(
     Ok(task)
 }
 
+/// Tasks delegated by a channel leader stay queued until the leader's channel
+/// turn ends, so task result messages never precede the leader's reply.
+fn defer_for_channel_leader(
+    db: &crate::db::Db,
+    task: &AgentTask,
+    has_active_turn: impl Fn(&str) -> bool,
+) -> bool {
+    let Some(origin_id) = task.origin_conversation_id.as_deref() else {
+        return false;
+    };
+    let Ok(Some(conversation)) = db.get_conversation(origin_id) else {
+        return false;
+    };
+    let Some(channel_id) = conversation.channel_id.as_deref() else {
+        return false;
+    };
+    let Ok(Some(channel)) = db.get_agent_channel(channel_id) else {
+        return false;
+    };
+    channel.leader_agent_id.is_some()
+        && channel.leader_agent_id.as_deref() == conversation.agent_id.as_deref()
+        && has_active_turn(origin_id)
+}
+
 /// One scheduler pass. Called by the background loop and safe to invoke from a
 /// command. Tasks run in parallel up to the concurrency governor; a task that
 /// cannot claim a slot stays queued for the next tick.
@@ -280,6 +304,12 @@ pub async fn scheduler_tick(app: AppHandle) {
             return;
         }
     };
+    let due: Vec<AgentTask> = due
+        .into_iter()
+        .filter(|task| {
+            !defer_for_channel_leader(&state.db, task, |id| state.has_active_turn_for(id))
+        })
+        .collect();
     drop(state);
     for task in due {
         let app = app.clone();
@@ -875,4 +905,102 @@ fn emit_updated(app: &AppHandle, task: &AgentTask) {
             origin_conversation_id: task.origin_conversation_id.clone(),
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::{Agent, AgentCapabilities, AgentInput};
+    use crate::domain::PermissionMode;
+
+    fn agent(db: &crate::db::Db, name: &str) -> Agent {
+        db.create_agent(&AgentInput {
+            name: name.to_string(),
+            role: "Engenheiro".to_string(),
+            description: String::new(),
+            avatar: crate::agents::AgentAvatar::emoji("🛠️"),
+            department: "Geral".to_string(),
+            provider_id: "opencode-go".to_string(),
+            model_id: "deepseek-v4.1-flash".to_string(),
+            fallback_provider_id: None,
+            fallback_model_id: None,
+            reasoning: None,
+            instructions: String::new(),
+            starters: Vec::new(),
+            capabilities: AgentCapabilities::default(),
+            memory_enabled: false,
+            workspace_id: None,
+            permission_mode: PermissionMode::Edit,
+            docker_image: None,
+            computer_environment: "auto".to_string(),
+        })
+        .expect("agent")
+    }
+
+    fn task_input(channel_id: &str, to_agent_id: &str) -> AgentTaskInput {
+        AgentTaskInput {
+            to_agent_id: to_agent_id.to_string(),
+            title: "Revisar".to_string(),
+            brief: "Revise o material.".to_string(),
+            acceptance: String::new(),
+            channel_id: Some(channel_id.to_string()),
+            parent_task_id: None,
+            workspace_id: None,
+            max_turns: None,
+            max_tokens: None,
+            max_cost: None,
+            deadline_minutes: None,
+        }
+    }
+
+    #[test]
+    fn channel_leader_tasks_wait_for_the_leader_turn() {
+        let db = crate::db::Db::open_in_memory().expect("db");
+        let leader = agent(&db, "Ana");
+        let member = agent(&db, "Bia");
+        let now = crate::domain::now_ms();
+        let channel = db
+            .create_agent_channel(
+                &crate::agents::AgentChannelInput {
+                    name: "Lançamento".to_string(),
+                    member_ids: vec![leader.id.clone(), member.id.clone()],
+                    leader_agent_id: Some(leader.id.clone()),
+                },
+                now,
+            )
+            .expect("channel");
+        let leader_thread = db
+            .get_or_create_channel_conversation(&channel.id, &leader.id, "#Lançamento · Ana")
+            .expect("leader thread");
+        let member_thread = db
+            .get_or_create_channel_conversation(&channel.id, &member.id, "#Lançamento · Bia")
+            .expect("member thread");
+
+        let leader_task = db
+            .create_agent_task(
+                &task_input(&channel.id, &member.id),
+                Some(&leader.id),
+                Some(&leader_thread.id),
+                false,
+                now,
+            )
+            .expect("leader task");
+        assert!(defer_for_channel_leader(&db, &leader_task, |id| {
+            id == leader_thread.id
+        }));
+        assert!(!defer_for_channel_leader(&db, &leader_task, |_| false));
+
+        let member_task = db
+            .create_agent_task(
+                &task_input(&channel.id, &leader.id),
+                Some(&member.id),
+                Some(&member_thread.id),
+                false,
+                now,
+            )
+            .expect("member task");
+        assert!(!defer_for_channel_leader(&db, &member_task, |id| {
+            id == member_thread.id
+        }));
+    }
 }

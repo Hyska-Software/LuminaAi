@@ -5,6 +5,7 @@ import {
   ArrowUp,
   Check,
   Copy,
+  Crown,
   ListChecks,
   Loader2,
   Settings2,
@@ -320,6 +321,10 @@ export function AgentChannelView({
     );
   }
 
+  const leader = channel.leaderAgentId
+    ? (members.find((member) => member.id === channel.leaderAgentId) ?? null)
+    : null;
+
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/70 px-3">
@@ -338,7 +343,18 @@ export function AgentChannelView({
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium text-foreground">{channel.name}</p>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <p className="truncate text-[13px] font-medium text-foreground">{channel.name}</p>
+            {leader ? (
+              <span
+                title={`Líder: ${leader.name}`}
+                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent-soft px-1.5 py-0.5 text-[9px] font-medium text-accent"
+              >
+                <Crown aria-hidden className="size-3" />
+                <span className="max-w-[7rem] truncate">Líder · {leader.name}</span>
+              </span>
+            ) : null}
+          </div>
           <p
             className="flex min-w-0 items-center gap-1 text-[11px] text-foreground-muted"
             title={memberNames || undefined}
@@ -390,7 +406,9 @@ export function AgentChannelView({
               <p className="mt-1 text-[13px] leading-relaxed text-foreground-muted">
                 {isDm
                   ? 'As respostas geradas pelo inbox aparecem aqui.'
-                  : 'Publique uma mensagem e os agentes do canal respondem em ordem. Use @nome para direcionar a mensagem.'}
+                  : leader
+                    ? `${leader.name} responde primeiro e pode delegar tarefas aos demais membros.`
+                    : 'Publique uma mensagem e os agentes do canal respondem em ordem. Use @nome para direcionar a mensagem.'}
               </p>
             </div>
           </div>
@@ -462,7 +480,11 @@ export function AgentChannelView({
                   <div className="size-7 shrink-0" aria-hidden />
                   <div className="flex items-center gap-2 py-1 text-[13px] text-foreground-subtle">
                     <Spinner size="xs" />
-                    <span>Os agentes do canal estão respondendo…</span>
+                    <span>
+                      {leader
+                        ? `${leader.name} está respondendo…`
+                        : 'Os agentes do canal estão respondendo…'}
+                    </span>
                   </div>
                 </div>
               ) : null}

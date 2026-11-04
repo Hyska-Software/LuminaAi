@@ -49,7 +49,9 @@ Dono (sempre disponíveis): `task_list`, `task_get`, `task_wait`, `task_cancel`,
 `accept_task`, `decline_task`, `update_task`, `finish_task`.
 
 - `delegate_task` — cria tarefa para outro agente; rejeita auto-delegação,
-  herda canal (inclusive de uma thread de tarefa) e tarefa-pai.
+  herda canal (inclusive de uma thread de tarefa) e tarefa-pai. Um líder de
+  canal pode usar a tool mesmo com a capability `delegation` desligada; os
+  demais membros continuam exigindo a capability.
 - `task_list` / `task_get` — escopados ao dono/criador/canal do chamador.
 - `task_wait` — espera até 300 s por um estado estável (`done`, `failed`,
   `cancelled`, `declined`, `review`, `waiting_input`, `waiting_approval`);
@@ -94,6 +96,9 @@ Limites:
   runner não escreve transição terminal depois do cancelamento;
 - terminais entregam uma mensagem `system` em `origin_conversation_id`
   (resultado como dados, não instrução) e publicam no canal quando aplicável;
+- tarefas criadas a partir da thread de um líder de canal ficam retidas enquanto
+  o turno do líder está ativo; o reply dele é publicado primeiro e o próximo
+  tick do scheduler inicia as tarefas;
 - emite `lumina:agent-task-updated` (com `originConversationId`) no claim, em
   cada transição relevante e no fim.
 

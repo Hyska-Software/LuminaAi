@@ -199,6 +199,7 @@ CREATE TABLE IF NOT EXISTS agent_channels (
   name        TEXT NOT NULL,
   kind        TEXT NOT NULL DEFAULT 'channel',
   dm_key      TEXT,
+  leader_agent_id TEXT,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
@@ -1273,6 +1274,12 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         "agent_channels",
         "sort_order",
         "ALTER TABLE agent_channels ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(
+        conn,
+        "agent_channels",
+        "leader_agent_id",
+        "ALTER TABLE agent_channels ADD COLUMN leader_agent_id TEXT",
     )?;
     ensure_column(
         conn,
@@ -2752,6 +2759,10 @@ impl Db {
              WHERE id = ?1",
             params![id, now_ms()],
         )?;
+        conn.execute(
+            "UPDATE agent_channels SET leader_agent_id = NULL WHERE leader_agent_id = ?1",
+            [id],
+        )?;
         drop(conn);
         if changed == 0 {
             return Err(anyhow::anyhow!("AGENT_NOT_FOUND: agente `{id}` não existe"));
@@ -2801,6 +2812,10 @@ impl Db {
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
         tx.execute("DELETE FROM agent_channel_members WHERE agent_id = ?1", [id])?;
+        tx.execute(
+            "UPDATE agent_channels SET leader_agent_id = NULL WHERE leader_agent_id = ?1",
+            [id],
+        )?;
         tx.commit()?;
         drop(conn);
         for conversation_id in channel_threads {
@@ -4678,7 +4693,7 @@ impl Db {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT c.id, c.name, c.kind, c.created_at, c.updated_at, MAX(m.created_at), \
-             c.sort_order \
+             c.sort_order, c.leader_agent_id \
              FROM agent_channels c LEFT JOIN agent_channel_messages m ON m.channel_id = c.id \
              GROUP BY c.id ORDER BY c.sort_order ASC, c.updated_at DESC, c.id",
         )?;
@@ -4691,18 +4706,22 @@ impl Db {
                 row.get::<_, i64>(4)?,
                 row.get::<_, Option<i64>>(5)?,
                 row.get::<_, i64>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         })?;
         let base = rows.collect::<rusqlite::Result<Vec<_>>>()?;
         drop(stmt);
         drop(conn);
         let mut channels = Vec::with_capacity(base.len());
-        for (id, name, kind, created_at, updated_at, last_message_at, sort_order) in base {
+        for (id, name, kind, created_at, updated_at, last_message_at, sort_order, leader_agent_id) in
+            base
+        {
             channels.push(AgentChannel {
                 member_ids: self.channel_members(&id)?,
                 id,
                 name,
                 kind,
+                leader_agent_id,
                 sort_order,
                 created_at,
                 updated_at,
@@ -4737,10 +4756,18 @@ impl Db {
                 ));
             }
         }
+        if let Some(leader) = input.leader_agent_id.as_deref() {
+            if !input.member_ids.iter().any(|id| id == leader) {
+                return Err(anyhow::anyhow!(
+                    "AGENT_CHANNEL_INVALID: o líder precisa ser um membro do canal."
+                ));
+            }
+        }
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO agent_channels (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
-            params![id, input.name, now],
+            "INSERT INTO agent_channels (id, name, leader_agent_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?4)",
+            params![id, input.name, input.leader_agent_id, now],
         )?;
         for agent_id in &input.member_ids {
             conn.execute(
@@ -4790,9 +4817,17 @@ impl Db {
                 ));
             }
         }
+        if let Some(leader) = input.leader_agent_id.as_deref() {
+            if !input.member_ids.iter().any(|id| id == leader) {
+                return Err(anyhow::anyhow!(
+                    "AGENT_CHANNEL_INVALID: o líder precisa ser um membro do canal."
+                ));
+            }
+        }
         conn.execute(
-            "UPDATE agent_channels SET name = ?2, updated_at = ?3 WHERE id = ?1",
-            params![id, input.name, now],
+            "UPDATE agent_channels SET name = ?2, leader_agent_id = ?3, updated_at = ?4 \
+             WHERE id = ?1",
+            params![id, input.name, input.leader_agent_id, now],
         )?;
         conn.execute("DELETE FROM agent_channel_members WHERE channel_id = ?1", [id])?;
         for agent_id in &input.member_ids {
@@ -7554,6 +7589,7 @@ mod tests {
                 &crate::agents::AgentChannelInput {
                     name: "Lançamento".to_string(),
                     member_ids: vec![first.id.clone(), second.id.clone()],
+                    leader_agent_id: None,
                 },
                 now_ms(),
             )
@@ -7598,6 +7634,49 @@ mod tests {
     }
 
     #[test]
+    fn channel_leader_is_persisted_and_cleared_on_archive() {
+        let db = test_db();
+        let first = db.create_agent(&agent_input("Ana")).expect("first");
+        let second = db.create_agent(&agent_input("Bia")).expect("second");
+        let channel = db
+            .create_agent_channel(
+                &crate::agents::AgentChannelInput {
+                    name: "Lançamento".to_string(),
+                    member_ids: vec![first.id.clone(), second.id.clone()],
+                    leader_agent_id: Some(first.id.clone()),
+                },
+                now_ms(),
+            )
+            .expect("channel");
+        assert_eq!(channel.leader_agent_id.as_deref(), Some(first.id.as_str()));
+
+        let updated = db
+            .update_agent_channel(
+                &channel.id,
+                &crate::agents::AgentChannelInput {
+                    name: "Lançamento".to_string(),
+                    member_ids: vec![first.id.clone(), second.id.clone()],
+                    leader_agent_id: Some(second.id.clone()),
+                },
+                now_ms(),
+            )
+            .expect("update");
+        assert_eq!(
+            updated.leader_agent_id.as_deref(),
+            Some(second.id.as_str())
+        );
+
+        db.archive_agent(&second.id).expect("archive");
+        assert_eq!(
+            db.get_agent_channel(&channel.id)
+                .expect("reload")
+                .expect("channel")
+                .leader_agent_id,
+            None
+        );
+    }
+
+    #[test]
     fn opens_legacy_agent_channels_without_dm_key() {
         let temp = TempDir::new("lumina-db-legacy-channels");
         let path = temp.path.join("lumina.db");
@@ -7619,6 +7698,7 @@ mod tests {
                 &crate::agents::AgentChannelInput {
                     name: "Geral".to_string(),
                     member_ids: Vec::new(),
+                    leader_agent_id: None,
                 },
                 now_ms(),
             )
@@ -7663,6 +7743,7 @@ mod tests {
                 &crate::agents::AgentChannelInput {
                     name: "Geral".to_string(),
                     member_ids: vec![agent.id.clone()],
+                    leader_agent_id: None,
                 },
                 now_ms(),
             )
@@ -7843,6 +7924,7 @@ mod tests {
                 &crate::agents::AgentChannelInput {
                     name: "Entrega".to_string(),
                     member_ids: vec![first.id.clone(), second.id.clone()],
+                    leader_agent_id: None,
                 },
                 now_ms(),
             )
@@ -10426,6 +10508,7 @@ mod tests {
         let channel_input = |name: &str| crate::agents::AgentChannelInput {
             name: name.to_string(),
             member_ids: vec![agent.id.clone()],
+            leader_agent_id: None,
         };
         let first = db
             .create_agent_channel(&channel_input("Primeiro"), now_ms())

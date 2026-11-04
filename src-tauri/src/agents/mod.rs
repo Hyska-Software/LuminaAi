@@ -747,6 +747,9 @@ pub struct AgentChannel {
     pub name: String,
     /// `channel` (group) or `dm` (direct agent-to-agent).
     pub kind: String,
+    /// Agent that answers first and may delegate to other members.
+    #[serde(default)]
+    pub leader_agent_id: Option<String>,
     /// Manual position inside the Canais section (0 = recency order).
     #[serde(default)]
     pub sort_order: i64,
@@ -762,6 +765,8 @@ pub struct AgentChannelInput {
     pub name: String,
     #[serde(default)]
     pub member_ids: Vec<String>,
+    #[serde(default)]
+    pub leader_agent_id: Option<String>,
 }
 
 impl AgentChannelInput {
@@ -783,6 +788,17 @@ impl AgentChannelInput {
         }
         if self.member_ids.len() > 6 {
             return Err("AGENT_CHANNEL_INVALID: um canal aceita no máximo 6 agentes.".to_string());
+        }
+        self.leader_agent_id = self
+            .leader_agent_id
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty());
+        if let Some(leader) = self.leader_agent_id.as_deref() {
+            if !self.member_ids.iter().any(|id| id == leader) {
+                return Err(
+                    "AGENT_CHANNEL_INVALID: o líder precisa ser um membro do canal.".to_string(),
+                );
+            }
         }
         Ok(self)
     }
@@ -1793,6 +1809,60 @@ mod tests {
         ] {
             assert!(allowed.iter().any(|item| item == name), "{name}");
         }
+    }
+
+    #[test]
+    fn channel_input_requires_leader_membership() {
+        let member = "agent-a".to_string();
+        let normalized = AgentChannelInput {
+            name: "Geral".to_string(),
+            member_ids: vec![member.clone()],
+            leader_agent_id: Some(format!(" {member} ")),
+        }
+        .normalize()
+        .expect("leader member");
+        assert_eq!(
+            normalized.leader_agent_id.as_deref(),
+            Some(member.as_str())
+        );
+
+        let rejected = AgentChannelInput {
+            name: "Geral".to_string(),
+            member_ids: vec![member.clone()],
+            leader_agent_id: Some("agent-b".to_string()),
+        }
+        .normalize()
+        .expect_err("leader must belong to the channel");
+        assert!(rejected.contains("líder precisa ser um membro"));
+
+        let cleared = AgentChannelInput {
+            name: "Geral".to_string(),
+            member_ids: vec![member],
+            leader_agent_id: Some("   ".to_string()),
+        }
+        .normalize()
+        .expect("empty leader");
+        assert_eq!(cleared.leader_agent_id, None);
+    }
+
+    #[test]
+    fn channel_leader_tool_catalog_grants_delegate_task_without_task_wait() {
+        let mut leader = agent("");
+        let mut allowed = crate::harness::code_agent_allowed_tools(&leader, &[]);
+        assert!(!allowed.iter().any(|name| name == "delegate_task"));
+        assert!(allowed.iter().any(|name| name == "task_wait"));
+
+        crate::harness::apply_channel_leader_tools(&leader, &mut allowed);
+        assert!(allowed.iter().any(|name| name == "delegate_task"));
+        assert!(!allowed.iter().any(|name| name == "task_wait"));
+
+        leader.capabilities.delegation = true;
+        let mut allowed = crate::harness::code_agent_allowed_tools(&leader, &[]);
+        assert!(allowed.iter().any(|name| name == "delegate_task"));
+        assert!(allowed.iter().any(|name| name == "task_wait"));
+        crate::harness::apply_channel_leader_tools(&leader, &mut allowed);
+        assert!(allowed.iter().any(|name| name == "delegate_task"));
+        assert!(!allowed.iter().any(|name| name == "task_wait"));
     }
 
     #[test]

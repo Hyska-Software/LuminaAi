@@ -268,16 +268,22 @@ pub fn run_with_hooks(
         Ok(None) => return ToolOutcome::error("AGENT_NOT_FOUND: agente não existe"),
         Err(error) => return ToolOutcome::error(format!("{error:#}")),
     };
-    let delegation = agent.capabilities.delegation;
     let conversation = match db.get_conversation(conversation_id) {
         Ok(Some(conversation)) => conversation,
         Ok(None) => return ToolOutcome::error("AGENT_TASK_INVALID: conversa não encontrada"),
         Err(error) => return ToolOutcome::error(format!("{error:#}")),
     };
+    let channel_leader = conversation
+        .channel_id
+        .as_deref()
+        .and_then(|channel_id| db.get_agent_channel(channel_id).ok().flatten())
+        .is_some_and(|channel| channel.leader_agent_id.as_deref() == Some(agent_id));
+    let delegation = agent.capabilities.delegation;
+    let can_delegate = delegation || channel_leader;
     let now = crate::domain::now_ms();
     match tool {
         "delegate_task" => {
-            if !delegation {
+            if !can_delegate {
                 return ToolOutcome::error(
                     "AGENT_CAPABILITY_DENIED: a delegação não está habilitada para este agente",
                 );
@@ -1099,6 +1105,65 @@ mod tests {
         );
         assert!(!declined.is_error, "{}", declined.content);
         assert_eq!(task_status(&db, &task_id), "declined");
+    }
+
+    #[test]
+    fn channel_leader_can_delegate_without_the_persona_capability() {
+        let db = Db::open_in_memory().expect("db");
+        let first = agent(&db, "Ana", false);
+        let second = agent(&db, "Bia", false);
+        let channel = db
+            .create_agent_channel(
+                &crate::agents::AgentChannelInput {
+                    name: "Lançamento".to_string(),
+                    member_ids: vec![first.id.clone(), second.id.clone()],
+                    leader_agent_id: Some(first.id.clone()),
+                },
+                crate::domain::now_ms(),
+            )
+            .expect("channel");
+        let leader_thread = db
+            .get_or_create_channel_conversation(&channel.id, &first.id, "#Lançamento · Ana")
+            .expect("leader thread");
+        let member_thread = db
+            .get_or_create_channel_conversation(&channel.id, &second.id, "#Lançamento · Bia")
+            .expect("member thread");
+
+        let delegated = run(
+            &db,
+            &first.id,
+            &leader_thread.id,
+            "delegate_task",
+            &serde_json::json!({
+                "toAgentId": second.id,
+                "title": "Resumo",
+                "brief": "Resuma a conversa.",
+            }),
+        );
+        assert!(!delegated.is_error, "{}", delegated.content);
+        let value: serde_json::Value = serde_json::from_str(&delegated.content).expect("json");
+        assert_eq!(
+            value["channelId"].as_str(),
+            Some(channel.id.as_str())
+        );
+        assert_eq!(
+            value["originConversationId"].as_str(),
+            Some(leader_thread.id.as_str())
+        );
+
+        let denied = run(
+            &db,
+            &second.id,
+            &member_thread.id,
+            "delegate_task",
+            &serde_json::json!({
+                "toAgentId": first.id,
+                "title": "Sem capability",
+                "brief": "Não deveria criar.",
+            }),
+        );
+        assert!(denied.is_error);
+        assert!(denied.content.contains("AGENT_CAPABILITY_DENIED"));
     }
 
     #[test]

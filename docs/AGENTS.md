@@ -270,6 +270,15 @@ com erro — o fallback é de rota, não um retry infinito.
 
 - Criados na sidebar (Canais → +) com até 6 agentes. A linha do canal mostra
   os avatares dos membros (dois visíveis + chip `+N`) no lugar do ícone `#`.
+- Líder opcional (`agent_channels.leader_agent_id`): com líder ativo, **somente
+  ele** responde ao post do usuário, sempre primeiro. O líder pode criar tarefas
+  para outros membros com `delegate_task` mesmo sem a capability `delegation`
+  (o papel concede apenas essa tool, respeitando a allowlist da persona). A
+  resposta dele é publicada e as tarefas delegadas rodam depois: o scheduler
+  mantém tarefas cuja thread de origem é a do líder em `queued` enquanto o turno
+  dele estiver ativo. `task_wait` não entra no catálogo do líder nesse turno.
+  Menções `@nome` viram dicas para o líder; sem líder, o roteamento antigo
+  (menções ou todos) continua. Arquivar/excluir o líder limpa o campo.
 - A view do canal espelha o chat padrão dos agentes (mesma coluna, mensagens,
   rolagem inteligente e shell do composer), **sem seletor de modelos**: cada
   membro já tem a própria rota. O header mostra a pilha de avatares dos membros,

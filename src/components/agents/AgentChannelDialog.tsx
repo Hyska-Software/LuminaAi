@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Loader2, Users } from 'lucide-react';
+import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { Check, ChevronDown, Loader2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -15,6 +15,9 @@ import {
   DialogTitle,
   Input,
   Label,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { selectActiveAgents, useAgentStore } from '@/lib/store';
@@ -37,6 +40,8 @@ export function AgentChannelDialog({
   const agents = useAgentStore(useShallow(selectActiveAgents));
   const [name, setName] = useState('');
   const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [leaderAgentId, setLeaderAgentId] = useState<string | null>(null);
+  const [leaderOpen, setLeaderOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,10 +49,41 @@ export function AgentChannelDialog({
     if (!open) return;
     setName(channel?.name ?? '');
     setMemberIds(channel?.memberIds ?? []);
+    setLeaderAgentId(channel?.leaderAgentId ?? null);
+    setLeaderOpen(false);
     setError(null);
   }, [open, channel]);
 
+  const memberAgents = agents.filter((agent) => memberIds.includes(agent.id));
+  const selectedLeader = leaderAgentId
+    ? (memberAgents.find((agent) => agent.id === leaderAgentId) ?? null)
+    : null;
+
+  const selectLeader = (agentId: string | null) => {
+    setLeaderAgentId(agentId);
+    setLeaderOpen(false);
+  };
+
+  const handleLeaderListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const options = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    );
+    if (options.length === 0) return;
+    event.preventDefault();
+    const current = options.indexOf(document.activeElement as HTMLButtonElement);
+    let next = current;
+    if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = options.length - 1;
+    else if (event.key === 'ArrowDown') next = current < 0 ? 0 : (current + 1) % options.length;
+    else next = current <= 0 ? options.length - 1 : current - 1;
+    options[next]?.focus();
+  };
+
   const toggle = (agentId: string) => {
+    if (memberIds.includes(agentId)) {
+      setLeaderAgentId((current) => (current === agentId ? null : current));
+    }
     setMemberIds((current) =>
       current.includes(agentId)
         ? current.filter((id) => id !== agentId)
@@ -65,7 +101,11 @@ export function AgentChannelDialog({
     setSaving(true);
     setError(null);
     try {
-      const input = { name: name.trim(), memberIds };
+      const input = {
+        name: name.trim(),
+        memberIds,
+        leaderAgentId: selectedLeader?.id ?? null,
+      };
       const saved = channel
         ? await api.updateAgentChannel(channel.id, input)
         : await api.createAgentChannel(input);
@@ -130,28 +170,130 @@ export function AgentChannelDialog({
                 {agents.map((agent) => {
                   const selected = memberIds.includes(agent.id);
                   return (
-                    <label
+                    <button
                       key={agent.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => toggle(agent.id)}
                       className={cn(
-                        'flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border border-border px-2 py-1.5 text-[12px]',
-                        selected ? 'border-accent/40 bg-accent-soft/50' : 'bg-surface-raised/40',
+                        'flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-[12px]',
+                        'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                        selected
+                          ? 'border-accent/40 bg-accent-soft/50 text-foreground'
+                          : 'border-border bg-surface-raised/40 text-foreground-muted hover:border-border-strong hover:bg-surface-hover hover:text-foreground',
                       )}
                     >
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        onChange={() => toggle(agent.id)}
-                        className="size-3.5 accent-accent"
-                      />
                       <AgentAvatar avatar={agent.avatar} size="sm" />
                       <span className="min-w-0 flex-1 truncate">{agent.name}</span>
-                    </label>
+                    </button>
                   );
                 })}
               </div>
             )}
             <p className="text-[10px] text-foreground-subtle">
               Até 6 agentes. Cada resposta é gerada na thread privada do agente e publicada no canal.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="channel-leader">Líder (opcional)</Label>
+            <Popover open={leaderOpen} onOpenChange={setLeaderOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  id="channel-leader"
+                  disabled={saving || memberAgents.length === 0}
+                  aria-label={`Líder: ${selectedLeader?.name ?? 'Nenhum — todos respondem'}`}
+                  aria-haspopup="listbox"
+                  className={cn(
+                    'flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-surface-raised px-2.5 text-left text-sm text-foreground',
+                    'transition-[border-color,box-shadow,background-color] duration-150 hover:bg-surface-hover',
+                    'focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20',
+                    'disabled:cursor-not-allowed disabled:opacity-60',
+                  )}
+                >
+                  {selectedLeader ? (
+                    <AgentAvatar avatar={selectedLeader.avatar} size="sm" />
+                  ) : (
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-active/70 text-foreground-subtle">
+                      <Users aria-hidden className="size-3.5" />
+                    </span>
+                  )}
+                  <span className="min-w-0 flex-1 truncate">
+                    {selectedLeader?.name ?? 'Nenhum — todos respondem'}
+                  </span>
+                  <ChevronDown
+                    aria-hidden
+                    className="size-4 shrink-0 text-foreground-subtle"
+                    strokeWidth={2}
+                  />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                sideOffset={6}
+                collisionPadding={12}
+                className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-1"
+              >
+                <div
+                  role="listbox"
+                  aria-label="Líder do canal"
+                  className="grid max-h-64 gap-0.5 overflow-y-auto"
+                  onKeyDown={handleLeaderListKeyDown}
+                >
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={selectedLeader === null}
+                    autoFocus={selectedLeader === null}
+                    onClick={() => selectLeader(null)}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px]',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                      selectedLeader === null
+                        ? 'bg-accent-soft text-foreground'
+                        : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                    )}
+                  >
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-active/70 text-foreground-subtle">
+                      <Users aria-hidden className="size-3.5" />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">Nenhum — todos respondem</span>
+                    {selectedLeader === null ? (
+                      <Check aria-hidden className="size-4 shrink-0 text-accent" />
+                    ) : null}
+                  </button>
+                  {memberAgents.map((agent) => {
+                    const active = agent.id === leaderAgentId;
+                    return (
+                      <button
+                        key={agent.id}
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        autoFocus={active}
+                        onClick={() => selectLeader(agent.id)}
+                        className={cn(
+                          'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px]',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                          active
+                            ? 'bg-accent-soft text-foreground'
+                            : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                        )}
+                      >
+                        <AgentAvatar avatar={agent.avatar} size="sm" />
+                        <span className="min-w-0 flex-1 truncate">{agent.name}</span>
+                        {active ? (
+                          <Check aria-hidden className="size-4 shrink-0 text-accent" />
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
+            <p className="text-[10px] text-foreground-subtle">
+              O líder responde primeiro e pode delegar tarefas específicas aos demais membros.
+              Sem líder, o canal responde como hoje (menções ou todos).
             </p>
           </div>
           {error ? (

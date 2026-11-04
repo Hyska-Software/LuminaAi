@@ -10,7 +10,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::agents::{AgentChannel, AgentChannelInput, AgentChannelMessage};
+use crate::agents::{Agent, AgentChannel, AgentChannelInput, AgentChannelMessage};
 use crate::domain::{TurnKind, TurnOptions, TurnPayload, TurnProfile};
 use crate::events::TurnEvent;
 use crate::harness::{self, EventEmitter, HarnessDeps};
@@ -108,6 +108,42 @@ fn channel_targets(content: &str, members: &[(String, String)]) -> Vec<String> {
     } else {
         targets
     }
+}
+
+fn resolve_channel_leader(
+    leader_id: Option<&str>,
+    active_member_ids: &[String],
+) -> Option<String> {
+    leader_id
+        .filter(|id| {
+            active_member_ids
+                .iter()
+                .any(|member| member.as_str() == *id)
+        })
+        .map(str::to_string)
+}
+
+fn build_channel_leader_prompt(
+    channel_name: &str,
+    agent_name: &str,
+    members: &[(String, String)],
+) -> String {
+    let roster = members
+        .iter()
+        .map(|(id, name)| format!("- {name} (`{id}`)"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "Você é o líder do canal compartilhado #{channel_name}. Responda primeiro como \
+         {agent_name} à mensagem mais recente do usuário. Se a tarefa pedir trabalho específico \
+         de outro membro, crie uma ou mais tarefas com `delegate_task`, usando o `toAgentId` \
+         exato da lista de membros e preenchendo title, brief e acceptance. Não delegue a si \
+         mesmo nem a quem não está no canal. As tarefas rodam depois desta resposta, cada uma na \
+         thread privada do dono, e o resultado é publicado no canal; não use `task_wait` e não \
+         afirme que já viu os resultados. Menções @nome do usuário são um pedido para envolver \
+         aquele membro; sem menção, decida você. Não responda pelos outros agentes, não repita o \
+         histórico e não invente ações.\n\nMembros do canal (id para delegação):\n{roster}"
+    )
 }
 
 pub(crate) fn build_channel_context(
@@ -276,19 +312,35 @@ pub async fn post_agent_channel_message(
         global: settings.max_concurrent_turns.max(1) as usize,
         per_agent: settings.max_concurrent_turns_per_agent.max(1) as usize,
     };
-    let member_names: Vec<(String, String)> = channel
+    let member_agents: Vec<Agent> = channel
         .member_ids
         .iter()
-        .filter_map(|id| {
-            db.get_agent(id)
-                .ok()
-                .flatten()
-                .map(|agent| (id.clone(), agent.name))
-        })
+        .filter_map(|id| db.get_agent(id).ok().flatten())
+        .collect();
+    let member_names: Vec<(String, String)> = member_agents
+        .iter()
+        .map(|agent| (agent.id.clone(), agent.name.clone()))
+        .collect();
+    let active_member_ids: Vec<String> = member_agents
+        .iter()
+        .filter(|agent| !agent.is_archived())
+        .map(|agent| agent.id.clone())
+        .collect();
+    let active_members: Vec<(String, String)> = member_agents
+        .iter()
+        .filter(|agent| !agent.is_archived())
+        .map(|agent| (agent.id.clone(), agent.name.clone()))
         .collect();
     let names_map: std::collections::HashMap<String, String> =
         member_names.iter().cloned().collect();
-    let targets = channel_targets(&content, &member_names);
+    let leader_target = resolve_channel_leader(
+        channel.leader_agent_id.as_deref(),
+        &active_member_ids,
+    );
+    let targets = match leader_target.as_deref() {
+        Some(leader) => vec![leader.to_string()],
+        None => channel_targets(&content, &member_names),
+    };
     let _ = app.emit(
         "lumina:agent-channel-updated",
         AgentChannelUpdatedEvent {
@@ -327,13 +379,18 @@ pub async fn post_agent_channel_message(
             .list_agent_channel_messages(&channel.id, Some(24))
             .unwrap_or_default();
         let history_text = build_channel_context(&channel.id, &history, &names_map);
-        let prompt = format!(
-            "Você está no canal compartilhado #{name}. Responda como {agent_name} à mensagem \
-             mais recente. O histórico do canal está no bloco de contexto; não repita o \
-             histórico e não invente ações que você não executou.",
-            name = channel.name,
-            agent_name = agent.name,
-        );
+        let is_leader = leader_target.as_deref() == Some(agent_id.as_str());
+        let prompt = if is_leader {
+            build_channel_leader_prompt(&channel.name, &agent.name, &active_members)
+        } else {
+            format!(
+                "Você está no canal compartilhado #{name}. Responda como {agent_name} à mensagem \
+                 mais recente. O histórico do canal está no bloco de contexto; não repita o \
+                 histórico e não invente ações que você não executou.",
+                name = channel.name,
+                agent_name = agent.name,
+            )
+        };
         let profile = TurnProfile::Code;
         let turn_id = uuid::Uuid::new_v4().to_string();
         let Some(cancel) = state.register_turn_if_idle(&turn_id, &conversation.id) else {
@@ -361,6 +418,7 @@ pub async fn post_agent_channel_message(
             reasoning: agent.reasoning.clone(),
             options: TurnOptions {
                 channel_context: Some(history_text),
+                channel_leader: is_leader,
                 ..TurnOptions::default()
             },
             profile,
@@ -424,6 +482,29 @@ mod tests {
             ("a".to_string(), "Ana".to_string()),
             ("b".to_string(), "Bia".to_string()),
         ]
+    }
+
+    #[test]
+    fn channel_leader_resolution_requires_an_active_member() {
+        let active = vec!["a".to_string()];
+        assert_eq!(
+            resolve_channel_leader(Some("a"), &active),
+            Some("a".to_string())
+        );
+        assert_eq!(resolve_channel_leader(Some("z"), &active), None);
+        assert_eq!(resolve_channel_leader(None, &active), None);
+    }
+
+    #[test]
+    fn channel_leader_prompt_lists_members_and_delegation() {
+        let prompt = build_channel_leader_prompt("Lançamento", "Ana", &members());
+        assert!(prompt.contains("#Lançamento"));
+        assert!(prompt.contains("Ana"));
+        assert!(prompt.contains("`a`"));
+        assert!(prompt.contains("`b`"));
+        assert!(prompt.contains("delegate_task"));
+        assert!(prompt.contains("task_wait"));
+        assert!(prompt.contains("publicado no canal"));
     }
 
     #[test]

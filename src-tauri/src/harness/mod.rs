@@ -1587,7 +1587,8 @@ pub async fn run_turn(
         payload.options.allowed_mcp_servers = agent.capabilities.mcp_servers.clone();
         payload.options.agent_memory = agent.memory_enabled;
         payload.options.agent_id = Some(agent.id.clone());
-        payload.options.agent_delegation = agent.capabilities.delegation;
+        payload.options.agent_delegation =
+            agent.capabilities.delegation || payload.options.channel_leader;
         let desktop_capable = agent.capabilities.computer_use
             || agent.capabilities.screen_capture;
         payload.options.agent_computer = match agent.computer_environment.as_str() {
@@ -2095,6 +2096,9 @@ pub async fn run_turn(
                     }
                 }
             }
+            if options.channel_leader {
+                apply_channel_leader_tools(agent, &mut allowed);
+            }
             options.allowed_tools = Some(allowed);
         }
     }
@@ -2190,14 +2194,17 @@ pub async fn run_turn(
             }
         }
     }
-    if agent
-        .as_ref()
-        .is_some_and(|agent| agent.capabilities.delegation)
-    {
+    if options.agent_delegation {
+        let guidance = if options.channel_leader {
+            "Use `delegate_task` to hand scoped work to channel members. The result is published \
+             in the channel after your reply; do not wait for it."
+        } else {
+            "Use delegation for small, independent work with explicit acceptance \
+             criteria. You stay responsible for checking the result with real evidence."
+        };
         code_tool_prompts_list.push(code::prompt::ToolPrompt {
             name: "delegate_task",
-            guidance: "Use delegation for small, independent work with explicit acceptance \
-                       criteria. You stay responsible for checking the result with real evidence.",
+            guidance,
         });
     }
     if let Some(agent) = agent.as_ref() {
@@ -4251,6 +4258,21 @@ fn agent_computer_tool_allowed(name: &str, computer_use: bool, screen_capture: b
         return false;
     }
     computer_use || (screen_capture && ["computer_screenshot", "computer_windows", "computer_ui_tree"].contains(&name))
+}
+
+/// Channel leaders may delegate even when the persona's `delegation` switch is
+/// off. The tool allowlist still applies; `task_wait` is withheld because tasks
+/// delegated by the leader are deferred until its channel turn ends.
+pub(crate) fn apply_channel_leader_tools(
+    agent: &crate::agents::Agent,
+    allowed: &mut Vec<String>,
+) {
+    allowed.retain(|name| name != "task_wait");
+    if agent.capabilities.allows_tool("delegate_task")
+        && !allowed.iter().any(|name| name == "delegate_task")
+    {
+        allowed.push("delegate_task".to_string());
+    }
 }
 
 pub(crate) fn code_agent_allowed_tools(
