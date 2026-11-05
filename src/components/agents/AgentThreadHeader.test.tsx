@@ -5,6 +5,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 const mocks = vi.hoisted(() => ({
   listActiveComputerSessions: vi.fn(),
   stopComputerSession: vi.fn(),
+  getAgentTask: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -88,6 +89,10 @@ function stream(): StreamingState {
 describe('AgentThreadHeader', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.getAgentTask.mockResolvedValue({
+      task: { status: 'running' },
+      events: [],
+    });
     mocks.listActiveComputerSessions.mockResolvedValue([
       {
         id: 'session-1',
@@ -126,6 +131,19 @@ describe('AgentThreadHeader', () => {
     expect(container.querySelector('[data-activity="running"]')).not.toBeNull();
     expect(screen.getByRole('status', { name: 'Executando' })).toBeTruthy();
     expect(screen.getByText('Executando')).toBeTruthy();
+  });
+
+  it('mostra o status da tarefa no header da thread', async () => {
+    render(
+      <AgentThreadHeader
+        agent={agent}
+        conversation={{ ...conversation, id: 'conv-task', taskId: 'task-1' }}
+        onBack={vi.fn()}
+      />,
+    );
+    const chip = await screen.findByText('Executando');
+    expect(chip.closest('header')).not.toBeNull();
+    expect(mocks.getAgentTask).toHaveBeenCalledWith('task-1');
   });
 
   it('mantém o header idle sem turno ativo', () => {

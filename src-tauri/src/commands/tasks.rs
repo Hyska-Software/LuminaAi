@@ -5,6 +5,7 @@
 //! queued tasks in the background under the global concurrency governor. Human
 //! tasks and tool-created tasks share the same state machine.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -20,9 +21,37 @@ fn to_error(error: impl std::fmt::Display) -> String {
     format!("{error:#}")
 }
 
-struct SilentEmitter;
-impl EventEmitter for SilentEmitter {
-    fn emit(&self, _event: TurnEvent) {}
+/// Task turns run in the background but must remain inspectable: persist the
+/// turn events and publish them on the global bus so an open task thread shows
+/// progress while the task is still running (and can reattach after reload).
+struct TaskEventEmitter {
+    app: AppHandle,
+    db: Arc<crate::db::Db>,
+    turn_id: String,
+    conversation_id: String,
+    seq: AtomicU64,
+}
+
+impl EventEmitter for TaskEventEmitter {
+    fn emit(&self, event: TurnEvent) {
+        let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Ok(json) = serde_json::to_string(&event) {
+            let _ = self.db.append_turn_event(
+                &self.turn_id,
+                seq,
+                &self.conversation_id,
+                &json,
+                crate::domain::now_ms(),
+            );
+        }
+        let payload = serde_json::json!({
+            "turnId": self.turn_id,
+            "seq": seq,
+            "conversationId": self.conversation_id,
+            "event": event,
+        });
+        let _ = self.app.emit("lumina:turn-event", payload);
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -321,6 +350,32 @@ pub async fn scheduler_tick(app: AppHandle) {
     }
 }
 
+/// Publishes a completed task result to its shared channel. Returns the
+/// channel id so the caller can emit the update event. Used both when the
+/// runner concludes the task and when the owner finishes it via `finish_task`
+/// inside the turn (in that case the runner loop just observes `done`).
+fn publish_task_result_to_channel(
+    db: &crate::db::Db,
+    task: &AgentTask,
+    text: &str,
+) -> Option<String> {
+    let channel_id = task.channel_id.as_deref()?;
+    let message = if text.trim().is_empty() {
+        format!("Tarefa `{}` concluída sem texto de resultado.", task.title)
+    } else {
+        format!("Tarefa `{}` concluída:\n\n{}", task.title, text)
+    };
+    db.append_agent_channel_message(
+        channel_id,
+        "agent",
+        Some(&task.owner_agent_id),
+        &message,
+        crate::domain::now_ms(),
+    )
+    .ok()?;
+    Some(channel_id.to_string())
+}
+
 async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
     let state = app.state::<AppState>();
     let settings = crate::config::load_settings(app);
@@ -565,6 +620,7 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
                 task.title
             )
         };
+        let task_turn_id = format!("{turn_id}-{}", index + 1);
         let payload = TurnPayload {
             conversation_id: conversation.id.clone(),
             content,
@@ -579,13 +635,20 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
             profile: TurnProfile::Code,
             turn_kind: TurnKind::User,
             goal_request: false,
-            turn_id: Some(format!("{turn_id}-{}", index + 1)),
+            turn_id: Some(task_turn_id.clone()),
         };
+        let emitter = Arc::new(TaskEventEmitter {
+            app: app.clone(),
+            db: state.db.clone(),
+            turn_id: task_turn_id,
+            conversation_id: conversation.id.clone(),
+            seq: AtomicU64::new(0),
+        });
         match harness::run_turn(
             deps.clone(),
             payload,
             settings.clone(),
-            Arc::new(SilentEmitter),
+            emitter,
             cancel.clone(),
         )
         .await
@@ -677,6 +740,15 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
     ) {
         emit_updated(app, &current);
         return Ok(());
+    }
+    if current.status == "done" {
+        let text = current.result.as_deref().unwrap_or("");
+        if let Some(channel_id) = publish_task_result_to_channel(&state.db, &current, text) {
+            let _ = app.emit(
+                "lumina:agent-channel-updated",
+                crate::commands::channels::AgentChannelUpdatedEvent { channel_id },
+            );
+        }
     }
     if current.status == "failed" || current.status == "done" {
         deliver_task_result(
@@ -772,24 +844,10 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(last_text.as_str())
         .to_string();
-    if let Some(channel_id) = task.channel_id.as_deref() {
-        let message = if text.is_empty() {
-            format!("Tarefa `{}` concluída sem texto de resultado.", task.title)
-        } else {
-            format!("Tarefa `{}` concluída:\n\n{}", task.title, text)
-        };
-        let _ = state.db.append_agent_channel_message(
-            channel_id,
-            "agent",
-            Some(&agent.id),
-            &message,
-            crate::domain::now_ms(),
-        );
+    if let Some(channel_id) = publish_task_result_to_channel(&state.db, &task, &text) {
         let _ = app.emit(
             "lumina:agent-channel-updated",
-            crate::commands::channels::AgentChannelUpdatedEvent {
-                channel_id: channel_id.to_string(),
-            },
+            crate::commands::channels::AgentChannelUpdatedEvent { channel_id },
         );
     }
     deliver_task_result(app, &current, "done", &text);
@@ -951,6 +1009,44 @@ mod tests {
             max_cost: None,
             deadline_minutes: None,
         }
+    }
+
+    #[test]
+    fn completed_task_publishes_its_result_to_the_channel() {
+        let db = crate::db::Db::open_in_memory().expect("db");
+        let owner = agent(&db, "Bia");
+        let now = crate::domain::now_ms();
+        let channel = db
+            .create_agent_channel(
+                &crate::agents::AgentChannelInput {
+                    name: "Lançamento".to_string(),
+                    member_ids: vec![owner.id.clone()],
+                    leader_agent_id: None,
+                },
+                now,
+            )
+            .expect("channel");
+        let task = db
+            .create_agent_task(
+                &task_input(&channel.id, &owner.id),
+                Some(&owner.id),
+                None,
+                false,
+                now,
+            )
+            .expect("task");
+
+        let published = publish_task_result_to_channel(&db, &task, "Resumo pronto.");
+        assert_eq!(published.as_deref(), Some(channel.id.as_str()));
+
+        let messages = db
+            .list_agent_channel_messages(&channel.id, Some(10))
+            .expect("messages");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "agent");
+        assert_eq!(messages[0].agent_id.as_deref(), Some(owner.id.as_str()));
+        assert!(messages[0].content.contains("Tarefa `Revisar` concluída"));
+        assert!(messages[0].content.contains("Resumo pronto."));
     }
 
     #[test]

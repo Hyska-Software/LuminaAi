@@ -96,6 +96,11 @@ Limites:
   runner não escreve transição terminal depois do cancelamento;
 - terminais entregam uma mensagem `system` em `origin_conversation_id`
   (resultado como dados, não instrução) e publicam no canal quando aplicável;
+  quando o dono conclui pela tool `finish_task`, o runner observa o `done` e
+  publica o resultado no canal mesmo sem transicionar a tarefa de novo;
+- cada turno de tarefa persiste `turn_events` e emite `lumina:turn-event`, então
+  abrir a thread da tarefa durante a execução mostra streaming/passos em vez de
+  um transcript vazio;
 - tarefas criadas a partir da thread de um líder de canal ficam retidas enquanto
   o turno do líder está ativo; o reply dele é publicado primeiro e o próximo
   tick do scheduler inicia as tarefas;

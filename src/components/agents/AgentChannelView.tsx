@@ -17,6 +17,7 @@ import { AgentAvatar } from './AgentAvatar';
 import { AgentAvatarStack } from './AgentAvatarStack';
 import { AgentTaskBoardDialog } from './AgentTaskBoardDialog';
 import { AgentPanelButton, AgentPanelOpener } from './AgentPanelToggle';
+import { TASK_STATUS_META, TASK_TERMINAL_STATUSES } from './agentTaskStatus';
 import { Markdown } from '@/components/chat/Markdown';
 import { ComposerActivity } from '@/components/composer/ComposerActivity';
 import { useReduceMotion } from '@/components/layout/hooks';
@@ -24,7 +25,12 @@ import { IconButton, Spinner } from '@/components/ui';
 import { api } from '@/lib/api';
 import { agentAvatarForEmoji, DEFAULT_AGENT_AVATAR } from '@/lib/agentAvatar';
 import { useAgentStore, useAppStore, useUiStore } from '@/lib/store';
-import type { AgentAvatar as AgentAvatarSpec, AgentChannel, AgentChannelMessage } from '@/lib/types';
+import type {
+  AgentAvatar as AgentAvatarSpec,
+  AgentChannel,
+  AgentChannelMessage,
+  AgentTask,
+} from '@/lib/types';
 import { cn, copyText } from '@/lib/utils';
 
 /** Distance from the bottom (px) still considered "reading the latest message". */
@@ -102,6 +108,7 @@ export function AgentChannelView({
   const sendKey = useAppStore((state) => state.settings.sendKey);
   const [channel, setChannel] = useState<AgentChannel | null>(null);
   const [messages, setMessages] = useState<AgentChannelMessage[]>([]);
+  const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState('');
@@ -134,6 +141,13 @@ export function AgentChannelView({
         }))
         .filter((member) => member.name !== 'Agente'),
     [channel?.memberIds, names],
+  );
+  const activeTasks = useMemo(
+    () =>
+      tasks
+        .filter((task) => !TASK_TERMINAL_STATUSES.includes(task.status))
+        .sort((left, right) => right.updatedAt - left.updatedAt),
+    [tasks],
   );
   const mentionMatch = /(?:^|\s)@([^\s@]*)$/.exec(draft);
   const mentionCandidates = mentionMatch
@@ -204,14 +218,16 @@ export function AgentChannelView({
       const request = ++requestId.current;
       if (!silent) setLoading(true);
       try {
-        const [channels, history] = await Promise.all([
+        const [channels, history, channelTasks] = await Promise.all([
           api.listAgentChannels(),
           api.listAgentChannelMessages(channelId),
+          api.listAgentTasks({ channelId }).catch(() => [] as AgentTask[]),
         ]);
         if (request !== requestId.current) return;
         const found = channels.find((entry) => entry.id === channelId) ?? null;
         setChannel(found);
         setMessages(history);
+        setTasks(channelTasks);
         if (!found) {
           toast.info('Este canal não existe mais');
           setActiveChannelId(null);
@@ -238,11 +254,13 @@ export function AgentChannelView({
     const reload = () => void load(true);
     window.addEventListener('lumina:channels-changed', reload);
     window.addEventListener('lumina:agent-channel-updated', reload);
+    window.addEventListener('lumina:agent-task-updated', reload);
     const interval = window.setInterval(reload, 3000);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener('lumina:channels-changed', reload);
       window.removeEventListener('lumina:agent-channel-updated', reload);
+      window.removeEventListener('lumina:agent-task-updated', reload);
     };
   }, [load]);
 
@@ -499,6 +517,54 @@ export function AgentChannelView({
           className="pointer-events-none absolute inset-x-0 -top-10 bottom-0 bg-linear-to-t from-background via-background/90 to-transparent"
         />
         <div className="relative mx-auto w-full max-w-3xl">
+          {activeTasks.length > 0 ? (
+            <div className="mb-2 overflow-hidden rounded-xl border border-accent/25 bg-accent-soft/35">
+              <div className="flex items-center gap-2 border-b border-accent/20 px-2.5 py-1.5">
+                <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" />
+                <span className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-wider text-foreground-muted">
+                  Tarefas em andamento
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTaskBoardOpen(true)}
+                  className="shrink-0 text-[10px] font-medium text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  Ver quadro
+                </button>
+              </div>
+              <div className="p-1">
+                {activeTasks.slice(0, 3).map((task) => {
+                  const owner = names.get(task.ownerAgentId);
+                  const meta = TASK_STATUS_META[task.status];
+                  return (
+                    <button
+                      key={task.id}
+                      type="button"
+                      onClick={() => setTaskBoardOpen(true)}
+                      className="flex w-full min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors duration-150 hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    >
+                      {owner ? <AgentAvatar avatar={owner.avatar} size="xs" /> : null}
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">
+                        {task.title}
+                      </span>
+                      <span className={cn('shrink-0 text-[10px] font-medium', meta.tone)}>
+                        {meta.label}
+                      </span>
+                    </button>
+                  );
+                })}
+                {activeTasks.length > 3 ? (
+                  <button
+                    type="button"
+                    onClick={() => setTaskBoardOpen(true)}
+                    className="w-full rounded-lg px-1.5 py-1 text-left text-[10px] text-foreground-subtle hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                  >
+                    +{activeTasks.length - 3} tarefa{activeTasks.length - 3 === 1 ? '' : 's'}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           {errors.length > 0 ? (
             <div
               role="alert"

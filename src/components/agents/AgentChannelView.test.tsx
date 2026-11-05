@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   listAgentChannels: vi.fn(),
   listAgentChannelMessages: vi.fn(),
+  listAgentTasks: vi.fn(),
   postAgentChannelMessage: vi.fn(),
 }));
 
@@ -75,6 +76,7 @@ beforeEach(() => {
   });
   mocks.listAgentChannels.mockResolvedValue([channel]);
   mocks.listAgentChannelMessages.mockResolvedValue([]);
+  mocks.listAgentTasks.mockResolvedValue([]);
   mocks.postAgentChannelMessage.mockResolvedValue({ messages: [], errors: [] });
   useAgentStore.setState({
     agentsById: { 'agent-1': agent('agent-1', 'Ana'), 'agent-2': agent('agent-2', 'Bia') },
@@ -144,6 +146,42 @@ describe('AgentChannelView — chat parity', () => {
     const header = container.querySelector('header');
     expect(header).not.toBeNull();
     expect(within(header as HTMLElement).getByText('2 agentes · Ana, Bia')).toBeTruthy();
+  });
+
+  it('mostra o andamento das tarefas delegadas no canal', async () => {
+    mocks.listAgentTasks.mockResolvedValue([
+      {
+        id: 'task-1',
+        channelId: 'channel-1',
+        parentTaskId: null,
+        ownerAgentId: 'agent-2',
+        createdByAgentId: 'agent-1',
+        createdByUser: false,
+        title: 'Resumir notícias de hoje',
+        brief: 'Pesquise e resuma.',
+        acceptance: '',
+        status: 'running',
+        priority: 0,
+        maxTurns: 5,
+        maxTokens: 5000,
+        maxCost: 1,
+        deadlineAt: null,
+        conversationId: null,
+        originConversationId: null,
+        result: null,
+        resultArtifactIds: [],
+        leaseUntil: null,
+        handoffCount: 0,
+        version: 1,
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    ]);
+    render(<AgentChannelView channelId="channel-1" onBack={() => {}} onEdit={() => {}} />);
+    expect(await screen.findByText('Tarefas em andamento')).toBeTruthy();
+    expect(screen.getByText('Resumir notícias de hoje')).toBeTruthy();
+    expect(screen.getByText('Executando')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Ver quadro' })).toBeTruthy();
   });
 
   it('usa o composer do chat (envio redondo) sem seletor de modelos', async () => {

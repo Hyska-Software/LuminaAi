@@ -1,14 +1,23 @@
-import { ArrowLeft, FolderKanban, PanelRight, Pencil } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowLeft, FolderKanban, Loader2, PanelRight, Pencil } from 'lucide-react';
 
 import { AgentAvatar } from './AgentAvatar';
 import { AgentActivityDots } from './AgentActivityDots';
 import { AgentComputerControl } from './AgentComputerControl';
 import { AgentConversationWorkspace } from './AgentConversationWorkspace';
+import { TASK_STATUS_META, TASK_TERMINAL_STATUSES } from './agentTaskStatus';
 import { modelLabel } from './agentUtils';
 import { CodeContextMeterChip } from '@/components/code/CodeAgentWidgets';
 import { Button, IconButton } from '@/components/ui';
+import { api } from '@/lib/api';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
-import type { Agent, Conversation } from '@/lib/types';
+import type {
+  Agent,
+  AgentTaskStatus,
+  AgentTaskUpdatedEvent,
+  Conversation,
+} from '@/lib/types';
+import { cn } from '@/lib/utils';
 
 export function AgentThreadHeader({
   agent,
@@ -21,6 +30,39 @@ export function AgentThreadHeader({
 }) {
   const providers = useAppStore((state) => state.providers);
   const turnActive = useChatStore((state) => Boolean(state.streamsByConversation[conversation.id]));
+  const [taskStatus, setTaskStatus] = useState<AgentTaskStatus | null>(null);
+  const taskId = conversation.taskId;
+
+  useEffect(() => {
+    if (!taskId) {
+      setTaskStatus(null);
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      void api
+        .getAgentTask(taskId)
+        .then((detail) => {
+          if (!cancelled) setTaskStatus(detail.task.status);
+        })
+        .catch(() => {
+          /* status is best-effort */
+        });
+    };
+    load();
+    const onTaskUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<AgentTaskUpdatedEvent>).detail;
+      if (detail?.taskId === taskId) setTaskStatus(detail.status as AgentTaskStatus);
+    };
+    window.addEventListener('lumina:agent-task-updated', onTaskUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('lumina:agent-task-updated', onTaskUpdated);
+    };
+  }, [taskId]);
+
+  const taskMeta = taskStatus ? TASK_STATUS_META[taskStatus] : null;
+  const taskActive = taskStatus ? !TASK_TERMINAL_STATUSES.includes(taskStatus) : false;
   const openEditor = useUiStore((state) => state.openAgentEditor);
   const panelOpen = useUiStore((state) => state.agentPanelOpen);
   const setPanelOpen = useUiStore((state) => state.setAgentPanelOpen);
@@ -38,15 +80,26 @@ export function AgentThreadHeader({
       <AgentAvatar
         avatar={agent.avatar}
         size="sm"
-        activity={turnActive ? 'running' : 'idle'}
+        activity={turnActive || taskActive ? 'running' : 'idle'}
       />
       <div className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-[13px] font-medium text-foreground">{agent.name}</span>
-          {turnActive ? (
+          {!taskId && turnActive ? (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent-soft px-1.5 py-0.5 text-[9px] font-medium text-accent">
               <AgentActivityDots label="Executando" />
               <span aria-hidden>Executando</span>
+            </span>
+          ) : null}
+          {taskMeta ? (
+            <span
+              className={cn(
+                'inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-surface-raised px-1.5 py-0.5 text-[9px] font-medium',
+                taskMeta.tone,
+              )}
+            >
+              {taskActive ? <Loader2 aria-hidden className="size-3 animate-spin" /> : null}
+              {taskMeta.label}
             </span>
           ) : null}
         </span>
