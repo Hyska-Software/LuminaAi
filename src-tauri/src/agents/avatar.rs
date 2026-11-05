@@ -157,6 +157,14 @@ impl AgentAvatar {
         }
     }
 
+    /// Random built-in mascot for model-created personas. Never an emoji.
+    pub fn random_mascot() -> Self {
+        let mut seed = [0u8; 8];
+        // Entropy failure leaves zeros; the caller still gets a valid mascot.
+        let _ = getrandom::getrandom(&mut seed);
+        mascot_from_seed(seed)
+    }
+
     /// Compact form for model-facing JSON: an image never leaks its data URL.
     pub fn summary(&self) -> serde_json::Value {
         match &self.source {
@@ -165,6 +173,60 @@ impl AgentAvatar {
             }
             _ => serde_json::to_value(self).unwrap_or(serde_json::Value::Null),
         }
+    }
+}
+
+fn mascot_from_seed(seed: [u8; 8]) -> AgentAvatar {
+    const BODIES: [AgentAvatarBody; 10] = [
+        AgentAvatarBody::Mascot,
+        AgentAvatarBody::Circle,
+        AgentAvatarBody::Bubble,
+        AgentAvatarBody::Rounded,
+        AgentAvatarBody::Square,
+        AgentAvatarBody::Drop,
+        AgentAvatarBody::Blob,
+        AgentAvatarBody::Hex,
+        AgentAvatarBody::Diamond,
+        AgentAvatarBody::Star,
+    ];
+    const EXPRESSIONS: [AgentAvatarExpression; 10] = [
+        AgentAvatarExpression::Neutral,
+        AgentAvatarExpression::Happy,
+        AgentAvatarExpression::Grin,
+        AgentAvatarExpression::Wink,
+        AgentAvatarExpression::Surprised,
+        AgentAvatarExpression::Angry,
+        AgentAvatarExpression::Sad,
+        AgentAvatarExpression::Sleepy,
+        AgentAvatarExpression::Smug,
+        AgentAvatarExpression::Dizzy,
+    ];
+    const COLORS: [AgentAvatarColor; 12] = [
+        AgentAvatarColor::Green,
+        AgentAvatarColor::Blue,
+        AgentAvatarColor::Red,
+        AgentAvatarColor::Orange,
+        AgentAvatarColor::Purple,
+        AgentAvatarColor::Teal,
+        AgentAvatarColor::Pink,
+        AgentAvatarColor::Yellow,
+        AgentAvatarColor::Emerald,
+        AgentAvatarColor::Coral,
+        AgentAvatarColor::Gray,
+        AgentAvatarColor::Silver,
+    ];
+    const FACES: [AgentAvatarFace; 2] = [AgentAvatarFace::White, AgentAvatarFace::Black];
+    let index = |offset: usize, len: usize| -> usize {
+        (u16::from_le_bytes([seed[offset], seed[offset + 1]]) as usize) % len
+    };
+    AgentAvatar {
+        source: AgentAvatarSource::Mascot {
+            body: BODIES[index(0, BODIES.len())],
+            expression: EXPRESSIONS[index(2, EXPRESSIONS.len())],
+            color: COLORS[index(4, COLORS.len())],
+            face: FACES[index(6, FACES.len())],
+        },
+        shape: AgentAvatarShape::Mascot,
     }
 }
 
@@ -329,6 +391,54 @@ mod tests {
             AgentAvatarSource::Mascot { face, .. } => assert_eq!(face, AgentAvatarFace::White),
             other => panic!("unexpected source: {other:?}"),
         }
+    }
+
+    fn mascot_parts(
+        avatar: &AgentAvatar,
+    ) -> (AgentAvatarBody, AgentAvatarExpression, AgentAvatarColor, AgentAvatarFace) {
+        match &avatar.source {
+            AgentAvatarSource::Mascot {
+                body,
+                expression,
+                color,
+                face,
+            } => (*body, *expression, *color, *face),
+            other => panic!("unexpected source: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn seeded_mascot_varies_each_component() {
+        let base = mascot_from_seed([0; 8]);
+        assert_eq!(base.shape, AgentAvatarShape::Mascot);
+        assert_eq!(
+            mascot_parts(&base),
+            (
+                AgentAvatarBody::Mascot,
+                AgentAvatarExpression::Neutral,
+                AgentAvatarColor::Green,
+                AgentAvatarFace::White,
+            )
+        );
+
+        let body = mascot_from_seed([1, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(mascot_parts(&body).0, AgentAvatarBody::Circle);
+        let expression = mascot_from_seed([0, 0, 1, 0, 0, 0, 0, 0]);
+        assert_eq!(mascot_parts(&expression).1, AgentAvatarExpression::Happy);
+        let color = mascot_from_seed([0, 0, 0, 0, 1, 0, 0, 0]);
+        assert_eq!(mascot_parts(&color).2, AgentAvatarColor::Blue);
+        let face = mascot_from_seed([0, 0, 0, 0, 0, 0, 1, 0]);
+        assert_eq!(mascot_parts(&face).3, AgentAvatarFace::Black);
+    }
+
+    #[test]
+    fn random_mascot_is_always_a_mascot_avatar() {
+        let avatar = AgentAvatar::random_mascot();
+        assert_eq!(avatar.shape, AgentAvatarShape::Mascot);
+        assert!(matches!(
+            avatar.source,
+            AgentAvatarSource::Mascot { .. }
+        ));
     }
 
     #[test]

@@ -94,11 +94,12 @@ pub fn definitions(agent: &Agent) -> Vec<ToolDefinition> {
             name: "create_agent".to_string(),
             description: "Create a new persistent persona on the team. The caller's provider/model \
                           are used when omitted. The new agent starts with every basic action \
-                          enabled, autonomous permissions, the app-internal workspace and the \
-                          global computer/Docker defaults; it has its own memory and appears in \
-                          the Agentes layout immediately. Only pass `capabilities` when the user \
-                          explicitly requested specific capabilities. An optional routine can be \
-                          attached when the caller also has `automation`."
+                          enabled, autonomous permissions, the app-internal workspace, the \
+                          global computer/Docker defaults and a random mascot avatar; it has its \
+                          own memory and appears in the Agentes layout immediately. Only pass \
+                          `capabilities` when the user explicitly requested specific capabilities, \
+                          and `avatar` only when the user asked for specific avatar traits. An \
+                          optional routine can be attached when the caller also has `automation`."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -106,7 +107,31 @@ pub fn definitions(agent: &Agent) -> Vec<ToolDefinition> {
                     "name": { "type": "string", "maxLength": 80 },
                     "role": { "type": "string", "maxLength": 120 },
                     "description": { "type": "string", "maxLength": 1000 },
-                    "emoji": { "type": "string", "maxLength": 16 },
+                    "avatar": {
+                        "type": "object",
+                        "description": "Optional mascot customization for what the user explicitly \
+                                        asked. Omit for a random mascot. Never send an emoji or \
+                                        an image.",
+                        "properties": {
+                            "body": {
+                                "type": "string",
+                                "enum": ["mascot", "circle", "bubble", "rounded", "square",
+                                         "drop", "blob", "hex", "diamond", "star"]
+                            },
+                            "expression": {
+                                "type": "string",
+                                "enum": ["neutral", "happy", "grin", "wink", "surprised",
+                                         "angry", "sad", "sleepy", "smug", "dizzy"]
+                            },
+                            "color": {
+                                "type": "string",
+                                "enum": ["green", "blue", "red", "orange", "purple", "teal",
+                                         "pink", "yellow", "emerald", "coral", "gray", "silver"]
+                            },
+                            "face": { "type": "string", "enum": ["white", "black"] }
+                        },
+                        "additionalProperties": false
+                    },
                     "department": { "type": "string", "maxLength": 80 },
                     "providerId": { "type": "string" },
                     "modelId": { "type": "string" },
@@ -262,7 +287,10 @@ pub fn guidance(agent: &Agent) -> Vec<(&'static str, &'static str)> {
              Omit `capabilities` unless the user explicitly named what to enable or disable: a \
              new agent inherits every basic action, autonomous permissions, the app-internal \
              workspace and the global Docker/computer defaults. When the user did list \
-             capabilities, send only those keys and change nothing else.",
+             capabilities, send only those keys and change nothing else. Configure the avatar: \
+             a new agent gets a random mascot by default; when the user asked for a body, \
+             expression, colour or eye colour, send only those `avatar` keys. Never use emoji \
+             avatars.",
         ));
     }
     if agent.capabilities.automation {
@@ -598,6 +626,38 @@ fn agent_inbox(db: &Db, agent_id: &str, args: &Value) -> ToolOutcome {
     }
 }
 
+fn agent_avatar_from_args(args: &Value) -> Result<crate::agents::AgentAvatar, String> {
+    let avatar = crate::agents::AgentAvatar::random_mascot();
+    let Some(value) = args.get("avatar").filter(|value| !value.is_null()) else {
+        return Ok(avatar);
+    };
+    let mut merged = match serde_json::to_value(&avatar) {
+        Ok(Value::Object(map)) => map,
+        _ => {
+            return Err(
+                "AGENT_AVATAR_INVALID: não foi possível resolver o avatar padrão".to_string(),
+            )
+        }
+    };
+    let Some(overrides) = value.as_object() else {
+        return Err(
+            "AGENT_AVATAR_INVALID: `avatar` deve ser um objeto com body/expression/color/face"
+                .to_string(),
+        );
+    };
+    for (key, override_value) in overrides {
+        if !matches!(key.as_str(), "body" | "expression" | "color" | "face") {
+            return Err(format!(
+                "AGENT_AVATAR_INVALID: chave desconhecida `{key}`; use body, expression, color, face"
+            ));
+        }
+        merged.insert(key.clone(), override_value.clone());
+    }
+    serde_json::from_value(Value::Object(merged)).map_err(|_| {
+        "AGENT_AVATAR_INVALID: valores inválidos em `avatar`; use os ids do seletor".to_string()
+    })
+}
+
 fn create_agent_tool(
     db: &Db,
     caller: &Agent,
@@ -659,6 +719,10 @@ fn create_agent_tool(
             }
         }
     };
+    let avatar = match agent_avatar_from_args(args) {
+        Ok(avatar) => avatar,
+        Err(error) => return ToolOutcome::error(error),
+    };
     let reasoning = args
         .get("reasoning")
         .cloned()
@@ -686,11 +750,7 @@ fn create_agent_tool(
         name,
         role: json_str(args, "role").unwrap_or_default(),
         description: json_str(args, "description").unwrap_or_default(),
-        avatar: crate::agents::AgentAvatar::emoji(
-            json_str(args, "emoji")
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "🤖".to_string()),
-        ),
+        avatar,
         department: json_str(args, "department")
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "Geral".to_string()),
@@ -983,7 +1043,7 @@ mod tests {
                 "name": "Garimpeiro",
                 "role": "Prospecção",
                 "description": "Encontra clientes e personaliza contato.",
-                "emoji": "🔎",
+                "avatar": { "color": "teal" },
                 "department": "Vendas",
                 "instructions": "Pesquise o cliente antes de escrever.",
                 "starters": ["Encontre 5 clientes."],
@@ -1010,6 +1070,92 @@ mod tests {
         assert!(created.capabilities.delegation);
         assert!(created.capabilities.computer_use);
         assert_eq!(db.list_agent_routines(&created.id).expect("routines").len(), 1);
+    }
+
+    #[test]
+    fn create_agent_uses_a_random_mascot_avatar_by_default() {
+        let db = std::sync::Arc::new(Db::open_in_memory().expect("db"));
+        let creator = agent(&db, "Recrutador", false);
+        let hooks = CreatingHooks { db: db.clone() };
+        let created = run_with_hooks(
+            &db,
+            &creator.id,
+            "create_agent",
+            &json!({ "name": "Mascote" }),
+            &Settings::default(),
+            Some(&hooks),
+        );
+        assert!(!created.is_error, "{}", created.content);
+        let agents = db.list_agents(false).expect("agents");
+        let created = agents
+            .iter()
+            .find(|agent| agent.name == "Mascote")
+            .expect("created");
+        assert_eq!(created.avatar.shape, crate::agents::AgentAvatarShape::Mascot);
+        assert!(matches!(
+            created.avatar.source,
+            crate::agents::AgentAvatarSource::Mascot { .. }
+        ));
+    }
+
+    #[test]
+    fn create_agent_avatar_follows_explicit_user_request() {
+        let db = std::sync::Arc::new(Db::open_in_memory().expect("db"));
+        let creator = agent(&db, "Recrutador", false);
+        let hooks = CreatingHooks { db: db.clone() };
+        let created = run_with_hooks(
+            &db,
+            &creator.id,
+            "create_agent",
+            &json!({
+                "name": "Roxo",
+                "avatar": {
+                    "body": "star",
+                    "expression": "grin",
+                    "color": "purple",
+                    "face": "black"
+                }
+            }),
+            &Settings::default(),
+            Some(&hooks),
+        );
+        assert!(!created.is_error, "{}", created.content);
+        let agents = db.list_agents(false).expect("agents");
+        let created = agents.iter().find(|agent| agent.name == "Roxo").expect("created");
+        assert_eq!(created.avatar.shape, crate::agents::AgentAvatarShape::Mascot);
+        match &created.avatar.source {
+            crate::agents::AgentAvatarSource::Mascot {
+                body,
+                expression,
+                color,
+                face,
+            } => {
+                assert_eq!(*body, crate::agents::avatar::AgentAvatarBody::Star);
+                assert_eq!(*expression, crate::agents::avatar::AgentAvatarExpression::Grin);
+                assert_eq!(*color, crate::agents::avatar::AgentAvatarColor::Purple);
+                assert_eq!(*face, crate::agents::avatar::AgentAvatarFace::Black);
+            }
+            other => panic!("unexpected avatar: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn create_agent_rejects_invalid_avatar_overrides() {
+        let db = std::sync::Arc::new(Db::open_in_memory().expect("db"));
+        let creator = agent(&db, "Recrutador", false);
+        let hooks = CreatingHooks { db: db.clone() };
+        let created = run_with_hooks(
+            &db,
+            &creator.id,
+            "create_agent",
+            &json!({ "name": "Inválido", "avatar": { "emoji": "🚀" } }),
+            &Settings::default(),
+            Some(&hooks),
+        );
+        assert!(created.is_error);
+        assert!(created.content.contains("AGENT_AVATAR_INVALID"));
+        let agents = db.list_agents(false).expect("agents");
+        assert!(!agents.iter().any(|agent| agent.name == "Inválido"));
     }
 
     #[test]
