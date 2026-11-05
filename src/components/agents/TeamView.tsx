@@ -1,17 +1,28 @@
 import { useEffect, useState } from 'react';
-import { Plus, Sparkles } from 'lucide-react';
+import { Archive, ArchiveRestore, Plus, Sparkles, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 
 import { AgentAvatar } from './AgentAvatar';
 import { AgentBuilderDialog } from './AgentBuilderDialog';
+import { AgentDialogBody } from './AgentDialogBody';
 import { AgentTemplatesDialog } from './AgentTemplatesDialog';
 import { formatUsageCost, formatUsageTokens, modelLabel, relativeTime } from './agentUtils';
 import { AGENT_TEMPLATES, templateCapabilities, type AgentTemplate } from '@/lib/agentTemplates';
 import { api } from '@/lib/api';
-import { Button } from '@/components/ui';
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  IconButton,
+} from '@/components/ui';
 import {
   selectActiveAgents,
+  selectArchivedAgents,
   useAgentStore,
   useAppStore,
   useChatStore,
@@ -25,12 +36,14 @@ function AgentCard({
   onOpen,
   onTalk,
   onEdit,
+  onArchive,
 }: {
   agent: Agent;
   usage?: AgentUsage;
   onOpen: () => void;
   onTalk: () => void;
   onEdit: () => void;
+  onArchive: () => void;
 }) {
   const providers = useAppStore((state) => state.providers);
   return (
@@ -71,6 +84,15 @@ function AgentCard({
         <Button size="sm" variant="ghost" onClick={onEdit}>
           Editar
         </Button>
+        <IconButton
+          size="sm"
+          label={`Arquivar agente ${agent.name}`}
+          title="Arquivar"
+          className="ml-auto"
+          onClick={onArchive}
+        >
+          <Archive className="size-4" />
+        </IconButton>
       </div>
     </article>
   );
@@ -79,9 +101,15 @@ function AgentCard({
 export function TeamView() {
   const [builderOpen, setBuilderOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
   const [usageById, setUsageById] = useState<Record<string, AgentUsage>>({});
   const agents = useAgentStore(useShallow(selectActiveAgents));
+  const archived = useAgentStore(useShallow(selectArchivedAgents));
   const createAgent = useAgentStore((state) => state.create);
+  const archive = useAgentStore((state) => state.archive);
+  const restore = useAgentStore((state) => state.restore);
+  const remove = useAgentStore((state) => state.remove);
+  const refresh = useAgentStore((state) => state.refresh);
   const openEditor = useUiStore((state) => state.openAgentEditor);
   const setActiveAgentId = useUiStore((state) => state.setActiveAgentId);
   const startNewConversation = useChatStore((state) => state.startNewConversation);
@@ -154,104 +182,231 @@ export function TeamView() {
     }
   };
 
-  if (agents.length === 0) {
-    return (
-      <div className="flex h-full min-h-0 items-center justify-center overflow-y-auto px-6 py-10">
-        <div className="w-full max-w-2xl text-center">
-          <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border border-border bg-surface-raised text-accent">
-            <Sparkles className="size-6" />
-          </div>
-          <h1 className="mt-5 text-2xl font-semibold tracking-tight">Monte sua equipe</h1>
-          <p className="mx-auto mt-2 max-w-md text-[14px] leading-relaxed text-foreground-muted">
-            Cada agente tem identidade, instruções, modelo e conversas próprias. Comece por um
-            template ou crie do zero.
-          </p>
-          <div className="mt-6 grid gap-3 text-left sm:grid-cols-3">
-            {AGENT_TEMPLATES.slice(0, 3).map((template) => (
-              <button
-                key={template.id}
-                type="button"
-                onClick={() => void createFromTemplate(template)}
-                className="rounded-xl border border-border bg-surface-raised/60 p-4 text-left transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-              >
-                <AgentAvatar avatar={template.avatar} size="md" />
-                <span className="mt-2 block text-[13px] font-medium">{template.name}</span>
-                <span className="mt-1 block text-[12px] leading-relaxed text-foreground-muted">
-                  {template.description}
-                </span>
-              </button>
-            ))}
-          </div>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-            <Button onClick={() => openEditor({ mode: 'create' })}>
-              <Plus className="mr-1.5 size-4" />
-              Criar meu primeiro agente
-            </Button>
-            <Button variant="secondary" onClick={() => setBuilderOpen(true)}>
-              <Sparkles className="mr-1.5 size-4" />
-              Criar com IA
-            </Button>
-            <Button variant="ghost" onClick={() => setTemplatesOpen(true)}>
-              Ver todos os templates
-            </Button>
-          </div>
-          <AgentBuilderDialog open={builderOpen} onOpenChange={setBuilderOpen} />
-          <AgentTemplatesDialog
-            open={templatesOpen}
-            onOpenChange={setTemplatesOpen}
-            onPick={createFromTemplate}
-          />
-        </div>
-      </div>
-    );
-  }
+  const archiveAgent = async (agent: Agent) => {
+    try {
+      await archive(agent.id);
+      toast.success('Agente arquivado', {
+        description: agent.name,
+        action: {
+          label: 'Desfazer',
+          onClick: () => void restore(agent.id),
+        },
+      });
+    } catch (error) {
+      toast.error('Não foi possível arquivar o agente', { description: String(error) });
+    }
+  };
+
+  const restoreAgent = async (agent: Agent) => {
+    try {
+      await restore(agent.id);
+      toast.success('Agente restaurado', { description: agent.name });
+    } catch (error) {
+      toast.error('Não foi possível restaurar o agente', { description: String(error) });
+    }
+  };
+
+  const importAgent = async () => {
+    try {
+      const imported = await api.importAgent();
+      if (!imported) return;
+      await refresh();
+      setActiveAgentId(imported.id);
+      clearActiveConversation();
+      toast.success('Agente importado', { description: imported.name });
+    } catch (error) {
+      toast.error('Não foi possível importar o agente', { description: String(error) });
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await remove(deleteTarget.id);
+      toast.success('Agente excluído', { description: deleteTarget.name });
+      setDeleteTarget(null);
+    } catch (error) {
+      toast.error('Não foi possível excluir o agente', { description: String(error) });
+    }
+  };
+
+  const deleteThreads = deleteTarget?.threadCount ?? 0;
 
   return (
     <div className="h-full min-h-0 overflow-y-auto">
-      <div className="mx-auto w-full max-w-5xl px-6 py-8">
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">Equipe</h1>
-            <p className="mt-1 text-[13px] text-foreground-muted">
-              Agentes que você pode chamar a qualquer momento.
+      {agents.length === 0 ? (
+        <div className="flex min-h-[70vh] items-center justify-center px-6 py-10">
+          <div className="w-full max-w-2xl text-center">
+            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border border-border bg-surface-raised text-accent">
+              <Sparkles className="size-6" />
+            </div>
+            <h1 className="mt-5 text-2xl font-semibold tracking-tight">Monte sua equipe</h1>
+            <p className="mx-auto mt-2 max-w-md text-[14px] leading-relaxed text-foreground-muted">
+              Cada agente tem identidade, instruções, modelo e conversas próprias. Comece por um
+              template ou crie do zero.
             </p>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setTemplatesOpen(true)}>
-              Templates
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => setBuilderOpen(true)}>
-              <Sparkles className="mr-1.5 size-4" />
-              Criar com IA
-            </Button>
-            <Button variant="primary" size="sm" onClick={() => openEditor({ mode: 'create' })}>
-              <Plus className="mr-1.5 size-4" />
-              Criar agente
-            </Button>
+            <div className="mt-6 grid gap-3 text-left sm:grid-cols-3">
+              {AGENT_TEMPLATES.slice(0, 3).map((template) => (
+                <button
+                  key={template.id}
+                  type="button"
+                  onClick={() => void createFromTemplate(template)}
+                  className="rounded-xl border border-border bg-surface-raised/60 p-4 text-left transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  <AgentAvatar avatar={template.avatar} size="md" />
+                  <span className="mt-2 block text-[13px] font-medium">{template.name}</span>
+                  <span className="mt-1 block text-[12px] leading-relaxed text-foreground-muted">
+                    {template.description}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+              <Button onClick={() => openEditor({ mode: 'create' })}>
+                <Plus className="mr-1.5 size-4" />
+                Criar meu primeiro agente
+              </Button>
+              <Button variant="secondary" onClick={() => setBuilderOpen(true)}>
+                <Sparkles className="mr-1.5 size-4" />
+                Criar com IA
+              </Button>
+              <Button variant="ghost" onClick={() => setTemplatesOpen(true)}>
+                Ver todos os templates
+              </Button>
+              <Button variant="ghost" onClick={() => void importAgent()}>
+                <Upload className="mr-1.5 size-4" />
+                Importar
+              </Button>
+            </div>
           </div>
         </div>
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {agents.map((agent) => (
-            <AgentCard
-              key={agent.id}
-              agent={agent}
-              usage={usageById[agent.id]}
-              onOpen={() => openAgent(agent)}
-              onTalk={() => void talk(agent)}
-              onEdit={() => {
-                setActiveAgentId(agent.id);
-                openEditor({ mode: 'edit', agentId: agent.id });
-              }}
-            />
-          ))}
+      ) : (
+        <div className="mx-auto w-full max-w-5xl px-6 py-8">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h1 className="text-xl font-semibold tracking-tight">Equipe</h1>
+              <p className="mt-1 text-[13px] text-foreground-muted">
+                Agentes que você pode chamar a qualquer momento.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => void importAgent()}>
+                <Upload className="mr-1.5 size-4" />
+                Importar
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setTemplatesOpen(true)}>
+                Templates
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setBuilderOpen(true)}>
+                <Sparkles className="mr-1.5 size-4" />
+                Criar com IA
+              </Button>
+              <Button variant="primary" size="sm" onClick={() => openEditor({ mode: 'create' })}>
+                <Plus className="mr-1.5 size-4" />
+                Criar agente
+              </Button>
+            </div>
+          </div>
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {agents.map((agent) => (
+              <AgentCard
+                key={agent.id}
+                agent={agent}
+                usage={usageById[agent.id]}
+                onOpen={() => openAgent(agent)}
+                onTalk={() => void talk(agent)}
+                onEdit={() => {
+                  setActiveAgentId(agent.id);
+                  openEditor({ mode: 'edit', agentId: agent.id });
+                }}
+                onArchive={() => void archiveAgent(agent)}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+
+      {archived.length > 0 ? (
+        <section className="mx-auto w-full max-w-5xl px-6 pb-10">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold tracking-tight">Arquivados</h2>
+              <p className="mt-1 text-[12px] text-foreground-muted">
+                Arquivar preserva o histórico e as conversas.
+              </p>
+            </div>
+            <span className="text-[11px] text-foreground-subtle">
+              {archived.length === 1 ? '1 agente' : `${archived.length} agentes`}
+            </span>
+          </div>
+          <div className="mt-4 space-y-2">
+            {archived.map((agent) => (
+              <div
+                key={agent.id}
+                className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
+              >
+                <AgentAvatar avatar={agent.avatar} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-medium">{agent.name}</p>
+                  <p className="truncate text-[11px] text-foreground-muted">
+                    {agent.role} ·{' '}
+                    {agent.threadCount === 1 ? '1 conversa' : `${agent.threadCount} conversas`}
+                  </p>
+                </div>
+                <Button size="sm" variant="ghost" onClick={() => void restoreAgent(agent)}>
+                  <ArchiveRestore className="mr-1.5 size-3.5" />
+                  Restaurar
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(agent)}>
+                  <Trash2 className="mr-1.5 size-3.5" />
+                  Excluir
+                </Button>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <AgentBuilderDialog open={builderOpen} onOpenChange={setBuilderOpen} />
       <AgentTemplatesDialog
         open={templatesOpen}
         onOpenChange={setTemplatesOpen}
         onPick={createFromTemplate}
       />
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader className="pb-4 pr-12">
+            <DialogTitle>Excluir agente?</DialogTitle>
+            <DialogDescription>
+              {deleteTarget
+                ? `“${deleteTarget.name}” será removido permanentemente.`
+                : 'Esta ação não pode ser desfeita.'}
+            </DialogDescription>
+          </DialogHeader>
+          {deleteThreads > 0 ? (
+            <AgentDialogBody>
+              <p className="rounded-lg border border-border bg-surface/50 px-3 py-2 text-[12px] text-foreground-muted">
+                Este agente tem {deleteThreads} conversa(s). Arquive-o para manter o histórico; a
+                exclusão definitiva só é permitida sem conversas.
+              </p>
+            </AgentDialogBody>
+          ) : null}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              disabled={deleteThreads > 0}
+              onClick={() => void confirmDelete()}
+            >
+              <Trash2 className="mr-1.5 size-3.5" />
+              Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

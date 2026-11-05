@@ -114,7 +114,9 @@ Limites:
 - Botão **Quadro de tarefas** no topo da sidebar (`AgentTaskBoardDialog`):
   colunas Em fila / Em andamento / Aguardando / Revisão / Concluídas /
   Encerradas, cards com dono/orçamento/status, abrir thread, retomar,
-  reatribuir e cancelar.
+  reatribuir e cancelar. O quadro mostra apenas tarefas com atividade nas
+  últimas 24h e cada coluna rola independentemente quando passa de duas
+  tarefas.
 - Diálogo **Atividade** lista turnos do renderer e turnos de fundo registrados
   no backend, aprovações/perguntas pendentes e tarefas aguardando o usuário.
 - Canal: mensagens de tarefa usam o mesmo histórico; o resultado é publicado

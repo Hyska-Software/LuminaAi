@@ -40,8 +40,8 @@ function task(overrides: Partial<AgentTask>): AgentTask {
     leaseUntil: null,
     handoffCount: 0,
     version: 1,
-    createdAt: 1,
-    updatedAt: 1,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
     ...overrides,
   };
 }
@@ -73,6 +73,40 @@ describe('AgentTaskBoardDialog', () => {
     expect(screen.getByText('Revisão')).toBeTruthy();
     expect(screen.getByText('Concluídas')).toBeTruthy();
     expect(screen.getByText('Encerradas')).toBeTruthy();
+  });
+
+  it('oculta tarefas fora das últimas 24 horas', async () => {
+    mocks.listAgentTasks.mockResolvedValue([
+      task({ id: 'recent', title: 'Tarefa recente', status: 'queued' }),
+      task({
+        id: 'old',
+        title: 'Tarefa antiga',
+        status: 'queued',
+        updatedAt: Date.now() - 25 * 60 * 60 * 1000,
+      }),
+    ]);
+    render(<AgentTaskBoardDialog open onOpenChange={() => {}} />);
+
+    expect(await screen.findByText('Tarefa recente')).toBeTruthy();
+    expect(screen.queryByText('Tarefa antiga')).toBeNull();
+    expect(screen.getByText(/1 tarefa\(s\) nas últimas 24h/)).toBeTruthy();
+  });
+
+  it('mantém a etapa rolável quando há mais de duas tarefas', async () => {
+    mocks.listAgentTasks.mockResolvedValue([
+      task({ id: 'a', title: 'Tarefa A', status: 'queued' }),
+      task({ id: 'b', title: 'Tarefa B', status: 'queued' }),
+      task({ id: 'c', title: 'Tarefa C', status: 'queued' }),
+    ]);
+    render(<AgentTaskBoardDialog open onOpenChange={() => {}} />);
+
+    const firstCard = (await screen.findByText('Tarefa A')).closest('article');
+    const list = firstCard?.parentElement;
+    expect(list?.className).toContain('overflow-y-auto');
+    expect(list?.className).toContain('min-h-0');
+    expect(list?.parentElement?.className).toContain('max-h-');
+    expect(screen.getByText('Tarefa B')).toBeTruthy();
+    expect(screen.getByText('Tarefa C')).toBeTruthy();
   });
 
   it('filtra por canal quando recebe channelId', async () => {

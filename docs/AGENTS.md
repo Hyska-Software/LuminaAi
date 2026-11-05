@@ -326,6 +326,9 @@ com erro — o fallback é de rota, não um retry infinito.
 - Exportar gera um documento `lumina-agent` **versão 2** (JSON) com configuração
   + memórias; a importação ainda lê documentos versão 1 convertendo o `emoji`
   antigo em avatar. Importar valida versão, modelo/workspace e recria o agente.
+- Arquivar/restaurar/excluir ficam na **Equipe** (página central): cada card
+  ativo arquiva; a seção **Arquivados** restaura ou exclui. A exclusão definitiva
+  só é permitida sem conversas — arquivar preserva o histórico.
 - Skills/tools/MCP e workspace são escolhidos no editor; permissões continuam
   limitadas pelo backend.
 

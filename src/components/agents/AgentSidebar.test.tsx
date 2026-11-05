@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   deleteConversation: vi.fn(),
   setConversationPinned: vi.fn(),
   exportConversation: vi.fn(),
-  importAgent: vi.fn(),
   listAgentThreads: vi.fn(),
   reorderAgents: vi.fn(),
   reorderConversations: vi.fn(),
@@ -207,24 +206,7 @@ describe('AgentSidebar — thread status', () => {
   });
 });
 
-describe('AgentSidebar — management and channels', () => {
-  it('lists active and archived agents and imports a document', async () => {
-    const archived = agent({ id: 'agent-old', name: 'Antigo', archivedAt: 9 });
-    useAgentStore.setState((state) => ({
-      agentsById: { ...state.agentsById, [archived.id]: archived },
-      orderedIds: [...state.orderedIds, archived.id],
-    }));
-    mocks.importAgent.mockResolvedValue(agent({ id: 'agent-new', name: 'Importado' }));
-    render(<AgentSidebar />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Gerenciar agentes' }));
-    expect(await screen.findByText('Ativos')).toBeTruthy();
-    expect(await screen.findByText('Arquivados')).toBeTruthy();
-    expect(await screen.findByText('Antigo')).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Importar' }));
-    await waitFor(() => expect(mocks.importAgent).toHaveBeenCalled());
-  });
-
+describe('AgentSidebar — channels', () => {
   it('mostra as miniaturas dos membros e o excedente no canal', async () => {
     const memberIds = ['agent-1', 'agent-2', 'agent-3', 'agent-4'];
     useAgentStore.setState({

@@ -44,6 +44,9 @@ const REASSIGNABLE: Record<string, true> = {
   review: true,
 };
 
+/** The board only keeps recent work visible; older tasks stay in the DB. */
+const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /** Global kanban of delegated tasks across every agent/channel. */
 export function AgentTaskBoardDialog({
   open,
@@ -75,7 +78,8 @@ export function AgentTaskBoardDialog({
         api.listAgentTasks({ channelId, ownerAgentId }),
         api.listAgentChannels(),
       ]);
-      setTasks(nextTasks);
+      const cutoff = Date.now() - RECENT_WINDOW_MS;
+      setTasks(nextTasks.filter((task) => task.updatedAt >= cutoff));
       setChannels(nextChannels);
     } catch (caught) {
       setError(String(caught));
@@ -160,7 +164,7 @@ export function AgentTaskBoardDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl">
+      <DialogContent className="max-w-6xl">
         <DialogHeader className="pb-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <ListChecks className="size-4 text-accent" />
@@ -172,9 +176,9 @@ export function AgentTaskBoardDialog({
           </DialogDescription>
         </DialogHeader>
         <AgentDialogBody className="space-y-3">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[11px] text-foreground-muted">
-            {tasks.length} tarefa(s) · atualiza sozinho quando o status muda
+            {tasks.length} tarefa(s) nas últimas 24h · atualiza sozinho quando o status muda
           </p>
           <Button
             size="sm"
@@ -203,15 +207,16 @@ export function AgentTaskBoardDialog({
               <section
                 key={column.id}
                 aria-labelledby={`task-column-${column.id}`}
-                className="flex min-h-32 flex-col gap-2 rounded-xl border border-border bg-surface/60 p-2"
+                className="flex max-h-[min(18rem,50vh)] min-h-32 flex-col gap-2 rounded-xl border border-border bg-surface/60 p-2"
               >
                 <h3
                   id={`task-column-${column.id}`}
-                  className="flex items-center justify-between px-1 text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle"
+                  className="flex shrink-0 items-center justify-between px-1 text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle"
                 >
                   {column.title}
                   <span className="font-mono text-[10px]">{entries.length}</span>
                 </h3>
+                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
                 {entries.length === 0 ? (
                   <p className="px-1 py-3 text-[11px] text-foreground-subtle">Vazio</p>
                 ) : (
@@ -220,12 +225,12 @@ export function AgentTaskBoardDialog({
                     return (
                       <article
                         key={task.id}
-                        className="rounded-lg border border-border bg-surface-raised p-2 shadow-sm"
+                        className="min-w-0 rounded-lg border border-border bg-surface-raised p-2 shadow-sm"
                       >
                         <button
                           type="button"
                           onClick={() => focusTask(task)}
-                          className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                          className="block w-full min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                         >
                           <p className="line-clamp-2 text-[12px] font-medium text-foreground">
                             {task.title}
@@ -313,6 +318,7 @@ export function AgentTaskBoardDialog({
                     );
                   })
                 )}
+                </div>
               </section>
             );
           })}

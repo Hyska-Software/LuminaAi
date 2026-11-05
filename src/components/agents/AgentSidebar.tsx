@@ -3,7 +3,6 @@ import { useShallow } from 'zustand/react/shallow';
 import {
   Activity,
   Archive,
-  ArchiveRestore,
   CalendarClock,
   ChevronDown,
   ChevronRight,
@@ -32,7 +31,6 @@ import {
   ShieldAlert,
   Square,
   Trash2,
-  Upload,
   Users,
   WandSparkles,
   X,
@@ -72,7 +70,6 @@ import {
 import type { SortableListApi } from '@/components/ui';
 import {
   selectActiveAgents,
-  selectArchivedAgents,
   selectPinnedAgents,
   useAgentQueueStore,
   useAgentStore,
@@ -585,7 +582,6 @@ function ChannelRow({
 export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [manageOpen, setManageOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
   const [allThreadsAgent, setAllThreadsAgent] = useState<Agent | null>(null);
   const [routinesAgent, setRoutinesAgent] = useState<Agent | null>(null);
@@ -615,7 +611,6 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const storeError = useAgentStore((state) => state.error);
   const refresh = useAgentStore((state) => state.refresh);
   const pinned = useAgentStore(useShallow(selectPinnedAgents));
-  const archived = useAgentStore(useShallow(selectArchivedAgents));
   const pin = useAgentStore((state) => state.pin);
   const reorderAgents = useAgentStore((state) => state.reorder);
   const archive = useAgentStore((state) => state.archive);
@@ -861,20 +856,6 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
       if (path) toast.success('Agente exportado', { description: path });
     } catch (error) {
       toast.error('Não foi possível exportar o agente', { description: String(error) });
-    }
-  };
-
-  const importAgent = async () => {
-    try {
-      const imported = await api.importAgent();
-      if (!imported) return;
-      await refresh();
-      setActiveAgentId(imported.id);
-      clearActiveConversation();
-      setManageOpen(false);
-      toast.success('Agente importado', { description: imported.name });
-    } catch (error) {
-      toast.error('Não foi possível importar o agente', { description: String(error) });
     }
   };
 
@@ -1260,14 +1241,6 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         </button>
         <button
           type="button"
-          onClick={() => setManageOpen(true)}
-          className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-[12px] text-foreground-muted hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-        >
-          <Users className="size-3.5" />
-          Gerenciar agentes
-        </button>
-        <button
-          type="button"
           onClick={() => openSettings()}
           className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-[12px] text-foreground-muted hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
         >
@@ -1275,138 +1248,6 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           Configurações
         </button>
       </div>
-
-      <Dialog open={manageOpen} onOpenChange={setManageOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader className="pb-4 pr-12">
-            <DialogTitle>Gerenciar agentes</DialogTitle>
-            <DialogDescription>
-              {agents.length} ativo(s) · {archived.length} arquivado(s). Arquivar preserva o
-              histórico e as conversas.
-            </DialogDescription>
-          </DialogHeader>
-          <AgentDialogBody className="space-y-4">
-            <section className="space-y-2">
-              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
-                Ativos
-              </h3>
-              {agents.length === 0 ? (
-                <p className="py-3 text-center text-[12px] text-foreground-muted">
-                  Nenhum agente ativo.
-                </p>
-              ) : (
-                agents.map((agent) => (
-                  <div
-                    key={agent.id}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
-                  >
-                    <AgentAvatar avatar={agent.avatar} size="sm" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-medium">{agent.name}</p>
-                      <p className="truncate text-[11px] text-foreground-muted">
-                        {agent.role} · {agent.threadCount} conversa(s)
-                      </p>
-                    </div>
-                    <Button size="sm" variant="ghost" onClick={() => setActiveAgentId(agent.id)}>
-                      Abrir
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => openEditor({ mode: 'edit', agentId: agent.id })}
-                    >
-                      Editar
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        void archive(agent.id)
-                          .then(() =>
-                            toast.success('Agente arquivado', { description: agent.name }),
-                          )
-                          .catch((error) =>
-                            toast.error('Não foi possível arquivar o agente', {
-                              description: String(error),
-                            }),
-                          )
-                      }
-                    >
-                      <Archive className="mr-1.5 size-3.5" />
-                      Arquivar
-                    </Button>
-                  </div>
-                ))
-              )}
-            </section>
-
-            <section className="space-y-2">
-              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
-                Arquivados
-              </h3>
-              {archived.length === 0 ? (
-                <p className="py-3 text-center text-[12px] text-foreground-muted">
-                  Nenhum agente arquivado.
-                </p>
-              ) : (
-                archived.map((agent) => (
-                  <div
-                    key={agent.id}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
-                  >
-                    <AgentAvatar avatar={agent.avatar} size="sm" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-medium">{agent.name}</p>
-                      <p className="truncate text-[11px] text-foreground-muted">
-                        {agent.role} · {agent.threadCount} conversa(s)
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        void restore(agent.id)
-                          .then(() =>
-                            toast.success('Agente restaurado', { description: agent.name }),
-                          )
-                          .catch((error) =>
-                            toast.error('Não foi possível restaurar o agente', {
-                              description: String(error),
-                            }),
-                          )
-                      }
-                    >
-                      <ArchiveRestore className="mr-1.5 size-3.5" />
-                      Restaurar
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setDeleteTarget(agent)}
-                    >
-                      <Trash2 className="mr-1.5 size-3.5" />
-                      Excluir
-                    </Button>
-                  </div>
-                ))
-              )}
-            </section>
-          </AgentDialogBody>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => void importAgent()}>
-              <Upload className="mr-1.5 size-4" />
-              Importar
-            </Button>
-            <Button variant="secondary" onClick={() => openEditor({ mode: 'create' })}>
-              <Plus className="mr-1.5 size-4" />
-              Novo agente
-            </Button>
-            <Button variant="ghost" onClick={() => setManageOpen(false)}>
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="max-w-md">
