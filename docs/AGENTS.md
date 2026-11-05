@@ -178,6 +178,10 @@ o renderer envia o perfil Chat e a conversa não tem pasta selecionada:
 - A conversa herda `workspace_id` e `permission_mode` do agente na criação.
 - O prompt do Code recebe o bloco `# Agent profile` (identidade/instruções/
   memória) e a snapshot key inclui `agent.id` + `prompt_version`.
+- O layout Agentes usa o perfil Code; a seção de UI generativa do prompt do Code
+  vale para threads e canais, e os blocos `ui` renderizam inline. O agente deve
+  preferir um bloco `ui` sempre que julgar viável e a resposta tiver dados
+  estruturados.
 - Com pasta explícita, tools de FS/shell/git/jobs/plano/objetivo/subagente,
   política de aprovação, journal/diff e jobs seguem o Code.
 - O layout Agentes mostra o painel Arquivos/Alterações e as abas centrais de

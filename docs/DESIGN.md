@@ -279,11 +279,14 @@ Com `reduceMotion` (config ou media query), remover transformações e shimmer; 
   **caixas de nota coloridas (`callout`, descontinuado)**; emojis e Markdown
   dentro de props. Detalhes e limites: `docs/GENUI.md`.
 
-## 16. UI generativa na conversa (Chat e Code)
+## 16. UI generativa na conversa (Chat, Code e Agentes)
 
 Regras de apresentação específicas das interfaces que o agente cria durante a
 execução (contrato e regras completas em `docs/GENUI.md`):
 
+- **Uso padrão**: o agente prefere um bloco `ui` sempre que julgar viável e a
+  resposta tiver dados estruturados; o Markdown fica para texto corrido,
+  explicações e listas simples.
 - **Mesmo sistema visual do chat**: superfícies `surface-raised`, borda de 1px,
   raio `rounded-xl`/`rounded-2xl`, tipografia 12–13,5px, números `tabular-nums`.
   Componentes não aceitam props de cor/tamanho — não há “tema paralelo”.
@@ -313,8 +316,8 @@ execução (contrato e regras completas em `docs/GENUI.md`):
   imagens, `prefers-reduced-motion` respeitado.
 - **Copy**: título e rótulos curtos em pt-BR, sentence case, sem ponto final em
   botões, sem emojis decorativos, sem repetir o que o Markdown já diz.
-- **No layout Code**: o bloco renderiza inline no transcript (mesmo renderer);
-  use para evidência estruturada (testes, métricas, comparação, achados) e
-  próximos passos, sem repetir o card de arquivos alterados nem o diff do painel
-  Alterações. Decisões bloqueantes usam `ask_user`; o plano é Markdown no card
-  de plano.
+- **Nos layouts Code e Agentes**: o bloco renderiza inline no transcript (mesmo
+  renderer); use para evidência estruturada (testes, métricas, comparação,
+  achados) e próximos passos, sem repetir o card de arquivos alterados nem o
+  diff do painel Alterações. Decisões bloqueantes usam `ask_user`; o plano é
+  Markdown no card de plano.

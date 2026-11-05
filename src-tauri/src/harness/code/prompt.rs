@@ -26,7 +26,7 @@ use super::goal::{GOAL_BLOCKED_STREAK, GOAL_MAX_OBJECTIVE_CHARS};
 
 /// Version of the Code prompt layout (part of the `prompt_snapshots` identity).
 /// Bump whenever the stable prompt text changes.
-pub const PROMPT_VERSION: u32 = 5;
+pub const PROMPT_VERSION: u32 = 6;
 
 /// Orientação de uma ferramenta habilitada no turno (gerada pelo registry).
 #[derive(Debug, Clone, Copy)]
@@ -549,9 +549,9 @@ fn response_section(subagent: bool) -> &'static str {
     }
     "# Response format\n\n\
      - Respond in Brazilian Portuguese, direct and technical; no preamble.\n\
-     - Use Markdown (short headings, lists, fenced code blocks with a language). For structured, \
-       comparable or actionable evidence, prefer one `ui` block over a table/list (see **Generative \
-       UI in this Code session** below).\n\
+     - Use Markdown (short headings, lists, fenced code blocks with a language). Prefer one `ui` \
+       block over a table/list whenever the answer has structured, comparable or actionable \
+       evidence and you judge it viable (see **Generative UI in this session** below).\n\
      - Reference files as `relative/path.ext:line` (relative to the workspace).\n\
      - Quote only the code snippet needed to explain; the rest stays in the file.\n\
      - When you need a decision from the user, use `ask_user` with clear options instead of \
@@ -566,10 +566,13 @@ fn response_section(subagent: bool) -> &'static str {
 /// (the turn summary card, the Changes panel, the plan and blocking decisions).
 fn generative_ui_section() -> String {
     let mut out = String::from(
-        "# Generative UI in this Code session\n\n\
-         The `ui` block contract below is the same one used by the Chat layout, and this transcript \
-         renders it inline. Use it when the answer has structured evidence the user will scan or act \
-         on:\n\
+        "# Generative UI in this session\n\n\
+         The `ui` block contract below is the same one used by the Chat layout; the Code and Agents \
+         layouts render it inline in the transcript. **Default to a `ui` block whenever you judge it \
+         viable**: if the answer has structured evidence the user will scan or act on — test/check \
+         results, coverage or benchmark numbers, comparisons, investigation findings, specs, \
+         checklists, timelines, next steps — use the block instead of a table/list. Do not reserve \
+         it for special cases.\n\
          - End of a task: check/test results (passed/failed counts, exit codes, durations), coverage \
            or benchmark numbers, comparison of approaches/libraries, or investigation findings \
            (entry points, symbols, impact) — as `card` + `stat`/`table`/`chart`/`checklist`.\n\
@@ -800,7 +803,7 @@ mod tests {
             "# Workspace",
             "# Project instructions",
             "# Response format",
-            "# Generative UI in this Code session",
+            "# Generative UI in this session",
             "# Generative UI (`ui` blocks)",
             "Session date: 2026-10-27",
             "npm test",
@@ -829,7 +832,7 @@ mod tests {
         let prompt = build_system_prompt(&model(), &ctx(), &[], "Windows", "2026-10-27");
         let contract = contract::contract();
         for needle in [
-            "# Generative UI in this Code session",
+            "# Generative UI in this session",
             "# Generative UI (`ui` blocks)",
             "`validate_ui`",
             "files changed",
@@ -838,6 +841,9 @@ mod tests {
         ] {
             assert!(prompt.contains(needle), "trecho de GenUI ausente: {needle}");
         }
+        assert!(prompt.contains("Default to a `ui` block whenever you judge it viable"));
+        assert!(prompt.contains("Do not reserve it for special cases"));
+        assert!(prompt.contains("Code and Agents layouts"));
         assert!(
             !prompt.contains("{budget}"),
             "o placeholder do orçamento não foi interpolado"

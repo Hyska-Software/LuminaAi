@@ -8115,7 +8115,7 @@ mod agent_loop_tests {
         assert!(requests[0].system_prompt.contains("demo"));
         assert!(requests[0]
             .system_prompt
-            .contains("# Generative UI in this Code session"));
+            .contains("# Generative UI in this session"));
         assert!(requests[0]
             .system_prompt
             .contains("# Generative UI (`ui` blocks)"));
