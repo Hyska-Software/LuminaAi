@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use crate::agents::{Agent, AgentRoutineInput};
 use crate::db::Db;
-use crate::domain::Settings;
+use crate::domain::{ReasoningMode, ReasoningSelection, Settings};
 use crate::providers::ToolDefinition;
 use crate::tools::{json_str, AgentHooks, ToolOutcome};
 
@@ -98,7 +98,8 @@ pub fn definitions(agent: &Agent) -> Vec<ToolDefinition> {
                           global computer/Docker defaults and a random mascot avatar; it has its \
                           own memory and appears in the Agentes layout immediately. Only pass \
                           `capabilities` when the user explicitly requested specific capabilities, \
-                          and `avatar` only when the user asked for specific avatar traits. An \
+                          and `avatar` only when the user asked for specific avatar traits. The new \
+                          agent inherits your current thinking unless `reasoning` overrides it. An \
                           optional routine can be attached when the caller also has `automation`."
                 .to_string(),
             parameters: json!({
@@ -137,7 +138,25 @@ pub fn definitions(agent: &Agent) -> Vec<ToolDefinition> {
                     "modelId": { "type": "string" },
                     "fallbackProviderId": { "type": "string" },
                     "fallbackModelId": { "type": "string" },
-                    "reasoning": { "type": "object" },
+                    "reasoning": {
+                        "type": "object",
+                        "description": "Thinking configuration for the new agent's model. Omit to \
+                                        inherit the caller's current thinking. When overriding \
+                                        provider/model, use only modes/efforts the target model \
+                                        supports. mode=off disables; mode=effort uses effort (omit \
+                                        it for toggle-only models); mode=budget requires budget \
+                                        tokens.",
+                        "properties": {
+                            "mode": { "type": "string", "enum": ["off", "effort", "budget"] },
+                            "effort": {
+                                "type": "string",
+                                "enum": ["minimal", "low", "medium", "high", "xhigh", "max"]
+                            },
+                            "budget": { "type": "integer", "minimum": 1024, "maximum": 65536 }
+                        },
+                        "required": ["mode"],
+                        "additionalProperties": false
+                    },
                     "instructions": { "type": "string", "maxLength": 16000 },
                     "starters": { "type": "array", "items": { "type": "string" }, "maxItems": 8 },
                     "capabilities": {
@@ -290,7 +309,10 @@ pub fn guidance(agent: &Agent) -> Vec<(&'static str, &'static str)> {
              capabilities, send only those keys and change nothing else. Configure the avatar: \
              a new agent gets a random mascot by default; when the user asked for a body, \
              expression, colour or eye colour, send only those `avatar` keys. Never use emoji \
-             avatars.",
+             avatars. Thinking: omit `reasoning` to inherit your current thinking; when the user \
+             asked for a thinking level, send `{ \"mode\": \"effort\", \"effort\": ... }` or \
+             `{ \"mode\": \"budget\", \"budget\": ... }`. If you switch provider/model, choose a \
+             mode the target model supports.",
         ));
     }
     if agent.capabilities.automation {
@@ -658,6 +680,61 @@ fn agent_avatar_from_args(args: &Value) -> Result<crate::agents::AgentAvatar, St
     })
 }
 
+fn agent_reasoning_from_args(args: &Value) -> Result<Option<ReasoningSelection>, String> {
+    const EFFORTS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+    let Some(value) = args.get("reasoning").filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let selection: ReasoningSelection = serde_json::from_value(value.clone()).map_err(|_| {
+        "AGENT_REASONING_INVALID: use { mode: off|effort|budget, effort?, budget? }".to_string()
+    })?;
+    match selection.mode {
+        ReasoningMode::Off => Ok(Some(ReasoningSelection {
+            mode: ReasoningMode::Off,
+            effort: None,
+            budget: None,
+        })),
+        ReasoningMode::Effort => {
+            if selection.budget.is_some() {
+                return Err(
+                    "AGENT_REASONING_INVALID: `budget` só vale com mode=budget".to_string(),
+                );
+            }
+            let effort = selection
+                .effort
+                .map(|effort| effort.trim().to_ascii_lowercase())
+                .filter(|effort| !effort.is_empty());
+            if let Some(effort) = effort.as_deref() {
+                if !EFFORTS.contains(&effort) {
+                    return Err(format!(
+                        "AGENT_REASONING_INVALID: effort desconhecido `{effort}`; use {}",
+                        EFFORTS.join(", ")
+                    ));
+                }
+            }
+            Ok(Some(ReasoningSelection {
+                mode: ReasoningMode::Effort,
+                effort,
+                budget: None,
+            }))
+        }
+        ReasoningMode::Budget => {
+            let budget = selection.budget.unwrap_or(0);
+            if !(1_024..=65_536).contains(&budget) {
+                return Err(
+                    "AGENT_REASONING_INVALID: `budget` deve ficar entre 1024 e 65536 tokens"
+                        .to_string(),
+                );
+            }
+            Ok(Some(ReasoningSelection {
+                mode: ReasoningMode::Budget,
+                effort: None,
+                budget: Some(budget),
+            }))
+        }
+    }
+}
+
 fn create_agent_tool(
     db: &Db,
     caller: &Agent,
@@ -723,10 +800,11 @@ fn create_agent_tool(
         Ok(avatar) => avatar,
         Err(error) => return ToolOutcome::error(error),
     };
-    let reasoning = args
-        .get("reasoning")
-        .cloned()
-        .and_then(|value| serde_json::from_value(value).ok());
+    let reasoning = match agent_reasoning_from_args(args) {
+        Ok(Some(reasoning)) => Some(reasoning),
+        Ok(None) => caller.reasoning.clone(),
+        Err(error) => return ToolOutcome::error(error),
+    };
     let starters = args
         .get("starters")
         .and_then(Value::as_array)
@@ -952,7 +1030,7 @@ pub fn run_with_hooks(
 mod tests {
     use super::*;
     use crate::agents::{AgentCapabilities, AgentInput};
-    use crate::domain::PermissionMode;
+    use crate::domain::{PermissionMode, ReasoningMode, ReasoningSelection};
 
     fn agent(db: &Db, name: &str, automation: bool) -> Agent {
         db.create_agent(&AgentInput {
@@ -1156,6 +1234,98 @@ mod tests {
         assert!(created.content.contains("AGENT_AVATAR_INVALID"));
         let agents = db.list_agents(false).expect("agents");
         assert!(!agents.iter().any(|agent| agent.name == "Inválido"));
+    }
+
+    #[test]
+    fn create_agent_inherits_the_callers_reasoning_when_omitted() {
+        let db = std::sync::Arc::new(Db::open_in_memory().expect("db"));
+        let creator = agent(&db, "Recrutador", false);
+        let mut creator_input = AgentInput::from(&creator);
+        creator_input.reasoning = Some(ReasoningSelection {
+            mode: ReasoningMode::Effort,
+            effort: Some("max".to_string()),
+            budget: None,
+        });
+        let creator = db
+            .update_agent(&creator.id, &creator_input)
+            .expect("creator reasoning");
+        let hooks = CreatingHooks { db: db.clone() };
+        let created = run_with_hooks(
+            &db,
+            &creator.id,
+            "create_agent",
+            &json!({ "name": "Herdeiro" }),
+            &Settings::default(),
+            Some(&hooks),
+        );
+        assert!(!created.is_error, "{}", created.content);
+        let agents = db.list_agents(false).expect("agents");
+        let created = agents
+            .iter()
+            .find(|agent| agent.name == "Herdeiro")
+            .expect("created");
+        let reasoning = created.reasoning.as_ref().expect("inherited reasoning");
+        assert_eq!(reasoning.mode, ReasoningMode::Effort);
+        assert_eq!(reasoning.effort.as_deref(), Some("max"));
+        assert_eq!(reasoning.budget, None);
+    }
+
+    #[test]
+    fn create_agent_accepts_an_explicit_budget_reasoning() {
+        let db = std::sync::Arc::new(Db::open_in_memory().expect("db"));
+        let creator = agent(&db, "Recrutador", false);
+        let hooks = CreatingHooks { db: db.clone() };
+        let created = run_with_hooks(
+            &db,
+            &creator.id,
+            "create_agent",
+            &json!({
+                "name": "Orçado",
+                "reasoning": { "mode": "budget", "budget": 16_384 }
+            }),
+            &Settings::default(),
+            Some(&hooks),
+        );
+        assert!(!created.is_error, "{}", created.content);
+        let agents = db.list_agents(false).expect("agents");
+        let created = agents.iter().find(|agent| agent.name == "Orçado").expect("created");
+        let reasoning = created.reasoning.as_ref().expect("explicit reasoning");
+        assert_eq!(reasoning.mode, ReasoningMode::Budget);
+        assert_eq!(reasoning.effort, None);
+        assert_eq!(reasoning.budget, Some(16_384));
+    }
+
+    #[test]
+    fn create_agent_rejects_invalid_reasoning() {
+        let db = std::sync::Arc::new(Db::open_in_memory().expect("db"));
+        let creator = agent(&db, "Recrutador", false);
+        let hooks = CreatingHooks { db: db.clone() };
+        let missing_budget = run_with_hooks(
+            &db,
+            &creator.id,
+            "create_agent",
+            &json!({ "name": "SemOrçamento", "reasoning": { "mode": "budget" } }),
+            &Settings::default(),
+            Some(&hooks),
+        );
+        assert!(missing_budget.is_error);
+        assert!(missing_budget.content.contains("AGENT_REASONING_INVALID"));
+        let bad_effort = run_with_hooks(
+            &db,
+            &creator.id,
+            "create_agent",
+            &json!({
+                "name": "EsforçoInvalido",
+                "reasoning": { "mode": "effort", "effort": "turbo" }
+            }),
+            &Settings::default(),
+            Some(&hooks),
+        );
+        assert!(bad_effort.is_error);
+        assert!(bad_effort.content.contains("AGENT_REASONING_INVALID"));
+        let agents = db.list_agents(false).expect("agents");
+        assert!(!agents.iter().any(|agent| agent.name == "SemOrçamento"));
+        assert!(!agents.iter().any(|agent| agent.name == "EsforçoInvalido"));
     }
 
     #[test]
