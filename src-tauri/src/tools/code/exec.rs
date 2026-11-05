@@ -207,24 +207,49 @@ fn writable_root(ctx: &ToolCtx) -> Result<PathBuf, ToolOutcome> {
 }
 
 fn resolve_path(ctx: &ToolCtx, requested: &str, access: safe_path::Access) -> Result<PathBuf, ToolOutcome> {
-    let root = workspace_root(ctx)?;
-    safe_path::resolve(&root, requested, access).map_err(|error| err(error.code, error.message))
+    let workspace = workspace_handle(ctx)?;
+    let resolved = if workspace.internal && access != safe_path::Access::Write {
+        // No project folder selected: agents may read/list/search the machine.
+        // Writes stay confined to the internal scratch workspace.
+        safe_path::resolve_unconfined(&workspace.root, requested, access)
+    } else {
+        safe_path::resolve(&workspace.root, requested, access)
+    };
+    resolved.map_err(|error| {
+        if workspace.internal
+            && access == safe_path::Access::Write
+            && error.code == safe_path::FS_OUTSIDE_WORKSPACE
+        {
+            return err(
+                error.code,
+                "para editar arquivos fora da pasta do agente, selecione uma pasta de projeto",
+            );
+        }
+        err(error.code, error.message)
+    })
 }
 
 fn relative_path(ctx: &ToolCtx, path: &Path) -> String {
-    ctx.workspace_root()
-        .map(|root| safe_path::to_relative(root, path))
-        .unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"))
+    let Some(root) = ctx.workspace_root() else {
+        return path.to_string_lossy().replace('\\', "/");
+    };
+    let internal = ctx.workspace.as_ref().is_some_and(|workspace| workspace.internal);
+    if internal && !safe_path::is_within(root, path) {
+        return path.to_string_lossy().replace('\\', "/");
+    }
+    safe_path::to_relative(root, path)
 }
 
 /// Resolve um diretório dentro do workspace (`Access::ReadDir` valida que é
 /// pasta e não deixa escapar do workspace).
 fn resolve_dir(ctx: &ToolCtx, requested: &str) -> Result<PathBuf, ToolOutcome> {
-    let root = workspace_root(ctx)?;
-    match safe_path::resolve(&root, requested, safe_path::Access::ReadDir) {
-        Ok(path) => Ok(path),
-        Err(error) => Err(err(error.code, error.message)),
-    }
+    let workspace = workspace_handle(ctx)?;
+    let resolved = if workspace.internal {
+        safe_path::resolve_unconfined(&workspace.root, requested, safe_path::Access::ReadDir)
+    } else {
+        safe_path::resolve(&workspace.root, requested, safe_path::Access::ReadDir)
+    };
+    resolved.map_err(|error| err(error.code, error.message))
 }
 
 fn dir_skip_name(name: &str) -> bool {
@@ -856,10 +881,6 @@ async fn list_dir(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Ok(path) => path,
         Err(outcome) => return outcome,
     };
-    let root = match workspace_root(ctx) {
-        Ok(root) => root,
-        Err(outcome) => return outcome,
-    };
     let depth = opt_u32(args, "depth").unwrap_or(2).clamp(1, 4) as usize;
     let include_hidden = opt_bool(args, "include_hidden").unwrap_or(false);
     let limit = opt_u32(args, "limit").unwrap_or(400).clamp(1, 2_000) as usize;
@@ -882,7 +903,12 @@ async fn list_dir(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             continue;
         }
         let path = entry.path();
-        let relative = safe_path::to_relative(&root, path);
+        let relative = path
+            .strip_prefix(&base)
+            .ok()
+            .map(|value| value.to_string_lossy().replace('\\', "/"))
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| relative_path(ctx, path));
         if relative.is_empty() {
             continue;
         }
@@ -956,10 +982,6 @@ async fn search_files(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Ok(path) => path,
         Err(outcome) => return outcome,
     };
-    let root = match workspace_root(ctx) {
-        Ok(root) => root,
-        Err(outcome) => return outcome,
-    };
     let cap = opt_u32(args, "max_results").unwrap_or(200).clamp(1, 1_000) as usize;
     let basename_only = !pattern.contains('/');
     let mut matches: Vec<String> = Vec::new();
@@ -971,7 +993,7 @@ async fn search_files(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             continue;
         }
         let path = entry.path();
-        let relative = safe_path::to_relative(&root, path);
+        let relative = relative_path(ctx, path);
         let candidate = if basename_only {
             path.file_name().map(|name| name.to_string_lossy().into_owned())
         } else {
@@ -1027,10 +1049,6 @@ async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Ok(path) => path,
         Err(outcome) => return outcome,
     };
-    let root = match workspace_root(ctx) {
-        Ok(root) => root,
-        Err(outcome) => return outcome,
-    };
     let pattern = if is_regex { query.clone() } else { regex::escape(&query) };
     let matcher = match regex::RegexBuilder::new(&pattern)
         .case_insensitive(!case_sensitive)
@@ -1055,11 +1073,11 @@ async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             continue;
         }
         let path = entry.path();
-        let relative = safe_path::to_relative(&root, path);
+        let relative = relative_path(ctx, path);
         if is_secret_path(&relative) {
             continue;
         }
-        if safe_path::resolve(&root, &relative, safe_path::Access::Read).is_err() {
+        if resolve_path(ctx, &relative, safe_path::Access::Read).is_err() {
             continue;
         }
         if let Some(glob) = &glob {
@@ -3299,6 +3317,40 @@ mod tests {
             .iter()
             .filter_map(|event| event.get("type").and_then(Value::as_str).map(str::to_string))
             .collect()
+    }
+
+    #[tokio::test]
+    async fn internal_workspace_reads_files_outside_but_keeps_writes_confined() {
+        let fixture = Fixture::new();
+        let outside_dir = fixture.root.parent().expect("temp root").join("fora");
+        std::fs::create_dir_all(&outside_dir).expect("outside dir");
+        let outside_file = outside_dir.join("nota.txt");
+        std::fs::write(&outside_file, "conteudo externo").expect("outside file");
+
+        let mut ctx = fixture.ctx();
+        ctx.workspace.as_mut().expect("workspace").internal = true;
+        let outside = outside_file.to_string_lossy().to_string();
+
+        let read = call(&ctx, "read_file", json!({ "path": outside })).await;
+        assert!(!read.is_error, "{}", read.content);
+        assert!(read.content.contains("conteudo externo"));
+
+        let listed = call(
+            &ctx,
+            "list_dir",
+            json!({ "path": outside_dir.to_string_lossy() }),
+        )
+        .await;
+        assert!(!listed.is_error, "{}", listed.content);
+        assert!(listed.content.contains("nota.txt"));
+
+        let write = call(
+            &ctx,
+            "write_file",
+            json!({ "path": outside, "content": "alterado" }),
+        )
+        .await;
+        assert_eq!(error_code(&write), "FS_OUTSIDE_WORKSPACE");
     }
 
     #[tokio::test]

@@ -58,6 +58,23 @@ pub enum Access {
 ///
 /// `root` precisa existir e ser um diretório; `requested` pode ser relativo ou absoluto.
 pub fn resolve(root: &Path, requested: &str, access: Access) -> Result<PathBuf, FsError> {
+    resolve_with_confinement(root, requested, access, true)
+}
+
+/// Resolves a path under `root` without requiring it to stay inside the
+/// workspace. Used by agents without a project folder: the agent scratch
+/// directory is the base for relative paths, but absolute paths anywhere on
+/// the machine are readable. Validation (device paths, NUL, type) still runs.
+pub fn resolve_unconfined(root: &Path, requested: &str, access: Access) -> Result<PathBuf, FsError> {
+    resolve_with_confinement(root, requested, access, false)
+}
+
+fn resolve_with_confinement(
+    root: &Path,
+    requested: &str,
+    access: Access,
+    confined: bool,
+) -> Result<PathBuf, FsError> {
     let requested = requested.trim();
     if requested.is_empty() {
         return Err(FsError::new(FS_EMPTY_PATH, "informe um caminho"));
@@ -109,7 +126,7 @@ pub fn resolve(root: &Path, requested: &str, access: Access) -> Result<PathBuf, 
         candidate.push(part);
     }
 
-    if !is_within(&root_canon, &candidate) {
+    if confined && !is_within(&root_canon, &candidate) {
         return Err(FsError::new(
             FS_OUTSIDE_WORKSPACE,
             format!("'{requested}' está fora do workspace"),
@@ -404,6 +421,29 @@ mod tests {
         );
         fs::create_dir_all(root.join("sub")).expect("criar sub");
         assert_eq!(err_code(resolve(&root, "sub", Access::Read)), FS_NOT_A_FILE);
+    }
+
+    #[test]
+    fn unconfined_allows_outside_paths_but_keeps_validation() {
+        let (temp, root) = workspace();
+        let outside = temp.path().join("fora.txt");
+        fs::write(&outside, "x").expect("criar fora");
+        let resolved = resolve_unconfined(&root, &outside.to_string_lossy(), Access::Read)
+            .expect("absolute outside is readable");
+        let canonical = simplify_verbatim(&outside.canonicalize().expect("canonical outside"));
+        assert_eq!(resolved, canonical);
+        let parent_escape = resolve_unconfined(&root, "../fora.txt", Access::Read)
+            .expect("relative escape is allowed");
+        assert_eq!(parent_escape, canonical);
+        assert_eq!(
+            err_code(resolve_unconfined(&root, "nao-existe.txt", Access::Read)),
+            FS_NOT_FOUND
+        );
+        fs::create_dir_all(root.join("sub")).expect("criar sub");
+        assert_eq!(
+            err_code(resolve_unconfined(&root, "sub", Access::Read)),
+            FS_NOT_A_FILE
+        );
     }
 
     #[test]

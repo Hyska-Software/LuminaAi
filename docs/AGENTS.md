@@ -163,6 +163,12 @@ o renderer envia o perfil Chat e a conversa não tem pasta selecionada:
   pasta como workspace visível no Code. Conversas diferentes usam pastas
   distintas. O prompt identifica a pasta como **Pasta do agente**, informa que
   ela persiste entre turnos e não imprime mais “No workspace is open”.
+- Sem uma **pasta de projeto** selecionada, as tools somente leitura
+  (`read_file`, `list_dir`, `search_files`, `search_text`) aceitam caminhos
+  absolutos em qualquer lugar do PC; o diretório interno serve de base para
+  caminhos relativos. Escritas/edições continuam confinadas a essa pasta. Ao
+  selecionar um workspace explícito, todas as tools voltam a ficar confinadas
+  ao projeto.
 - O editor do agente e o cabeçalho da conversa permitem escolher uma pasta sem
   abrir o Code; uma pasta externa precisa estar marcada como confiável. A troca
   da pasta da conversa é recusada enquanto qualquer turno dela estiver ativo.

@@ -14,7 +14,7 @@ use crate::tools::ToolOutcome;
 
 pub static READ_FILE_SPEC: ToolSpec = ToolSpec {
     name: "read_file",
-    description: "Read a UTF-8 text file with line numbers. Use offset/limit to page through large files. Never reads binary files as text.",
+    description: "Read a text file. Relative paths resolve inside the workspace; absolute paths are allowed when the session has no project folder.",
     schema: read_file_schema,
     parallel: ParallelClass::Safe,
     risk: RiskClass::Read,
@@ -26,7 +26,7 @@ pub static READ_FILE_SPEC: ToolSpec = ToolSpec {
 
 pub static LIST_DIR_SPEC: ToolSpec = ToolSpec {
     name: "list_dir",
-    description: "List a directory tree inside the workspace, respecting .gitignore and skipping build/VCS directories by default.",
+    description: "List a directory tree, respecting .gitignore and skipping build/VCS directories by default. Absolute paths are allowed when the session has no project folder.",
     schema: list_dir_schema,
     parallel: ParallelClass::Safe,
     risk: RiskClass::Read,
@@ -38,19 +38,19 @@ pub static LIST_DIR_SPEC: ToolSpec = ToolSpec {
 
 pub static SEARCH_FILES_SPEC: ToolSpec = ToolSpec {
     name: "search_files",
-    description: "Find workspace files whose paths match a glob pattern (e.g. `**/*.test.ts`), ordered by path.",
+    description: "Find files whose paths match a glob pattern (e.g. `**/*.test.ts`), ordered by path. Absolute paths are allowed when the session has no project folder.",
     schema: search_files_schema,
     parallel: ParallelClass::Safe,
     risk: RiskClass::Read,
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `search_files` to locate files by name/pattern and `search_text` to locate content; results are relative to the workspace.",
+    guidance: "Use `search_files` to locate files by name/pattern and `search_text` to locate content; results are relative to the workspace, or absolute outside it.",
 };
 
 pub static SEARCH_TEXT_SPEC: ToolSpec = ToolSpec {
     name: "search_text",
-    description: "Search workspace file contents (literal or regex), grouped by file, optionally filtered by glob and with context lines.",
+    description: "Search file contents (literal or regex), grouped by file, optionally filtered by glob and with context lines. Absolute paths are allowed when the session has no project folder.",
     schema: search_text_schema,
     parallel: ParallelClass::Safe,
     risk: RiskClass::Read,
@@ -90,7 +90,7 @@ fn read_file_schema() -> Value {
         "properties": {
             "path": {
                 "type": "string",
-                "description": "File path, relative to the workspace (or absolute inside it)."
+                "description": "File path (relative to the workspace or absolute)."
             },
             "offset": {
                 "type": "integer",
@@ -115,7 +115,7 @@ fn list_dir_schema() -> Value {
         "properties": {
             "path": {
                 "type": "string",
-                "description": "Directory relative to the workspace. Defaults to \".\"."
+                "description": "Directory (relative to the workspace or absolute). Defaults to \".\"."
             },
             "depth": {
                 "type": "integer",
@@ -148,7 +148,7 @@ fn search_files_schema() -> Value {
             },
             "path": {
                 "type": "string",
-                "description": "Directory to search under, relative to the workspace. Defaults to \".\"."
+                "description": "Directory to search under (relative to the workspace or absolute). Defaults to \".\"."
             },
             "max_results": {
                 "type": "integer",
@@ -172,7 +172,7 @@ fn search_text_schema() -> Value {
             },
             "path": {
                 "type": "string",
-                "description": "Directory to search under, relative to the workspace. Defaults to \".\"."
+                "description": "Directory to search under (relative to the workspace or absolute). Defaults to \".\"."
             },
             "glob": {
                 "type": "string",

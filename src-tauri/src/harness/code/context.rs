@@ -71,6 +71,7 @@ impl CodeTurnContext {
     /// Contexto de prompt (tipos do módulo `prompt`).
     pub fn prompt_context(&self) -> prompt::CodeContext {
         prompt::CodeContext {
+            internal: self.internal,
             workspace_name: self
                 .workspace
                 .as_ref()
