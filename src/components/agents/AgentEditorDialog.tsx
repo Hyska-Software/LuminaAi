@@ -28,6 +28,7 @@ import {
 import { ThinkingSelector } from '@/components/models/ThinkingSelector';
 import { api } from '@/lib/api';
 import { DEFAULT_AGENT_AVATAR } from '@/lib/agentAvatar';
+import { DEFAULT_AGENT_CAPABILITIES } from '@/lib/agentDefaults';
 import { reasoningForModel } from '@/lib/modelMenu';
 import { selectAgent, useAgentStore, useAppStore, useUiStore } from '@/lib/store';
 import type {
@@ -42,24 +43,6 @@ import type {
   Workspace,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
-
-const DEFAULT_CAPABILITIES: AgentCapabilities = {
-  webSearch: true,
-  fileAccess: true,
-  codeExecution: true,
-  delegation: false,
-  automation: false,
-  sharedMemory: false,
-  skillsWrite: false,
-  createAgents: false,
-  computerUse: false,
-  screenCapture: false,
-  browserUse: false,
-  dockerExecution: false,
-  skills: null,
-  tools: null,
-  mcpServers: null,
-};
 
 /** Stable catalog of tools an agent can be limited to. Kept in sync with the
  * Chat and Code registries; names not present remain globally gated. */
@@ -162,7 +145,7 @@ function emptyForm(providerId: string, modelId: string): FormState {
     reasoning: null,
     instructions: '',
     starters: '',
-    capabilities: { ...DEFAULT_CAPABILITIES },
+    capabilities: { ...DEFAULT_AGENT_CAPABILITIES },
     memoryEnabled: false,
     workspaceId: '',
     permissionMode: 'autonomous',
@@ -184,6 +167,7 @@ export function AgentEditorDialog() {
   const setActiveAgentId = useUiStore((state) => state.setActiveAgentId);
   const providers = useAppStore((state) => state.providers);
   const selection = useAppStore((state) => state.selection);
+  const settings = useAppStore((state) => state.settings);
   const agent = useAgentStore((state) =>
     editor?.mode === 'edit' ? selectAgent(state, editor.agentId) : null,
   );
@@ -195,6 +179,7 @@ export function AgentEditorDialog() {
 
   const fallbackProvider =
     providers.find((provider) => provider.id === selection.providerId) ?? providers[0];
+  const globalDockerImage = settings.dockerImage?.trim() || 'node:22-bookworm';
   const [form, setForm] = useState<FormState>(() =>
     emptyForm(fallbackProvider?.id ?? '', fallbackProvider?.defaultModelId ?? ''),
   );
@@ -256,7 +241,7 @@ export function AgentEditorDialog() {
         reasoning: draft.reasoning,
         instructions: draft.instructions,
         starters: draft.starters.join('\n'),
-        capabilities: { ...DEFAULT_CAPABILITIES, ...draft.capabilities },
+        capabilities: { ...DEFAULT_AGENT_CAPABILITIES, ...draft.capabilities },
         memoryEnabled: draft.memoryEnabled,
         workspaceId: draft.workspaceId ?? '',
         permissionMode: draft.permissionMode,
@@ -797,13 +782,13 @@ export function AgentEditorDialog() {
                     id="agent-docker-image"
                     value={form.dockerImage}
                     maxLength={200}
-                    placeholder="Ex.: node:22-bookworm"
+                    placeholder={globalDockerImage}
                     disabled={!form.capabilities.dockerExecution}
                     onChange={(event) => set('dockerImage', event.target.value)}
                   />
                   <p className="text-[11px] text-foreground-subtle">
                     Requer “Override de Docker” nas capacidades. Sem imagem, usa a configuração
-                    global.
+                    global ({globalDockerImage}).
                   </p>
                 </div>
                 <div className="space-y-1.5">

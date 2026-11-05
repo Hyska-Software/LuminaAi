@@ -93,8 +93,11 @@ pub fn definitions(agent: &Agent) -> Vec<ToolDefinition> {
         tools.push(ToolDefinition {
             name: "create_agent".to_string(),
             description: "Create a new persistent persona on the team. The caller's provider/model \
-                          are used when omitted. The new agent has its own memory/workspace and \
-                          appears in the Agentes layout immediately. An optional routine can be \
+                          are used when omitted. The new agent starts with every basic action \
+                          enabled, autonomous permissions, the app-internal workspace and the \
+                          global computer/Docker defaults; it has its own memory and appears in \
+                          the Agentes layout immediately. Only pass `capabilities` when the user \
+                          explicitly requested specific capabilities. An optional routine can be \
                           attached when the caller also has `automation`."
                 .to_string(),
             parameters: json!({
@@ -112,14 +115,25 @@ pub fn definitions(agent: &Agent) -> Vec<ToolDefinition> {
                     "reasoning": { "type": "object" },
                     "instructions": { "type": "string", "maxLength": 16000 },
                     "starters": { "type": "array", "items": { "type": "string" }, "maxItems": 8 },
-                    "capabilities": { "type": "object" },
+                    "capabilities": {
+                        "type": "object",
+                        "description": "Only pass when the user explicitly asked for specific \
+                                        capabilities. Omitted: every basic action stays enabled and \
+                                        permission is autonomous with the app-internal workspace. \
+                                        Unspecified keys keep the default; only listed camelCase \
+                                        keys change."
+                    },
                     "memoryEnabled": { "type": "boolean" },
                     "workspaceId": { "type": "string" },
                     "permissionMode": {
                         "type": "string",
                         "enum": ["read_only", "edit", "autonomous", "review"]
                     },
-                    "dockerImage": { "type": "string" },
+                    "dockerImage": {
+                        "type": "string",
+                        "description": "Optional image override. Omit to inherit the user's \
+                                        global Docker image and environment."
+                    },
                     "computerEnvironment": {
                         "type": "string",
                         "enum": ["auto", "private_desktop", "this_computer", "browser", "off"]
@@ -244,9 +258,11 @@ pub fn guidance(agent: &Agent) -> Vec<(&'static str, &'static str)> {
     if agent.capabilities.create_agents {
         items.push((
             "create_agent",
-            "Create an agent only when a durable role is missing. Fill instructions and role; do \
-             not grant capabilities you would not use yourself, and ask the user before creating \
-             an autonomous agent.",
+            "Create an agent only when a durable role is missing. Fill instructions and role. \
+             Omit `capabilities` unless the user explicitly named what to enable or disable: a \
+             new agent inherits every basic action, autonomous permissions, the app-internal \
+             workspace and the global Docker/computer defaults. When the user did list \
+             capabilities, send only those keys and change nothing else.",
         ));
     }
     if agent.capabilities.automation {
@@ -607,11 +623,42 @@ fn create_agent_tool(
     let model_id = json_str(args, "modelId")
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| caller.model_id.clone());
-    let capabilities = args
-        .get("capabilities")
-        .cloned()
-        .and_then(|value| serde_json::from_value::<crate::agents::AgentCapabilities>(value).ok())
-        .unwrap_or_default();
+    let capabilities = match args.get("capabilities") {
+        None | Some(Value::Null) => crate::agents::AgentCapabilities::default(),
+        Some(value) => {
+            let mut merged =
+                match serde_json::to_value(crate::agents::AgentCapabilities::default()) {
+                    Ok(Value::Object(map)) => map,
+                    _ => {
+                        return ToolOutcome::error(
+                            "AGENT_CAPABILITIES_INVALID: não foi possível resolver o padrão de capabilities",
+                        )
+                    }
+                };
+            let Some(overrides) = value.as_object() else {
+                return ToolOutcome::error(
+                    "AGENT_CAPABILITIES_INVALID: `capabilities` deve ser um objeto camelCase",
+                );
+            };
+            for (key, override_value) in overrides {
+                if !merged.contains_key(key) {
+                    return ToolOutcome::error(format!(
+                        "AGENT_CAPABILITIES_INVALID: chave desconhecida `{key}`; use {}",
+                        merged.keys().cloned().collect::<Vec<_>>().join(", ")
+                    ));
+                }
+                merged.insert(key.clone(), override_value.clone());
+            }
+            match serde_json::from_value(Value::Object(merged)) {
+                Ok(parsed) => parsed,
+                Err(_) => {
+                    return ToolOutcome::error(
+                        "AGENT_CAPABILITIES_INVALID: valores inválidos em `capabilities` (booleanos; skills/tools/mcpServers aceitam lista ou null)",
+                    )
+                }
+            }
+        }
+    };
     let reasoning = args
         .get("reasoning")
         .cloned()
@@ -960,7 +1007,90 @@ mod tests {
         assert_eq!(created.provider_id, creator.provider_id);
         assert_eq!(created.permission_mode, crate::domain::PermissionMode::Autonomous);
         assert!(!created.capabilities.code_execution);
+        assert!(created.capabilities.delegation);
+        assert!(created.capabilities.computer_use);
         assert_eq!(db.list_agent_routines(&created.id).expect("routines").len(), 1);
+    }
+
+    #[test]
+    fn create_agent_without_capabilities_enables_every_basic_action() {
+        let db = std::sync::Arc::new(Db::open_in_memory().expect("db"));
+        let creator = agent(&db, "Recrutador", false);
+        let hooks = CreatingHooks { db: db.clone() };
+        let created = run_with_hooks(
+            &db,
+            &creator.id,
+            "create_agent",
+            &json!({ "name": "Analista" }),
+            &Settings::default(),
+            Some(&hooks),
+        );
+        assert!(!created.is_error, "{}", created.content);
+        let agents = db.list_agents(false).expect("agents");
+        let created = agents
+            .iter()
+            .find(|agent| agent.name == "Analista")
+            .expect("created");
+        let capabilities = &created.capabilities;
+        assert!(capabilities.web_search);
+        assert!(capabilities.file_access);
+        assert!(capabilities.code_execution);
+        assert!(capabilities.delegation);
+        assert!(capabilities.automation);
+        assert!(capabilities.shared_memory);
+        assert!(capabilities.skills_write);
+        assert!(capabilities.create_agents);
+        assert!(capabilities.computer_use);
+        assert!(capabilities.screen_capture);
+        assert!(capabilities.browser_use);
+        assert!(capabilities.docker_execution);
+        assert_eq!(capabilities.skills, None);
+        assert_eq!(capabilities.tools, None);
+        assert_eq!(capabilities.mcp_servers, None);
+        assert_eq!(created.permission_mode, PermissionMode::Autonomous);
+        assert!(created.workspace_id.is_none());
+        assert!(created.docker_image.is_none());
+        assert_eq!(created.computer_environment, "auto");
+    }
+
+    #[test]
+    fn create_agent_capability_overrides_change_only_the_named_keys() {
+        let db = std::sync::Arc::new(Db::open_in_memory().expect("db"));
+        let creator = agent(&db, "Recrutador", false);
+        let hooks = CreatingHooks { db: db.clone() };
+        let created = run_with_hooks(
+            &db,
+            &creator.id,
+            "create_agent",
+            &json!({
+                "name": "Focado",
+                "capabilities": { "computerUse": false, "browserUse": false }
+            }),
+            &Settings::default(),
+            Some(&hooks),
+        );
+        assert!(!created.is_error, "{}", created.content);
+        let agents = db.list_agents(false).expect("agents");
+        let created = agents
+            .iter()
+            .find(|agent| agent.name == "Focado")
+            .expect("created");
+        let capabilities = &created.capabilities;
+        assert!(!capabilities.computer_use);
+        assert!(!capabilities.browser_use);
+        assert!(capabilities.web_search);
+        assert!(capabilities.file_access);
+        assert!(capabilities.code_execution);
+        assert!(capabilities.delegation);
+        assert!(capabilities.automation);
+        assert!(capabilities.shared_memory);
+        assert!(capabilities.skills_write);
+        assert!(capabilities.create_agents);
+        assert!(capabilities.screen_capture);
+        assert!(capabilities.docker_execution);
+        assert_eq!(capabilities.skills, None);
+        assert_eq!(capabilities.tools, None);
+        assert_eq!(capabilities.mcp_servers, None);
     }
 
     #[test]

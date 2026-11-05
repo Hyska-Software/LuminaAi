@@ -939,6 +939,11 @@ fn default_computer_environment() -> String {
     "auto".to_string()
 }
 
+/// New personas start autonomous unless the payload says otherwise.
+fn default_agent_permission_mode() -> PermissionMode {
+    PermissionMode::Autonomous
+}
+
 /// Normalizes the per-agent computer environment. Unknown values fall back to
 /// `auto` so an old/hand-edited DB never disables the agent silently.
 pub fn normalize_computer_environment(value: &str) -> String {
@@ -1002,21 +1007,21 @@ pub struct AgentCapabilities {
 
 impl Default for AgentCapabilities {
     fn default() -> Self {
-        // A brand-new agent must inherit the app defaults instead of losing
-        // web/skills because Rust's `bool::default()` is false.
+        // A brand-new agent starts with every basic action enabled; the editor
+        // or the creating tool can still restrict any of them.
         Self {
             web_search: true,
             file_access: true,
             code_execution: true,
-            delegation: false,
-            automation: false,
-            shared_memory: false,
-            skills_write: false,
-            create_agents: false,
-            computer_use: false,
-            screen_capture: false,
-            browser_use: false,
-            docker_execution: false,
+            delegation: true,
+            automation: true,
+            shared_memory: true,
+            skills_write: true,
+            create_agents: true,
+            computer_use: true,
+            screen_capture: true,
+            browser_use: true,
+            docker_execution: true,
             skills: None,
             tools: None,
             mcp_servers: None,
@@ -1059,7 +1064,7 @@ pub struct AgentInput {
     /// Optional workspace used by turns with the Code profile.
     #[serde(default)]
     pub workspace_id: Option<String>,
-    #[serde(default)]
+    #[serde(default = "default_agent_permission_mode")]
     pub permission_mode: PermissionMode,
     /// Optional per-agent Docker image override (requires `dockerExecution`).
     #[serde(default)]
@@ -1761,8 +1766,33 @@ mod tests {
         assert!(capabilities.web_search);
         assert!(capabilities.file_access);
         assert!(capabilities.code_execution);
-        assert!(!capabilities.computer_use);
-        assert!(!capabilities.create_agents);
+        assert!(capabilities.delegation);
+        assert!(capabilities.automation);
+        assert!(capabilities.shared_memory);
+        assert!(capabilities.skills_write);
+        assert!(capabilities.create_agents);
+        assert!(capabilities.computer_use);
+        assert!(capabilities.screen_capture);
+        assert!(capabilities.browser_use);
+        assert!(capabilities.docker_execution);
+        assert_eq!(capabilities.skills, None);
+        assert_eq!(capabilities.tools, None);
+        assert_eq!(capabilities.mcp_servers, None);
+    }
+
+    #[test]
+    fn agent_input_defaults_to_autonomous_permissions_and_basic_actions() {
+        let input: AgentInput = serde_json::from_value(serde_json::json!({
+            "name": "Nova",
+            "providerId": "opencode-go",
+            "modelId": "deepseek-v4.1-flash"
+        }))
+        .expect("minimal agent input");
+        assert_eq!(input.permission_mode, PermissionMode::Autonomous);
+        assert_eq!(input.capabilities, AgentCapabilities::default());
+        assert_eq!(input.workspace_id, None);
+        assert_eq!(input.docker_image, None);
+        assert_eq!(input.computer_environment, "auto");
     }
 
     #[test]
@@ -1832,6 +1862,7 @@ mod tests {
     #[test]
     fn agent_layout_tools_are_gated_by_automation() {
         let mut value = agent("");
+        value.capabilities.automation = false;
         let allowed = crate::harness::code_agent_allowed_tools(&value, &[]);
         assert!(allowed.iter().any(|name| name == "agent_directory"));
         assert!(allowed.iter().any(|name| name == "agent_usage"));
@@ -1888,6 +1919,7 @@ mod tests {
     #[test]
     fn channel_leader_tool_catalog_grants_delegate_task_without_task_wait() {
         let mut leader = agent("");
+        leader.capabilities.delegation = false;
         let mut allowed = crate::harness::code_agent_allowed_tools(&leader, &[]);
         assert!(!allowed.iter().any(|name| name == "delegate_task"));
         assert!(allowed.iter().any(|name| name == "task_wait"));

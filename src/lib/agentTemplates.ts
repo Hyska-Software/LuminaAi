@@ -1,7 +1,9 @@
 import type { AgentAvatar, AgentCapabilities } from './types';
+import { DEFAULT_AGENT_CAPABILITIES } from './agentDefaults';
 
 /** A curated starting point for the Agentes layout. Templates are local,
- * versioned with the app and never grant permissions the user did not choose. */
+ * versioned with the app and never grant capabilities beyond the factory
+ * defaults: a template can only restrict them. */
 export interface AgentTemplate {
   id: string;
   name: string;
@@ -14,15 +16,6 @@ export interface AgentTemplate {
   capabilities?: Partial<AgentCapabilities>;
   memoryEnabled?: boolean;
 }
-
-const DEFAULT_CAPABILITIES: AgentCapabilities = {
-  webSearch: true,
-  fileAccess: true,
-  codeExecution: true,
-  skills: null,
-  tools: null,
-  mcpServers: null,
-};
 
 export const AGENT_TEMPLATES: AgentTemplate[] = [
   {
@@ -116,5 +109,5 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
 ];
 
 export function templateCapabilities(template: AgentTemplate): AgentCapabilities {
-  return { ...DEFAULT_CAPABILITIES, ...template.capabilities };
+  return { ...DEFAULT_AGENT_CAPABILITIES, ...template.capabilities };
 }
