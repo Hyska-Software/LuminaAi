@@ -3,48 +3,28 @@ import {
   CalendarClock,
   ChevronRight,
   Loader2,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
   ScrollText,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import type { AgentPanelContext } from './AgentPanel';
-import { AgentRoutinesDialog } from './AgentRoutinesDialog';
+import { AgentRoutineEditorDialog } from './AgentRoutineEditorDialog';
+import { relativeTime } from './agentUtils';
 import { Badge, Button, Switch } from '@/components/ui';
 import { api } from '@/lib/api';
+import {
+  ROUTINE_STATUS_META,
+  routineLastRunLabel,
+  routineNextRunLabel,
+  routineScheduleLabel,
+} from '@/lib/routineCalendar';
 import type { AgentRoutine, AgentRoutineRun } from '@/lib/types';
 import { cn } from '@/lib/utils';
-
-function scheduleLabel(routine: AgentRoutine): string {
-  if (routine.scheduleKind === 'daily') {
-    return `Todos os dias às ${String(routine.hour).padStart(2, '0')}:${String(routine.minute).padStart(2, '0')}`;
-  }
-  if (routine.intervalMinutes % 60 === 0) return `A cada ${routine.intervalMinutes / 60} h`;
-  return `A cada ${routine.intervalMinutes} min`;
-}
-
-function relative(timestamp: number | null): string {
-  if (!timestamp) return 'Ainda não executada';
-  const delta = timestamp - Date.now();
-  const future = delta > 0;
-  const minutes = Math.max(1, Math.round(Math.abs(delta) / 60_000));
-  const value =
-    minutes < 60
-      ? `${minutes} min`
-      : minutes < 1440
-        ? `${Math.round(minutes / 60)} h`
-        : `${Math.round(minutes / 1440)} d`;
-  return future ? `Em ${value}` : `Há ${value}`;
-}
-
-const STATUS_LABELS: Record<string, { label: string; tone: 'neutral' | 'success' | 'warning' | 'danger' }> = {
-  ok: { label: 'Concluída', tone: 'success' },
-  error: { label: 'Erro', tone: 'danger' },
-  blocked: { label: 'Bloqueada', tone: 'warning' },
-  running: { label: 'Executando', tone: 'warning' },
-};
 
 /** Routine list, quick actions and execution log links for one agent. */
 export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) {
@@ -53,7 +33,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editor, setEditor] = useState<{ routine: AgentRoutine | null } | null>(null);
   const [logsOpen, setLogsOpen] = useState(false);
   const [runs, setRuns] = useState<Array<{ run: AgentRoutineRun; routine: AgentRoutine }>>([]);
   const [runsLoading, setRunsLoading] = useState(false);
@@ -108,6 +88,24 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
     }
   };
 
+  const remove = async (routine: AgentRoutine) => {
+    // eslint-disable-next-line no-alert -- destructive action needs a native confirmation here
+    if (!window.confirm(`Excluir a rotina “${routine.title}”? A conversa dela é preservada.`)) {
+      return;
+    }
+    setBusyId(routine.id);
+    try {
+      await api.deleteAgentRoutine(routine.id);
+      setRoutines((current) => current.filter((entry) => entry.id !== routine.id));
+      if (editor?.routine?.id === routine.id) setEditor(null);
+      toast.success('Rotina excluída');
+    } catch (caught) {
+      toast.error('Não foi possível excluir a rotina', { description: String(caught) });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const loadRuns = useCallback(async () => {
     setRunsLoading(true);
     try {
@@ -132,6 +130,16 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
     if (!logsOpen) return;
     void loadRuns();
   }, [logsOpen, loadRuns]);
+
+  const handleSaved = (saved: AgentRoutine) => {
+    setRoutines((current) => {
+      const exists = current.some((routine) => routine.id === saved.id);
+      return exists
+        ? current.map((routine) => (routine.id === saved.id ? saved : routine))
+        : [...current, saved];
+    });
+    setEditor(null);
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -162,9 +170,9 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
             </Button>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => setDialogOpen(true)}>
+            <Button size="sm" onClick={() => setEditor({ routine: null })}>
               <Plus className="mr-1.5 size-3.5" />
-              Criar agendamento
+              Nova rotina
             </Button>
             <Button
               size="sm"
@@ -198,14 +206,12 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
               </p>
             ) : (
               runs.map(({ run, routine }) => {
-                const meta = STATUS_LABELS[run.status] ?? null;
+                const meta = ROUTINE_STATUS_META[run.status] ?? null;
                 return (
                   <button
                     key={run.id}
                     type="button"
-                    onClick={() =>
-                      run.conversationId && openThread(run.conversationId)
-                    }
+                    onClick={() => run.conversationId && openThread(run.conversationId)}
                     className="flex items-center gap-2 rounded-lg border border-border bg-surface-raised px-2.5 py-2 text-left hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                   >
                     <ScrollText className="size-3.5 shrink-0 text-foreground-muted" />
@@ -214,7 +220,8 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                         {routine.title}
                       </span>
                       <span className="block truncate text-[10px] text-foreground-muted">
-                        {relative(run.startedAt)} · {run.error ?? scheduleLabel(routine)}
+                        {relativeTime(run.startedAt)} ·{' '}
+                        {run.error ?? routineScheduleLabel(routine)}
                       </span>
                     </span>
                     {meta ? <Badge tone={meta.tone}>{meta.label}</Badge> : null}
@@ -238,7 +245,9 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
             </p>
           ) : (
             routines.map((routine) => {
-              const meta = STATUS_LABELS[routine.lastStatus ?? ''] ?? null;
+              const meta = routine.lastStatus
+                ? ROUTINE_STATUS_META[routine.lastStatus] ?? null
+                : null;
               return (
                 <article
                   key={routine.id}
@@ -253,11 +262,11 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                         {routine.title}
                       </p>
                       <p className="text-[11px] text-foreground-muted">
-                        {scheduleLabel(routine)}
+                        {routineScheduleLabel(routine)}
                       </p>
                       <p className="mt-0.5 text-[10px] text-foreground-subtle">
-                        {routine.enabled ? 'Ativa' : 'Pausada'} · {relative(routine.lastRunAt)} ·{' '}
-                        {relative(routine.nextRunAt)}
+                        {routine.enabled ? 'Ativa' : 'Pausada'} ·{' '}
+                        {routineLastRunLabel(routine)} · {routineNextRunLabel(routine)}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
@@ -284,6 +293,24 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                       )}
                       Executar agora
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busyId === routine.id}
+                      onClick={() => setEditor({ routine })}
+                    >
+                      <Pencil className="mr-1.5 size-3.5" />
+                      Editar
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busyId === routine.id}
+                      onClick={() => void remove(routine)}
+                    >
+                      <Trash2 className="mr-1.5 size-3.5" />
+                      Excluir
+                    </Button>
                     {routine.conversationId ? (
                       <Button
                         size="sm"
@@ -304,7 +331,14 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
           )}
         </section>
       </div>
-      <AgentRoutinesDialog agent={agent} open={dialogOpen} onOpenChange={setDialogOpen} />
+      <AgentRoutineEditorDialog
+        open={editor !== null}
+        onOpenChange={(open) => !open && setEditor(null)}
+        agents={[agent]}
+        initialAgentId={agent.id}
+        routine={editor?.routine ?? null}
+        onSaved={handleSaved}
+      />
     </div>
   );
 }

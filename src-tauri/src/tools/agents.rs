@@ -216,6 +216,8 @@ pub fn definitions(agent: &Agent) -> Vec<ToolDefinition> {
             name: "routine_create".to_string(),
             description: "Create a recurring routine owned by this agent. Schedules are \
                           `interval` (minutes, minimum 5) or `daily` (local hour/minute). \
+                          For `daily`, `daysOfWeek` selects weekdays (Monday=1, Tuesday=2, \
+                          Wednesday=4, Thursday=8, Friday=16, Saturday=32, Sunday=64; default 127). \
                           The routine runs unattended in its own thread."
                 .to_string(),
             parameters: json!({
@@ -227,6 +229,12 @@ pub fn definitions(agent: &Agent) -> Vec<ToolDefinition> {
                     "intervalMinutes": { "type": "integer", "minimum": 5, "maximum": 10080 },
                     "hour": { "type": "integer", "minimum": 0, "maximum": 23 },
                     "minute": { "type": "integer", "minimum": 0, "maximum": 59 },
+                    "daysOfWeek": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 127,
+                        "description": "Bitmask for daily schedules: Monday=1, Tuesday=2, Wednesday=4, Thursday=8, Friday=16, Saturday=32, Sunday=64. Default 127."
+                    },
                     "enabled": { "type": "boolean" },
                     "triggerKind": { "type": "string", "enum": ["schedule", "event"] },
                     "eventKind": { "type": "string", "enum": ["channel.message", "task.status"] },
@@ -239,7 +247,8 @@ pub fn definitions(agent: &Agent) -> Vec<ToolDefinition> {
         tools.push(ToolDefinition {
             name: "routine_update".to_string(),
             description: "Update a routine owned by this agent. Omitted fields keep their \
-                          current value."
+                          current value. `daysOfWeek` is a Monday-first bitmask for `daily` \
+                          schedules (Monday=1 … Sunday=64)."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -251,6 +260,12 @@ pub fn definitions(agent: &Agent) -> Vec<ToolDefinition> {
                     "intervalMinutes": { "type": "integer", "minimum": 5, "maximum": 10080 },
                     "hour": { "type": "integer", "minimum": 0, "maximum": 23 },
                     "minute": { "type": "integer", "minimum": 0, "maximum": 59 },
+                    "daysOfWeek": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 127,
+                        "description": "Bitmask for daily schedules: Monday=1, Tuesday=2, Wednesday=4, Thursday=8, Friday=16, Saturday=32, Sunday=64. Default 127."
+                    },
                     "enabled": { "type": "boolean" },
                     "triggerKind": { "type": "string", "enum": ["schedule", "event"] },
                     "eventKind": { "type": "string", "enum": ["channel.message", "task.status"] },
@@ -392,6 +407,12 @@ fn routine_input(args: &Value, current: Option<&crate::agents::AgentRoutine>) ->
         .map(|value| value as u32)
         .or_else(|| current.map(|routine| routine.minute))
         .unwrap_or(0);
+    let days_of_week = args
+        .get("daysOfWeek")
+        .and_then(Value::as_u64)
+        .map(|value| value as u32)
+        .or_else(|| current.map(|routine| routine.days_of_week))
+        .unwrap_or(crate::agents::AGENT_ROUTINE_ALL_DAYS);
     let enabled = args
         .get("enabled")
         .and_then(Value::as_bool)
@@ -413,6 +434,7 @@ fn routine_input(args: &Value, current: Option<&crate::agents::AgentRoutine>) ->
         interval_minutes,
         hour,
         minute,
+        days_of_week,
         enabled,
         trigger_kind,
         event_kind,
@@ -431,6 +453,7 @@ fn routine_json(routine: &crate::agents::AgentRoutine) -> Value {
         "intervalMinutes": routine.interval_minutes,
         "hour": routine.hour,
         "minute": routine.minute,
+        "daysOfWeek": routine.days_of_week,
         "enabled": routine.enabled,
         "conversationId": routine.conversation_id,
         "nextRunAt": routine.next_run_at,
@@ -1531,6 +1554,7 @@ mod tests {
                 "scheduleKind": "daily",
                 "hour": 9,
                 "minute": 0,
+                "daysOfWeek": 31,
                 "enabled": true,
             }),
             &Settings::default(),
@@ -1539,6 +1563,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&created.content).expect("json");
         let routine_id = value["id"].as_str().expect("id").to_string();
         assert_eq!(value["scheduleKind"], "daily");
+        assert_eq!(value["daysOfWeek"], 31);
 
         let listed = run(
             &db,
@@ -1572,6 +1597,59 @@ mod tests {
             .list_agent_routines(&second.id)
             .expect("routines")
             .is_empty());
+    }
+
+    #[test]
+    fn routine_tools_accept_days_of_week() {
+        let db = Db::open_in_memory().expect("db");
+        let owner = agent(&db, "Bia", true);
+        let created = run(
+            &db,
+            &owner.id,
+            "routine_create",
+            &json!({
+                "title": "Sexta",
+                "prompt": "Resuma a semana.",
+                "scheduleKind": "daily",
+                "hour": 18,
+                "minute": 0,
+                "daysOfWeek": 16,
+            }),
+            &Settings::default(),
+        );
+        assert!(!created.is_error, "{}", created.content);
+        let value: serde_json::Value = serde_json::from_str(&created.content).expect("json");
+        assert_eq!(value["daysOfWeek"], 16);
+        let routine_id = value["id"].as_str().expect("id").to_string();
+
+        let updated = run(
+            &db,
+            &owner.id,
+            "routine_update",
+            &json!({ "routineId": routine_id, "daysOfWeek": 96 }),
+            &Settings::default(),
+        );
+        assert!(!updated.is_error, "{}", updated.content);
+        let value: serde_json::Value = serde_json::from_str(&updated.content).expect("json");
+        assert_eq!(value["daysOfWeek"], 96);
+
+        let listed = run(
+            &db,
+            &owner.id,
+            "routine_list",
+            &json!({}),
+            &Settings::default(),
+        );
+        assert!(!listed.is_error, "{}", listed.content);
+        let routines: Vec<serde_json::Value> =
+            serde_json::from_str(&listed.content).expect("list json");
+        assert_eq!(
+            routines
+                .iter()
+                .find(|routine| routine["id"] == routine_id)
+                .expect("routine")["daysOfWeek"],
+            96
+        );
     }
 
     #[test]

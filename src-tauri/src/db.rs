@@ -55,7 +55,7 @@ const AGENT_TASK_COLUMNS: &str = "id, channel_id, parent_task_id, owner_agent_id
 const AGENT_ROUTINE_COLUMNS: &str = "id, agent_id, title, prompt, schedule_kind, \
      interval_minutes, hour, minute, enabled, conversation_id, next_run_at, last_run_at, \
      last_status, last_error, trigger_kind, event_kind, event_filter_json, lease_until, \
-     created_at, updated_at";
+     created_at, updated_at, days_of_week";
 
 const AGENT_INBOX_ITEM_COLUMNS: &str = "i.id, i.recipient_agent_id, i.sender_agent_id, \
      i.sender_user, i.channel_id, c.name, i.message_id, COALESCE(s.name, 'Usuário'), \
@@ -162,6 +162,7 @@ CREATE TABLE IF NOT EXISTS agent_routines (
   interval_minutes  INTEGER NOT NULL DEFAULT 60,
   hour              INTEGER NOT NULL DEFAULT 9,
   minute            INTEGER NOT NULL DEFAULT 0,
+  days_of_week      INTEGER NOT NULL DEFAULT 127,
   enabled           INTEGER NOT NULL DEFAULT 1,
   conversation_id   TEXT,
   next_run_at       INTEGER NOT NULL,
@@ -1304,6 +1305,10 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
             "lease_until",
             "ALTER TABLE agent_routines ADD COLUMN lease_until INTEGER",
         ),
+        (
+            "days_of_week",
+            "ALTER TABLE agent_routines ADD COLUMN days_of_week INTEGER NOT NULL DEFAULT 127",
+        ),
     ] {
         ensure_column(conn, "agent_routines", column, ddl)?;
     }
@@ -1863,6 +1868,7 @@ fn agent_routine_from_row(row: &Row<'_>) -> rusqlite::Result<AgentRoutine> {
         lease_until: row.get(17)?,
         created_at: row.get(18)?,
         updated_at: row.get(19)?,
+        days_of_week: row.get::<_, i64>(20)? as u32,
     })
 }
 
@@ -4497,6 +4503,16 @@ impl Db {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Every routine across agents, used by the central routines page.
+    pub fn list_all_agent_routines(&self) -> Result<Vec<AgentRoutine>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AGENT_ROUTINE_COLUMNS} FROM agent_routines ORDER BY created_at, id"
+        ))?;
+        let rows = stmt.query_map([], agent_routine_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub fn get_agent_routine(&self, id: &str) -> Result<Option<AgentRoutine>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(&format!(
@@ -4543,6 +4559,7 @@ impl Db {
                 input.interval_minutes,
                 input.hour,
                 input.minute,
+                input.days_of_week,
                 now,
             )
         };
@@ -4550,9 +4567,10 @@ impl Db {
             "INSERT INTO agent_routines \
              (id, agent_id, title, prompt, schedule_kind, interval_minutes, hour, minute, \
               enabled, conversation_id, next_run_at, last_run_at, last_status, last_error, \
-              trigger_kind, event_kind, event_filter_json, lease_until, created_at, updated_at) \
+              trigger_kind, event_kind, event_filter_json, lease_until, created_at, updated_at, \
+              days_of_week) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, NULL, NULL, NULL, \
-                     ?11, ?12, ?13, NULL, ?14, ?14)",
+                     ?11, ?12, ?13, NULL, ?14, ?14, ?15)",
             params![
                 id,
                 agent_id,
@@ -4568,6 +4586,7 @@ impl Db {
                 input.event_kind,
                 input.event_filter_json,
                 now,
+                input.days_of_week as i64,
             ],
         )
         .context("falha ao criar rotina do agente")?;
@@ -4590,6 +4609,7 @@ impl Db {
                 input.interval_minutes,
                 input.hour,
                 input.minute,
+                input.days_of_week,
                 now,
             )
         };
@@ -4597,8 +4617,8 @@ impl Db {
         let changed = conn.execute(
             "UPDATE agent_routines SET title = ?2, prompt = ?3, schedule_kind = ?4, \
              interval_minutes = ?5, hour = ?6, minute = ?7, enabled = ?8, next_run_at = ?9, \
-             trigger_kind = ?10, event_kind = ?11, event_filter_json = ?12, updated_at = ?13 \
-             WHERE id = ?1",
+             trigger_kind = ?10, event_kind = ?11, event_filter_json = ?12, updated_at = ?13, \
+             days_of_week = ?14 WHERE id = ?1",
             params![
                 id,
                 input.title,
@@ -4613,6 +4633,7 @@ impl Db {
                 input.event_kind,
                 input.event_filter_json,
                 now,
+                input.days_of_week as i64,
             ],
         )?;
         drop(conn);
@@ -4640,6 +4661,7 @@ impl Db {
                 routine.interval_minutes,
                 routine.hour,
                 routine.minute,
+                routine.days_of_week,
                 now,
             )
         };
@@ -7611,6 +7633,7 @@ mod tests {
             interval_minutes: 60,
             hour: 9,
             minute: 0,
+            days_of_week: crate::agents::AGENT_ROUTINE_ALL_DAYS,
             enabled: true,
             trigger_kind: "schedule".to_string(),
             event_kind: String::new(),
@@ -7632,10 +7655,12 @@ mod tests {
 
         let mut edit = input.clone();
         edit.title = "Resumo diário".to_string();
+        edit.days_of_week = 31;
         let updated = db
             .update_agent_routine(&routine.id, &edit, now)
             .expect("update");
         assert_eq!(updated.title, "Resumo diário");
+        assert_eq!(updated.days_of_week, 31);
         let disabled = db
             .set_agent_routine_enabled(&routine.id, false, now)
             .expect("disable");
@@ -7648,6 +7673,38 @@ mod tests {
         );
         db.delete_agent_routine(&routine.id).expect("delete");
         assert!(db.list_agent_routines(&agent.id).expect("list").is_empty());
+    }
+
+    #[test]
+    fn list_all_agent_routines_across_agents() {
+        let db = test_db();
+        let first = db.create_agent(&agent_input("Ana")).expect("agent");
+        let second = db.create_agent(&agent_input("Bia")).expect("agent");
+        let input = |title: &str| crate::agents::AgentRoutineInput {
+            title: title.to_string(),
+            prompt: "Resuma o dia.".to_string(),
+            schedule_kind: "interval".to_string(),
+            interval_minutes: 60,
+            hour: 9,
+            minute: 0,
+            days_of_week: crate::agents::AGENT_ROUTINE_ALL_DAYS,
+            enabled: true,
+            trigger_kind: "schedule".to_string(),
+            event_kind: String::new(),
+            event_filter_json: "{}".to_string(),
+        };
+        let first_routine = db
+            .create_agent_routine(&first.id, &input("Primeira"), now_ms())
+            .expect("first routine");
+        let second_routine = db
+            .create_agent_routine(&second.id, &input("Segunda"), now_ms() + 1)
+            .expect("second routine");
+
+        let all = db.list_all_agent_routines().expect("all routines");
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].id, first_routine.id);
+        assert_eq!(all[1].id, second_routine.id);
+        assert_eq!(all[0].days_of_week, crate::agents::AGENT_ROUTINE_ALL_DAYS);
     }
 
     #[test]
@@ -7791,6 +7848,7 @@ mod tests {
                     interval_minutes: 60,
                     hour: 9,
                     minute: 0,
+                    days_of_week: crate::agents::AGENT_ROUTINE_ALL_DAYS,
                     enabled: true,
                     trigger_kind: "event".to_string(),
                     event_kind: "channel.message".to_string(),
@@ -8318,6 +8376,7 @@ mod tests {
                     interval_minutes: 15,
                     hour: 9,
                     minute: 0,
+                    days_of_week: crate::agents::AGENT_ROUTINE_ALL_DAYS,
                     enabled: true,
                     trigger_kind: "schedule".to_string(),
                     event_kind: String::new(),

@@ -145,6 +145,7 @@ beforeEach(() => {
     activeAgentId: 'agent-1',
     activeChannelId: null,
     agentView: 'team',
+    agentRoutinesAgentId: null,
     agentEditor: null,
   });
 });
@@ -239,6 +240,31 @@ describe('AgentSidebar — channels', () => {
     render(<AgentSidebar />);
     fireEvent.click(await screen.findByRole('button', { name: 'Equipe' }));
     expect(useUiStore.getState().agentView).toBe('team');
+  });
+});
+
+describe('AgentSidebar — routines entry', () => {
+  it('opens the routines page from the footer', async () => {
+    useUiStore.setState({ activeAgentId: null, activeChannelId: null, agentView: 'team' });
+    render(<AgentSidebar />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Rotinas' }));
+
+    const state = useUiStore.getState();
+    expect(state.agentView).toBe('routines');
+    expect(state.agentRoutinesAgentId).toBeNull();
+  });
+
+  it('opens the routines page filtered by the agent menu', async () => {
+    render(<AgentSidebar />);
+
+    openMenu(await screen.findByRole('button', { name: 'Opções de Irineu' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rotinas' }));
+
+    const state = useUiStore.getState();
+    expect(state.agentView).toBe('routines');
+    expect(state.agentRoutinesAgentId).toBe('agent-1');
+    expect(state.activeAgentId).toBeNull();
   });
 });
 

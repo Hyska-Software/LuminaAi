@@ -1235,6 +1235,8 @@ export interface AgentRoutine {
   intervalMinutes: number;
   hour: number;
   minute: number;
+  /** Bitmask: Monday=1 … Sunday=64; 127 = every day. Used by daily routines. */
+  daysOfWeek: number;
   enabled: boolean;
   conversationId: string | null;
   nextRunAt: number;
@@ -1256,6 +1258,8 @@ export interface AgentRoutineInput {
   intervalMinutes: number;
   hour: number;
   minute: number;
+  /** Bitmask: Monday=1 … Sunday=64; 127 = every day. Used by daily routines. */
+  daysOfWeek: number;
   enabled: boolean;
   triggerKind: 'schedule' | 'event';
   eventKind: 'channel.message' | 'task.status' | '';

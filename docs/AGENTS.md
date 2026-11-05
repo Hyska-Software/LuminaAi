@@ -259,7 +259,16 @@ com erro — o fallback é de rota, não um retry infinito.
 
 ## 7. Rotinas
 
-- CRUD em `AgentRoutinesDialog` (menu do agente → Rotinas).
+- Página central `AgentRoutinesView` (rodapé da sidebar → **Rotinas** e menu do
+  agente → **Rotinas**): calendário **Dia/Semana/Mês** com a agenda prevista
+  (passado e futuro), filtro por agente, **Hoje**, seletor de mês/ano e a lista
+  **Todas as rotinas**. O menu do agente abre a página já filtrada por ele.
+- CRUD no `AgentRoutineEditorDialog` compartilhado (página, aba **Rotinas** do
+  painel direito e editor do painel); excluir preserva a conversa da rotina.
+  **Execuções** lista `agent_routine_runs` em diálogo próprio.
+- `list_all_agent_routines` alimenta a página; a lista é recarregada no mount,
+  no evento `lumina:agent-routine-run`, no foco da janela e no botão de
+  recarregar.
 - Com a capability `automation`, o próprio agente pode listar, criar, editar e
   excluir rotinas pelas tools `routine_*`; cada agente tem no máximo 50 rotinas
   e só acessa as próprias.
@@ -268,6 +277,9 @@ com erro — o fallback é de rota, não um retry infinito.
 - Cada rotina executa um turno normal na sua thread dedicada, com o modelo,
   instruções, memória e workspace do agente. O resultado aparece na thread.
 - Frequência: intervalo mínimo de 5 min (máx. 7 dias) ou horário diário local.
+  Rotinas diárias têm `days_of_week` (bitmask segunda=1 … domingo=64; padrão
+  127 = todos os dias); intervalos são contínuos. As tools `routine_create`/
+  `routine_update` aceitam `daysOfWeek`.
 - Status/erro ficam na rotina; o evento `lumina:agent-routine-run` atualiza a
   lista de conversas e mostra um toast.
 - Cada execução grava uma linha em `agent_routine_runs` (status, início/fim,

@@ -20,7 +20,6 @@ import { toast } from 'sonner';
 
 import type { AgentPanelContext } from './AgentPanel';
 import { inputFromAgent } from './agentUtils';
-import { AgentRoutinesDialog } from './AgentRoutinesDialog';
 import { ComputerDockerHelp, isComputerDockerError } from './ComputerDockerHelp';
 import { PrivateDesktopViewer } from './PrivateDesktopViewer';
 import { ComputerActivity } from './ComputerActivity';
@@ -94,6 +93,7 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
   const startNewConversation = useChatStore((state) => state.startNewConversation);
   const turnActive = useChatStore((state) => Boolean(conversationId && state.streamsByConversation[conversationId]));
   const openSettings = useUiStore((state) => state.openSettings);
+  const setAgentPanelTab = useUiStore((state) => state.setAgentPanelTab);
   const [preview, setPreview] = useState<ComputerPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -101,7 +101,6 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
   const [environmentBusy, setEnvironmentBusy] = useState(false);
   const [controlBusy, setControlBusy] = useState(false);
   const [routineCount, setRoutineCount] = useState(0);
-  const [routinesOpen, setRoutinesOpen] = useState(false);
   const [localExpanded, setLocalExpanded] = useState(false);
   const [clock, setClock] = useState(Date.now());
   const loadingRef = useRef(false);
@@ -525,7 +524,7 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
         <section aria-labelledby="agent-routines-summary" className="rounded-xl border border-border bg-surface-raised/40 p-3">
           <button
             type="button"
-            onClick={() => setRoutinesOpen(true)}
+            onClick={() => setAgentPanelTab('routines')}
             className="flex w-full items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             <CalendarClock className="size-4 shrink-0 text-accent" />
@@ -541,11 +540,6 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
           </button>
         </section>
       </div>
-      <AgentRoutinesDialog
-        agent={agent}
-        open={routinesOpen}
-        onOpenChange={setRoutinesOpen}
-      />
     </div>
   );
 }

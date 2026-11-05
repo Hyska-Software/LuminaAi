@@ -66,6 +66,8 @@ pub const AGENT_ROUTINE_MAX_INTERVAL_MINUTES: i64 = 7 * 24 * 60;
 pub const AGENT_ROUTINE_MAX_PROMPT_CHARS: usize = 8 * 1024;
 /// Maximum number of routines one agent may own.
 pub const AGENT_ROUTINE_MAX_PER_AGENT: i64 = 50;
+/// Bitmask with every weekday selected (Monday=1 … Sunday=64).
+pub const AGENT_ROUTINE_ALL_DAYS: u32 = 0x7f;
 
 /// A scheduled instruction that runs in the agent's dedicated routine thread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +83,8 @@ pub struct AgentRoutine {
     /// Daily schedule (local time).
     pub hour: u32,
     pub minute: u32,
+    /// Weekday bitmask for daily schedules (Monday=1 … Sunday=64; 127 = all).
+    pub days_of_week: u32,
     pub enabled: bool,
     /// Thread created on the first run; every run appends there.
     pub conversation_id: Option<String>,
@@ -125,6 +129,8 @@ pub struct AgentRoutineInput {
     pub hour: u32,
     #[serde(default)]
     pub minute: u32,
+    #[serde(default = "default_days_of_week")]
+    pub days_of_week: u32,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default)]
@@ -137,6 +143,10 @@ pub struct AgentRoutineInput {
 
 fn default_daily_hour() -> u32 {
     9
+}
+
+fn default_days_of_week() -> u32 {
+    AGENT_ROUTINE_ALL_DAYS
 }
 
 fn default_enabled() -> bool {
@@ -168,6 +178,14 @@ impl AgentRoutineInput {
             _ => "schedule",
         }
         .to_string();
+        if self.days_of_week == 0 || self.days_of_week > AGENT_ROUTINE_ALL_DAYS {
+            if self.trigger_kind == "schedule" && self.schedule_kind == "daily" {
+                return Err(
+                    "AGENT_ROUTINE_INVALID: escolha ao menos um dia da semana.".to_string(),
+                );
+            }
+            self.days_of_week = AGENT_ROUTINE_ALL_DAYS;
+        }
         if self.trigger_kind == "event" {
             self.event_kind = self.event_kind.trim().to_ascii_lowercase();
             if !matches!(self.event_kind.as_str(), "channel.message" | "task.status") {
@@ -210,28 +228,41 @@ impl AgentRoutineInput {
     }
 }
 
-/// Next due timestamp for a schedule. `now` is unix ms.
+/// Next due timestamp for a schedule. `now` is unix ms. `days_of_week` is a
+/// Monday-first bitmask; it only filters `daily` schedules.
 pub fn routine_next_run_at(
     schedule_kind: &str,
     interval_minutes: i64,
     hour: u32,
     minute: u32,
+    days_of_week: u32,
     now: i64,
 ) -> i64 {
     if schedule_kind == "daily" {
-        use chrono::{Local, TimeZone};
+        use chrono::{Datelike, Local, TimeZone};
+        let mask = {
+            let masked = days_of_week & AGENT_ROUTINE_ALL_DAYS;
+            if masked == 0 {
+                AGENT_ROUTINE_ALL_DAYS
+            } else {
+                masked
+            }
+        };
         let now_dt = Local
             .timestamp_millis_opt(now)
             .single()
             .unwrap_or_else(Local::now);
         let mut date = now_dt.date_naive();
-        for _ in 0..3 {
-            let Some(naive) = date.and_hms_opt(hour.min(23), minute.min(59), 0) else {
-                break;
-            };
-            if let Some(next) = Local.from_local_datetime(&naive).earliest() {
-                if next.timestamp_millis() > now {
-                    return next.timestamp_millis();
+        for _ in 0..8 {
+            let weekday_enabled = mask & (1u32 << date.weekday().num_days_from_monday()) != 0;
+            if weekday_enabled {
+                let Some(naive) = date.and_hms_opt(hour.min(23), minute.min(59), 0) else {
+                    break;
+                };
+                if let Some(next) = Local.from_local_datetime(&naive).earliest() {
+                    if next.timestamp_millis() > now {
+                        return next.timestamp_millis();
+                    }
                 }
             }
             let Some(next_date) = date.succ_opt() else {
@@ -1816,11 +1847,11 @@ mod tests {
     #[test]
     fn routine_schedule_is_clamped_and_computed() {
         let now = 1_700_000_000_000i64;
-        let next = routine_next_run_at("interval", 1, 0, 0, now);
+        let next = routine_next_run_at("interval", 1, 0, 0, AGENT_ROUTINE_ALL_DAYS, now);
         assert_eq!(next, now + AGENT_ROUTINE_MIN_INTERVAL_MINUTES * 60_000);
-        let next = routine_next_run_at("interval", 999_999, 0, 0, now);
+        let next = routine_next_run_at("interval", 999_999, 0, 0, AGENT_ROUTINE_ALL_DAYS, now);
         assert_eq!(next, now + AGENT_ROUTINE_MAX_INTERVAL_MINUTES * 60_000);
-        let daily = routine_next_run_at("daily", 0, 9, 30, now);
+        let daily = routine_next_run_at("daily", 0, 9, 30, AGENT_ROUTINE_ALL_DAYS, now);
         assert!(daily > now);
         assert!(daily - now <= 24 * 60 * 60 * 1000);
 
@@ -1831,6 +1862,7 @@ mod tests {
             interval_minutes: 1,
             hour: 9,
             minute: 0,
+            days_of_week: AGENT_ROUTINE_ALL_DAYS,
             enabled: true,
             trigger_kind: "schedule".to_string(),
             event_kind: String::new(),
@@ -1841,6 +1873,71 @@ mod tests {
         input.schedule_kind = "daily".to_string();
         input.hour = 25;
         assert!(input.normalize().is_err());
+    }
+
+    #[test]
+    fn routine_weekdays_control_daily_next_run() {
+        use chrono::{Local, TimeZone};
+
+        let friday = |hour: u32, minute: u32| {
+            Local
+                .with_ymd_and_hms(2026, 11, 6, hour, minute, 0)
+                .single()
+                .expect("local friday")
+                .timestamp_millis()
+        };
+        let friday_9 = Local
+            .with_ymd_and_hms(2026, 11, 6, 9, 0, 0)
+            .single()
+            .expect("local friday")
+            .timestamp_millis();
+        let next_friday_9 = Local
+            .with_ymd_and_hms(2026, 11, 13, 9, 0, 0)
+            .single()
+            .expect("local friday")
+            .timestamp_millis();
+        let saturday_9 = Local
+            .with_ymd_and_hms(2026, 11, 7, 9, 0, 0)
+            .single()
+            .expect("local saturday")
+            .timestamp_millis();
+
+        // Friday only, before and after the scheduled time.
+        assert_eq!(
+            routine_next_run_at("daily", 0, 9, 0, 1 << 4, friday(8, 0)),
+            friday_9
+        );
+        assert_eq!(
+            routine_next_run_at("daily", 0, 9, 0, 1 << 4, friday(10, 0)),
+            next_friday_9
+        );
+        // Saturday only starts on the next day, not later the same Friday.
+        assert_eq!(
+            routine_next_run_at("daily", 0, 9, 0, 1 << 5, friday(10, 0)),
+            saturday_9
+        );
+        // Zero is treated as every day instead of never firing.
+        assert_eq!(
+            routine_next_run_at("daily", 0, 9, 0, 0, friday(10, 0)),
+            saturday_9
+        );
+
+        let mut weekly = AgentRoutineInput {
+            title: "Sexta".to_string(),
+            prompt: "Resumo semanal.".to_string(),
+            schedule_kind: "daily".to_string(),
+            interval_minutes: 0,
+            hour: 9,
+            minute: 0,
+            days_of_week: 0,
+            enabled: true,
+            trigger_kind: "schedule".to_string(),
+            event_kind: String::new(),
+            event_filter_json: "{}".to_string(),
+        };
+        assert!(weekly.clone().normalize().is_err());
+        weekly.days_of_week = 1 << 4;
+        assert_eq!(weekly.normalize().expect("valid").days_of_week, 1 << 4);
     }
 
     #[test]

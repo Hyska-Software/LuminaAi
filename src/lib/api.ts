@@ -236,6 +236,7 @@ export const api = {
     invoke<UsageStats>('get_usage_stats', { since }),
   listAgentRoutines: (agentId: string) =>
     invoke<AgentRoutine[]>('list_agent_routines', { agentId }),
+  listAllAgentRoutines: () => invoke<AgentRoutine[]>('list_all_agent_routines'),
   listAgentRoutineRuns: (routineId: string, limit?: number) =>
     invoke<AgentRoutineRun[]>('list_agent_routine_runs', {
       routineId,

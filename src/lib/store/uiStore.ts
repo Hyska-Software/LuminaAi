@@ -20,9 +20,9 @@ export type LayoutMode = 'chat' | 'code' | 'agent';
 
 /**
  * Center surface inside the Agentes layout when no agent/channel is selected.
- * Volatile: `stats` never survives an app restart.
+ * Volatile: `stats` and `routines` never survive an app restart.
  */
-export type AgentView = 'team' | 'stats';
+export type AgentView = 'team' | 'stats' | 'routines';
 
 /** Dialog de criação/edição de agente (volátil). */
 export type AgentEditorState =
@@ -190,6 +190,8 @@ interface UiState {
   activeChannelId: string | null;
   /** Centro do layout Agentes sem agente/canal selecionado (volátil). */
   agentView: AgentView;
+  /** Filter of the central routines page (`null` = all agents; volatile). */
+  agentRoutinesAgentId: string | null;
   /** Diálogo de criação/edição de agente (volátil). */
   agentEditor: AgentEditorState | null;
   /** Quick avatar editor: agent id or `null` (volatile). */
@@ -259,8 +261,11 @@ interface UiState {
   setLayoutMode: (mode: LayoutMode) => void;
   setActiveAgentId: (agentId: string | null) => void;
   setActiveChannelId: (channelId: string | null) => void;
-  /** Switches the Agentes center between the team page and usage stats. */
+  /** Switches the Agentes center between the team page, usage stats and routines. */
   setAgentView: (view: AgentView) => void;
+  /** Opens the central routines page with an optional agent filter. */
+  openAgentRoutines: (agentId: string | null) => void;
+  setAgentRoutinesAgentId: (agentId: string | null) => void;
   openAgentEditor: (target: AgentEditorState) => void;
   closeAgentEditor: () => void;
   openAgentAvatarEditor: (agentId: string) => void;
@@ -399,6 +404,7 @@ export const useUiStore = create<UiState>()(
       activeAgentId: null,
       activeChannelId: null,
       agentView: 'team',
+      agentRoutinesAgentId: null,
       agentEditor: null,
       agentAvatarEditor: null,
       codeView: 'session',
@@ -456,6 +462,9 @@ export const useUiStore = create<UiState>()(
           agentView: activeChannelId ? 'team' : state.agentView,
         })),
       setAgentView: (agentView) => set({ agentView }),
+      openAgentRoutines: (agentRoutinesAgentId) =>
+        set({ agentView: 'routines', agentRoutinesAgentId }),
+      setAgentRoutinesAgentId: (agentRoutinesAgentId) => set({ agentRoutinesAgentId }),
       openAgentEditor: (agentEditor) => set({ agentEditor }),
       closeAgentEditor: () => set({ agentEditor: null }),
       openAgentAvatarEditor: (agentAvatarEditor) => set({ agentAvatarEditor }),

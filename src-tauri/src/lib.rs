@@ -224,6 +224,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::agents::suggest_agent,
             commands::agents::revise_agent,
             commands::routines::list_agent_routines,
+            commands::routines::list_all_agent_routines,
             commands::routines::list_agent_routine_runs,
             commands::routines::create_agent_routine,
             commands::routines::update_agent_routine,

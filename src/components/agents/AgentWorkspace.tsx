@@ -6,6 +6,7 @@ import { AgentChannelView } from './AgentChannelView';
 import { AgentEditorDialog } from './AgentEditorDialog';
 import { AgentHome, AgentWelcome } from './AgentHome';
 import { AgentPanelOpener } from './AgentPanelToggle';
+import { AgentRoutinesView } from './AgentRoutinesView';
 import { AgentStatsView } from './AgentStatsView';
 import { AgentThreadHeader } from './AgentThreadHeader';
 import { TeamView } from './TeamView';
@@ -211,7 +212,13 @@ export function AgentWorkspace() {
   if (!agent) {
     return (
       <>
-        {agentView === 'stats' ? <AgentStatsView /> : <TeamView />}
+        {agentView === 'stats' ? (
+          <AgentStatsView />
+        ) : agentView === 'routines' ? (
+          <AgentRoutinesView />
+        ) : (
+          <TeamView />
+        )}
         <AgentEditorDialog />
       </>
     );

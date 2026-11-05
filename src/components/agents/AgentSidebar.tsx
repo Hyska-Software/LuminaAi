@@ -45,7 +45,6 @@ import { AgentActivityDialog } from './AgentActivityDialog';
 import { AgentChannelDialog } from './AgentChannelDialog';
 import { AgentDialogBody } from './AgentDialogBody';
 import { AgentRevisionDialog } from './AgentRevisionDialog';
-import { AgentRoutinesDialog } from './AgentRoutinesDialog';
 import { AgentTaskBoardDialog } from './AgentTaskBoardDialog';
 import { AgentTasksDialog } from './AgentTasksDialog';
 import { relativeTime } from './agentUtils';
@@ -584,7 +583,6 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
   const [allThreadsAgent, setAllThreadsAgent] = useState<Agent | null>(null);
-  const [routinesAgent, setRoutinesAgent] = useState<Agent | null>(null);
   const [revisionAgent, setRevisionAgent] = useState<Agent | null>(null);
   const [tasksAgent, setTasksAgent] = useState<Agent | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
@@ -622,13 +620,23 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const activeChannelId = useUiStore((state) => state.activeChannelId);
   const setActiveAgentId = useUiStore((state) => state.setActiveAgentId);
   const setActiveChannelId = useUiStore((state) => state.setActiveChannelId);
+  const agentView = useUiStore((state) => state.agentView);
   const setAgentView = useUiStore((state) => state.setAgentView);
+  const openAgentRoutines = useUiStore((state) => state.openAgentRoutines);
   const openEditor = useUiStore((state) => state.openAgentEditor);
   const openAvatarEditor = useUiStore((state) => state.openAgentAvatarEditor);
   const openSettings = useUiStore((state) => state.openSettings);
   const startNewConversation = useChatStore((state) => state.startNewConversation);
   const clearActiveConversation = useChatStore((state) => state.clearActiveConversation);
   const openConversation = useChatStore((state) => state.openConversation);
+
+  const openRoutines = (agentId: string | null) => {
+    setActiveAgentId(null);
+    setActiveChannelId(null);
+    clearActiveConversation();
+    openAgentRoutines(agentId);
+    onClose?.();
+  };
 
   useEffect(() => {
     if (activeAgentId) {
@@ -1139,7 +1147,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                       onDeleteThread={setDeleteThreadTarget}
                       onStopThread={stopThread}
                       onShowAllThreads={() => setAllThreadsAgent(agent)}
-                      onRoutines={() => setRoutinesAgent(agent)}
+                      onRoutines={() => openRoutines(agent.id)}
                       onTasks={() => setTasksAgent(agent)}
                     />
                   ))}
@@ -1199,7 +1207,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
                       onDeleteThread={setDeleteThreadTarget}
                       onStopThread={stopThread}
                       onShowAllThreads={() => setAllThreadsAgent(agent)}
-                      onRoutines={() => setRoutinesAgent(agent)}
+                      onRoutines={() => openRoutines(agent.id)}
                       onTasks={() => setTasksAgent(agent)}
                     />
                   ))}
@@ -1229,17 +1237,40 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
             clearActiveConversation();
             onClose?.();
           }}
-          aria-current={activeAgentId === null && activeChannelId === null ? 'page' : undefined}
+          aria-current={
+            activeAgentId === null && activeChannelId === null && agentView !== 'routines'
+              ? 'page'
+              : undefined
+          }
           className={cn(
             'flex h-8 w-full items-center gap-2 rounded-lg px-2 text-[12px]',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-            activeAgentId === null && activeChannelId === null
+            activeAgentId === null && activeChannelId === null && agentView !== 'routines'
               ? 'bg-surface-active text-foreground'
               : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
           )}
         >
           <Users className="size-3.5" />
           Equipe
+        </button>
+        <button
+          type="button"
+          onClick={() => openRoutines(null)}
+          aria-current={
+            activeAgentId === null && activeChannelId === null && agentView === 'routines'
+              ? 'page'
+              : undefined
+          }
+          className={cn(
+            'flex h-8 w-full items-center gap-2 rounded-lg px-2 text-[12px]',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+            activeAgentId === null && activeChannelId === null && agentView === 'routines'
+              ? 'bg-surface-active text-foreground'
+              : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+          )}
+        >
+          <CalendarClock className="size-3.5" />
+          Rotinas
         </button>
         <button
           type="button"
@@ -1350,12 +1381,6 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <AgentRoutinesDialog
-        agent={routinesAgent}
-        open={routinesAgent !== null}
-        onOpenChange={(open) => !open && setRoutinesAgent(null)}
-      />
 
       <AgentRevisionDialog
         agent={revisionAgent}

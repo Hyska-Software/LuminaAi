@@ -50,6 +50,14 @@ pub fn list_agent_routines(
     state.db.list_agent_routines(&agent_id).map_err(to_error)
 }
 
+/// Every routine across agents, for the central routines page.
+#[tauri::command]
+pub fn list_all_agent_routines(
+    state: State<'_, AppState>,
+) -> Result<Vec<AgentRoutine>, String> {
+    state.db.list_all_agent_routines().map_err(to_error)
+}
+
 #[tauri::command]
 pub fn create_agent_routine(
     state: State<'_, AppState>,
@@ -252,6 +260,7 @@ async fn execute_routine_inner(
                 routine.interval_minutes,
                 routine.hour,
                 routine.minute,
+                routine.days_of_week,
                 now_ms(),
             )
         };
@@ -349,6 +358,7 @@ async fn execute_routine_inner(
             routine.interval_minutes,
             routine.hour,
             routine.minute,
+            routine.days_of_week,
             now_ms(),
         )
     };
@@ -450,6 +460,7 @@ async fn execute_routine_inner(
             routine.interval_minutes,
             routine.hour,
             routine.minute,
+            routine.days_of_week,
             now_ms(),
         );
     }
