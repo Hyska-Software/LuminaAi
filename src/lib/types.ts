@@ -1196,6 +1196,36 @@ export interface AgentUsage {
   lastUsedAt: number | null;
 }
 
+export interface UsageStatsTotals {
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  cost: number;
+  lastUsedAt: number | null;
+}
+
+export interface ModelUsageStats {
+  providerId: string;
+  modelId: string;
+  turns: number;
+  totalTokens: number;
+  cost: number;
+}
+
+export interface DailyUsageStats {
+  /** Local day in `YYYY-MM-DD`. */
+  day: string;
+  totalTokens: number;
+}
+
+export interface UsageStats {
+  totals: UsageStatsTotals;
+  byModel: ModelUsageStats[];
+  byDay: DailyUsageStats[];
+}
+
 export interface AgentRoutine {
   id: string;
   agentId: string;

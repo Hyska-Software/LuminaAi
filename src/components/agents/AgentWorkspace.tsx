@@ -6,6 +6,7 @@ import { AgentChannelView } from './AgentChannelView';
 import { AgentEditorDialog } from './AgentEditorDialog';
 import { AgentHome, AgentWelcome } from './AgentHome';
 import { AgentPanelOpener } from './AgentPanelToggle';
+import { AgentStatsView } from './AgentStatsView';
 import { AgentThreadHeader } from './AgentThreadHeader';
 import { TeamView } from './TeamView';
 import { ChatView } from '@/components/chat/ChatView';
@@ -130,6 +131,7 @@ function AgentCodeViewHeader({ title, onBack }: { title: string; onBack: () => v
 export function AgentWorkspace() {
   const activeAgentId = useUiStore((state) => state.activeAgentId);
   const activeChannelId = useUiStore((state) => state.activeChannelId);
+  const agentView = useUiStore((state) => state.agentView);
   const setActiveChannelId = useUiStore((state) => state.setActiveChannelId);
   const [editingChannel, setEditingChannel] = useState<AgentChannel | null>(null);
   const [channelRevision, setChannelRevision] = useState(0);
@@ -209,7 +211,7 @@ export function AgentWorkspace() {
   if (!agent) {
     return (
       <>
-        <TeamView />
+        {agentView === 'stats' ? <AgentStatsView /> : <TeamView />}
         <AgentEditorDialog />
       </>
     );

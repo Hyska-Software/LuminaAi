@@ -144,6 +144,7 @@ beforeEach(() => {
     layoutMode: 'agent',
     activeAgentId: 'agent-1',
     activeChannelId: null,
+    agentView: 'team',
     agentEditor: null,
   });
 });
@@ -231,6 +232,13 @@ describe('AgentSidebar — channels', () => {
     fireEvent.click(rows[0]);
     expect(useUiStore.getState().activeChannelId).toBe('channel-1');
     expect(useUiStore.getState().activeAgentId).toBeNull();
+  });
+
+  it('returns to the team page when Equipe is clicked', async () => {
+    useUiStore.setState({ agentView: 'stats' });
+    render(<AgentSidebar />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Equipe' }));
+    expect(useUiStore.getState().agentView).toBe('team');
   });
 });
 

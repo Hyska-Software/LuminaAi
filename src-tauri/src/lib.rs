@@ -217,6 +217,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::agents::delete_shared_agent_memory,
             commands::agents::get_agent_usage,
             commands::agents::list_agent_usage,
+            commands::agents::get_usage_stats,
             commands::agents::duplicate_agent,
             commands::agents::export_agent,
             commands::agents::import_agent,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Archive, ArchiveRestore, Plus, Sparkles, Trash2, Upload } from 'lucide-react';
+import { Archive, ArchiveRestore, BarChart3, Plus, Sparkles, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -112,6 +112,7 @@ export function TeamView() {
   const refresh = useAgentStore((state) => state.refresh);
   const openEditor = useUiStore((state) => state.openAgentEditor);
   const setActiveAgentId = useUiStore((state) => state.setActiveAgentId);
+  const setAgentView = useUiStore((state) => state.setAgentView);
   const startNewConversation = useChatStore((state) => state.startNewConversation);
   const clearActiveConversation = useChatStore((state) => state.clearActiveConversation);
 
@@ -273,6 +274,10 @@ export function TeamView() {
               <Button variant="ghost" onClick={() => setTemplatesOpen(true)}>
                 Ver todos os templates
               </Button>
+              <Button variant="ghost" onClick={() => setAgentView('stats')}>
+                <BarChart3 className="mr-1.5 size-4" />
+                Estatísticas
+              </Button>
               <Button variant="ghost" onClick={() => void importAgent()}>
                 <Upload className="mr-1.5 size-4" />
                 Importar
@@ -290,6 +295,10 @@ export function TeamView() {
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setAgentView('stats')}>
+                <BarChart3 className="mr-1.5 size-4" />
+                Estatísticas
+              </Button>
               <Button variant="ghost" size="sm" onClick={() => void importAgent()}>
                 <Upload className="mr-1.5 size-4" />
                 Importar

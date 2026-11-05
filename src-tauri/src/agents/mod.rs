@@ -739,6 +739,46 @@ pub struct AgentUsage {
     pub last_used_at: Option<i64>,
 }
 
+/// Aggregated billing/usage across every conversation (Chat, Code and Agentes).
+/// One `usage_log` row per turn; `since` restricts by `created_at` (ms).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageStatsTotals {
+    pub turns: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub total_tokens: i64,
+    pub cost: f64,
+    pub last_used_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsageStats {
+    pub provider_id: String,
+    pub model_id: String,
+    pub turns: i64,
+    pub total_tokens: i64,
+    pub cost: f64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyUsageStats {
+    /// Local day in `YYYY-MM-DD`.
+    pub day: String,
+    pub total_tokens: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageStats {
+    pub totals: UsageStatsTotals,
+    pub by_model: Vec<ModelUsageStats>,
+    pub by_day: Vec<DailyUsageStats>,
+}
+
 /// A shared channel: one thread several agents read and write.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

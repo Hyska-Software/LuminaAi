@@ -622,6 +622,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const activeChannelId = useUiStore((state) => state.activeChannelId);
   const setActiveAgentId = useUiStore((state) => state.setActiveAgentId);
   const setActiveChannelId = useUiStore((state) => state.setActiveChannelId);
+  const setAgentView = useUiStore((state) => state.setAgentView);
   const openEditor = useUiStore((state) => state.openAgentEditor);
   const openAvatarEditor = useUiStore((state) => state.openAgentAvatarEditor);
   const openSettings = useUiStore((state) => state.openSettings);
@@ -1222,6 +1223,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         <button
           type="button"
           onClick={() => {
+            setAgentView('team');
             setActiveAgentId(null);
             setActiveChannelId(null);
             clearActiveConversation();

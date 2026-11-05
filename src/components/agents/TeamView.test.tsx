@@ -85,6 +85,7 @@ beforeEach(() => {
     layoutMode: 'agent',
     activeAgentId: 'agent-1',
     activeChannelId: null,
+    agentView: 'team',
     agentEditor: null,
   });
 });
@@ -95,6 +96,12 @@ describe('TeamView — per-agent usage', () => {
     expect(await screen.findByText(/12,3 mil tokens/)).toBeTruthy();
     expect(screen.getByText(/US\$ 0,50/)).toBeTruthy();
     expect(mocks.listAgentUsage).toHaveBeenCalled();
+  });
+
+  it('opens the stats page from the team header', async () => {
+    render(<TeamView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Estatísticas' }));
+    expect(useUiStore.getState().agentView).toBe('stats');
   });
 });
 

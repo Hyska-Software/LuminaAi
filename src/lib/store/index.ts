@@ -60,6 +60,7 @@ export type {
   AgentEditorState,
   AgentPanelTab,
   AgentRightPanel,
+  AgentView,
   ArtifactPanelView,
   CodeDiffTab,
   CodeFileTab,

@@ -8,7 +8,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::agents::{
     Agent, AgentAvatar, AgentExportDocument, AgentInput, AgentMemory, AgentMemoryInput,
-    AgentRevision, AgentSharedMemory, AgentThreadCursor, AgentThreadPage, AgentUsage,
+    AgentRevision, AgentSharedMemory, AgentThreadCursor, AgentThreadPage, AgentUsage, UsageStats,
 };
 use crate::harness::{self, HarnessDeps};
 use crate::state::AppState;
@@ -269,6 +269,14 @@ pub fn get_agent_usage(
 #[tauri::command]
 pub fn list_agent_usage(state: State<'_, AppState>) -> Result<Vec<AgentUsage>, String> {
     state.db.list_agent_usage().map_err(to_error)
+}
+
+#[tauri::command]
+pub fn get_usage_stats(
+    state: State<'_, AppState>,
+    since: Option<i64>,
+) -> Result<UsageStats, String> {
+    state.db.usage_stats(since).map_err(to_error)
 }
 
 #[tauri::command]

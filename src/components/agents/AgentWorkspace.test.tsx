@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({
   getAgentUsage: vi.fn(),
+  getUsageStats: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -12,7 +13,7 @@ vi.mock('@/components/chat/ChatView', () => ({
 }));
 
 import { useAgentStore, useChatStore, useUiStore } from '@/lib/store';
-import type { Agent } from '@/lib/types';
+import type { Agent, UsageStats } from '@/lib/types';
 import { AgentWorkspace } from './AgentWorkspace';
 
 const agent: Agent = {
@@ -55,9 +56,24 @@ const agent: Agent = {
   lastActiveAt: null,
 };
 
+const emptyStats: UsageStats = {
+  totals: {
+    turns: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    totalTokens: 0,
+    cost: 0,
+    lastUsedAt: null,
+  },
+  byModel: [],
+  byDay: [],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getAgentUsage.mockResolvedValue(null);
+  mocks.getUsageStats.mockResolvedValue(emptyStats);
   useAgentStore.setState({
     agentsById: { [agent.id]: agent },
     orderedIds: [agent.id],
@@ -76,6 +92,7 @@ beforeEach(() => {
     layoutMode: 'agent',
     activeAgentId: agent.id,
     activeChannelId: null,
+    agentView: 'team',
     agentEditor: null,
     agentPanelOpen: false,
     agentRightPanel: 'agent',
@@ -103,5 +120,15 @@ describe('AgentWorkspace — right panel', () => {
 
     expect(await screen.findByRole('button', { name: /Restaurar agente/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Abrir painel do agente' })).toBeTruthy();
+  });
+});
+
+describe('AgentWorkspace — stats page', () => {
+  it('renders the stats surface when no agent is selected', async () => {
+    useUiStore.setState({ activeAgentId: null, activeChannelId: null, agentView: 'stats' });
+    render(<AgentWorkspace />);
+
+    expect(await screen.findByRole('heading', { name: 'Estatísticas' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Voltar à Equipe' })).toBeTruthy();
   });
 });

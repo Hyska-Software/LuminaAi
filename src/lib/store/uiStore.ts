@@ -18,6 +18,12 @@ export type MainView = 'chat' | 'skills' | 'library';
  */
 export type LayoutMode = 'chat' | 'code' | 'agent';
 
+/**
+ * Center surface inside the Agentes layout when no agent/channel is selected.
+ * Volatile: `stats` never survives an app restart.
+ */
+export type AgentView = 'team' | 'stats';
+
 /** Dialog de criação/edição de agente (volátil). */
 export type AgentEditorState =
   | { mode: 'create'; draft?: AgentInput }
@@ -182,6 +188,8 @@ interface UiState {
   activeAgentId: string | null;
   /** Canal compartilhado selecionado (`null` = nenhum). */
   activeChannelId: string | null;
+  /** Centro do layout Agentes sem agente/canal selecionado (volátil). */
+  agentView: AgentView;
   /** Diálogo de criação/edição de agente (volátil). */
   agentEditor: AgentEditorState | null;
   /** Quick avatar editor: agent id or `null` (volatile). */
@@ -251,6 +259,8 @@ interface UiState {
   setLayoutMode: (mode: LayoutMode) => void;
   setActiveAgentId: (agentId: string | null) => void;
   setActiveChannelId: (channelId: string | null) => void;
+  /** Switches the Agentes center between the team page and usage stats. */
+  setAgentView: (view: AgentView) => void;
   openAgentEditor: (target: AgentEditorState) => void;
   closeAgentEditor: () => void;
   openAgentAvatarEditor: (agentId: string) => void;
@@ -388,6 +398,7 @@ export const useUiStore = create<UiState>()(
       layoutMode: 'chat',
       activeAgentId: null,
       activeChannelId: null,
+      agentView: 'team',
       agentEditor: null,
       agentAvatarEditor: null,
       codeView: 'session',
@@ -436,12 +447,15 @@ export const useUiStore = create<UiState>()(
         set((state) => ({
           activeAgentId,
           activeChannelId: activeAgentId ? null : state.activeChannelId,
+          agentView: activeAgentId ? 'team' : state.agentView,
         })),
       setActiveChannelId: (activeChannelId) =>
         set((state) => ({
           activeChannelId,
           activeAgentId: activeChannelId ? null : state.activeAgentId,
+          agentView: activeChannelId ? 'team' : state.agentView,
         })),
+      setAgentView: (agentView) => set({ agentView }),
       openAgentEditor: (agentEditor) => set({ agentEditor }),
       closeAgentEditor: () => set({ agentEditor: null }),
       openAgentAvatarEditor: (agentAvatarEditor) => set({ agentAvatarEditor }),

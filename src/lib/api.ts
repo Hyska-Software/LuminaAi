@@ -23,6 +23,7 @@ import type {
   AgentRoutineInput,
   AgentThreadCursor,
   AgentUsage,
+  UsageStats,
   AgentThreadPage,
   ActiveTurnInfo,
   AppInfo,
@@ -231,6 +232,8 @@ export const api = {
   getAgentUsage: (agentId: string) =>
     invoke<AgentUsage>('get_agent_usage', { agentId }),
   listAgentUsage: () => invoke<AgentUsage[]>('list_agent_usage'),
+  getUsageStats: (since: number | null) =>
+    invoke<UsageStats>('get_usage_stats', { since }),
   listAgentRoutines: (agentId: string) =>
     invoke<AgentRoutine[]>('list_agent_routines', { agentId }),
   listAgentRoutineRuns: (routineId: string, limit?: number) =>

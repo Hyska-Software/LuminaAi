@@ -20,7 +20,7 @@ use crate::agents::{
     Agent, AgentChannel, AgentChannelInput, AgentChannelMessage, AgentEvent, AgentInboxCount,
     AgentInboxItem, AgentInput, AgentMemory, AgentMemoryInput, AgentRoutine, AgentRoutineInput,
     AgentRoutineRun, AgentSharedMemory, AgentTask, AgentTaskEvent, AgentTaskInput, AgentThreadCursor,
-    AgentThreadPage, AgentUsage,
+    AgentThreadPage, AgentUsage, DailyUsageStats, ModelUsageStats, UsageStats, UsageStatsTotals,
 };
 use crate::computer::{ComputerActionRecord, ComputerSession};
 use crate::domain::{
@@ -3277,6 +3277,77 @@ impl Db {
             agent_id: agent_id.to_string(),
             ..AgentUsage::default()
         }))
+    }
+
+    /// Global billing/usage across every conversation. `since` is an optional
+    /// lower bound in milliseconds (`None` = all time). `by_model` is ordered
+    /// by turns (most used first), then tokens and ids for determinism;
+    /// `by_day` groups by the machine's local day and is ordered oldest first.
+    pub fn usage_stats(&self, since: Option<i64>) -> Result<UsageStats> {
+        let conn = self.conn.lock();
+
+        let totals = conn
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), \
+                 COALESCE(SUM(output_tokens), 0), COALESCE(SUM(reasoning_tokens), 0), \
+                 COALESCE(SUM(total_tokens), 0), COALESCE(SUM(cost), 0.0), MAX(created_at) \
+                 FROM usage_log WHERE (?1 IS NULL OR created_at >= ?1)",
+                params![since],
+                |row| {
+                    Ok(UsageStatsTotals {
+                        turns: row.get(0)?,
+                        input_tokens: row.get(1)?,
+                        output_tokens: row.get(2)?,
+                        reasoning_tokens: row.get(3)?,
+                        total_tokens: row.get(4)?,
+                        cost: row.get(5)?,
+                        last_used_at: row.get(6)?,
+                    })
+                },
+            )
+            .context("falha ao somar uso de tokens")?;
+
+        let mut model_stmt = conn.prepare(
+            "SELECT COALESCE(provider_id, ''), COALESCE(model_id, ''), COUNT(*), \
+             COALESCE(SUM(total_tokens), 0), COALESCE(SUM(cost), 0.0) \
+             FROM usage_log WHERE (?1 IS NULL OR created_at >= ?1) \
+             GROUP BY provider_id, model_id \
+             ORDER BY COUNT(*) DESC, COALESCE(SUM(total_tokens), 0) DESC, provider_id, model_id",
+        )?;
+        let by_model = model_stmt
+            .query_map(params![since], |row| {
+                Ok(ModelUsageStats {
+                    provider_id: row.get(0)?,
+                    model_id: row.get(1)?,
+                    turns: row.get(2)?,
+                    total_tokens: row.get(3)?,
+                    cost: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao agrupar uso por modelo")?;
+
+        let mut day_stmt = conn.prepare(
+            "SELECT date(created_at / 1000, 'unixepoch', 'localtime'), \
+             COALESCE(SUM(total_tokens), 0) \
+             FROM usage_log WHERE (?1 IS NULL OR created_at >= ?1) \
+             GROUP BY 1 ORDER BY 1 ASC",
+        )?;
+        let by_day = day_stmt
+            .query_map(params![since], |row| {
+                Ok(DailyUsageStats {
+                    day: row.get(0)?,
+                    total_tokens: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao agrupar uso por dia")?;
+
+        Ok(UsageStats {
+            totals,
+            by_model,
+            by_day,
+        })
     }
 
     /* ---------------- computer-use audit ---------------- */
@@ -9287,6 +9358,95 @@ mod tests {
         assert_eq!(totals["totalTokens"], 43);
         assert_eq!(summary["byProvider"].as_array().expect("array").len(), 2);
         assert_eq!(summary["byModel"].as_array().expect("array").len(), 2);
+    }
+
+    #[test]
+    fn usage_stats_aggregates_totals_models_days_and_window() {
+        let db = test_db();
+        let usage = |input, output: u32| UsageInfo {
+            input_tokens: Some(input),
+            output_tokens: Some(output),
+            reasoning_tokens: Some(1),
+            cached_tokens: Some(0),
+            total_tokens: Some(input + output),
+            cost: Some(0.5),
+            duration_ms: None,
+            ..UsageInfo::default()
+        };
+        db.record_usage(
+            "conv-1",
+            "msg-1",
+            "opencode-go",
+            "glm-5.3-flash",
+            &usage(10, 20),
+        )
+        .expect("usage 1");
+        db.record_usage(
+            "conv-1",
+            "msg-2",
+            "opencode-go",
+            "glm-5.3-flash",
+            &usage(1, 2),
+        )
+        .expect("usage 2");
+        db.record_usage(
+            "conv-2",
+            "msg-3",
+            "opencode-zen",
+            "gpt-6-luna",
+            &usage(5, 5),
+        )
+        .expect("usage 3");
+
+        // Pin both "today" rows to the same instant so the daily bucket cannot
+        // split if the test crosses local midnight.
+        let now = now_ms();
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "UPDATE usage_log SET created_at = ?1 WHERE message_id IN ('msg-1', 'msg-2')",
+                [now],
+            )
+            .expect("pin today usage");
+            conn.execute(
+                "UPDATE usage_log SET created_at = ?1 WHERE message_id = 'msg-3'",
+                [now - 86_400_000],
+            )
+            .expect("shift yesterday usage");
+        }
+
+        let all = db.usage_stats(None).expect("all stats");
+        assert_eq!(all.totals.turns, 3);
+        assert_eq!(all.totals.input_tokens, 16);
+        assert_eq!(all.totals.output_tokens, 27);
+        assert_eq!(all.totals.total_tokens, 43);
+        assert!((all.totals.cost - 1.5).abs() < f64::EPSILON);
+        assert_eq!(all.totals.last_used_at, Some(now));
+        assert_eq!(all.by_model.len(), 2);
+        assert_eq!(all.by_model[0].model_id, "glm-5.3-flash");
+        assert_eq!(all.by_model[0].turns, 2);
+        assert_eq!(all.by_model[0].total_tokens, 33);
+        assert_eq!(all.by_day.len(), 2);
+        assert!(all
+            .by_day
+            .iter()
+            .any(|day| day.total_tokens == 33 && day.day.len() == 10));
+
+        let recent = db
+            .usage_stats(Some(now - 12 * 60 * 60 * 1000))
+            .expect("recent stats");
+        assert_eq!(recent.totals.turns, 2);
+        assert_eq!(recent.by_model.len(), 1);
+        assert_eq!(recent.by_model[0].model_id, "glm-5.3-flash");
+
+        let empty = db
+            .usage_stats(Some(now + 60_000))
+            .expect("future stats");
+        assert_eq!(empty.totals.turns, 0);
+        assert_eq!(empty.totals.total_tokens, 0);
+        assert!(empty.totals.last_used_at.is_none());
+        assert!(empty.by_model.is_empty());
+        assert!(empty.by_day.is_empty());
     }
 
     #[test]
