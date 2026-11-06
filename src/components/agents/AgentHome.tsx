@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, MessageSquarePlus, Pencil, Sparkles } from 'lucide-react';
+import { ArrowUpRight, MessageSquarePlus, Pencil, Pin, Sparkles } from 'lucide-react';
 
 import { AgentAvatar } from './AgentAvatar';
 import {
@@ -13,6 +13,7 @@ import { Button } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import type { Agent, AgentUsage, Conversation } from '@/lib/types';
+import { compareConversationOrder } from '@/lib/utils';
 
 const PERMISSION_LABELS: Record<string, string> = {
   read_only: 'Leitura',
@@ -51,12 +52,14 @@ export function AgentWelcome({
   onNewConversation,
   onEdit,
   onOpenThread,
+  onOpenMain,
 }: {
   agent: Agent;
   threads: Conversation[];
   onNewConversation: () => void;
   onEdit: () => void;
   onOpenThread: (id: string) => void;
+  onOpenMain?: () => void;
 }) {
   const providers = useAppStore((state) => state.providers);
   const usage = useAgentUsage(agent.id, agent.updatedAt);
@@ -105,6 +108,17 @@ export function AgentWelcome({
           <MessageSquarePlus className="mr-1.5 size-4" />
           Nova conversa
         </Button>
+        {onOpenMain ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-label="Abrir conversa principal"
+            onClick={onOpenMain}
+          >
+            <Pin className="mr-1.5 size-3.5" />
+            Conversa principal
+          </Button>
+        ) : null}
         <Button size="sm" variant="ghost" onClick={onEdit}>
           <Pencil className="mr-1.5 size-3.5" />
           Editar agente
@@ -180,10 +194,9 @@ export function AgentHome({ agent }: { agent: Agent }) {
         !conversation.channelId &&
         !conversation.taskId,
     )
-    .sort(
-      (left, right) =>
-        Number(right.pinned) - Number(left.pinned) || right.updatedAt - left.updatedAt,
-    );
+    .sort(compareConversationOrder);
+  const main = threads.find((thread) => thread.isMain) ?? null;
+  const recentThreads = threads.filter((thread) => !thread.isMain);
 
   return (
     <ChatView
@@ -191,10 +204,11 @@ export function AgentHome({ agent }: { agent: Agent }) {
       welcome={
         <AgentWelcome
           agent={agent}
-          threads={threads}
+          threads={recentThreads}
           onNewConversation={() => void startNewConversation('agent', { agentId: agent.id })}
           onEdit={() => openEditor({ mode: 'edit', agentId: agent.id })}
           onOpenThread={(id) => void openConversation(id)}
+          onOpenMain={main ? () => void openConversation(main.id) : undefined}
         />
       }
     />

@@ -495,8 +495,9 @@ Contrato completo: **`docs/AGENTS.md`**. Resumo:
   enfileirar durante o streaming. O backend aceita um turno por conversa
   (`register_if_idle`).
 - **Rotinas**: `agent_routines` + agendador Rust em paralelo (enquanto o app
-  está aberto); cada run é um turno normal na thread dedicada, sob o governador
-  e com lease/sweep.
+  está aberto); cada run é um turno normal na conversa principal do agente,
+  passando pela fila persistente `agent_routine_queue`, sob o governador e com
+  lease/sweep.
 - **Canais**: `agent_channels` + membros + mensagens; só os membros mencionados
   (ou todos, sem menção) respondem em threads privadas; o histórico entra como
   `surface_item` volátil e um evento `lumina:agent-channel-updated` atualiza a

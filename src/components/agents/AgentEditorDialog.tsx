@@ -30,7 +30,7 @@ import { api } from '@/lib/api';
 import { DEFAULT_AGENT_AVATAR } from '@/lib/agentAvatar';
 import { DEFAULT_AGENT_CAPABILITIES } from '@/lib/agentDefaults';
 import { reasoningForModel } from '@/lib/modelMenu';
-import { selectAgent, useAgentStore, useAppStore, useUiStore } from '@/lib/store';
+import { selectAgent, useAgentStore, useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import type {
   AgentAvatar as AgentAvatarSpec,
   AgentCapabilities,
@@ -379,9 +379,11 @@ export function AgentEditorDialog() {
     try {
       if (editor?.mode === 'edit') {
         const updated = await updateAgent(editor.agentId, input);
+        await useChatStore.getState().refreshConversations();
         toast.success('Agente atualizado', { description: updated.name });
       } else {
         const created = await createAgent(input);
+        await useChatStore.getState().refreshConversations();
         setActiveAgentId(created.id);
         toast.success('Agente criado', { description: created.name });
       }

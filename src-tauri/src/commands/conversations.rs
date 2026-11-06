@@ -185,6 +185,11 @@ pub fn rename_conversation(
 #[tauri::command]
 pub fn delete_conversation(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let conversation = state.db.get_conversation(&id).map_err(to_error)?;
+    if conversation.as_ref().is_some_and(|conversation| conversation.is_main) {
+        return Err(
+            "CONVERSATION_MAIN: a conversa principal não pode ser excluída.".to_string(),
+        );
+    }
     state.cancel_conversation(&id);
     let result = state.db.delete_conversation(&id).map_err(to_error);
     if result.is_ok() {
@@ -672,6 +677,7 @@ mod tests {
                 agent_id: None,
                 channel_id: None,
                 task_id: None,
+                is_main: false,
             },
             messages: vec![user, assistant],
         }

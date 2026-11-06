@@ -1290,7 +1290,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         )
       : await api.createConversation(title, selection.providerId, selection.modelId, layout);
     set((state) => ({
-      conversations: [conversation, ...state.conversations],
+      conversations: [conversation, ...state.conversations].sort(compareConversationOrder),
       activeId: conversation.id,
       messagesByConversation: { ...state.messagesByConversation, [conversation.id]: [] },
       activeIdByLayout: { ...state.activeIdByLayout, [layout]: conversation.id },
@@ -1663,7 +1663,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
               layout,
             );
         set((state) => ({
-          conversations: [conversation, ...state.conversations],
+          conversations: [conversation, ...state.conversations].sort(compareConversationOrder),
           activeId: conversation.id,
           messagesByConversation: { ...state.messagesByConversation, [conversation.id]: [] },
           pendingAttachments: [],
@@ -1744,6 +1744,10 @@ export const useChatStore = create<ChatState>()((set, get) => {
     togglePinned: async (id) => {
       const conversation = get().conversations.find((c) => c.id === id);
       if (!conversation) return;
+      if (conversation.isMain) {
+        toast.info('A conversa principal permanece fixada.');
+        return;
+      }
       const pinned = !conversation.pinned;
       set((state) => ({
         conversations: state.conversations.map((c) => (c.id === id ? { ...c, pinned } : c)),

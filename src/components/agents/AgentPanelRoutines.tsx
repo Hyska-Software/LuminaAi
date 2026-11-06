@@ -78,9 +78,14 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
       setRoutines((current) =>
         current.map((entry) => (entry.id === updated.id ? updated : entry)),
       );
-      toast.success('Rotina executada', {
-        description: updated.lastStatus === 'error' ? updated.lastError ?? 'Erro' : routine.title,
-      });
+      if (updated.lastStatus === 'queued') {
+        toast.success('Rotina enfileirada', { description: routine.title });
+      } else {
+        toast.success('Rotina executada', {
+          description:
+            updated.lastStatus === 'error' ? updated.lastError ?? 'Erro' : routine.title,
+        });
+      }
     } catch (caught) {
       toast.error('Não foi possível executar a rotina', { description: String(caught) });
     } finally {
@@ -90,7 +95,11 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
 
   const remove = async (routine: AgentRoutine) => {
     // eslint-disable-next-line no-alert -- destructive action needs a native confirmation here
-    if (!window.confirm(`Excluir a rotina “${routine.title}”? A conversa dela é preservada.`)) {
+    if (
+      !window.confirm(
+        `Excluir a rotina “${routine.title}”? A conversa principal do agente é preservada.`,
+      )
+    ) {
       return;
     }
     setBusyId(routine.id);
@@ -318,7 +327,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                         onClick={() => openThread(routine.conversationId!)}
                       >
                         <ScrollText className="mr-1.5 size-3.5" />
-                        Abrir thread
+                        Abrir conversa
                       </Button>
                     ) : null}
                   </div>

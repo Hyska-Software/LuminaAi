@@ -19,8 +19,9 @@ use sha2::{Digest, Sha256};
 use crate::agents::{
     Agent, AgentChannel, AgentChannelInput, AgentChannelMessage, AgentEvent, AgentInboxCount,
     AgentInboxItem, AgentInput, AgentMemory, AgentMemoryInput, AgentRoutine, AgentRoutineInput,
-    AgentRoutineRun, AgentSharedMemory, AgentTask, AgentTaskEvent, AgentTaskInput, AgentThreadCursor,
-    AgentThreadPage, AgentUsage, DailyUsageStats, ModelUsageStats, UsageStats, UsageStatsTotals,
+    AgentRoutineQueueItem, AgentRoutineRun, AgentSharedMemory, AgentTask, AgentTaskEvent,
+    AgentTaskInput, AgentThreadCursor, AgentThreadPage, AgentUsage, DailyUsageStats,
+    ModelUsageStats, UsageStats, UsageStatsTotals,
 };
 use crate::computer::{ComputerActionRecord, ComputerSession};
 use crate::domain::{
@@ -38,7 +39,7 @@ use crate::domain::{
 const CONVERSATION_COLUMNS: &str = "id, title, created_at, updated_at, pinned, \
      provider_id, model_id, message_count, preview, mode, code_linked, workspace_id, \
      agent_kind, permission_mode, parent_conversation_id, subagent_task_call_id, subagent_type, \
-     agent_id, channel_id, task_id, sort_order";
+     agent_id, channel_id, task_id, sort_order, is_main";
 
 const AGENT_COLUMNS: &str = "a.id, a.name, a.role, a.description, a.avatar_json, a.department, \
      a.pinned, a.sort_order, a.provider_id, a.model_id, a.fallback_provider_id, \
@@ -56,6 +57,9 @@ const AGENT_ROUTINE_COLUMNS: &str = "id, agent_id, title, prompt, schedule_kind,
      interval_minutes, hour, minute, enabled, conversation_id, next_run_at, last_run_at, \
      last_status, last_error, trigger_kind, event_kind, event_filter_json, lease_until, \
      created_at, updated_at, days_of_week";
+
+const AGENT_ROUTINE_QUEUE_COLUMNS: &str = "id, routine_id, agent_id, conversation_id, source, \
+     event_id, scheduled_for, status, error, created_at, started_at";
 
 const AGENT_INBOX_ITEM_COLUMNS: &str = "i.id, i.recipient_agent_id, i.sender_agent_id, \
      i.sender_user, i.channel_id, c.name, i.message_id, COALESCE(s.name, 'Usuário'), \
@@ -315,6 +319,23 @@ CREATE TABLE IF NOT EXISTS agent_event_deliveries (
 CREATE INDEX IF NOT EXISTS idx_agent_event_deliveries_status
   ON agent_event_deliveries(status, created_at);
 
+-- FIFO of routine executions waiting for the agent's primary conversation.
+CREATE TABLE IF NOT EXISTS agent_routine_queue (
+  id              TEXT PRIMARY KEY,
+  routine_id      TEXT NOT NULL REFERENCES agent_routines(id) ON DELETE CASCADE,
+  agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  source          TEXT NOT NULL DEFAULT 'schedule',
+  event_id        TEXT REFERENCES agent_events(id) ON DELETE SET NULL,
+  scheduled_for   INTEGER NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  error           TEXT,
+  created_at      INTEGER NOT NULL,
+  started_at      INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_agent_routine_queue_pending
+  ON agent_routine_queue(status, created_at);
+
 -- Computer-use audit (v1.16). Never stores typed text/screenshot bytes.
 CREATE TABLE IF NOT EXISTS computer_sessions (
   id              TEXT PRIMARY KEY,
@@ -408,7 +429,9 @@ CREATE TABLE IF NOT EXISTS conversations (
   -- Canais: thread privada que pertence a um canal compartilhado.
   channel_id             TEXT,
   -- Delegação: thread de execução de uma tarefa.
-  task_id                TEXT
+  task_id                TEXT,
+  -- Conversa principal da persona (uma por agente; fixada no topo).
+  is_main                INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -1240,6 +1263,19 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         "sort_order",
         "ALTER TABLE conversations ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
     )?;
+    // One primary conversation per agent; the partial unique index is the
+    // database-level guarantee even under concurrent creation/self-heal.
+    ensure_column(
+        conn,
+        "conversations",
+        "is_main",
+        "ALTER TABLE conversations ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0",
+    )?;
+    conn.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_main_agent \
+         ON conversations(agent_id) WHERE is_main = 1 AND agent_id IS NOT NULL;",
+    )
+    .context("falha ao criar o índice da conversa principal")?;
     ensure_column(
         conn,
         "agent_tasks",
@@ -1785,6 +1821,7 @@ fn conversation_from_row(row: &Row<'_>) -> rusqlite::Result<Conversation> {
         channel_id: row.get(18)?,
         task_id: row.get(19)?,
         sort_order: row.get(20)?,
+        is_main: row.get::<_, i64>(21)? != 0,
     })
 }
 
@@ -1869,6 +1906,22 @@ fn agent_routine_from_row(row: &Row<'_>) -> rusqlite::Result<AgentRoutine> {
         created_at: row.get(18)?,
         updated_at: row.get(19)?,
         days_of_week: row.get::<_, i64>(20)? as u32,
+    })
+}
+
+fn agent_routine_queue_from_row(row: &Row<'_>) -> rusqlite::Result<AgentRoutineQueueItem> {
+    Ok(AgentRoutineQueueItem {
+        id: row.get(0)?,
+        routine_id: row.get(1)?,
+        agent_id: row.get(2)?,
+        conversation_id: row.get(3)?,
+        source: row.get(4)?,
+        event_id: row.get(5)?,
+        scheduled_for: row.get(6)?,
+        status: row.get(7)?,
+        error: row.get(8)?,
+        created_at: row.get(9)?,
+        started_at: row.get(10)?,
     })
 }
 
@@ -2479,6 +2532,108 @@ fn migrate_workspaces_schema(conn: &Connection) -> Result<()> {
 }
 
 /* ------------------------------------------------------------------ */
+/* Agent main conversation helpers                                     */
+/* ------------------------------------------------------------------ */
+
+const AGENT_MAIN_CONVERSATION_TITLE: &str = "Conversa principal";
+
+/// Inserts (or returns the existing) primary conversation for one agent.
+/// The partial unique index makes concurrent `INSERT OR IGNORE`s safe.
+fn insert_agent_main_conversation(
+    conn: &Connection,
+    agent_id: &str,
+    provider_id: &str,
+    model_id: &str,
+    workspace_id: Option<&str>,
+    permission_mode: &str,
+    now: i64,
+) -> Result<String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT OR IGNORE INTO conversations \
+         (id, title, created_at, updated_at, pinned, sort_order, provider_id, model_id, \
+          message_count, preview, mode, code_linked, workspace_id, agent_kind, permission_mode, \
+          agent_id, is_main) \
+         VALUES (?1, ?2, ?3, ?3, 1, 0, ?4, ?5, 0, NULL, ?6, 0, ?7, 'lumina', ?8, ?9, 1)",
+        params![
+            &id,
+            AGENT_MAIN_CONVERSATION_TITLE,
+            now,
+            provider_id,
+            model_id,
+            CONVERSATION_MODE_AGENT,
+            workspace_id,
+            permission_mode,
+            agent_id,
+        ],
+    )
+    .context("falha ao criar a conversa principal do agente")?;
+    let main_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM conversations WHERE agent_id = ?1 AND is_main = 1 LIMIT 1",
+            [agent_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    main_id.ok_or_else(|| anyhow::anyhow!("conversa principal do agente não encontrada"))
+}
+
+/// Creates an empty primary conversation for every agent that lacks one and
+/// repoints routines to it. Used on open and after `reset`; idempotent.
+fn backfill_agent_main_conversations(conn: &Connection) -> Result<()> {
+    let now = now_ms();
+    let agents: Vec<(String, String, String, Option<String>, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT a.id, a.provider_id, a.model_id, a.workspace_id, a.permission_mode \
+             FROM agents a \
+             WHERE NOT EXISTS (SELECT 1 FROM conversations c \
+               WHERE c.agent_id = a.id AND c.is_main = 1)",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for (agent_id, provider_id, model_id, workspace_id, permission_mode) in agents {
+        insert_agent_main_conversation(
+            conn,
+            &agent_id,
+            &provider_id,
+            &model_id,
+            workspace_id.as_deref(),
+            &permission_mode,
+            now,
+        )?;
+    }
+    conn.execute(
+        "UPDATE conversations SET pinned = 1 WHERE is_main = 1",
+        [],
+    )
+    .context("falha ao fixar as conversas principais")?;
+    conn.execute(
+        "UPDATE agent_routines SET conversation_id = \
+         (SELECT c.id FROM conversations c \
+          WHERE c.agent_id = agent_routines.agent_id AND c.is_main = 1 LIMIT 1) \
+         WHERE EXISTS (SELECT 1 FROM conversations c \
+           WHERE c.agent_id = agent_routines.agent_id AND c.is_main = 1)",
+        [],
+    )
+    .context("falha ao apontar rotinas para a conversa principal")?;
+    Ok(())
+}
+
+/// Resets queue items left in `running` by a previous process.
+fn recover_agent_routine_queue(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "UPDATE agent_routine_queue SET status = 'pending', started_at = NULL, \
+         error = 'interrompida' WHERE status = 'running'",
+        [],
+    )
+    .context("falha ao recuperar a fila de rotinas")?;
+    Ok(())
+}
+
+/* ------------------------------------------------------------------ */
 /* Db                                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -2513,6 +2668,11 @@ impl Db {
         migrate_messages_schema(conn)?;
         // Separação Chat/Code: conversas antigas viram mode='chat', sem vínculo.
         migrate_conversations_schema(conn)?;
+        // Cada persona existente ganha uma conversa principal vazia e as
+        // rotinas passam a apontar para ela (idempotente a cada boot).
+        backfill_agent_main_conversations(conn)?;
+        // Fila de rotinas: itens interrompidos por um fechamento voltam a pending.
+        recover_agent_routine_queue(conn)?;
         // Ordem manual da sidebar de projetos: coluna aditiva em `workspaces`.
         migrate_workspaces_schema(conn)?;
         // Avatares: emoji legado vira `avatar_json` e a coluna antiga é removida.
@@ -2543,7 +2703,7 @@ impl Db {
         let sql = format!(
             "SELECT {CONVERSATION_COLUMNS} FROM conversations \
              WHERE parent_conversation_id IS NULL \
-             ORDER BY pinned DESC, sort_order ASC, updated_at DESC"
+             ORDER BY is_main DESC, pinned DESC, sort_order ASC, updated_at DESC"
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], |row| conversation_from_row(row))?;
@@ -2594,6 +2754,41 @@ impl Db {
             .next())
     }
 
+    pub fn get_agent_main_conversation(&self, agent_id: &str) -> Result<Option<Conversation>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {CONVERSATION_COLUMNS} FROM conversations \
+             WHERE agent_id = ?1 AND is_main = 1 AND channel_id IS NULL LIMIT 1"
+        ))?;
+        let mut rows = stmt.query_map([agent_id], conversation_from_row)?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// Returns the agent's primary conversation, creating it when a legacy or
+    /// damaged database is missing one.
+    pub fn ensure_agent_main_conversation(&self, agent_id: &str) -> Result<Conversation> {
+        if let Some(conversation) = self.get_agent_main_conversation(agent_id)? {
+            return Ok(conversation);
+        }
+        let agent = self
+            .get_agent(agent_id)?
+            .ok_or_else(|| anyhow::anyhow!("AGENT_NOT_FOUND: agente `{agent_id}` não existe"))?;
+        {
+            let conn = self.conn.lock();
+            insert_agent_main_conversation(
+                &conn,
+                agent_id,
+                &agent.provider_id,
+                &agent.model_id,
+                agent.workspace_id.as_deref(),
+                agent.permission_mode.as_str(),
+                now_ms(),
+            )?;
+        }
+        self.get_agent_main_conversation(agent_id)?
+            .ok_or_else(|| anyhow::anyhow!("conversa principal do agente não encontrada"))
+    }
+
     pub fn create_agent(&self, input: &AgentInput) -> Result<Agent> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_ms();
@@ -2607,12 +2802,13 @@ impl Db {
         let avatar = serde_json::to_string(&input.avatar)?;
         {
             let conn = self.conn.lock();
-            let sort_order: i64 = conn.query_row(
+            let tx = conn.unchecked_transaction()?;
+            let sort_order: i64 = tx.query_row(
                 "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM agents",
                 [],
                 |row| row.get(0),
             )?;
-            conn.execute(
+            tx.execute(
                 "INSERT INTO agents (id, name, role, description, avatar_json, department, pinned, \
                  sort_order, provider_id, model_id, fallback_provider_id, fallback_model_id, \
                  reasoning_json, instructions, prompt_version, starters_json, capabilities_json, \
@@ -2644,6 +2840,17 @@ impl Db {
                 ],
             )
             .context("falha ao criar agente")?;
+            insert_agent_main_conversation(
+                &tx,
+                &id,
+                &input.provider_id,
+                &input.model_id,
+                input.workspace_id.as_deref(),
+                input.permission_mode.as_str(),
+                now,
+            )?;
+            tx.commit()
+                .context("falha ao confirmar a criação do agente")?;
         }
         self.get_agent(&id)?
             .ok_or_else(|| anyhow::anyhow!("agente recém-criado não encontrado"))
@@ -2705,6 +2912,21 @@ impl Db {
             ],
         )
         .context("falha ao atualizar agente")?;
+        // A principal vazia acompanha a persona até a primeira mensagem; depois
+        // disso vale o congelamento normal de modelo/workspace/permissão.
+        conn.execute(
+            "UPDATE conversations SET provider_id = ?2, model_id = ?3, \
+             workspace_id = ?4, permission_mode = ?5 \
+             WHERE agent_id = ?1 AND is_main = 1 AND message_count = 0",
+            params![
+                id,
+                &input.provider_id,
+                &input.model_id,
+                &input.workspace_id,
+                input.permission_mode.as_str(),
+            ],
+        )
+        .context("falha ao sincronizar a conversa principal")?;
         drop(conn);
         if memory_disabled {
             let _ = self.delete_agent_surface_items(id, "memory");
@@ -2769,6 +2991,15 @@ impl Db {
             "UPDATE agent_channels SET leader_agent_id = NULL WHERE leader_agent_id = ?1",
             [id],
         )?;
+        conn.execute(
+            "DELETE FROM agent_routine_queue WHERE agent_id = ?1 AND status = 'pending'",
+            [id],
+        )?;
+        conn.execute(
+            "UPDATE agent_routines SET last_status = NULL \
+             WHERE agent_id = ?1 AND last_status = 'queued'",
+            [id],
+        )?;
         drop(conn);
         if changed == 0 {
             return Err(anyhow::anyhow!("AGENT_NOT_FOUND: agente `{id}` não existe"));
@@ -2799,10 +3030,12 @@ impl Db {
         if exists == 0 {
             return Err(anyhow::anyhow!("AGENT_NOT_FOUND: agente `{id}` não existe"));
         }
-        // Hidden channel threads do not block deletion: they are derived from
-        // the channel and are removed with the agent. Normal conversations do.
+        // Hidden channel threads and the primary conversation do not block
+        // deletion: the first are derived from the channel, the second is part
+        // of the persona. Any other conversation (including task threads) does.
         let threads: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM conversations WHERE agent_id = ?1 AND channel_id IS NULL",
+            "SELECT COUNT(*) FROM conversations WHERE agent_id = ?1 \
+             AND channel_id IS NULL AND is_main = 0",
             [id],
             |row| row.get(0),
         )?;
@@ -2817,6 +3050,13 @@ impl Db {
             let rows = stmt.query_map([id], |row| row.get::<_, String>(0))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
+        let main_id: Option<String> = tx
+            .query_row(
+                "SELECT id FROM conversations WHERE agent_id = ?1 AND is_main = 1 LIMIT 1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
         tx.execute("DELETE FROM agent_channel_members WHERE agent_id = ?1", [id])?;
         tx.execute(
             "UPDATE agent_channels SET leader_agent_id = NULL WHERE leader_agent_id = ?1",
@@ -2825,7 +3065,10 @@ impl Db {
         tx.commit()?;
         drop(conn);
         for conversation_id in channel_threads {
-            self.delete_conversation(&conversation_id)?;
+            self.delete_conversation_inner(&conversation_id, false)?;
+        }
+        if let Some(main_id) = main_id {
+            self.delete_conversation_inner(&main_id, true)?;
         }
         let conn = self.conn.lock();
         conn.execute("DELETE FROM agents WHERE id = ?1", [id])?;
@@ -4528,6 +4771,7 @@ impl Db {
         input: &AgentRoutineInput,
         now: i64,
     ) -> Result<AgentRoutine> {
+        let main = self.ensure_agent_main_conversation(agent_id)?;
         let conn = self.conn.lock();
         let exists: i64 = conn.query_row(
             "SELECT COUNT(*) FROM agents WHERE id = ?1",
@@ -4569,8 +4813,8 @@ impl Db {
               enabled, conversation_id, next_run_at, last_run_at, last_status, last_error, \
               trigger_kind, event_kind, event_filter_json, lease_until, created_at, updated_at, \
               days_of_week) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, NULL, NULL, NULL, \
-                     ?11, ?12, ?13, NULL, ?14, ?14, ?15)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, NULL, NULL, \
+                     ?12, ?13, ?14, NULL, ?15, ?15, ?16)",
             params![
                 id,
                 agent_id,
@@ -4581,6 +4825,7 @@ impl Db {
                 input.hour as i64,
                 input.minute as i64,
                 input.enabled as i64,
+                main.id,
                 next,
                 input.trigger_kind,
                 input.event_kind,
@@ -4671,6 +4916,17 @@ impl Db {
              WHERE id = ?1",
             params![id, enabled as i64, next, now],
         )?;
+        if !enabled {
+            conn.execute(
+                "DELETE FROM agent_routine_queue WHERE routine_id = ?1 AND status = 'pending'",
+                [id],
+            )?;
+            conn.execute(
+                "UPDATE agent_routines SET last_status = NULL \
+                 WHERE id = ?1 AND last_status = 'queued'",
+                [id],
+            )?;
+        }
         drop(conn);
         self.get_agent_routine(id)?
             .ok_or_else(|| anyhow::anyhow!("rotina atualizada não encontrada"))
@@ -4683,6 +4939,157 @@ impl Db {
             return Err(anyhow::anyhow!("AGENT_ROUTINE_NOT_FOUND: rotina `{id}` não existe"));
         }
         Ok(())
+    }
+
+    pub fn enqueue_scheduled_agent_routine(
+        &self,
+        routine: &AgentRoutine,
+        conversation_id: &str,
+        scheduled_for: i64,
+        next_run_at: i64,
+        now: i64,
+    ) -> Result<AgentRoutineQueueItem> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock();
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO agent_routine_queue \
+             (id, routine_id, agent_id, conversation_id, source, event_id, scheduled_for, \
+              status, error, created_at, started_at) \
+             VALUES (?1, ?2, ?3, ?4, 'schedule', NULL, ?5, 'pending', NULL, ?6, NULL)",
+            params![
+                &id,
+                &routine.id,
+                &routine.agent_id,
+                conversation_id,
+                scheduled_for,
+                now,
+            ],
+        )?;
+        tx.execute(
+            "UPDATE agent_routines SET next_run_at = ?2, last_status = 'queued', \
+             last_error = NULL, updated_at = ?3 WHERE id = ?1",
+            params![&routine.id, next_run_at, now],
+        )?;
+        tx.commit()?;
+        drop(conn);
+        Ok(AgentRoutineQueueItem {
+            id,
+            routine_id: routine.id.clone(),
+            agent_id: routine.agent_id.clone(),
+            conversation_id: conversation_id.to_string(),
+            source: "schedule".to_string(),
+            event_id: None,
+            scheduled_for,
+            status: "pending".to_string(),
+            error: None,
+            created_at: now,
+            started_at: None,
+        })
+    }
+
+    pub fn enqueue_agent_routine_run(
+        &self,
+        routine: &AgentRoutine,
+        conversation_id: &str,
+        source: &str,
+        event_id: Option<&str>,
+        scheduled_for: i64,
+        now: i64,
+    ) -> Result<AgentRoutineQueueItem> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock();
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO agent_routine_queue \
+             (id, routine_id, agent_id, conversation_id, source, event_id, scheduled_for, \
+              status, error, created_at, started_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', NULL, ?8, NULL)",
+            params![
+                &id,
+                &routine.id,
+                &routine.agent_id,
+                conversation_id,
+                source,
+                event_id,
+                scheduled_for,
+                now,
+            ],
+        )?;
+        tx.execute(
+            "UPDATE agent_routines SET last_status = 'queued', last_error = NULL, \
+             updated_at = ?2 WHERE id = ?1",
+            params![&routine.id, now],
+        )?;
+        tx.commit()?;
+        drop(conn);
+        Ok(AgentRoutineQueueItem {
+            id,
+            routine_id: routine.id.clone(),
+            agent_id: routine.agent_id.clone(),
+            conversation_id: conversation_id.to_string(),
+            source: source.to_string(),
+            event_id: event_id.map(str::to_string),
+            scheduled_for,
+            status: "pending".to_string(),
+            error: None,
+            created_at: now,
+            started_at: None,
+        })
+    }
+
+    pub fn list_pending_agent_routine_queue(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<AgentRoutineQueueItem>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AGENT_ROUTINE_QUEUE_COLUMNS} FROM agent_routine_queue \
+             WHERE status = 'pending' ORDER BY created_at, rowid LIMIT ?1"
+        ))?;
+        let rows = stmt.query_map([limit.clamp(1, 100) as i64], agent_routine_queue_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn claim_agent_routine_queue_item(&self, id: &str, now: i64) -> Result<bool> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE agent_routine_queue SET status = 'running', started_at = ?2, error = NULL \
+             WHERE id = ?1 AND status = 'pending'",
+            params![id, now],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn release_agent_routine_queue_item(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE agent_routine_queue SET status = 'pending', started_at = NULL, error = NULL \
+             WHERE id = ?1 AND status = 'running'",
+            [id],
+        )?;
+        Ok(())
+    }
+
+    pub fn finish_agent_routine_queue_item(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute("DELETE FROM agent_routine_queue WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn clear_agent_routine_pending_status(&self, routine_id: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE agent_routines SET last_status = NULL \
+             WHERE id = ?1 AND last_status IN ('queued', 'running')",
+            [routine_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn recover_agent_routine_queue(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        recover_agent_routine_queue(&conn)
     }
 
     pub fn list_due_agent_routines(&self, now: i64) -> Result<Vec<AgentRoutine>> {
@@ -5658,6 +6065,29 @@ impl Db {
     /// code harness, prompt cache and `usage_log`). Orphan Library attachments
     /// are preserved by product decision.
     pub fn delete_conversation(&self, id: &str) -> anyhow::Result<()> {
+        self.delete_conversation_inner(id, false)
+    }
+
+    fn delete_conversation_inner(
+        &self,
+        id: &str,
+        allow_main: bool,
+    ) -> anyhow::Result<()> {
+        if !allow_main {
+            let conn = self.conn.lock();
+            let is_main: Option<i64> = conn
+                .query_row(
+                    "SELECT is_main FROM conversations WHERE id = ?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if is_main == Some(1) {
+                return Err(anyhow::anyhow!(
+                    "CONVERSATION_MAIN: a conversa principal não pode ser excluída."
+                ));
+            }
+        }
         // Retained subagent transcripts are children of this conversation and
         // must be deleted with it (they are hidden from the sidebar).
         let child_ids: Vec<String> = {
@@ -5668,7 +6098,7 @@ impl Db {
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
         for child_id in child_ids {
-            self.delete_conversation(&child_id)?;
+            self.delete_conversation_inner(&child_id, false)?;
         }
         let conn = self.conn.lock();
         let artifact_paths: Vec<(String, String)> = {
@@ -5718,6 +6148,18 @@ impl Db {
 
     pub fn set_pinned(&self, id: &str, pinned: bool) -> anyhow::Result<()> {
         let conn = self.conn.lock();
+        let is_main: Option<i64> = conn
+            .query_row(
+                "SELECT is_main FROM conversations WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if !pinned && is_main == Some(1) {
+            return Err(anyhow::anyhow!(
+                "CONVERSATION_MAIN: a conversa principal não pode ser desafixada."
+            ));
+        }
         conn.execute(
             "UPDATE conversations SET pinned = ?2 WHERE id = ?1",
             params![id, if pinned { 1i64 } else { 0i64 }],
@@ -5771,12 +6213,12 @@ impl Db {
              c.provider_id, c.model_id, c.message_count, c.preview, c.mode, c.code_linked, \
              c.workspace_id, c.agent_kind, c.permission_mode, c.parent_conversation_id, \
              c.subagent_task_call_id, c.subagent_type, c.agent_id, c.channel_id, c.task_id, \
-             c.sort_order \
+             c.sort_order, c.is_main \
              FROM conversations c \
              LEFT JOIN messages m ON m.conversation_id = c.id \
              WHERE c.parent_conversation_id IS NULL \
                AND (c.title LIKE ?1 ESCAPE '\\' OR m.content LIKE ?1 ESCAPE '\\') \
-             ORDER BY c.pinned DESC, c.sort_order ASC, c.updated_at DESC"
+             ORDER BY c.is_main DESC, c.pinned DESC, c.sort_order ASC, c.updated_at DESC"
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([&pattern], |row| conversation_from_row(row))?;
@@ -7482,6 +7924,7 @@ impl Db {
             "session_summaries",
             "approval_rules",
             "workspaces",
+            "agent_routine_runs",
             "conversations",
             "meta",
         ] {
@@ -7489,6 +7932,13 @@ impl Db {
                 .with_context(|| format!("falha ao limpar a tabela {table}"))?;
         }
         tx.commit()?;
+        // Agents survive a data reset; give each one a fresh primary
+        // conversation and repoint its routines.
+        backfill_agent_main_conversations(&conn)?;
+        conn.execute(
+            "UPDATE agent_routines SET last_status = NULL, last_error = NULL",
+            [],
+        )?;
         Ok(())
     }
 }
@@ -7538,7 +7988,7 @@ mod tests {
         let created = db.create_agent(&agent_input("Irineu")).expect("create agent");
         assert_eq!(created.name, "Irineu");
         assert_eq!(created.prompt_version, 1);
-        assert_eq!(created.thread_count, 0);
+        assert_eq!(created.thread_count, 1);
         assert_eq!(db.list_agents(false).expect("list").len(), 1);
 
         let mut edit = agent_input("Irineu");
@@ -7708,6 +8158,224 @@ mod tests {
     }
 
     #[test]
+    fn agent_main_conversation_is_created_pinned_and_protected() {
+        let db = test_db();
+        let agent = db.create_agent(&agent_input("Ana")).expect("agent");
+        let main = db
+            .get_agent_main_conversation(&agent.id)
+            .expect("main")
+            .expect("primary exists");
+        assert_eq!(main.title, "Conversa principal");
+        assert!(main.is_main);
+        assert!(main.pinned);
+        assert_eq!(main.agent_id.as_deref(), Some(agent.id.as_str()));
+        assert_eq!(main.provider_id, agent.provider_id);
+        assert_eq!(main.model_id, agent.model_id);
+        assert_eq!(agent.thread_count, 1);
+        assert_eq!(
+            db.ensure_agent_main_conversation(&agent.id)
+                .expect("ensure")
+                .id,
+            main.id
+        );
+        let error = db.set_pinned(&main.id, false).expect_err("unpin");
+        assert!(format!("{error:#}").contains("CONVERSATION_MAIN"));
+        let error = db.delete_conversation(&main.id).expect_err("delete");
+        assert!(format!("{error:#}").contains("CONVERSATION_MAIN"));
+
+        db.delete_agent(&agent.id).expect("delete agent");
+        assert!(db.get_agent(&agent.id).expect("get").is_none());
+        assert!(db.get_conversation(&main.id).expect("conversation").is_none());
+    }
+
+    #[test]
+    fn ensure_agent_main_conversation_recreates_a_missing_primary() {
+        let db = test_db();
+        let agent = db.create_agent(&agent_input("Bia")).expect("agent");
+        let first = db
+            .get_agent_main_conversation(&agent.id)
+            .expect("main")
+            .expect("primary");
+        db.delete_conversation_inner(&first.id, true)
+            .expect("force delete primary");
+        let second = db
+            .ensure_agent_main_conversation(&agent.id)
+            .expect("ensure");
+        assert_ne!(first.id, second.id);
+        assert!(second.is_main);
+        let count: i64 = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT COUNT(*) FROM conversations WHERE agent_id = ?1 AND is_main = 1",
+                [&agent.id],
+                |row| row.get(0),
+            )
+            .expect("count");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn update_agent_syncs_only_an_empty_primary_route() {
+        use crate::domain::PermissionMode;
+
+        let db = test_db();
+        let agent = db.create_agent(&agent_input("Caio")).expect("agent");
+        let main = db
+            .get_agent_main_conversation(&agent.id)
+            .expect("main")
+            .expect("primary");
+        let mut edit = agent_input("Caio");
+        edit.provider_id = "opencode-zen".to_string();
+        edit.model_id = "deepseek-v4.1-flash".to_string();
+        edit.workspace_id = Some("ws-main".to_string());
+        edit.permission_mode = PermissionMode::ReadOnly;
+        db.update_agent(&agent.id, &edit).expect("update");
+        let synced = db.get_conversation(&main.id).expect("conversation").unwrap();
+        assert_eq!(synced.provider_id, "opencode-zen");
+        assert_eq!(synced.model_id, "deepseek-v4.1-flash");
+        assert_eq!(synced.workspace_id.as_deref(), Some("ws-main"));
+        assert_eq!(synced.permission_mode, PermissionMode::ReadOnly);
+
+        db.conn
+            .lock()
+            .execute(
+                "UPDATE conversations SET message_count = 1 WHERE id = ?1",
+                [&main.id],
+            )
+            .expect("mark used");
+        edit.model_id = "another-model".to_string();
+        db.update_agent(&agent.id, &edit).expect("update used");
+        let frozen = db.get_conversation(&main.id).expect("conversation").unwrap();
+        assert_eq!(frozen.model_id, "deepseek-v4.1-flash");
+    }
+
+    #[test]
+    fn reset_recreates_primary_and_repoints_routines() {
+        let db = test_db();
+        let agent = db.create_agent(&agent_input("Dora")).expect("agent");
+        let routine = db
+            .create_agent_routine(
+                &agent.id,
+                &crate::agents::AgentRoutineInput {
+                    title: "Olhar o dia".to_string(),
+                    prompt: "Resuma o dia.".to_string(),
+                    schedule_kind: "interval".to_string(),
+                    interval_minutes: 60,
+                    hour: 9,
+                    minute: 0,
+                    days_of_week: crate::agents::AGENT_ROUTINE_ALL_DAYS,
+                    enabled: true,
+                    trigger_kind: "schedule".to_string(),
+                    event_kind: String::new(),
+                    event_filter_json: "{}".to_string(),
+                }
+                .normalize()
+                .expect("input"),
+                now_ms(),
+            )
+            .expect("routine");
+        let old_main = db
+            .get_agent_main_conversation(&agent.id)
+            .expect("main")
+            .expect("primary");
+        assert_eq!(
+            routine.conversation_id.as_deref(),
+            Some(old_main.id.as_str())
+        );
+
+        db.reset().expect("reset");
+        let new_main = db
+            .get_agent_main_conversation(&agent.id)
+            .expect("main")
+            .expect("recreated primary");
+        assert_ne!(old_main.id, new_main.id);
+        let persisted = db
+            .get_agent_routine(&routine.id)
+            .expect("routine")
+            .expect("still exists");
+        assert_eq!(
+            persisted.conversation_id.as_deref(),
+            Some(new_main.id.as_str())
+        );
+        assert_eq!(
+            db.get_agent(&agent.id).expect("agent").unwrap().thread_count,
+            1
+        );
+    }
+
+    #[test]
+    fn agent_routine_queue_transitions_recovery_and_cascade() {
+        let db = test_db();
+        let agent = db.create_agent(&agent_input("Eva")).expect("agent");
+        let routine = db
+            .create_agent_routine(
+                &agent.id,
+                &crate::agents::AgentRoutineInput {
+                    title: "Fila".to_string(),
+                    prompt: "Execute.".to_string(),
+                    schedule_kind: "interval".to_string(),
+                    interval_minutes: 60,
+                    hour: 9,
+                    minute: 0,
+                    days_of_week: crate::agents::AGENT_ROUTINE_ALL_DAYS,
+                    enabled: true,
+                    trigger_kind: "schedule".to_string(),
+                    event_kind: String::new(),
+                    event_filter_json: "{}".to_string(),
+                }
+                .normalize()
+                .expect("input"),
+                now_ms(),
+            )
+            .expect("routine");
+        let main = db
+            .get_agent_main_conversation(&agent.id)
+            .expect("main")
+            .expect("primary");
+        let now = now_ms();
+        let scheduled_for = routine.next_run_at;
+        let next = scheduled_for + 60_000;
+        let item = db
+            .enqueue_scheduled_agent_routine(&routine, &main.id, scheduled_for, next, now)
+            .expect("enqueue");
+        assert_eq!(item.status, "pending");
+        assert_eq!(db.list_pending_agent_routine_queue(10).expect("pending").len(), 1);
+        let queued = db.get_agent_routine(&routine.id).expect("routine").unwrap();
+        assert_eq!(queued.last_status.as_deref(), Some("queued"));
+        assert_eq!(queued.next_run_at, next);
+
+        assert!(db.claim_agent_routine_queue_item(&item.id, now).expect("claim"));
+        assert!(db.list_pending_agent_routine_queue(10).expect("pending").is_empty());
+        db.release_agent_routine_queue_item(&item.id).expect("release");
+        assert_eq!(db.list_pending_agent_routine_queue(10).expect("pending").len(), 1);
+        assert!(db.claim_agent_routine_queue_item(&item.id, now).expect("claim"));
+        db.recover_agent_routine_queue().expect("recover");
+        let recovered = db.list_pending_agent_routine_queue(10).expect("pending");
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].status, "pending");
+        assert!(db.claim_agent_routine_queue_item(&item.id, now).expect("claim"));
+        db.finish_agent_routine_queue_item(&item.id).expect("finish");
+        assert!(db.list_pending_agent_routine_queue(10).expect("pending").is_empty());
+
+        db.set_agent_routine_enabled(&routine.id, true, now).expect("enable");
+        let manual = db
+            .enqueue_agent_routine_run(&routine, &main.id, "manual", None, now, now)
+            .expect("manual");
+        assert_eq!(manual.source, "manual");
+        db.set_agent_routine_enabled(&routine.id, false, now).expect("disable");
+        assert!(db.list_pending_agent_routine_queue(10).expect("pending").is_empty());
+        let paused = db.get_agent_routine(&routine.id).expect("routine").unwrap();
+        assert_ne!(paused.last_status.as_deref(), Some("queued"));
+
+        db.set_agent_routine_enabled(&routine.id, true, now).expect("enable");
+        db.enqueue_agent_routine_run(&routine, &main.id, "event", None, now, now)
+            .expect("event");
+        db.delete_agent_routine(&routine.id).expect("delete routine");
+        assert!(db.list_pending_agent_routine_queue(10).expect("pending").is_empty());
+    }
+
+    #[test]
     fn agent_channels_keep_members_messages_and_hide_private_threads() {
         let db = test_db();
         let first = db.create_agent(&agent_input("Ana")).expect("agent");
@@ -7742,13 +8410,14 @@ mod tests {
         assert_eq!(thread.channel_id.as_deref(), Some(channel.id.as_str()));
         assert_eq!(
             db.get_agent(&first.id).expect("agent").expect("found").thread_count,
-            0
+            1
         );
-        assert!(db
+        let threads = db
             .list_agent_threads(&first.id, None, Some(10))
             .expect("threads")
-            .items
-            .is_empty());
+            .items;
+        assert_eq!(threads.len(), 1);
+        assert!(threads[0].is_main);
         assert_eq!(
             db.get_or_create_channel_conversation(&channel.id, &first.id, "ignored")
                 .expect("reuse")
@@ -8583,7 +9252,7 @@ mod tests {
         assert_eq!(first.agent_id.as_deref(), Some(agent.id.as_str()));
         assert_eq!(db.list_agent_threads(&agent.id, None, Some(1)).expect("page").items.len(), 1);
         assert!(db.list_agent_threads(&agent.id, None, Some(1)).expect("page").has_more);
-        assert_eq!(db.get_agent(&agent.id).expect("get").unwrap().thread_count, 2);
+        assert_eq!(db.get_agent(&agent.id).expect("get").unwrap().thread_count, 3);
 
         assert!(db.delete_agent(&agent.id).is_err());
         db.delete_conversation(&first.id).expect("delete first");

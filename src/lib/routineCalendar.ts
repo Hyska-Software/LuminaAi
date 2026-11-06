@@ -39,6 +39,7 @@ export const ROUTINE_STATUS_META: Record<
   error: { label: 'Erro', tone: 'danger' },
   blocked: { label: 'Bloqueada', tone: 'warning' },
   running: { label: 'Executando', tone: 'accent' },
+  queued: { label: 'Na fila', tone: 'accent' },
 };
 
 const MONTH_NAMES = [

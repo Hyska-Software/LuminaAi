@@ -1349,6 +1349,8 @@ export interface Conversation {
   channelId?: string | null;
   /** Task that owns this hidden agent thread. */
   taskId?: string | null;
+  /** Primary conversation of the agent persona; always pinned at the top. */
+  isMain?: boolean;
 }
 
 export interface ConversationDetail {

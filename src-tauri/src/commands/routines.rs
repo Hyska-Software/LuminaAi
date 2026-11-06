@@ -1,16 +1,19 @@
 //! Scheduled agent routines.
 //!
-//! A routine is one instruction plus a schedule. Each run appends a normal turn
-//! to a dedicated agent thread, so the result lands where its context already
-//! lives. The scheduler runs only while the app is open; it is not a cron
-//! service or a cloud worker.
+//! A routine is one instruction plus a schedule. Each execution waits in a
+//! persistent FIFO and appends a normal turn to the agent's primary
+//! conversation, so concurrent routines never overlap the same thread. The
+//! scheduler runs only while the app is open; it is not a cron service.
 
 use std::sync::Arc;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::agents::{routine_next_run_at, AgentEvent, AgentRoutine, AgentRoutineInput, AgentRoutineRun};
+use crate::agents::{
+    routine_next_run_at, AgentEvent, AgentRoutine, AgentRoutineInput, AgentRoutineQueueItem,
+    AgentRoutineRun,
+};
 use crate::domain::{TurnKind, TurnOptions, TurnPayload, TurnProfile};
 use crate::events::TurnEvent;
 use crate::harness::{self, EventEmitter, HarnessDeps};
@@ -116,9 +119,9 @@ pub fn list_agent_routine_runs(
         .map_err(to_error)
 }
 
-/// Runs one routine immediately, in its dedicated thread.
+/// Queues one manual execution in the agent's primary conversation.
 #[tauri::command]
-pub async fn run_agent_routine_now(
+pub fn run_agent_routine_now(
     app: AppHandle,
     state: State<'_, AppState>,
     routine_id: String,
@@ -128,24 +131,42 @@ pub async fn run_agent_routine_now(
         .get_agent_routine(&routine_id)
         .map_err(to_error)?
         .ok_or_else(|| format!("AGENT_ROUTINE_NOT_FOUND: rotina `{routine_id}` não existe"))?;
-    execute_routine(&app, &routine, None, false).await?;
+    let agent = state
+        .db
+        .get_agent(&routine.agent_id)
+        .map_err(to_error)?
+        .ok_or_else(|| format!("AGENT_NOT_FOUND: agente `{}` não existe", routine.agent_id))?;
+    if agent.is_archived() {
+        return Err(
+            "AGENT_ARCHIVED: restaure o agente antes de executar a rotina".to_string(),
+        );
+    }
+    let main = state
+        .db
+        .ensure_agent_main_conversation(&routine.agent_id)
+        .map_err(to_error)?;
+    let now = now_ms();
     state
         .db
-        .get_agent_routine(&routine_id)
-        .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_ROUTINE_NOT_FOUND: rotina `{routine_id}` não existe"))
+        .enqueue_agent_routine_run(&routine, &main.id, "manual", None, now, now)
+        .map_err(to_error)?;
+    emit_run(&app, &routine, Some(&main.id), "queued", None, None);
+    let mut queued = routine;
+    queued.conversation_id = Some(main.id);
+    queued.last_status = Some("queued".to_string());
+    queued.last_error = None;
+    queued.updated_at = now;
+    Ok(queued)
 }
 
-/// One scheduler pass. Called by the background loop; also safe to call from a
-/// test/command. Sequential by design: routines never overlap the same thread.
+/// One scheduler pass. Due routines are enqueued; the queue worker is the
+/// only executor. Sequential by design: the queue is FIFO per conversation.
 pub async fn scheduler_tick(app: AppHandle) {
+    let now = now_ms();
     let due = {
         let state = app.state::<AppState>();
-        let _ = state.db.sweep_agent_routine_leases(now_ms());
-        match state
-            .db
-            .claim_due_agent_routines(now_ms(), 8)
-        {
+        let _ = state.db.sweep_agent_routine_leases(now);
+        match state.db.claim_due_agent_routines(now, 8) {
             Ok(due) => due,
             Err(error) => {
                 eprintln!("lumina: falha ao listar rotinas: {error:#}");
@@ -154,12 +175,37 @@ pub async fn scheduler_tick(app: AppHandle) {
         }
     };
     for routine in due {
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(error) = execute_routine(&app, &routine, None, true).await {
-                eprintln!("lumina: rotina `{}` falhou: {error}", routine.title);
-            }
-        });
+        let state = app.state::<AppState>();
+        let result = (|| -> Result<(), String> {
+            let main = state
+                .db
+                .ensure_agent_main_conversation(&routine.agent_id)
+                .map_err(to_error)?;
+            let next = routine_next_run_at(
+                &routine.schedule_kind,
+                routine.interval_minutes,
+                routine.hour,
+                routine.minute,
+                routine.days_of_week,
+                now,
+            );
+            state
+                .db
+                .enqueue_scheduled_agent_routine(
+                    &routine,
+                    &main.id,
+                    routine.next_run_at,
+                    next,
+                    now,
+                )
+                .map_err(to_error)?;
+            emit_run(&app, &routine, Some(&main.id), "queued", None, None);
+            Ok(())
+        })();
+        if let Err(error) = result {
+            eprintln!("lumina: falha ao enfileirar rotina `{}`: {error}", routine.title);
+        }
+        let _ = state.db.clear_agent_routine_lease(&routine.id);
     }
 }
 
@@ -206,39 +252,133 @@ pub async fn event_tick(app: AppHandle) {
         {
             continue;
         }
-        let result = execute_routine(&app, &routine, Some(&event), false).await;
-        let (status, error) = match result {
-            Ok(()) => ("done", None),
-            Err(error) => ("failed", Some(error)),
-        };
-        let _ = state.db.finish_event_delivery(
-            &event.id,
-            &routine.id,
-            status,
-            error.as_deref(),
-            now_ms(),
-        );
+        let result = (|| -> Result<(), String> {
+            let main = state
+                .db
+                .ensure_agent_main_conversation(&routine.agent_id)
+                .map_err(to_error)?;
+            state
+                .db
+                .enqueue_agent_routine_run(
+                    &routine,
+                    &main.id,
+                    "event",
+                    Some(&event.id),
+                    now,
+                    now,
+                )
+                .map_err(to_error)?;
+            emit_run(&app, &routine, Some(&main.id), "queued", None, Some(&event));
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                let _ = state.db.finish_event_delivery(
+                    &event.id,
+                    &routine.id,
+                    "done",
+                    None,
+                    now_ms(),
+                );
+            }
+            Err(error) => {
+                let _ = state.db.finish_event_delivery(
+                    &event.id,
+                    &routine.id,
+                    "failed",
+                    Some(&error),
+                    now_ms(),
+                );
+                emit_run(&app, &routine, None, "error", Some(error), Some(&event));
+            }
+        }
     }
 }
 
-async fn execute_routine(
-    app: &AppHandle,
-    routine: &AgentRoutine,
-    event: Option<&AgentEvent>,
-    from_schedule: bool,
-) -> Result<(), String> {
-    let result = execute_routine_inner(app, routine, event, from_schedule).await;
+/// Drains pending routine executions whose primary conversation is idle.
+/// Items for different conversations may run in parallel; each conversation
+/// has at most one turn because `register_turn_if_idle` is atomic.
+pub async fn routine_queue_tick(app: AppHandle) {
     let state = app.state::<AppState>();
-    let _ = state.db.clear_agent_routine_lease(&routine.id);
-    result
+    let pending = match state.db.list_pending_agent_routine_queue(20) {
+        Ok(pending) => pending,
+        Err(error) => {
+            eprintln!("lumina: falha ao listar a fila de rotinas: {error:#}");
+            return;
+        }
+    };
+    let mut seen = std::collections::HashSet::new();
+    for item in pending {
+        if !seen.insert(item.conversation_id.clone()) {
+            continue;
+        }
+        if state.has_active_turn_for(&item.conversation_id) {
+            continue;
+        }
+        if !state
+            .db
+            .claim_agent_routine_queue_item(&item.id, now_ms())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            execute_queued_routine(app, item).await;
+        });
+    }
+}
+
+async fn execute_queued_routine(app: AppHandle, item: AgentRoutineQueueItem) {
+    let state = app.state::<AppState>();
+    let db = state.db.clone();
+    let routine = match db.get_agent_routine(&item.routine_id) {
+        Ok(Some(routine)) => routine,
+        Ok(None) => {
+            let _ = db.finish_agent_routine_queue_item(&item.id);
+            return;
+        }
+        Err(error) => {
+            eprintln!("lumina: falha ao carregar rotina da fila: {error:#}");
+            let _ = db.finish_agent_routine_queue_item(&item.id);
+            return;
+        }
+    };
+    if !routine.enabled && item.source != "manual" {
+        let _ = db.finish_agent_routine_queue_item(&item.id);
+        let _ = db.clear_agent_routine_pending_status(&routine.id);
+        return;
+    }
+    let event = item
+        .event_id
+        .as_deref()
+        .and_then(|id| db.get_agent_event(id).ok().flatten());
+    let result = execute_routine_inner(&app, &routine, &item, event.as_ref()).await;
+    match result {
+        Ok(RoutineRunOutcome::Busy) => {
+            let _ = db.release_agent_routine_queue_item(&item.id);
+        }
+        Ok(RoutineRunOutcome::Executed) => {
+            let _ = db.finish_agent_routine_queue_item(&item.id);
+        }
+        Err(error) => {
+            eprintln!("lumina: rotina `{}` falhou: {error}", routine.title);
+            let _ = db.finish_agent_routine_queue_item(&item.id);
+        }
+    }
+}
+
+enum RoutineRunOutcome {
+    Executed,
+    Busy,
 }
 
 async fn execute_routine_inner(
     app: &AppHandle,
     routine: &AgentRoutine,
+    queue: &AgentRoutineQueueItem,
     event: Option<&AgentEvent>,
-    from_schedule: bool,
-) -> Result<(), String> {
+) -> Result<RoutineRunOutcome, String> {
     let state = app.state::<AppState>();
     let db = state.db.clone();
     let agent = db
@@ -255,43 +395,51 @@ async fn execute_routine_inner(
         let next = if routine.trigger_kind == "event" {
             0
         } else {
-            routine_next_run_at(
-                &routine.schedule_kind,
-                routine.interval_minutes,
-                routine.hour,
-                routine.minute,
-                routine.days_of_week,
-                now_ms(),
-            )
+            routine.next_run_at
         };
         let _ = db.mark_agent_routine_run(
             &routine.id,
-            None,
+            Some(&queue.conversation_id),
             "blocked",
             Some(&error),
             next,
             now_ms(),
         );
-        emit_run(app, routine, None, "blocked", Some(error.clone()), None);
+        emit_run(
+            app,
+            routine,
+            Some(&queue.conversation_id),
+            "blocked",
+            Some(error.clone()),
+            event,
+        );
         return Err(error);
     }
 
-    let conversation = match routine.conversation_id.as_deref() {
-        Some(id) => match db.get_conversation(id).map_err(to_error)? {
-            Some(conversation) => conversation,
-            // The user deleted the routine thread: recreate it instead of
-            // leaving the routine permanently broken.
-            None => db
-                .create_agent_conversation(&agent.id, &routine.title)
-                .map_err(to_error)?,
-        },
-        None => db
-            .create_agent_conversation(&agent.id, &routine.title)
-            .map_err(to_error)?,
+    let conversation = match db.get_conversation(&queue.conversation_id).map_err(to_error)? {
+        Some(conversation) => conversation,
+        None => {
+            let error =
+                "AGENT_ROUTINE_CONVERSATION_NOT_FOUND: conversa principal não encontrada"
+                    .to_string();
+            let next = if routine.trigger_kind == "event" {
+                0
+            } else {
+                routine.next_run_at
+            };
+            let _ = db.mark_agent_routine_run(
+                &routine.id,
+                None,
+                "error",
+                Some(&error),
+                next,
+                now_ms(),
+            );
+            emit_run(app, routine, None, "error", Some(error.clone()), event);
+            return Err(error);
+        }
     };
 
-    // Mark the next schedule before the model call so a crash cannot run the
-    // same slot twice; the status is replaced with the real result below.
     let settings = crate::config::load_settings(app);
     let limits = crate::concurrency::TurnLimits {
         global: settings.max_concurrent_turns.max(1) as usize,
@@ -301,67 +449,29 @@ async fn execute_routine_inner(
         .governor
         .try_acquire(Some(agent.id.clone()), limits)
     else {
-        let next = if routine.trigger_kind == "event" {
-            0
-        } else {
-            now_ms() + 30_000
-        };
-        let _ = db.mark_agent_routine_run(
-            &routine.id,
-            Some(&conversation.id),
-            "blocked",
-            Some("AGENT_ROUTINE_BUSY: sem slot de concorrência"),
-            next,
-            now_ms(),
-        );
-        emit_run(
-            app,
-            routine,
-            Some(&conversation.id),
-            "blocked",
-            Some("sem slot de concorrência".to_string()),
-            event,
-        );
-        return Ok(());
+        return Ok(RoutineRunOutcome::Busy);
     };
     let turn_id = uuid::Uuid::new_v4().to_string();
     let Some(cancel) = state.register_turn_if_idle(&turn_id, &conversation.id) else {
-        let next = if routine.trigger_kind == "event" {
-            0
-        } else {
-            now_ms() + 30_000
-        };
-        let _ = db.mark_agent_routine_run(
-            &routine.id,
-            Some(&conversation.id),
-            "blocked",
-            Some("AGENT_ROUTINE_BUSY: thread ocupada"),
-            next,
-            now_ms(),
-        );
-        emit_run(
-            app,
-            routine,
-            Some(&conversation.id),
-            "blocked",
-            Some("thread ocupada".to_string()),
-            event,
-        );
-        return Ok(());
+        return Ok(RoutineRunOutcome::Busy);
     };
     let _turn_guard = state.turn_guard(&turn_id);
+
     let mut next = if routine.trigger_kind == "event" {
         0
     } else {
-        routine_next_run_at(
+        routine.next_run_at
+    };
+    if routine.trigger_kind != "event" && next <= now_ms() {
+        next = routine_next_run_at(
             &routine.schedule_kind,
             routine.interval_minutes,
             routine.hour,
             routine.minute,
             routine.days_of_week,
             now_ms(),
-        )
-    };
+        );
+    }
     let _ = db.mark_agent_routine_run(
         &routine.id,
         Some(&conversation.id),
@@ -370,16 +480,24 @@ async fn execute_routine_inner(
         next,
         now_ms(),
     );
+    emit_run(
+        app,
+        routine,
+        Some(&conversation.id),
+        "running",
+        None,
+        event,
+    );
     let run_id = db
         .start_agent_routine_run(&routine.id, Some(&conversation.id), now_ms())
         .ok();
 
     let now = now_ms();
     let mut prompt = routine.prompt.clone();
-    if from_schedule && routine.next_run_at < now {
+    if queue.source == "schedule" && queue.scheduled_for < now {
         prompt.push_str(&format!(
             "\n\nExecução atrasada desde {}.",
-            routine.next_run_at
+            queue.scheduled_for
         ));
     }
     let event_text = event.map(|event| {
@@ -454,7 +572,7 @@ async fn execute_routine_inner(
         Err(error) => ("error", Some(format!("{error:#}"))),
     };
     // A run longer than the interval must not start again immediately.
-    if next <= now_ms() {
+    if routine.trigger_kind != "event" && next <= now_ms() {
         next = routine_next_run_at(
             &routine.schedule_kind,
             routine.interval_minutes,
@@ -486,7 +604,7 @@ async fn execute_routine_inner(
     if let Some(error) = error {
         Err(error)
     } else {
-        Ok(())
+        Ok(RoutineRunOutcome::Executed)
     }
 }
 

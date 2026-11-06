@@ -169,7 +169,28 @@ pub fn restore_agent(state: State<'_, AppState>, agent_id: String) -> Result<Age
 
 #[tauri::command]
 pub fn delete_agent(state: State<'_, AppState>, agent_id: String) -> Result<(), String> {
-    state.db.delete_agent(&agent_id).map_err(to_error)
+    let main = state
+        .db
+        .get_agent_main_conversation(&agent_id)
+        .map_err(to_error)?;
+    if let Some(conversation) = main.as_ref() {
+        state.cancel_conversation(&conversation.id);
+    }
+    state.db.delete_agent(&agent_id).map_err(to_error)?;
+    if let Some(conversation) = main {
+        state.terminals.close_conversation(&conversation.id);
+        if let Some(browser) = crate::computer::browser::global() {
+            browser.close(&conversation.id);
+        }
+        let _ = state
+            .db
+            .end_computer_session(&conversation.id, "stopped", crate::domain::now_ms());
+        if conversation.workspace_id.is_none() {
+            let dir = crate::harness::agent_workspace::path(&state.data_dir, &conversation.id);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]

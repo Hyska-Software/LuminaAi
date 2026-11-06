@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   deleteAgent: vi.fn(),
   importAgent: vi.fn(),
   listAgents: vi.fn(),
+  listConversations: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -17,8 +18,24 @@ vi.mock('sonner', () => ({
 }));
 
 import { useAgentStore, useAppStore, useChatStore, useUiStore } from '@/lib/store';
-import type { Agent } from '@/lib/types';
+import type { Agent, Conversation } from '@/lib/types';
 import { TeamView } from './TeamView';
+
+function conversation(overrides: Partial<Conversation> = {}): Conversation {
+  return {
+    id: 'conv-1',
+    title: 'Conversa',
+    createdAt: 1,
+    updatedAt: 1,
+    pinned: false,
+    providerId: 'opencode-go',
+    modelId: 'glm-5.3-flash',
+    messageCount: 0,
+    mode: 'agent',
+    agentId: 'agent-old',
+    ...overrides,
+  };
+}
 
 const agent: Agent = {
   id: 'agent-1',
@@ -59,6 +76,7 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.listConversations.mockResolvedValue([]);
   mocks.listAgentUsage.mockResolvedValue([
     {
       agentId: 'agent-1',
@@ -142,7 +160,12 @@ describe('TeamView — agent lifecycle', () => {
   });
 
   it('exclui um agente arquivado sem conversas após confirmação', async () => {
-    addArchived(archivedAgent());
+    addArchived(archivedAgent({ threadCount: 1 }));
+    useChatStore.setState({
+      conversations: [conversation({ id: 'old-main', isMain: true, pinned: true })],
+      activeId: null,
+      streaming: null,
+    });
     mocks.deleteAgent.mockResolvedValue(undefined);
     render(<TeamView />);
     fireEvent.click(await screen.findByRole('button', { name: 'Excluir' }));
@@ -154,6 +177,14 @@ describe('TeamView — agent lifecycle', () => {
 
   it('bloqueia a exclusão enquanto o agente tem conversas', async () => {
     addArchived(archivedAgent({ threadCount: 2 }));
+    useChatStore.setState({
+      conversations: [
+        conversation({ id: 'old-main', isMain: true, pinned: true }),
+        conversation({ id: 'old-extra' }),
+      ],
+      activeId: null,
+      streaming: null,
+    });
     render(<TeamView />);
     fireEvent.click(await screen.findByRole('button', { name: 'Excluir' }));
     const dialog = await screen.findByRole('dialog');

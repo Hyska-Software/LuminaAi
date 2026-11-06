@@ -139,7 +139,11 @@ function ThreadRow({
         {...sortable.itemProps(conversation.id)}
         onClick={onSelect}
         aria-current={active ? 'page' : undefined}
-        title={conversation.title}
+        title={
+          conversation.isMain && conversation.title !== 'Conversa principal'
+            ? `${conversation.title} · Conversa principal`
+            : conversation.title
+        }
         className={cn(
           'flex h-8 w-full min-w-0 items-center gap-2 rounded-lg pl-7 pr-8 text-left text-[12px]',
           'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
@@ -212,28 +216,38 @@ function ThreadRow({
               <DropdownMenuSeparator />
             </>
           ) : null}
-          <DropdownMenuItem
-            icon={
-              conversation.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />
-            }
-            onSelect={onTogglePin}
-          >
-            {conversation.pinned ? 'Desafixar' : 'Fixar'}
-          </DropdownMenuItem>
+          {!conversation.isMain ? (
+            <DropdownMenuItem
+              icon={
+                conversation.pinned ? (
+                  <PinOff className="size-3.5" />
+                ) : (
+                  <Pin className="size-3.5" />
+                )
+              }
+              onSelect={onTogglePin}
+            >
+              {conversation.pinned ? 'Desafixar' : 'Fixar'}
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem icon={<Pencil className="size-3.5" />} onSelect={onStartRename}>
             Renomear
           </DropdownMenuItem>
           <DropdownMenuItem icon={<Download className="size-3.5" />} onSelect={onExport}>
             Exportar
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            variant="danger"
-            icon={<Trash2 className="size-3.5" />}
-            onSelect={onDelete}
-          >
-            Excluir
-          </DropdownMenuItem>
+          {!conversation.isMain ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="danger"
+                icon={<Trash2 className="size-3.5" />}
+                onSelect={onDelete}
+              >
+                Excluir
+              </DropdownMenuItem>
+            </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
@@ -851,6 +865,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
     try {
       const copy = await api.duplicateAgent(agent.id);
       await refresh();
+      await useChatStore.getState().refreshConversations();
       setActiveAgentId(copy.id);
       clearActiveConversation();
       toast.success('Agente duplicado', { description: copy.name });
@@ -896,6 +911,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
     if (!deleteTarget) return;
     try {
       await remove(deleteTarget.id);
+      await useChatStore.getState().refreshConversations();
       if (activeAgentId === deleteTarget.id) {
         setActiveAgentId(null);
         clearActiveConversation();
@@ -907,7 +923,14 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
     }
   };
 
-  const deleteThreads = deleteTarget ? threadsFor(deleteTarget.id).length : 0;
+  const deleteThreads = deleteTarget
+    ? conversations.filter(
+        (conversation) =>
+          conversation.agentId === deleteTarget.id &&
+          !conversation.channelId &&
+          !conversation.isMain,
+      ).length
+    : 0;
 
   return (
     <aside className={cn('flex h-full min-h-0 flex-col bg-surface', className)}>
@@ -1288,15 +1311,15 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
             <DialogTitle>Excluir agente?</DialogTitle>
             <DialogDescription>
               {deleteTarget
-                ? `“${deleteTarget.name}” será removido permanentemente.`
+                ? `“${deleteTarget.name}” será removido permanentemente. A conversa principal é removida junto.`
                 : 'Esta ação não pode ser desfeita.'}
             </DialogDescription>
           </DialogHeader>
           {deleteThreads > 0 ? (
             <AgentDialogBody>
               <p className="rounded-lg border border-border bg-surface/50 px-3 py-2 text-[12px] text-foreground-muted">
-                Este agente tem {deleteThreads} conversa(s). Arquive-o para manter o histórico; a
-                exclusão definitiva só é permitida sem conversas.
+                Este agente tem {deleteThreads} outra(s) conversa(s). Arquive-o para manter o
+                histórico; a exclusão definitiva só é permitida sem outras conversas.
               </p>
             </AgentDialogBody>
           ) : null}

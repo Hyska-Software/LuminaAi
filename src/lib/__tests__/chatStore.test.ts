@@ -2396,3 +2396,21 @@ describe('chatStore — notificações de agente', () => {
     );
   });
 });
+
+describe('chatStore — primary conversation pin', () => {
+  it('does not call the backend when the primary is unpinned', async () => {
+    useChatStore.setState({
+      conversations: [
+        conversation({ id: 'conv-1', pinned: true, isMain: true }),
+      ],
+      activeId: null,
+    });
+
+    await useChatStore.getState().togglePinned('conv-1');
+
+    expect(mocks.api.setConversationPinned).not.toHaveBeenCalled();
+    const stored = useChatStore.getState().conversations[0];
+    expect(stored.pinned).toBe(true);
+    expect(stored.isMain).toBe(true);
+  });
+});

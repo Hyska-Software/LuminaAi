@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Conversation } from '@/lib/types';
 import {
   cn,
+  compareConversationOrder,
   createSerialRunner,
   deriveTitle,
   formatBytes,
@@ -145,6 +146,16 @@ describe('safeJsonParse', () => {
 
   it('returns the fallback for invalid JSON', () => {
     expect(safeJsonParse('{oops}', { fallback: true })).toEqual({ fallback: true });
+  });
+});
+
+describe('compareConversationOrder', () => {
+  it('puts the agent primary conversation above every pinned thread', () => {
+    const primary = { ...conversation('main', 1, true), isMain: true };
+    const pinned = conversation('pinned', 9_000, true);
+    const recent = conversation('recent', 10_000);
+    const ordered = [recent, pinned, primary].sort(compareConversationOrder);
+    expect(ordered.map((entry) => entry.id)).toEqual(['main', 'pinned', 'recent']);
   });
 });
 

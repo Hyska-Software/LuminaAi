@@ -243,6 +243,40 @@ describe('AgentSidebar — channels', () => {
   });
 });
 
+describe('AgentSidebar — primary conversation', () => {
+  it('renders it above pinned threads and hides unpin/delete', async () => {
+    useChatStore.setState({
+      conversations: [
+        thread({ id: 'pinned', title: 'Pinned', pinned: true, updatedAt: 9_999 }),
+        thread({
+          id: 'main',
+          title: 'Diário',
+          pinned: true,
+          isMain: true,
+          updatedAt: 1,
+        }),
+      ],
+      activeId: null,
+      messagesByConversation: {},
+      streamsByConversation: {},
+      streaming: null,
+    });
+    render(<AgentSidebar />);
+
+    const mainRow = await screen.findByTitle('Diário · Conversa principal');
+    const pinnedRow = screen.getByTitle('Pinned');
+    expect(
+      mainRow.compareDocumentPosition(pinnedRow) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    openMenu(screen.getByRole('button', { name: 'Opções de Diário' }));
+    expect(await screen.findByRole('menuitem', { name: 'Renomear' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Exportar' })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: 'Desafixar' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Excluir' })).toBeNull();
+  });
+});
+
 describe('AgentSidebar — routines entry', () => {
   it('opens the routines page from the footer', async () => {
     useUiStore.setState({ activeAgentId: null, activeChannelId: null, agentView: 'team' });

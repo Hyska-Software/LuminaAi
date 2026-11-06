@@ -115,6 +115,7 @@ export function TeamView() {
   const setAgentView = useUiStore((state) => state.setAgentView);
   const startNewConversation = useChatStore((state) => state.startNewConversation);
   const clearActiveConversation = useChatStore((state) => state.clearActiveConversation);
+  const conversations = useChatStore((state) => state.conversations);
 
   const agentIds = agents.map((agent) => agent.id).join('|');
   useEffect(() => {
@@ -174,6 +175,7 @@ export function TeamView() {
         workspaceId: null,
         permissionMode: 'autonomous',
       });
+      await useChatStore.getState().refreshConversations();
       setActiveAgentId(agent.id);
       clearActiveConversation();
       setTemplatesOpen(false);
@@ -212,6 +214,7 @@ export function TeamView() {
       const imported = await api.importAgent();
       if (!imported) return;
       await refresh();
+      await useChatStore.getState().refreshConversations();
       setActiveAgentId(imported.id);
       clearActiveConversation();
       toast.success('Agente importado', { description: imported.name });
@@ -224,6 +227,7 @@ export function TeamView() {
     if (!deleteTarget) return;
     try {
       await remove(deleteTarget.id);
+      await useChatStore.getState().refreshConversations();
       toast.success('Agente excluído', { description: deleteTarget.name });
       setDeleteTarget(null);
     } catch (error) {
@@ -231,7 +235,14 @@ export function TeamView() {
     }
   };
 
-  const deleteThreads = deleteTarget?.threadCount ?? 0;
+  const deleteThreads = deleteTarget
+    ? conversations.filter(
+        (conversation) =>
+          conversation.agentId === deleteTarget.id &&
+          !conversation.channelId &&
+          !conversation.isMain,
+      ).length
+    : 0;
 
   return (
     <div className="h-full min-h-0 overflow-y-auto">
@@ -389,15 +400,15 @@ export function TeamView() {
             <DialogTitle>Excluir agente?</DialogTitle>
             <DialogDescription>
               {deleteTarget
-                ? `“${deleteTarget.name}” será removido permanentemente.`
+                ? `“${deleteTarget.name}” será removido permanentemente. A conversa principal é removida junto.`
                 : 'Esta ação não pode ser desfeita.'}
             </DialogDescription>
           </DialogHeader>
           {deleteThreads > 0 ? (
             <AgentDialogBody>
               <p className="rounded-lg border border-border bg-surface/50 px-3 py-2 text-[12px] text-foreground-muted">
-                Este agente tem {deleteThreads} conversa(s). Arquive-o para manter o histórico; a
-                exclusão definitiva só é permitida sem conversas.
+                Este agente tem {deleteThreads} outra(s) conversa(s). Arquive-o para manter o
+                histórico; a exclusão definitiva só é permitida sem outras conversas.
               </p>
             </AgentDialogBody>
           ) : null}

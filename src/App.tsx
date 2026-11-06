@@ -201,7 +201,7 @@ export default function App() {
       const run = event.payload;
       if (run.status === 'ok') {
         toast.success(`Rotina concluída: ${run.title}`, {
-          description: 'O resultado está na conversa da rotina.',
+          description: 'O resultado está na conversa principal do agente.',
         });
       } else if (run.status === 'error' || run.status === 'blocked') {
         toast.error(`Rotina falhou: ${run.title}`, {
@@ -211,7 +211,12 @@ export default function App() {
       window.dispatchEvent(new CustomEvent('lumina:agent-routine-run', { detail: run }));
       void useChatStore.getState().refreshConversations();
       void useAgentStore.getState().refresh();
-      if (run.conversationId && useChatStore.getState().activeId === run.conversationId) {
+      if (
+        run.status !== 'queued' &&
+        run.status !== 'running' &&
+        run.conversationId &&
+        useChatStore.getState().activeId === run.conversationId
+      ) {
         void useChatStore.getState().openConversation(run.conversationId);
       }
     })

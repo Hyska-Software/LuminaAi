@@ -89,7 +89,7 @@ export function AgentRoutineRunsDialog({
           </DialogTitle>
           <DialogDescription>
             {routine
-              ? `${routineScheduleLabel(routine)} · últimas 30 execuções na conversa da rotina.`
+              ? `${routineScheduleLabel(routine)} · últimas 30 execuções na conversa principal.`
               : 'Histórico de execução da rotina.'}
           </DialogDescription>
         </DialogHeader>

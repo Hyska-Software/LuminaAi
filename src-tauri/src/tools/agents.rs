@@ -218,7 +218,7 @@ pub fn definitions(agent: &Agent) -> Vec<ToolDefinition> {
                           `interval` (minutes, minimum 5) or `daily` (local hour/minute). \
                           For `daily`, `daysOfWeek` selects weekdays (Monday=1, Tuesday=2, \
                           Wednesday=4, Thursday=8, Friday=16, Saturday=32, Sunday=64; default 127). \
-                          The routine runs unattended in its own thread."
+                          The routine runs unattended in the agent's primary conversation."
                 .to_string(),
             parameters: json!({
                 "type": "object",

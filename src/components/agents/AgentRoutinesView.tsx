@@ -377,7 +377,9 @@ export function AgentRoutinesView() {
       setRoutines((current) =>
         current.map((entry) => (entry.id === updated.id ? updated : entry)),
       );
-      if (updated.lastStatus === 'error') {
+      if (updated.lastStatus === 'queued') {
+        toast.success('Rotina enfileirada', { description: updated.title });
+      } else if (updated.lastStatus === 'error') {
         toast.error('A rotina terminou com erro', {
           description: updated.lastError ?? updated.title,
         });
@@ -880,7 +882,7 @@ export function AgentRoutinesView() {
             <DialogTitle>Excluir rotina?</DialogTitle>
             <DialogDescription>
               {deleteTarget
-                ? `“${deleteTarget.title}” será removida permanentemente. A conversa dela é preservada.`
+                ? `“${deleteTarget.title}” será removida permanentemente. A conversa principal do agente é preservada.`
                 : 'Esta ação não pode ser desfeita.'}
             </DialogDescription>
           </DialogHeader>

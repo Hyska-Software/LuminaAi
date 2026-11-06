@@ -66,6 +66,20 @@ starters, `capabilities_json`, `memory_enabled`, `workspace_id`,
   sincroniza o par congelado da thread vazia; depois disso o modelo da conversa
   fica travado e o segmento ✦ continua ajustando o raciocínio da persona.
 
+### `conversations` — conversa principal
+
+Cada agente tem exatamente uma conversa principal (`conversations.is_main = 1`,
+índice único parcial por `agent_id`), criada na mesma transação do agente e
+recriada pelo backfill para bancos antigos e pelo `reset`. Ela nasce com
+`pinned = 1` e título **Conversa principal**, aparece acima de qualquer thread
+fixada no histórico do agente e é o destino de todas as execuções de rotina.
+A principal não pode ser desafixada nem excluída isoladamente; é removida junto
+com o agente quando não há outras conversas. Cliques no agente continuam abrindo
+a home, que oferece um botão dedicado **Conversa principal**. Editar a persona
+sincroniza rota/workspace/permissão da principal enquanto ela está vazia; depois
+da primeira mensagem vale o congelamento normal de thread. `list_agent_threads`
+continua por recência; Sidebar/Home aplicam a ordem principal-first.
+
 ### `agent_memories`
 
 Uma linha por memória: `kind` (`fact`/`preference`/`procedure`/`note`),
@@ -75,8 +89,11 @@ Uma linha por memória: `kind` (`fact`/`preference`/`procedure`/`note`),
 ### `agent_routines`
 
 `title`, `prompt`, `schedule_kind` (`interval`/`daily`), `interval_minutes`,
-`hour`/`minute`, `enabled`, `conversation_id` (thread dedicada criada no primeiro
-run), `next_run_at`, `last_run_at`, `last_status`, `last_error`.
+`hour`/`minute`, `enabled`, `conversation_id` (id da conversa principal do
+agente), `next_run_at`, `last_run_at`, `last_status` (`queued` incluso),
+`last_error`. Execuções aguardam em `agent_routine_queue` (FIFO persistente por
+conversa principal, com `source` schedule/event/manual, `scheduled_for`,
+`status` pending/running e `error` de recuperação).
 
 ### `agent_channels` / `agent_channel_members` / `agent_channel_messages`
 
@@ -264,8 +281,8 @@ com erro — o fallback é de rota, não um retry infinito.
   (passado e futuro), filtro por agente, **Hoje**, seletor de mês/ano e a lista
   **Todas as rotinas**. O menu do agente abre a página já filtrada por ele.
 - CRUD no `AgentRoutineEditorDialog` compartilhado (página, aba **Rotinas** do
-  painel direito e editor do painel); excluir preserva a conversa da rotina.
-  **Execuções** lista `agent_routine_runs` em diálogo próprio.
+  painel direito e editor do painel); excluir preserva a conversa principal do
+  agente. **Execuções** lista `agent_routine_runs` em diálogo próprio.
 - `list_all_agent_routines` alimenta a página; a lista é recarregada no mount,
   no evento `lumina:agent-routine-run`, no foco da janela e no botão de
   recarregar.
@@ -274,8 +291,11 @@ com erro — o fallback é de rota, não um retry infinito.
   e só acessa as próprias.
 - O agendador roda no Rust enquanto o app está aberto (tick de 30 s). Ele não é
   um serviço de nuvem nem promete execução com o app fechado.
-- Cada rotina executa um turno normal na sua thread dedicada, com o modelo,
-  instruções, memória e workspace do agente. O resultado aparece na thread.
+- Cada rotina executa um turno normal na **conversa principal** do agente, com o
+  modelo, instruções, memória e workspace dele. O resultado aparece nela. Quando
+  a principal já tem um turno ativo, a execução fica `queued` em
+  `agent_routine_queue` e um worker a inicia quando a conversa fica livre (FIFO
+  por conversa; itens de agentes diferentes podem rodar em paralelo).
 - Frequência: intervalo mínimo de 5 min (máx. 7 dias) ou horário diário local.
   Rotinas diárias têm `days_of_week` (bitmask segunda=1 … domingo=64; padrão
   127 = todos os dias); intervalos são contínuos. As tools `routine_create`/
@@ -498,8 +518,8 @@ Testes específicos deste contrato:
 - `src/components/settings/ToolsTab.test.tsx` (ambiente Docker)
 - `src-tauri/src/concurrency.rs` (governador global/por agente)
 - `src-tauri/src/tools/tasks.rs` (delegação/ownership/handoff pendente)
-- `src-tauri/src/db.rs` (tarefas: claim/transições/handoff/lease; auditoria de
-  computer use; `turn_events`)
+- `src-tauri/src/db.rs` (conversa principal/backfill, fila de rotinas; tarefas:
+  claim/transições/handoff/lease; auditoria de computer use; `turn_events`)
 - `src-tauri/src/commands/tasks.rs` (runner multi-turno/cancelamento/heartbeat)
 - `src-tauri/src/commands/turn.rs` (eventos persistidos/reattach)
 - `src-tauri/src/computer/mod.rs` (backend local/Docker e ambiente por agente)
@@ -511,6 +531,7 @@ Testes específicos deste contrato:
 - `src-tauri/src/harness/mod.rs` (imagens de tool para modelos com visão)
 - `src/lib/__tests__/chatStore.test.ts` (reattach e notificações)
 - `src/components/agents/AgentPanel.test.tsx` (Tela/Navegador)
+- `src/components/agents/AgentHome.test.tsx` (conversa principal)
 - `src/components/settings/AgentsTab.test.tsx` (concorrência, notificações, navegador e computer use)
 - `src/components/agents/AgentTaskBoardDialog.test.tsx`
 - `src/components/agents/AgentActivityDialog.test.tsx`

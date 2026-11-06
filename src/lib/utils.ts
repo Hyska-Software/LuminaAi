@@ -124,9 +124,10 @@ export function groupConversations(conversations: Conversation[]): ConversationG
   return groups;
 }
 
-/** Sidebar order: pinned first, then manual position, then recency. */
+/** Sidebar order: agent primary first, then pinned, manual position, recency. */
 export function compareConversationOrder(left: Conversation, right: Conversation): number {
   return (
+    Number(Boolean(right.isMain)) - Number(Boolean(left.isMain)) ||
     Number(right.pinned) - Number(left.pinned) ||
     (left.sortOrder ?? 0) - (right.sortOrder ?? 0) ||
     right.updatedAt - left.updatedAt

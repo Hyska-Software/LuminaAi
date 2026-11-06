@@ -90,6 +90,16 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
                     crate::commands::routines::event_tick(event_scheduler.clone()).await;
                 }
             });
+            // Routine executions wait for their agent's primary conversation.
+            // The queue is persistent; a 2s tick starts the next pending turn.
+            let routine_queue = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                crate::commands::routines::routine_queue_tick(routine_queue.clone()).await;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    crate::commands::routines::routine_queue_tick(routine_queue.clone()).await;
+                }
+            });
             // Delegated tasks are latency-sensitive: pick them up quickly while
             // still respecting the concurrency governor.
             let task_scheduler = app.handle().clone();

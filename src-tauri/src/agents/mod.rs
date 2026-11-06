@@ -69,7 +69,7 @@ pub const AGENT_ROUTINE_MAX_PER_AGENT: i64 = 50;
 /// Bitmask with every weekday selected (Monday=1 … Sunday=64).
 pub const AGENT_ROUTINE_ALL_DAYS: u32 = 0x7f;
 
-/// A scheduled instruction that runs in the agent's dedicated routine thread.
+/// A scheduled instruction that runs in the agent's primary conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRoutine {
@@ -102,6 +102,24 @@ pub struct AgentRoutine {
     pub lease_until: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// One queued routine execution waiting for the agent's primary conversation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentRoutineQueueItem {
+    pub id: String,
+    pub routine_id: String,
+    pub agent_id: String,
+    pub conversation_id: String,
+    /// `schedule` | `event` | `manual`.
+    pub source: String,
+    pub event_id: Option<String>,
+    pub scheduled_for: i64,
+    /// `pending` | `running`.
+    pub status: String,
+    pub error: Option<String>,
+    pub created_at: i64,
+    pub started_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

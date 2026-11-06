@@ -321,6 +321,7 @@ mod tests {
             agent_id: None,
             channel_id: None,
             task_id: None,
+            is_main: false,
         }
     }
 

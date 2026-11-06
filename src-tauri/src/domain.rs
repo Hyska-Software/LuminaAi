@@ -82,6 +82,10 @@ pub struct Conversation {
     /// Delegated task that owns this hidden thread (`None` = normal thread).
     #[serde(default)]
     pub task_id: Option<String>,
+    /// One pinned primary conversation per agent (`None`/false for Chat, Code,
+    /// channels, tasks and other agent threads).
+    #[serde(default)]
+    pub is_main: bool,
 }
 
 fn default_agent_kind() -> String {
@@ -2606,6 +2610,7 @@ mod tests {
             agent_id: None,
             channel_id: None,
             task_id: None,
+            is_main: false,
         };
         let json = serde_json::to_value(&conversation).expect("serialize conversation");
         assert_eq!(json["mode"], "code");

@@ -162,7 +162,7 @@ export function AgentRoutineEditorDialog({
         <DialogHeader className="pb-4 pr-12">
           <DialogTitle>{routine ? 'Editar rotina' : 'Nova rotina'}</DialogTitle>
           <DialogDescription>
-            Uma instrução que o agente executa sozinho na thread dedicada da rotina.
+            Uma instrução que o agente executa sozinho na conversa principal do agente.
           </DialogDescription>
         </DialogHeader>
 
@@ -410,8 +410,8 @@ export function AgentRoutineEditorDialog({
           ) : null}
 
           <p className="text-[10px] leading-relaxed text-foreground-subtle">
-            O agendador roda enquanto o app estiver aberto. O resultado aparece na conversa da
-            rotina; não há execução em nuvem.
+            O agendador roda enquanto o app estiver aberto. O resultado aparece na conversa
+            principal do agente; não há execução em nuvem.
           </p>
         </AgentDialogBody>
 
