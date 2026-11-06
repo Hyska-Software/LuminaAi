@@ -363,8 +363,11 @@ com erro — o fallback é de rota, não um retry infinito.
   + memórias; a importação ainda lê documentos versão 1 convertendo o `emoji`
   antigo em avatar. Importar valida versão, modelo/workspace e recria o agente.
 - Arquivar/restaurar/excluir ficam na **Equipe** (página central): cada card
-  ativo arquiva; a seção **Arquivados** restaura ou exclui. A exclusão definitiva
-  só é permitida sem conversas — arquivar preserva o histórico.
+  ativo arquiva; a seção **Arquivados** restaura ou exclui. Excluir um agente
+  ativo exige que ele não tenha outras conversas (arquivar preserva o
+  histórico); excluir um agente **arquivado** remove permanentemente a persona,
+  a conversa principal e todas as demais conversas, com aviso explícito no
+  diálogo.
 - Skills/tools/MCP e workspace são escolhidos no editor; permissões continuam
   limitadas pelo backend.
 

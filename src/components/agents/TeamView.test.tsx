@@ -175,22 +175,26 @@ describe('TeamView — agent lifecycle', () => {
     await waitFor(() => expect(mocks.deleteAgent).toHaveBeenCalledWith('agent-old'));
   });
 
-  it('bloqueia a exclusão enquanto o agente tem conversas', async () => {
-    addArchived(archivedAgent({ threadCount: 2 }));
+  it('exclui um agente arquivado com conversas e avisa que tudo será apagado', async () => {
+    addArchived(archivedAgent({ threadCount: 3 }));
     useChatStore.setState({
       conversations: [
         conversation({ id: 'old-main', isMain: true, pinned: true }),
-        conversation({ id: 'old-extra' }),
+        conversation({ id: 'old-extra-1' }),
+        conversation({ id: 'old-extra-2' }),
       ],
       activeId: null,
       streaming: null,
     });
+    mocks.deleteAgent.mockResolvedValue(undefined);
     render(<TeamView />);
     fireEvent.click(await screen.findByRole('button', { name: 'Excluir' }));
     const dialog = await screen.findByRole('dialog');
-    expect(
-      within(dialog).getByRole('button', { name: 'Excluir' }).hasAttribute('disabled'),
-    ).toBe(true);
+    expect(within(dialog).getByText(/junto com 2 outra\(s\) conversa\(s\)/)).toBeTruthy();
+    const button = within(dialog).getByRole('button', { name: 'Excluir' });
+    expect(button.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(button);
+    await waitFor(() => expect(mocks.deleteAgent).toHaveBeenCalledWith('agent-old'));
   });
 
   it('importa um agente pela página da Equipe', async () => {

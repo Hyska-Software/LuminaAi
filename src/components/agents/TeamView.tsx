@@ -243,6 +243,11 @@ export function TeamView() {
           !conversation.isMain,
       ).length
     : 0;
+  // Active agents keep the guard so their history is archived first; an
+  // archived agent is already inactive, so permanent deletion removes every
+  // conversation with it (the backend does the same).
+  const deleteBlocked =
+    deleteTarget !== null && deleteTarget.archivedAt === null && deleteThreads > 0;
 
   return (
     <div className="h-full min-h-0 overflow-y-auto">
@@ -400,11 +405,13 @@ export function TeamView() {
             <DialogTitle>Excluir agente?</DialogTitle>
             <DialogDescription>
               {deleteTarget
-                ? `“${deleteTarget.name}” será removido permanentemente. A conversa principal é removida junto.`
+                ? deleteTarget.archivedAt !== null && deleteThreads > 0
+                  ? `“${deleteTarget.name}” será removido permanentemente junto com ${deleteThreads} outra(s) conversa(s). A conversa principal também é apagada.`
+                  : `“${deleteTarget.name}” será removido permanentemente. A conversa principal é removida junto.`
                 : 'Esta ação não pode ser desfeita.'}
             </DialogDescription>
           </DialogHeader>
-          {deleteThreads > 0 ? (
+          {deleteBlocked ? (
             <AgentDialogBody>
               <p className="rounded-lg border border-border bg-surface/50 px-3 py-2 text-[12px] text-foreground-muted">
                 Este agente tem {deleteThreads} outra(s) conversa(s). Arquive-o para manter o
@@ -418,7 +425,7 @@ export function TeamView() {
             </Button>
             <Button
               variant="danger"
-              disabled={deleteThreads > 0}
+              disabled={deleteBlocked}
               onClick={() => void confirmDelete()}
             >
               <Trash2 className="mr-1.5 size-3.5" />

@@ -2711,6 +2711,25 @@ impl Db {
             .context("falha ao listar conversas")
     }
 
+    /// Top-level conversations owned by an agent (main, extra threads, channel
+    /// and task threads). Retained subagent transcripts are excluded: they are
+    /// removed together with their parent.
+    pub fn list_conversations_for_agent(
+        &self,
+        agent_id: &str,
+    ) -> anyhow::Result<Vec<Conversation>> {
+        let conn = self.conn.lock();
+        let sql = format!(
+            "SELECT {CONVERSATION_COLUMNS} FROM conversations \
+             WHERE agent_id = ?1 AND parent_conversation_id IS NULL \
+             ORDER BY is_main DESC, pinned DESC, sort_order ASC, updated_at DESC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([agent_id], |row| conversation_from_row(row))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("falha ao listar conversas do agente")
+    }
+
     /* ---------------- agents ---------------- */
 
     fn agent_query(&self, id: Option<&str>, include_archived: bool) -> Result<Vec<Agent>> {
@@ -3025,38 +3044,43 @@ impl Db {
     pub fn delete_agent(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock();
         let tx = conn.unchecked_transaction()?;
-        let exists: i64 =
-            tx.query_row("SELECT COUNT(*) FROM agents WHERE id = ?1", [id], |row| row.get(0))?;
-        if exists == 0 {
-            return Err(anyhow::anyhow!("AGENT_NOT_FOUND: agente `{id}` não existe"));
-        }
-        // Hidden channel threads and the primary conversation do not block
-        // deletion: the first are derived from the channel, the second is part
-        // of the persona. Any other conversation (including task threads) does.
-        let threads: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM conversations WHERE agent_id = ?1 \
-             AND channel_id IS NULL AND is_main = 0",
-            [id],
-            |row| row.get(0),
-        )?;
-        if threads > 0 {
-            return Err(anyhow::anyhow!(
-                "AGENT_IN_USE: este agente tem {threads} conversas; arquive-o para manter o histórico"
-            ));
-        }
-        let channel_threads = {
-            let mut stmt =
-                tx.prepare("SELECT id FROM conversations WHERE agent_id = ?1 AND channel_id IS NOT NULL")?;
-            let rows = stmt.query_map([id], |row| row.get::<_, String>(0))?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()?
-        };
-        let main_id: Option<String> = tx
+        let archived_at: Option<Option<i64>> = tx
             .query_row(
-                "SELECT id FROM conversations WHERE agent_id = ?1 AND is_main = 1 LIMIT 1",
+                "SELECT archived_at FROM agents WHERE id = ?1",
                 [id],
                 |row| row.get(0),
             )
             .optional()?;
+        let Some(archived_at) = archived_at else {
+            return Err(anyhow::anyhow!("AGENT_NOT_FOUND: agente `{id}` não existe"));
+        };
+        // Hidden channel threads and the primary conversation do not block
+        // deletion: the first are derived from the channel, the second is part
+        // of the persona. Any other conversation (including task threads) does.
+        // An archived agent is already inactive, so deletion is the explicit
+        // "remove everything" step and takes its conversations with it.
+        let threads: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM conversations WHERE agent_id = ?1 \
+             AND channel_id IS NULL AND is_main = 0 \
+             AND parent_conversation_id IS NULL",
+            [id],
+            |row| row.get(0),
+        )?;
+        if archived_at.is_none() && threads > 0 {
+            return Err(anyhow::anyhow!(
+                "AGENT_IN_USE: este agente tem {threads} conversas; arquive-o para manter o histórico"
+            ));
+        }
+        let conversations: Vec<(String, bool)> = {
+            let mut stmt = tx.prepare(
+                "SELECT id, is_main FROM conversations WHERE agent_id = ?1 \
+                 AND parent_conversation_id IS NULL",
+            )?;
+            let rows = stmt.query_map([id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0))
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
         tx.execute("DELETE FROM agent_channel_members WHERE agent_id = ?1", [id])?;
         tx.execute(
             "UPDATE agent_channels SET leader_agent_id = NULL WHERE leader_agent_id = ?1",
@@ -3064,11 +3088,8 @@ impl Db {
         )?;
         tx.commit()?;
         drop(conn);
-        for conversation_id in channel_threads {
-            self.delete_conversation_inner(&conversation_id, false)?;
-        }
-        if let Some(main_id) = main_id {
-            self.delete_conversation_inner(&main_id, true)?;
+        for (conversation_id, is_main) in conversations {
+            self.delete_conversation_inner(&conversation_id, is_main)?;
         }
         let conn = self.conn.lock();
         conn.execute("DELETE FROM agents WHERE id = ?1", [id])?;
@@ -9259,6 +9280,26 @@ mod tests {
         db.delete_conversation(&second.id).expect("delete second");
         db.delete_agent(&agent.id).expect("delete agent");
         assert!(db.list_agents(false).expect("list").is_empty());
+    }
+
+    #[test]
+    fn archived_agent_delete_removes_its_conversations() {
+        let db = test_db();
+        let agent = db.create_agent(&agent_input("Nina")).expect("agent");
+        let main = db
+            .get_agent_main_conversation(&agent.id)
+            .expect("main")
+            .expect("primary exists");
+        let extra = db
+            .create_agent_conversation(&agent.id, "Extra")
+            .expect("thread");
+        db.archive_agent(&agent.id).expect("archive");
+
+        db.delete_agent(&agent.id).expect("delete archived agent");
+        assert!(db.get_agent(&agent.id).expect("get").is_none());
+        assert!(db.get_conversation(&main.id).expect("main").is_none());
+        assert!(db.get_conversation(&extra.id).expect("extra").is_none());
+        assert!(db.list_conversations().expect("list").is_empty());
     }
 
     #[test]
