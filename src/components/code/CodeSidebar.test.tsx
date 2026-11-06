@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   deleteConversation: vi.fn(),
   exportConversation: vi.fn(),
   setConversationPinned: vi.fn(),
+  reorderWorkspaces: vi.fn(),
+  reorderConversations: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -162,7 +164,7 @@ beforeEach(() => {
     conversations: [],
     conversationsLoading: false,
     activeId: null,
-    activeIdByLayout: { chat: null, code: null },
+    activeIdByLayout: { chat: null, code: null, agent: null },
   });
   useUiStore.setState({
     layoutMode: 'code',
@@ -194,7 +196,7 @@ describe('CodeSidebar — chrome e ações', () => {
   it('oferece Novo agente, Abrir pasta, Adicionar sessão do Chat, Buscar e Skills, na ordem', async () => {
     renderSidebar();
 
-    const newAgent = screen.getByRole('button', { name: /Novo agente/ });
+    const newAgent = screen.getByRole('button', { name: /Nova sess/i });
     const openFolder = screen.getByRole('button', { name: 'Abrir pasta' });
     const addSession = screen.getByRole('button', { name: 'Adicionar sessão do Chat' });
     const search = screen.getByRole('button', { name: /Buscar/ });
@@ -220,7 +222,7 @@ describe('CodeSidebar — chrome e ações', () => {
     useUiStore.setState({ activeWorkspaceId: 'ws-1', codeView: 'skills' });
     renderSidebar();
 
-    fireEvent.click(screen.getByRole('button', { name: /Novo agente/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Nova sess/i }));
 
     // O centro volta para a sessão imediatamente.
     expect(useUiStore.getState().codeView).toBe('session');
@@ -240,7 +242,7 @@ describe('CodeSidebar — chrome e ações', () => {
     mocks.listWorkspaces.mockResolvedValue([ws]);
     renderSidebar();
 
-    fireEvent.click(screen.getByRole('button', { name: /Novo agente/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Nova sess/i }));
 
     await waitFor(() => expect(mocks.pickWorkspaceFolder).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(useUiStore.getState().activeWorkspaceId).toBe('ws-1'));
@@ -272,7 +274,7 @@ describe('CodeSidebar — chrome e ações', () => {
 
     expect(screen.queryByRole('button', { name: 'Skills' })).toBeNull();
     // O resto das ações continua disponível.
-    expect(screen.getByRole('button', { name: /Novo agente/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Nova sess/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Buscar/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Adicionar sessão do Chat' })).toBeTruthy();
   });
@@ -721,5 +723,50 @@ describe('CodeSidebar — ações da sessão', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Excluir' }));
 
     await waitFor(() => expect(mocks.deleteConversation).toHaveBeenCalledWith('c-1'));
+  });
+});
+
+describe('CodeSidebar — reordenação por teclado', () => {
+  it('move o workspace e persiste a ordem', async () => {
+    mocks.listWorkspaces.mockResolvedValue([
+      workspace({ id: 'ws-1', name: 'lumina-core', path: 'C:/dev/lumina', lastOpenedAt: 20 }),
+      workspace({
+        id: 'ws-2',
+        name: 'site',
+        path: 'C:/dev/site',
+        lastOpenedAt: 10,
+        git: null,
+      }),
+    ]);
+    mocks.reorderWorkspaces.mockResolvedValue(undefined);
+    renderSidebar();
+
+    const button = await screen.findByRole('button', { name: 'lumina-core' });
+    fireEvent.keyDown(button, { key: 'ArrowDown', altKey: true });
+
+    await waitFor(() =>
+      expect(mocks.reorderWorkspaces).toHaveBeenCalledWith(['ws-2', 'ws-1']),
+    );
+  });
+
+  it('não reordena enquanto a busca de workspaces está ativa', async () => {
+    mocks.listWorkspaces.mockResolvedValue([
+      workspace({ id: 'ws-1', name: 'lumina-core', path: 'C:/dev/lumina', lastOpenedAt: 20 }),
+      workspace({ id: 'ws-2', name: 'site', path: 'C:/dev/site', lastOpenedAt: 10, git: null }),
+    ]);
+    renderSidebar();
+    await screen.findByRole('button', { name: 'lumina-core' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pesquisar workspaces' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /Pesquisar workspaces/ }), {
+      target: { value: 'C:/dev' },
+    });
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'lumina-core' }), {
+      key: 'ArrowDown',
+      altKey: true,
+    });
+
+    expect(mocks.reorderWorkspaces).not.toHaveBeenCalled();
   });
 });

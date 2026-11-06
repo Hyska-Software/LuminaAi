@@ -20,7 +20,7 @@ export function SettingsSection({
           <p className="mt-0.5 text-xs leading-relaxed text-foreground-muted">{description}</p>
         ) : null}
       </div>
-      <div className="divide-y divide-border rounded-xl border border-border bg-surface-raised px-4">
+      <div className="rounded-xl border border-border bg-surface/50 px-4 py-2">
         {children}
       </div>
     </section>

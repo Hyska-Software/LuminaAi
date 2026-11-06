@@ -43,7 +43,7 @@ export const TabsTrigger = React.forwardRef<HTMLButtonElement, TabsTriggerProps>
         'disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none',
         '[&_svg]:size-4 [&_svg]:shrink-0',
         variant === 'pill' &&
-          'h-8 justify-center rounded-[10px] px-3 data-[state=active]:bg-surface-raised data-[state=active]:text-foreground data-[state=active]:shadow-sm',
+          'h-8 justify-center rounded-xl px-3 data-[state=active]:bg-surface-raised data-[state=active]:text-foreground data-[state=active]:shadow-sm',
         variant === 'underline' &&
           'relative h-8 justify-center rounded-none px-2 data-[state=active]:text-foreground data-[state=active]:after:absolute data-[state=active]:after:inset-x-1 data-[state=active]:after:-bottom-px data-[state=active]:after:h-0.5 data-[state=active]:after:rounded-full data-[state=active]:after:bg-accent',
         variant === 'sidebar' &&

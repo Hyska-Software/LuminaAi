@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import type { Workspace, WorkspaceContext } from '@/lib/types';
+import { createSerialRunner } from '@/lib/utils';
 
 /**
  * Workspaces do layout Code (docs/goals/code-harness/WORKBENCH.md §3–§4/§8).
@@ -44,6 +45,7 @@ const INITIAL_SNAPSHOT: WorkspacesSnapshot = {
 let snapshot: WorkspacesSnapshot = INITIAL_SNAPSHOT;
 let loadPromise: Promise<void> | null = null;
 const listeners = new Set<() => void>();
+const runReorder = createSerialRunner();
 
 function emit(patch: Partial<WorkspacesSnapshot>): void {
   snapshot = { ...snapshot, ...patch };
@@ -70,6 +72,8 @@ function describeError(error: unknown): string {
 function sortWorkspaces(workspaces: Workspace[]): Workspace[] {
   return [...workspaces].sort(
     (left, right) =>
+      Number(right.pinned) - Number(left.pinned) ||
+      (left.sortOrder ?? 0) - (right.sortOrder ?? 0) ||
       (right.lastOpenedAt ?? right.updatedAt) - (left.lastOpenedAt ?? left.updatedAt) ||
       left.name.localeCompare(right.name),
   );
@@ -100,6 +104,29 @@ async function load(force = false): Promise<void> {
 /** Recarrega a lista ignorando o cache (usada após criar/renomear/remover). */
 export async function reloadWorkspaces(): Promise<void> {
   await load(true);
+}
+
+/** Persiste a ordem manual dos workspaces (uma seção por vez). */
+export async function reorderWorkspaces(ids: string[]): Promise<void> {
+  const positions = new Map(ids.map((id, index) => [id, index]));
+  if (positions.size === 0) return;
+  const previous = snapshot.workspaces;
+  emit({
+    workspaces: sortWorkspaces(
+      snapshot.workspaces.map((workspace) =>
+        positions.has(workspace.id)
+          ? { ...workspace, sortOrder: positions.get(workspace.id)! }
+          : workspace,
+      ),
+    ),
+  });
+  try {
+    await runReorder(() => api.reorderWorkspaces(ids));
+  } catch (error) {
+    emit({ workspaces: previous });
+    toast.error('Não foi possível reordenar os projetos', { description: describeError(error) });
+    await load(true);
+  }
 }
 
 /** Marca uma conversa como pertencente a um workspace (sem duplicar a sessão). */
@@ -302,6 +329,7 @@ export interface UseWorkspacesResult {
   startSession: (workspaceId: string | null) => Promise<string | null>;
   trust: (workspace: Workspace, trusted: boolean) => Promise<void>;
   rename: (workspace: Workspace, name: string) => Promise<void>;
+  reorder: (ids: string[]) => Promise<void>;
   remove: (workspace: Workspace) => Promise<void>;
   refreshContext: (id: string) => Promise<WorkspaceContext | null>;
   resolveTrust: (trusted: boolean) => Promise<void>;
@@ -326,6 +354,7 @@ export function useWorkspaces(): UseWorkspacesResult {
     [],
   );
   const remove = useCallback((workspace: Workspace) => removeWorkspace(workspace), []);
+  const reorder = useCallback((ids: string[]) => reorderWorkspaces(ids), []);
   const refreshContext = useCallback(
     (id: string) => refreshWorkspaceContext(id),
     [],
@@ -344,6 +373,7 @@ export function useWorkspaces(): UseWorkspacesResult {
     startSession: startSessionInWorkspace,
     trust,
     rename,
+    reorder,
     remove,
     refreshContext,
     resolveTrust,

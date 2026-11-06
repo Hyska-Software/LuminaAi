@@ -10,8 +10,11 @@
 //! - `db`:        SQLite persistence
 //! - `commands`:  Tauri command surface used by the React app
 
+mod agents;
 mod catalog;
 mod commands;
+mod computer;
+mod concurrency;
 mod config;
 mod db;
 mod documents;
@@ -59,6 +62,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             crate::state::ensure_dirs(app.handle()).expect("failed to create app dirs");
             let state = crate::state::AppState::init(app.handle())
@@ -67,11 +71,132 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             let data_dir = crate::config::data_dir(app.handle())
                 .expect("failed to resolve the app data directory");
             app.manage(crate::update::UpdateState::new(data_dir));
+            // Agent routines run only while the app is open. A tick every 30s
+            // keeps the schedule responsive without a cloud worker.
+            let scheduler = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                crate::commands::routines::scheduler_tick(scheduler.clone()).await;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    crate::commands::routines::scheduler_tick(scheduler.clone()).await;
+                }
+            });
+            // Event-triggered routines are drained on boot and every 5s.
+            let event_scheduler = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                crate::commands::routines::event_tick(event_scheduler.clone()).await;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    crate::commands::routines::event_tick(event_scheduler.clone()).await;
+                }
+            });
+            // Routine executions wait for their agent's primary conversation.
+            // The queue is persistent; a 2s tick starts the next pending turn.
+            let routine_queue = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                crate::commands::routines::routine_queue_tick(routine_queue.clone()).await;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    crate::commands::routines::routine_queue_tick(routine_queue.clone()).await;
+                }
+            });
+            // Delegated tasks are latency-sensitive: pick them up quickly while
+            // still respecting the concurrency governor.
+            let task_scheduler = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    crate::commands::tasks::scheduler_tick(task_scheduler.clone()).await;
+                }
+            });
+            // Direct messages: deliver pending inbox rows immediately after boot
+            // and every 5s while the app is open.
+            let inbox_scheduler = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                crate::commands::inbox::inbox_tick(inbox_scheduler.clone()).await;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    crate::commands::inbox::inbox_tick(inbox_scheduler.clone()).await;
+                }
+            });
+            // Orphan containers and audit sessions from a previous process are
+            // not live. Clean them once at boot; periodic cleanup would kill
+            // legitimate terminal/run_code containers.
+            let boot_cleanup = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = boot_cleanup.state::<crate::state::AppState>();
+                let now = crate::domain::now_ms();
+                let _ = state.db.sweep_agent_tasks(now);
+                let _ = state.db.sweep_agent_routine_leases(now);
+                let _ = state.db.finish_interrupted_agent_routine_runs(now);
+                let _ = state
+                    .db
+                    .end_all_computer_sessions("stopped", now);
+                let _ = state.db.reset_all_computer_controls();
+                let _ = state
+                    .db
+                    .interrupt_pending_computer_actions(crate::domain::now_ms());
+                let retention = crate::domain::now_ms() - 24 * 60 * 60 * 1000;
+                let _ = crate::computer::prune_old_screenshots(
+                    &state.data_dir.join("computer"),
+                    retention,
+                );
+                let _ = crate::computer::prune_old_screenshots(
+                    &state.data_dir.join("tool-images"),
+                    retention,
+                );
+                if let Err(error) = crate::commands::docker::cleanup_containers(&state).await {
+                    eprintln!("lumina: limpeza de containers no boot falhou: {error}");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::turn::run_turn,
             commands::turn::cancel_turn,
+            commands::turn::cancel_all_turns,
+            commands::turn::cancel_conversation,
+            commands::turn::list_active_turns,
+            commands::turn::list_turn_events,
+            commands::docker::docker_status,
+            commands::docker::docker_pull_image,
+            commands::docker::docker_validate_image,
+            commands::docker::docker_cleanup,
+            commands::notifications::notify_desktop,
+            commands::computer::list_computer_actions,
+            commands::computer::list_computer_sessions,
+            commands::computer::list_active_computer_sessions,
+            commands::computer::stop_computer_session,
+            commands::computer::stop_all_computer_sessions,
+            commands::computer::computer_screenshot_preview,
+            commands::computer::tool_image_preview,
+            commands::computer::computer_preview,
+            commands::computer::computer_open_stream,
+            commands::computer::computer_control_status,
+            commands::computer::computer_start_local_stream,
+            commands::computer::computer_stop_local_stream,
+            commands::computer::set_computer_paused,
+            commands::computer::computer_take_control,
+            commands::computer::release_computer_control,
+            commands::browser::browser_session_status,
+            commands::browser::browser_session_open,
+            commands::browser::browser_session_close,
+            commands::browser::browser_tabs,
+            commands::browser::browser_new_tab,
+            commands::browser::browser_close_tab,
+            commands::browser::browser_activate_tab,
+            commands::browser::browser_navigate,
+            commands::browser::browser_history,
+            commands::browser::browser_frame,
+            commands::browser::browser_start_stream,
+            commands::browser::browser_stop_stream,
+            commands::browser::browser_click_at,
+            commands::browser::browser_human_input,
+            commands::browser::browser_press_key,
+            commands::browser::browser_insert_text,
+            commands::browser::browser_snapshot,
+            commands::browser::browser_take_control,
+            commands::diagnostics::platform_diagnostics,
             commands::models::get_catalog,
             commands::models::refresh_catalog,
             commands::models::list_remote_models,
@@ -81,6 +206,56 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::oauth::openai_login_cancel,
             commands::oauth::openai_sign_out,
             commands::oauth::openai_auth_status,
+            commands::agents::list_agents,
+            commands::agents::get_agent,
+            commands::agents::create_agent,
+            commands::agents::update_agent,
+            commands::agents::set_agent_avatar,
+            commands::agents::import_agent_avatar_image,
+            commands::agents::set_agent_pinned,
+            commands::agents::reorder_agents,
+            commands::agents::archive_agent,
+            commands::agents::restore_agent,
+            commands::agents::delete_agent,
+            commands::agents::list_agent_threads,
+            commands::agents::list_agent_memories,
+            commands::agents::create_agent_memory,
+            commands::agents::update_agent_memory,
+            commands::agents::delete_agent_memory,
+            commands::agents::clear_agent_memories,
+            commands::agents::list_shared_agent_memories,
+            commands::agents::delete_shared_agent_memory,
+            commands::agents::get_agent_usage,
+            commands::agents::list_agent_usage,
+            commands::agents::get_usage_stats,
+            commands::agents::duplicate_agent,
+            commands::agents::export_agent,
+            commands::agents::import_agent,
+            commands::agents::suggest_agent,
+            commands::agents::revise_agent,
+            commands::routines::list_agent_routines,
+            commands::routines::list_all_agent_routines,
+            commands::routines::list_agent_routine_runs,
+            commands::routines::create_agent_routine,
+            commands::routines::update_agent_routine,
+            commands::routines::set_agent_routine_enabled,
+            commands::routines::delete_agent_routine,
+            commands::routines::run_agent_routine_now,
+            commands::channels::list_agent_channels,
+            commands::channels::reorder_agent_channels,
+            commands::channels::create_agent_channel,
+            commands::channels::update_agent_channel,
+            commands::channels::delete_agent_channel,
+            commands::channels::list_agent_channel_messages,
+            commands::inbox::list_agent_channel_inbox_counts,
+            commands::channels::post_agent_channel_message,
+            commands::tasks::list_agent_tasks,
+            commands::tasks::get_agent_task,
+            commands::tasks::create_agent_task,
+            commands::tasks::cancel_agent_task,
+            commands::tasks::resume_agent_task,
+            commands::tasks::reassign_agent_task,
+            commands::tasks::run_agent_task_now,
             commands::conversations::list_conversations,
             commands::conversations::list_subagent_conversations,
             commands::conversations::create_conversation,
@@ -89,6 +264,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::conversations::rename_conversation,
             commands::conversations::delete_conversation,
             commands::conversations::set_conversation_pinned,
+            commands::conversations::reorder_conversations,
             commands::conversations::set_conversation_code_linked,
             commands::conversations::set_conversation_model,
             commands::conversations::search_conversations,
@@ -118,6 +294,8 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::skills::set_skill_enabled,
             commands::skills::delete_skill,
             commands::skills::get_skill_content,
+            commands::skills::save_skill,
+            commands::skills::list_skill_versions,
             commands::attachments::import_attachments,
             commands::attachments::get_attachment,
             commands::attachments::delete_attachment,
@@ -136,6 +314,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::workspace::pick_workspace_folder,
             commands::workspace::add_workspace,
             commands::workspace::list_workspaces,
+            commands::workspace::reorder_workspaces,
             commands::workspace::get_workspace_context,
             commands::workspace::rename_workspace,
             commands::workspace::remove_workspace,
@@ -204,6 +383,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             if let Some(state) = app_handle.try_state::<state::AppState>() {
                 state.terminals.close_all();
             }
+            crate::computer::browser::global().map(|browser| browser.close_all());
         }
     });
 }

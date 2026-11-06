@@ -45,6 +45,16 @@ describe('goalRunner — decisão de autocontinuação', () => {
     expect(shouldContinueGoal(base)).toBe(true);
   });
 
+  it('continua em Agentes somente quando a thread tem workspace', () => {
+    expect(
+      shouldContinueGoal({ ...base, layoutMode: 'agent' as const, hasWorkspace: true }),
+    ).toBe(true);
+    expect(
+      shouldContinueGoal({ ...base, layoutMode: 'agent' as const, hasWorkspace: false }),
+    ).toBe(false);
+    expect(shouldContinueGoal({ ...base, layoutMode: 'agent' as const })).toBe(false);
+  });
+
   it.each([
     ['sem objetivo', { goal: null }],
     ['fora do layout Code', { layoutMode: 'chat' as const }],

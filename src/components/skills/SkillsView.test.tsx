@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   setSkillEnabled: vi.fn(),
   deleteSkill: vi.fn(),
   getSkillContent: vi.fn(),
+  listSkillVersions: vi.fn(),
   openSkillsDir: vi.fn(),
   getSettings: vi.fn(),
 }));
@@ -18,6 +19,7 @@ vi.mock('@/lib/api', () => ({
     setSkillEnabled: mocks.setSkillEnabled,
     deleteSkill: mocks.deleteSkill,
     getSkillContent: mocks.getSkillContent,
+    listSkillVersions: mocks.listSkillVersions,
     openSkillsDir: mocks.openSkillsDir,
     getSettings: mocks.getSettings,
   },
@@ -151,6 +153,7 @@ beforeEach(() => {
   });
   mocks.openSkillsDir.mockResolvedValue(undefined);
   mocks.getSkillContent.mockResolvedValue(skillContent());
+  mocks.listSkillVersions.mockResolvedValue([]);
   useAppStore.setState({ settings: settings() });
   useUiStore.setState({ activeView: 'skills', settingsOpen: false });
 });

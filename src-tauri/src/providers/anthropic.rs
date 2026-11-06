@@ -201,10 +201,23 @@ fn push_blocks(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) {
 }
 
 fn push_tool_result(messages: &mut Vec<Value>, message: &HistoryMessage) {
+    let content = if message.images.is_empty() {
+        json!(message.text)
+    } else {
+        let mut blocks = vec![json!({"type": "text", "text": message.text})];
+        for image in &message.images {
+            let (media_type, data) = image_base64(image);
+            blocks.push(json!({
+                "type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": data},
+            }));
+        }
+        json!(blocks)
+    };
     let block = json!({
         "type": "tool_result",
         "tool_use_id": message.tool_call_id.clone().unwrap_or_default(),
-        "content": message.text,
+        "content": content,
     });
     if let Some(last) = messages.last_mut() {
         if last.get("role").and_then(Value::as_str) == Some("user") {
@@ -635,6 +648,24 @@ mod tests {
 
     fn direct_request(reasoning: ReasoningRequest) -> CompletionRequest {
         direct_request_for(reasoning, None)
+    }
+
+    #[test]
+    fn tool_result_with_image_uses_anthropic_content_blocks() {
+        let mut message = HistoryMessage::tool_result("call-1", "computer_screenshot", "ok");
+        message.images.push(crate::providers::ImagePart {
+            mime_type: "image/jpeg".to_string(),
+            data_base64: "abc".to_string(),
+        });
+        let mut messages = Vec::new();
+        push_tool_result(&mut messages, &message);
+        assert_eq!(messages[0]["content"][0]["type"], json!("tool_result"));
+        assert_eq!(messages[0]["content"][0]["content"][0]["type"], json!("text"));
+        assert_eq!(messages[0]["content"][0]["content"][1]["type"], json!("image"));
+        assert_eq!(
+            messages[0]["content"][0]["content"][1]["source"]["media_type"],
+            json!("image/jpeg")
+        );
     }
 
     #[test]

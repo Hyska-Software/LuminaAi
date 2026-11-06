@@ -1,0 +1,190 @@
+// @vitest-environment jsdom
+import { useState } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+
+import { SortableList, sortableDropClass } from './sortable-list';
+
+function rect(top: number, height = 32, left = 0, right = 240): DOMRect {
+  return {
+    top,
+    bottom: top + height,
+    left,
+    right,
+    width: right - left,
+    height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+interface HarnessProps {
+  initial?: string[];
+  lockedCount?: number;
+  disabled?: boolean;
+  onReorder?: (ids: string[]) => void;
+  onClick?: (id: string) => void;
+}
+
+function Harness({
+  initial = ['a', 'b', 'c'],
+  lockedCount = 0,
+  disabled = false,
+  onReorder = vi.fn(),
+  onClick = vi.fn(),
+}: HarnessProps) {
+  const [ids, setIds] = useState(initial);
+  return (
+    <SortableList
+      ids={ids}
+      label="Itens"
+      lockedCount={lockedCount}
+      disabled={disabled}
+      onReorder={(next) => {
+        onReorder(next);
+        setIds(next);
+      }}
+    >
+      {(sortable) => (
+        <div ref={sortable.containerRef} data-testid="container" className="flex flex-col">
+          {ids.map((id) => (
+            <div
+              key={id}
+              {...sortable.dropProps(id)}
+              data-testid={`row-${id}`}
+              className={sortableDropClass}
+            >
+              <button
+                type="button"
+                {...sortable.itemProps(id)}
+                data-testid={`item-${id}`}
+                onClick={() => onClick(id)}
+              >
+                {id}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </SortableList>
+  );
+}
+
+function stubLayout(ids = ['a', 'b', 'c']) {
+  const container = screen.getByTestId('container');
+  container.getBoundingClientRect = () => rect(0, 32 * ids.length, 0, 240);
+  ids.forEach((id, index) => {
+    const item = screen.getByTestId(`item-${id}`);
+    item.getBoundingClientRect = () => rect(index * 32);
+  });
+}
+
+function drag(id: string, fromY: number, toY: number, x = 100) {
+  fireEvent.pointerDown(screen.getByTestId(`item-${id}`), {
+    button: 0,
+    clientX: x,
+    clientY: fromY,
+  });
+  fireEvent.pointerMove(window, { clientX: x, clientY: toY });
+  fireEvent.pointerUp(window, { clientX: x, clientY: toY });
+}
+
+afterEach(() => cleanup());
+
+describe('SortableList', () => {
+  it('reorders with Alt+ArrowDown', () => {
+    const onReorder = vi.fn();
+    render(<Harness onReorder={onReorder} />);
+
+    fireEvent.keyDown(screen.getByTestId('item-b'), { key: 'ArrowDown', altKey: true });
+
+    expect(onReorder).toHaveBeenCalledWith(['a', 'c', 'b']);
+  });
+
+  it('drops a row after another row with the pointer', () => {
+    const onReorder = vi.fn();
+    render(<Harness onReorder={onReorder} />);
+    stubLayout();
+
+    fireEvent.pointerDown(screen.getByTestId('item-a'), {
+      button: 0,
+      clientX: 100,
+      clientY: 5,
+    });
+    fireEvent.pointerMove(window, { clientX: 100, clientY: 55 });
+    expect(screen.getByTestId('row-c').getAttribute('data-drop')).toBe('before');
+    fireEvent.pointerUp(window, { clientX: 100, clientY: 55 });
+
+    expect(onReorder).toHaveBeenCalledWith(['b', 'a', 'c']);
+  });
+
+  it('ignores drops outside the container width', () => {
+    const onReorder = vi.fn();
+    render(<Harness onReorder={onReorder} />);
+    stubLayout();
+
+    fireEvent.pointerDown(screen.getByTestId('item-a'), {
+      button: 0,
+      clientX: 100,
+      clientY: 5,
+    });
+    fireEvent.pointerMove(window, { clientX: 400, clientY: 55 });
+    expect(screen.getByTestId('row-b').getAttribute('data-drop')).toBeNull();
+    fireEvent.pointerUp(window, { clientX: 400, clientY: 55 });
+
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  it('ignores drops over another section vertically', () => {
+    const onReorder = vi.fn();
+    render(<Harness onReorder={onReorder} />);
+    stubLayout();
+
+    fireEvent.pointerDown(screen.getByTestId('item-a'), {
+      button: 0,
+      clientX: 100,
+      clientY: 5,
+    });
+    fireEvent.pointerMove(window, { clientX: 100, clientY: 200 });
+    expect(screen.getByTestId('row-c').getAttribute('data-drop')).toBeNull();
+    fireEvent.pointerUp(window, { clientX: 100, clientY: 200 });
+
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  it('does not drag or cross the locked prefix', () => {
+    const onReorder = vi.fn();
+    render(<Harness onReorder={onReorder} lockedCount={1} />);
+    stubLayout();
+
+    drag('a', 5, 55);
+    expect(onReorder).not.toHaveBeenCalled();
+
+    drag('b', 40, 5);
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  it('ignores pointer reorder when disabled', () => {
+    const onReorder = vi.fn();
+    render(<Harness onReorder={onReorder} disabled />);
+    stubLayout();
+
+    drag('a', 5, 55);
+
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  it('suppresses the click that follows a drag', () => {
+    const onClick = vi.fn();
+    render(<Harness onClick={onClick} />);
+    stubLayout();
+
+    drag('a', 5, 55);
+    fireEvent.click(screen.getByTestId('item-a'));
+    expect(onClick).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('item-b'));
+    expect(onClick).toHaveBeenCalledWith('b');
+  });
+});

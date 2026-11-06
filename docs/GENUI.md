@@ -1,4 +1,4 @@
-# Lumina — UI generativa (interfaces que o agente cria no chat e no Code)
+# Lumina — UI generativa (interfaces que o agente cria no chat, no Code e nos Agentes)
 
 > Documento normativo do sistema de **UI generativa/interativa** do Lumina.
 > Fonte única de verdade em código: **`data/genui-contract.json`** (componentes,
@@ -7,7 +7,7 @@
 > vence e o doc precisa ser corrigido (`pnpm test` valida os exemplos daqui).
 >
 > Consumidores do contrato: **system prompt** (`src-tauri/src/harness/prompt.rs`
-> no Chat e `src-tauri/src/harness/code/prompt.rs` no Code),
+> no Chat e `src-tauri/src/harness/code/prompt.rs` no Code e nos Agentes),
 > **validador/ferramenta do agente** (`src-tauri/src/tools/genui`), **renderer**
 > (`src/lib/genui`, `src/components/genui`) e **fixtures de paridade**
 > (`data/genui-fixtures.json`).
@@ -21,7 +21,8 @@ arbitrário. É a forma de o agente entregar dados estruturados (métricas,
 comparações, tabelas, etapas) e **próximos passos clicáveis** (`actions`), em vez
 de despejar tudo em Markdown.
 
-O mesmo contrato vale nos **dois layouts**: no Chat e no Code. O perfil `code`
+O mesmo contrato vale nos **três layouts**: no Chat, no Code e no Agentes (as
+threads e os canais do layout Agentes usam o perfil Code). O perfil `code`
 recebe a seção gerada do contrato no system prompt e a ferramenta `validate_ui`
 (sempre disponível; exceto no subagente read-only), com orientações específicas
 para não duplicar o fecho de arquivos/diff e para tratar decisões bloqueantes
@@ -79,6 +80,11 @@ O bloco é renderizado inline no fluxo da mensagem, com espaço próprio
     antigas (compatibilidade de renderização).
 
 ## 3. Quando usar (e quando não usar)
+
+**Padrão**: use um bloco `ui` sempre que julgar viável e a resposta tiver dados
+ou estrutura que o contrato represente — o bloco substitui a tabela/lista
+equivalente. O Markdown fica para texto corrido, explicações e listas simples;
+não duplique o mesmo conteúdo nos dois formatos.
 
 | Situação | Use |
 | --- | --- |
@@ -692,9 +698,10 @@ e `ui.label-period`.
    O teste de paridade falha de propósito se os lados divergirem.
 4. Atualize este documento e rode os testes: os exemplos ```ui daqui são
    validados automaticamente.
-5. Mudança de texto no prompt do Code também exige bump de
-   `harness::code::prompt::PROMPT_VERSION` (o snapshot congelado por sessão é
-   reconstruído na próxima mensagem).
+5. Mudança de texto no prompt do Chat ou do Code/Agentes também exige bump de
+   `harness::prompt::PROMPT_VERSION` (Chat) e
+   `harness::code::prompt::PROMPT_VERSION` (Code/Agentes); o snapshot congelado
+   por sessão é reconstruído na próxima mensagem.
 6. Mudança incompatível (remover componente/prop, mudar semântica de ação):
    incrementar `version` no contrato, aceitar leitura da versão anterior por um
    ciclo (`ui.version-mismatch`) e registrar em `docs/ARCHITECTURE.md`.

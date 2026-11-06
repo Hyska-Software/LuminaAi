@@ -32,7 +32,10 @@ import {
   DialogTitle,
   IconButton,
   Kbd,
+  SortableList,
+  sortableDropClass,
 } from '@/components/ui';
+import type { SortableListApi } from '@/components/ui';
 import { useIsCompact } from './hooks';
 
 export interface SidebarProps {
@@ -101,6 +104,7 @@ interface ConversationRowProps {
   active: boolean;
   renaming: boolean;
   renameValue: string;
+  sortable: SortableListApi;
   onSelect: () => void;
   onStartRename: () => void;
   onRenameValueChange: (value: string) => void;
@@ -118,6 +122,7 @@ function ConversationRow({
   active,
   renaming,
   renameValue,
+  sortable,
   onSelect,
   onStartRename,
   onRenameValueChange,
@@ -130,7 +135,10 @@ function ConversationRow({
 }: ConversationRowProps) {
   if (renaming) {
     return (
-      <div className="relative flex items-center">
+      <div
+        {...sortable.dropProps(conversation.id)}
+        className={cn('relative flex items-center', sortableDropClass)}
+      >
         <input
           autoFocus
           value={renameValue}
@@ -159,15 +167,20 @@ function ConversationRow({
   }
 
   return (
-    <div className="group relative flex items-center">
+    <div
+      {...sortable.dropProps(conversation.id)}
+      className={cn('group relative flex items-center', sortableDropClass)}
+    >
       <button
         type="button"
+        {...sortable.itemProps(conversation.id)}
         onClick={onSelect}
         aria-current={active ? 'true' : undefined}
         title={conversation.title}
         className={cn(
           'flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 pr-8 text-left text-[13px]',
           'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+          !sortable.disabled && 'cursor-grab active:cursor-grabbing',
           active
             ? 'bg-surface-active text-foreground'
             : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
@@ -410,26 +423,36 @@ export function Sidebar({ className, onClose }: SidebarProps) {
           groups.map((group) => (
             <section key={group.label} aria-label={group.label} className="mb-1">
               <h2 className="px-2 pb-1 pt-3 text-[11px] font-medium text-foreground-subtle">{group.label}</h2>
-              <div className="flex flex-col gap-0.5">
-                {group.conversations.map((conversation) => (
-                  <ConversationRow
-                    key={conversation.id}
-                    conversation={conversation}
-                    active={conversation.id === activeId}
-                    renaming={renamingId === conversation.id}
-                    renameValue={renameValue}
-                    onSelect={() => handleSelect(conversation.id)}
-                    onStartRename={() => handleStartRename(conversation)}
-                    onRenameValueChange={setRenameValue}
-                    onCommitRename={handleCommitRename}
-                    onCancelRename={handleCancelRename}
-                    onTogglePin={() => handleTogglePin(conversation)}
-                    onToggleCodeLink={() => void handleToggleCodeLink(conversation)}
-                    onExport={() => void handleExport(conversation)}
-                    onDelete={() => setDeleteTarget(conversation)}
-                  />
-                ))}
-              </div>
+              <SortableList
+                ids={group.conversations.map((conversation) => conversation.id)}
+                label={group.label}
+                itemLabel={(id) => group.conversations.find((conversation) => conversation.id === id)?.title ?? id}
+                onReorder={(ids) => void useChatStore.getState().reorderConversations(ids)}
+              >
+                {(sortable) => (
+                  <div ref={sortable.containerRef} className="flex flex-col gap-0.5">
+                    {group.conversations.map((conversation) => (
+                      <ConversationRow
+                        key={conversation.id}
+                        conversation={conversation}
+                        active={conversation.id === activeId}
+                        renaming={renamingId === conversation.id}
+                        renameValue={renameValue}
+                        sortable={sortable}
+                        onSelect={() => handleSelect(conversation.id)}
+                        onStartRename={() => handleStartRename(conversation)}
+                        onRenameValueChange={setRenameValue}
+                        onCommitRename={handleCommitRename}
+                        onCancelRename={handleCancelRename}
+                        onTogglePin={() => handleTogglePin(conversation)}
+                        onToggleCodeLink={() => void handleToggleCodeLink(conversation)}
+                        onExport={() => void handleExport(conversation)}
+                        onDelete={() => setDeleteTarget(conversation)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </SortableList>
             </section>
           ))
         )}

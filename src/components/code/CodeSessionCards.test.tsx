@@ -88,10 +88,39 @@ beforeEach(() => {
   mocks.getCodeSessionState.mockResolvedValue(snapshot());
   mocks.respondQuestion.mockResolvedValue(true);
   mocks.updateGoal.mockResolvedValue(snapshot());
-  useUiStore.setState({ codeGoalOpen: false, codeView: 'session', goalDialog: null });
+  useUiStore.setState({ codeGoalOpen: false, codeView: 'session', goalDialog: null, layoutMode: 'chat' });
 });
 
 afterEach(cleanup);
+
+describe('CodeSessionCards — computer assistance', () => {
+  it.each([
+    ['computer_desktop', 'screen'],
+    ['computer_browser', 'browser'],
+  ] as const)('opens the requested surface without answering or granting control (%s)', (header, tab) => {
+    useUiStore.setState({ layoutMode: 'agent', agentPanelOpen: false, agentRightPanel: 'workspace' });
+    useCodeStore.setState({ byConversation: { 'c-1': {
+      ...emptyCodeSession('c-1'),
+      questions: [{ id: 'ask-1', conversationId: 'c-1', toolCallId: 'call-1', createdAt: 1, questions: [{ id: 'q1', question: 'Conclua a autenticação.', header, options: [], multiSelect: false }] }],
+    } } });
+    render(<CodeSessionCards conversationId="c-1" />);
+    expect(screen.queryByLabelText('Outra resposta (opcional)')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir ambiente para ajudar' }));
+    expect(useUiStore.getState().agentPanelOpen).toBe(true);
+    expect(useUiStore.getState().agentPanelTab).toBe(tab);
+    expect(mocks.respondQuestion).not.toHaveBeenCalled();
+  });
+
+  it('does not present an agent-panel action in the Code layout', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    useCodeStore.setState({ byConversation: { 'c-1': {
+      ...emptyCodeSession('c-1'),
+      questions: [{ id: 'ask-1', conversationId: 'c-1', toolCallId: 'call-1', createdAt: 1, questions: [{ id: 'q1', question: 'Preciso de ajuda.', header: 'computer_browser', options: [], multiSelect: false }] }],
+    } } });
+    render(<CodeSessionCards conversationId="c-1" />);
+    expect(screen.queryByRole('button', { name: 'Abrir ambiente para ajudar' })).toBeNull();
+  });
+});
 
 describe('CodeSessionCards — gate do plano', () => {
   it('renderiza o gate interativo com o markdown do preview', () => {

@@ -29,6 +29,7 @@ pub struct DynamicModels {
 struct TurnEntry {
     cancel: CancellationToken,
     conversation_id: String,
+    started_at: i64,
 }
 
 /// Registro de turnos ativos (testável sem Tauri). `AppState` delega para ele.
@@ -49,9 +50,38 @@ impl TurnRegistry {
             TurnEntry {
                 cancel: token.clone(),
                 conversation_id: conversation_id.to_string(),
+                started_at: crate::domain::now_ms(),
             },
         );
         token
+    }
+
+    /// Registers a turn only when the conversation has no other active turn.
+    /// This is the backend single-flight boundary for agent threads: the
+    /// renderer prevents double sends, but background runners and reloads do
+    /// not share that state.
+    pub fn register_if_idle(
+        &self,
+        turn_id: &str,
+        conversation_id: &str,
+    ) -> Option<CancellationToken> {
+        let mut turns = self.turns.lock();
+        if turns
+            .values()
+            .any(|entry| entry.conversation_id == conversation_id)
+        {
+            return None;
+        }
+        let token = CancellationToken::new();
+        turns.insert(
+            turn_id.to_string(),
+            TurnEntry {
+                cancel: token.clone(),
+                conversation_id: conversation_id.to_string(),
+                started_at: crate::domain::now_ms(),
+            },
+        );
+        Some(token)
     }
 
     pub fn finish(&self, turn_id: &str) {
@@ -68,10 +98,12 @@ impl TurnRegistry {
         }
     }
 
-    pub fn cancel_all(&self) {
-        for entry in self.turns.lock().values() {
+    pub fn cancel_all(&self) -> usize {
+        let turns = self.turns.lock();
+        for entry in turns.values() {
             entry.cancel.cancel();
         }
+        turns.len()
     }
 
     /// Há algum turno ativo para esta conversa?
@@ -80,6 +112,48 @@ impl TurnRegistry {
             .lock()
             .values()
             .any(|entry| entry.conversation_id == conversation_id)
+    }
+
+    /// Cancels every turn of one conversation (background-thread Stop).
+    pub fn cancel_conversation(&self, conversation_id: &str) -> usize {
+        let mut cancelled = 0;
+        for entry in self.turns.lock().values() {
+            if entry.conversation_id == conversation_id {
+                entry.cancel.cancel();
+                cancelled += 1;
+            }
+        }
+        cancelled
+    }
+
+    /// `(turn_id, conversation_id)` of every active turn, sorted by turn id.
+    pub fn active_turns(&self) -> Vec<(String, String)> {
+        let mut turns: Vec<(String, String)> = self
+            .turns
+            .lock()
+            .iter()
+            .map(|(turn_id, entry)| (turn_id.clone(), entry.conversation_id.clone()))
+            .collect();
+        turns.sort();
+        turns
+    }
+
+    /// `(turn_id, conversation_id, started_at)` of every active turn.
+    pub fn active_turn_details(&self) -> Vec<(String, String, i64)> {
+        let mut turns: Vec<(String, String, i64)> = self
+            .turns
+            .lock()
+            .iter()
+            .map(|(turn_id, entry)| {
+                (
+                    turn_id.clone(),
+                    entry.conversation_id.clone(),
+                    entry.started_at,
+                )
+            })
+            .collect();
+        turns.sort();
+        turns
     }
 
     /// Ids de conversas com turno ativo (para reconciliação/diagnóstico).
@@ -93,6 +167,20 @@ impl TurnRegistry {
         conversations.sort();
         conversations.dedup();
         conversations
+    }
+}
+
+/// Finishes a registered turn even when the command returns early through
+/// `?`. Holds a borrow of the registry, so it is cheap and cannot outlive the
+/// state that created it.
+pub struct TurnGuard<'a> {
+    registry: &'a TurnRegistry,
+    turn_id: String,
+}
+
+impl Drop for TurnGuard<'_> {
+    fn drop(&mut self) {
+        self.registry.finish(&self.turn_id);
     }
 }
 
@@ -114,8 +202,10 @@ pub struct AppState {
     pub mcp: Arc<crate::mcp::McpManager>,
     /// Terminais PTY abertos no layout Code.
     pub terminals: Arc<crate::terminal::TerminalRegistry>,
-    /// Perguntas estruturadas pendentes (sk_user).
+    /// Perguntas estruturadas pendentes (`ask_user`).
     pub questions: Arc<crate::harness::code::questions::QuestionRegistry>,
+    /// Global/per-agent turn slots (cost/CPU protection for background agents).
+    pub governor: Arc<crate::concurrency::ConcurrencyGovernor>,
     dynamic_models: RwLock<HashMap<String, DynamicModels>>,
     turns: TurnRegistry,
 }
@@ -123,6 +213,7 @@ pub struct AppState {
 impl AppState {
     pub fn init(app: &AppHandle) -> anyhow::Result<Self> {
         let data_dir = crate::config::data_dir(app)?;
+        crate::computer::browser::init_global(&data_dir);
         let db_path = data_dir.join("lumina.db");
         let db = Db::open(&db_path)?;
         let catalog = CatalogFile::load()?;
@@ -139,6 +230,7 @@ impl AppState {
             mcp: Arc::new(crate::mcp::McpManager::load(data_dir.as_path())),
             terminals: Arc::new(crate::terminal::TerminalRegistry::new()),
             questions: Arc::new(crate::harness::code::questions::QuestionRegistry::new()),
+            governor: crate::concurrency::ConcurrencyGovernor::new(),
             jobs: Arc::new(crate::jobs::JobRegistry::new()),
             dynamic_models: RwLock::new(HashMap::new()),
             turns: TurnRegistry::new(),
@@ -291,6 +383,21 @@ impl AppState {
         self.turns.register(turn_id, conversation_id)
     }
 
+    pub fn register_turn_if_idle(
+        &self,
+        turn_id: &str,
+        conversation_id: &str,
+    ) -> Option<CancellationToken> {
+        self.turns.register_if_idle(turn_id, conversation_id)
+    }
+
+    pub fn turn_guard(&self, turn_id: &str) -> TurnGuard<'_> {
+        TurnGuard {
+            registry: &self.turns,
+            turn_id: turn_id.to_string(),
+        }
+    }
+
     pub fn finish_turn(&self, turn_id: &str) {
         self.turns.finish(turn_id);
     }
@@ -300,8 +407,20 @@ impl AppState {
         self.turns.cancel(turn_id)
     }
 
-    pub fn cancel_all(&self) {
-        self.turns.cancel_all();
+    pub fn cancel_all(&self) -> usize {
+        self.turns.cancel_all()
+    }
+
+    pub fn cancel_conversation(&self, conversation_id: &str) -> usize {
+        self.turns.cancel_conversation(conversation_id)
+    }
+
+    pub fn active_turns(&self) -> Vec<(String, String)> {
+        self.turns.active_turns()
+    }
+
+    pub fn active_turn_details(&self) -> Vec<(String, String, i64)> {
+        self.turns.active_turn_details()
     }
 
     /// Há um turno ativo nesta conversa? Usado pelo preflight de objetivos
@@ -350,6 +469,18 @@ mod tests {
         registry.finish("turn-1");
         assert!(!registry.has_active_for("conv-1"));
         assert!(registry.active_conversations().is_empty());
+    }
+
+    #[test]
+    fn turn_registry_accepts_only_one_turn_per_conversation() {
+        let registry = TurnRegistry::new();
+        let first = registry.register_if_idle("turn-1", "conv-1").expect("first");
+        assert!(!first.is_cancelled());
+        assert!(registry.register_if_idle("turn-2", "conv-1").is_none());
+        let other = registry.register_if_idle("turn-3", "conv-2").expect("other");
+        assert!(!other.is_cancelled());
+        registry.finish("turn-1");
+        assert!(registry.register_if_idle("turn-4", "conv-1").is_some());
     }
 
     #[test]

@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ArrowUp, FilePlus, Globe, Plus, Square, Target, TriangleAlert } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
 import { credentialGateMessage } from '@/components/chat/turnError';
 import { useReduceMotion } from '@/components/layout/hooks';
@@ -22,7 +23,15 @@ import {
   Tooltip,
 } from '@/components/ui';
 import { api } from '@/lib/api';
-import { useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
+import {
+  agentSelectionForLayout,
+  selectAgent,
+  useAgentStore,
+  useAppStore,
+  useChatStore,
+  useCodeStore,
+  useUiStore,
+} from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { AttachmentChips } from './AttachmentChips';
 import { CacheMeterChip } from './CacheMeterChip';
@@ -88,25 +97,41 @@ export function Composer() {
   // signed-in ChatGPT plan) before a turn can start. Only enforced when the
   // provider exists in the merged list, so an empty catalog (boot/unit tests)
   // keeps the composer usable — `chatStore.send` still guards the real send.
-  const selectedProvider = useAppStore((state) =>
-    state.providers.find((provider) => provider.id === state.selection.providerId),
-  );
-  const providerReady = useAppStore((state) => state.providerReady(state.selection.providerId));
   const setModelPickerOpen = useUiStore((state) => state.setModelPickerOpen);
   const openSettings = useUiStore((state) => state.openSettings);
   // Only the copy changes in the Code layout; sending/attachments/streaming are shared.
   const layoutMode = useUiStore((state) => state.layoutMode);
   const activeWorkspaceId = useUiStore((state) => state.activeWorkspaceId);
+  const activeAgentId = useUiStore((state) => state.activeAgentId);
+  const activeAgent = useAgentStore((state) => selectAgent(state, activeAgentId));
   const isCodeLayout = layoutMode === 'code';
+  const isAgentLayout = layoutMode === 'agent';
+  // Agent turns resolve the route from the persona/thread, not from the global
+  // chat selection, so the pill needs the explicit pair in that layout.
+  const agentSelection = useChatStore(
+    useShallow((state) => agentSelectionForLayout(state, layoutMode)),
+  );
+  // D9 gate: an agent owns its provider, so the global composer selection is
+  // irrelevant in that layout.
+  const globalProviderId = useAppStore((state) => state.selection.providerId);
+  const effectiveProviderId =
+    isAgentLayout && activeAgent ? activeAgent.providerId : globalProviderId;
+  const selectedProvider = useAppStore((state) =>
+    state.providers.find((provider) => provider.id === effectiveProviderId),
+  );
+  const providerReady = useAppStore((state) => state.providerReady(effectiveProviderId));
 
   const activeConversation = activeConversationId
     ? conversations.find((conversation) => conversation.id === activeConversationId)
     : undefined;
-  /** Sessão do Code (nativa ou compartilhada do Chat): hospeda os controles de sessão. */
+  /** Sessão do Code (nativa, compartilhada ou agente com workspace). */
   const codeSessionConversation =
-    isCodeLayout &&
     activeConversation &&
-    (activeConversation.mode === 'code' || activeConversation.codeLinked)
+    ((isCodeLayout &&
+      (activeConversation.mode === 'code' || activeConversation.codeLinked)) ||
+      (isAgentLayout &&
+        activeConversation.mode === 'agent' &&
+        Boolean(activeConversation.workspaceId)))
       ? activeConversation
       : undefined;
   /**
@@ -121,15 +146,15 @@ export function Composer() {
   /** A linha de chips acima do textarea existe quando há `/goal` e/ou Plano. */
   const showComposerChips = goalIntent || planModeActive;
   const workspaceId = activeConversation?.workspaceId || activeWorkspaceId || null;
-  /** `@` menções e `/` comandos só existem no modo Code com workspace. */
-  const codeMenusEnabled = isCodeLayout && Boolean(workspaceId);
+  /** `@` menções e `/` comandos existem no Code e em agentes com workspace. */
+  const codeMenusEnabled = (isCodeLayout || isAgentLayout) && Boolean(workspaceId);
 
   const isStreaming = streaming !== null;
   const providerBlocked = selectedProvider !== undefined && !providerReady;
-  const canSend =
-    !isStreaming &&
-    !providerBlocked &&
-    (value.trim().length > 0 || mentioned.length > 0 || pendingAttachments.length > 0);
+  const hasDraft =
+    value.trim().length > 0 || mentioned.length > 0 || pendingAttachments.length > 0;
+  const canQueue = isAgentLayout && isStreaming && !providerBlocked && hasDraft;
+  const canSend = !isStreaming && !providerBlocked && hasDraft;
 
   const slashQuery = menu?.kind === 'slash' ? menu.query : '';
   const slashCommands = useMemo(() => filterSlashCommands(slashQuery), [slashQuery]);
@@ -454,19 +479,22 @@ export function Composer() {
     [activeIndex, menu, optionCount],
   );
 
-  const submit = useCallback(() => {
-    if (!canSend) return;
+  const submit = useCallback(async () => {
+    if (!canSend && !canQueue) return;
     const text = composeMessage(value, mentioned);
     if (!text && pendingAttachments.length === 0) return;
     const goalRequest = goalIntent;
+    const accepted = await useChatStore
+      .getState()
+      .send(text, goalRequest ? { goalRequest: true } : undefined);
+    if (!accepted) return;
     setValue('');
     setMentioned([]);
     setMenu(null);
     setGoalIntent(false);
     requestAnimationFrame(resizeTextarea);
     window.dispatchEvent(new CustomEvent('lumina:scroll-bottom'));
-    void useChatStore.getState().send(text, goalRequest ? { goalRequest: true } : undefined);
-  }, [canSend, goalIntent, mentioned, pendingAttachments.length, resizeTextarea, value]);
+  }, [canQueue, canSend, goalIntent, mentioned, pendingAttachments.length, resizeTextarea, value]);
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;
@@ -544,11 +572,13 @@ export function Composer() {
 
   const placeholder = goalIntent
     ? 'Descreva o objetivo e o trabalho a fazer…'
-    : !isCodeLayout
-      ? 'Pergunte alguma coisa…'
-      : codeMenusEnabled
-        ? 'Descreva a tarefa… @ para arquivos, / para comandos'
-        : 'Descreva a tarefa para o agente…';
+    : isAgentLayout
+      ? `Converse com ${activeAgent?.name ?? 'o agente'}…`
+      : !isCodeLayout
+        ? 'Pergunte alguma coisa…'
+        : codeMenusEnabled
+          ? 'Descreva a tarefa… @ para arquivos, / para comandos'
+          : 'Descreva a tarefa para o agente…';
 
   const menuControls = menu
     ? menu.kind === 'mention'
@@ -660,7 +690,13 @@ export function Composer() {
                 onKeyDown={handleKeyDown}
                 rows={1}
                 placeholder={placeholder}
-                aria-label={isCodeLayout ? 'Tarefa para o agente' : 'Mensagem para o Lumina'}
+                aria-label={
+                  isAgentLayout
+                    ? `Mensagem para ${activeAgent?.name ?? 'o agente'}`
+                    : isCodeLayout
+                      ? 'Tarefa para o agente'
+                      : 'Mensagem para o Lumina'
+                }
                 aria-describedby={providerBlocked ? 'composer-credential-notice' : undefined}
                 aria-expanded={menu ? true : undefined}
                 aria-controls={menuControls}
@@ -730,7 +766,7 @@ export function Composer() {
               goalIntent={goalIntent}
               onToggleGoalIntent={() => setGoalIntent((current) => !current)}
             />
-          ) : isCodeLayout ? null : (
+          ) : isCodeLayout || isAgentLayout ? null : (
             <>
               <ToolsToggle
                 icon={Globe}
@@ -748,24 +784,53 @@ export function Composer() {
           )}
 
           <div className="ml-auto flex items-center gap-1.5">
-            {!isCodeLayout && activeConversationId ? (
+            {layoutMode === 'chat' && activeConversationId ? (
               <CacheMeterChip conversationId={activeConversationId} />
             ) : null}
-            <ModelPill onClick={() => setModelPickerOpen(true)} />
+            {isAgentLayout ? (
+              agentSelection ? (
+                <ModelPill
+                  providerId={agentSelection.providerId}
+                  modelId={agentSelection.modelId}
+                  reasoning={agentSelection.reasoning}
+                  onClick={() => setModelPickerOpen(true)}
+                />
+              ) : null
+            ) : (
+              <ModelPill onClick={() => setModelPickerOpen(true)} />
+            )}
 
             {isStreaming ? (
-              <button
-                type="button"
-                onClick={() => void useChatStore.getState().stop()}
-                aria-label="Parar resposta"
-                className={cn(
-                  'flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background',
-                  'transition-colors duration-150 hover:bg-foreground/90',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                )}
-              >
-                <Square className="size-3.5 fill-current" strokeWidth={2} />
-              </button>
+              <div className="flex items-center gap-1.5">
+                {canQueue ? (
+                  <button
+                    type="button"
+                    onClick={() => void submit()}
+                    aria-label="Enfileirar mensagem"
+                    title="Enfileirar mensagem"
+                    className={cn(
+                      'flex size-8 shrink-0 items-center justify-center rounded-full transition-[background-color,color,transform] duration-150',
+                      'bg-linear-to-br from-accent to-accent-hover text-accent-foreground hover:brightness-105',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                      !reduceMotion && 'active:scale-95',
+                    )}
+                  >
+                    <ArrowUp className="size-4" strokeWidth={2.25} />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void useChatStore.getState().stop()}
+                  aria-label="Parar resposta"
+                  className={cn(
+                    'flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background',
+                    'transition-colors duration-150 hover:bg-foreground/90',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                  )}
+                >
+                  <Square className="size-3.5 fill-current" strokeWidth={2} />
+                </button>
+              </div>
             ) : (
               <button
                 type="button"

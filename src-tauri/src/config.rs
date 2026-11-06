@@ -80,7 +80,12 @@ pub const APPROVAL_TIMEOUT_MAX_SECS: u32 = 3_600;
 /// arquivo desde a v1.9 **sem** nenhuma UI, um `"edit"` persistido num arquivo
 /// v1 é o default de fábrica antigo, não uma escolha do usuário — a migração de
 /// leitura o converte (ver [`parse_settings_json`]).
-const SETTINGS_VERSION: u32 = 2;
+///
+/// v3 (computer use): a imagem gráfica passa de `lumina/computer:latest` (tag
+/// de build local, nunca publicada) para a imagem publicada no GHCR. Um valor
+/// igual ao default antigo é migrado uma única vez; imagens customizadas são
+/// preservadas.
+const SETTINGS_VERSION: u32 = 3;
 
 /// Normaliza a lista de skills desativadas vinda do disco ou do renderer:
 /// `trim`, descarta entradas vazias, remove duplicatas e ordena (a comparação
@@ -153,6 +158,66 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     // `code_default_permission_mode` é enum tipado: valores inválidos no JSON
     // são tratados na leitura (`parse_settings_json`).
     settings.code_max_steps = settings.code_max_steps.clamp(1, MAX_STEPS_LIMIT);
+    settings.execution_environment = match settings
+        .execution_environment
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "docker" => "docker".to_string(),
+        _ => "local".to_string(),
+    };
+    settings.docker_image = settings.docker_image.trim().to_string();
+    if settings.docker_image.is_empty() || settings.docker_image.chars().count() > 200 {
+        settings.docker_image = defaults.docker_image;
+    }
+    settings.computer_environment =
+        crate::agents::normalize_computer_environment(&settings.computer_environment);
+    for field in [
+        &mut settings.browser_allowed_domains,
+        &mut settings.browser_blocked_domains,
+        &mut settings.computer_allowed_apps,
+        &mut settings.computer_blocked_apps,
+    ] {
+        *field = field
+            .iter()
+            .map(|domain| domain.trim().to_ascii_lowercase())
+            .filter(|domain| !domain.is_empty() && domain.chars().count() <= 253)
+            .take(200)
+            .collect();
+    }
+    settings.docker_memory_mb = settings.docker_memory_mb.clamp(256, 16_384);
+    settings.docker_cpus = settings.docker_cpus.clamp(0.25, 16.0);
+    settings.docker_pids_limit = settings.docker_pids_limit.clamp(32, 4_096);
+    settings.max_concurrent_turns = settings.max_concurrent_turns.clamp(1, 32);
+    settings.max_concurrent_turns_per_agent = settings.max_concurrent_turns_per_agent.clamp(1, 4);
+    settings.max_queue_length_per_thread = settings.max_queue_length_per_thread.clamp(1, 100);
+    match settings.agent_daily_cost_limit_usd {
+        Some(value) if !value.is_finite() || value <= 0.0 => {
+            settings.agent_daily_cost_limit_usd = None;
+        }
+        Some(value) => {
+            settings.agent_daily_cost_limit_usd = Some(value.min(10_000.0));
+        }
+        None => {}
+    }
+    settings.computer_docker_image = settings.computer_docker_image.trim().to_string();
+    if settings.computer_docker_image.is_empty()
+        || settings.computer_docker_image.chars().count() > 200
+    {
+        settings.computer_docker_image = defaults.computer_docker_image;
+    }
+    settings.computer_docker_container = settings.computer_docker_container.trim().to_string();
+    if settings.computer_docker_container.is_empty()
+        || !settings
+            .computer_docker_container
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        settings.computer_docker_container = defaults.computer_docker_container;
+    }
+    settings.computer_max_actions_per_turn = settings.computer_max_actions_per_turn.clamp(1, 200);
+    settings.computer_max_actions_per_hour = settings.computer_max_actions_per_hour.clamp(1, 2_000);
     settings.spill_retention_days = settings
         .spill_retention_days
         .clamp(SPILL_RETENTION_MIN_DAYS, SPILL_RETENTION_MAX_DAYS);
@@ -180,9 +245,11 @@ fn normalize_settings(mut settings: Settings) -> Settings {
 /// cair em `Settings::default()`, apagando todas as preferências. Aqui a chave
 /// inválida é removida antes da tipagem, então só ela volta ao default.
 ///
-/// Também aplica a migração de leitura v1 → v2: arquivos sem `settingsVersion`
-/// (ou de versão anterior) trocam o `"edit"` legado do modo de permissão do Code
-/// pelo novo default `"autonomous"`; valores gravados pela v2 são preservados.
+/// Também aplica as migrações de leitura:
+/// - v1 → v2: arquivos sem `settingsVersion` (ou v1) trocam o `"edit"` legado do
+///   modo de permissão do Code pelo novo default `"autonomous"`;
+/// - v2 → v3: a tag local antiga do computer use (`lumina/computer:latest`) vira
+///   a imagem publicada no GHCR. Valores customizados são preservados.
 fn parse_settings_json(raw: &str) -> Result<Settings, serde_json::Error> {
     let mut value: serde_json::Value = serde_json::from_str(raw)?;
     if let Some(object) = value.as_object_mut() {
@@ -190,7 +257,7 @@ fn parse_settings_json(raw: &str) -> Result<Settings, serde_json::Error> {
             .get("settingsVersion")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
-        if version < u64::from(SETTINGS_VERSION) {
+        if version < 2 {
             let legacy_default = object
                 .get("codeDefaultPermissionMode")
                 .and_then(serde_json::Value::as_str)
@@ -199,6 +266,20 @@ fn parse_settings_json(raw: &str) -> Result<Settings, serde_json::Error> {
                 object.insert(
                     "codeDefaultPermissionMode".to_string(),
                     serde_json::Value::String("autonomous".to_string()),
+                );
+            }
+        }
+        if version < u64::from(SETTINGS_VERSION) {
+            let legacy_computer_image = object
+                .get("computerDockerImage")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|image| image.trim() == "lumina/computer:latest");
+            if legacy_computer_image {
+                object.insert(
+                    "computerDockerImage".to_string(),
+                    serde_json::Value::String(
+                        crate::domain::DEFAULT_COMPUTER_DOCKER_IMAGE.to_string(),
+                    ),
                 );
             }
         }
@@ -1764,6 +1845,9 @@ mod tests {
         // Shell é opt-in por sessão, mas o default do app já vem ligado: cada
         // comando fora do workspace continua passando pela política de aprovação.
         assert!(defaults.shell_enabled);
+        assert_eq!(defaults.execution_environment, "local");
+        assert_eq!(defaults.docker_image, "node:22-bookworm");
+        assert!(!defaults.docker_network);
         assert!(defaults.auto_compact);
         assert_eq!(defaults.spill_retention_days, 30);
         assert_eq!(defaults.approval_timeout_secs, 600);
@@ -1776,6 +1860,21 @@ mod tests {
         );
         // Pasta nova pede confirmação explícita.
         assert!(!defaults.trust_workspaces_by_default);
+    }
+
+    #[test]
+    fn concurrent_turn_limit_defaults_to_10_and_clamps_to_32() {
+        assert_eq!(Settings::default().max_concurrent_turns, 10);
+        let normalized = normalize_settings(Settings {
+            max_concurrent_turns: 64,
+            ..Settings::default()
+        });
+        assert_eq!(normalized.max_concurrent_turns, 32);
+        let normalized = normalize_settings(Settings {
+            max_concurrent_turns: 0,
+            ..Settings::default()
+        });
+        assert_eq!(normalized.max_concurrent_turns, 1);
     }
 
     #[test]
@@ -1868,6 +1967,56 @@ mod tests {
         assert_eq!(normalized.diff_open_mode, "tab");
     }
     #[test]
+    fn execution_environment_and_docker_image_are_normalized() {
+        let mut settings = Settings::default();
+        settings.execution_environment = " DOCKER ".into();
+        settings.docker_image = "  python:3.12  ".into();
+        let normalized = normalize_settings(settings);
+        assert_eq!(normalized.execution_environment, "docker");
+        assert_eq!(normalized.docker_image, "python:3.12");
+
+        let mut invalid = Settings::default();
+        invalid.execution_environment = "cloud".into();
+        invalid.docker_image = "   ".into();
+        let normalized = normalize_settings(invalid);
+        assert_eq!(normalized.execution_environment, "local");
+        assert_eq!(normalized.docker_image, "node:22-bookworm");
+
+        let mut resources = Settings::default();
+        resources.docker_memory_mb = 1;
+        resources.docker_cpus = 99.0;
+        resources.docker_pids_limit = 1;
+        let normalized = normalize_settings(resources);
+        assert_eq!(normalized.docker_memory_mb, 256);
+        assert_eq!(normalized.docker_cpus, 16.0);
+        assert_eq!(normalized.docker_pids_limit, 32);
+
+        let mut computer = Settings::default();
+        computer.computer_environment = " PRIVATE_DESKTOP ".into();
+        assert_eq!(
+            normalize_settings(computer).computer_environment,
+            "private_desktop"
+        );
+        let mut invalid_computer = Settings::default();
+        invalid_computer.computer_environment = "cloud".into();
+        assert_eq!(
+            normalize_settings(invalid_computer).computer_environment,
+            "auto"
+        );
+
+        let mut lists = Settings::default();
+        lists.browser_allowed_domains = vec![" Example.COM ".into(), "  ".into()];
+        lists.browser_blocked_domains = vec!["BAD.test".into()];
+        lists.computer_allowed_apps = vec![" Notepad ".into()];
+        lists.computer_blocked_apps = vec!["1Password".into()];
+        let normalized = normalize_settings(lists);
+        assert_eq!(normalized.browser_allowed_domains, vec!["example.com"]);
+        assert_eq!(normalized.browser_blocked_domains, vec!["bad.test"]);
+        assert_eq!(normalized.computer_allowed_apps, vec!["notepad"]);
+        assert_eq!(normalized.computer_blocked_apps, vec!["1password"]);
+    }
+
+    #[test]
     fn diff_open_mode_normalizes_to_tab_or_panel() {
         let mut settings = Settings::default();
         settings.diff_open_mode = " PANEL ".into();
@@ -1925,6 +2074,38 @@ mod tests {
         assert_eq!(
             normalize_settings(parsed).code_default_permission_mode,
             crate::domain::PermissionMode::Edit
+        );
+    }
+
+    #[test]
+    fn settings_v2_migrates_the_legacy_local_computer_image() {
+        let raw = r#"{"settingsVersion":2,"computerDockerImage":"lumina/computer:latest"}"#;
+        let parsed = parse_settings_json(raw).expect("migrar imagem legada");
+        assert_eq!(
+            normalize_settings(parsed).computer_docker_image,
+            crate::domain::DEFAULT_COMPUTER_DOCKER_IMAGE
+        );
+    }
+
+    #[test]
+    fn settings_v2_preserves_a_custom_computer_image() {
+        let raw = r#"{"settingsVersion":2,"computerDockerImage":"example/custom:1"}"#;
+        let parsed = parse_settings_json(raw).expect("parse imagem customizada");
+        assert_eq!(
+            normalize_settings(parsed).computer_docker_image,
+            "example/custom:1"
+        );
+    }
+
+    #[test]
+    fn settings_v3_preserves_an_explicit_legacy_local_tag() {
+        // Depois da migração, a tag local pode ser uma escolha explícita de
+        // desenvolvimento e não deve ser trocada silenciosamente.
+        let raw = r#"{"settingsVersion":3,"computerDockerImage":"lumina/computer:latest"}"#;
+        let parsed = parse_settings_json(raw).expect("parse v3");
+        assert_eq!(
+            normalize_settings(parsed).computer_docker_image,
+            "lumina/computer:latest"
         );
     }
 

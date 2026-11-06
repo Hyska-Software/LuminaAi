@@ -126,6 +126,7 @@ mod tests {
             options: Default::default(),
             settings: Settings::default(),
             cancel: tokio_util::sync::CancellationToken::new(),
+            agent_hooks: None,
             data_dir: temp.path.clone(),
             skills_roots: Vec::new(),
         }

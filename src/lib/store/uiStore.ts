@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_SETTINGS_TAB, isSettingsTabId, type SettingsTabId } from '../settingsTabs';
-import type { Artifact, ThemeMode } from '../types';
+import type { AgentInput, Artifact, ThemeMode } from '../types';
 
 /**
  * Main content surface. `skills` and `library` replace the chat column (the
@@ -16,7 +16,18 @@ export type MainView = 'chat' | 'skills' | 'library';
  * docs/goals/chat-code-layout/PLAN.md. The mode is persisted and switched from
  * the title bar.
  */
-export type LayoutMode = 'chat' | 'code';
+export type LayoutMode = 'chat' | 'code' | 'agent';
+
+/**
+ * Center surface inside the Agentes layout when no agent/channel is selected.
+ * Volatile: `stats` and `routines` never survive an app restart.
+ */
+export type AgentView = 'team' | 'stats' | 'routines';
+
+/** Dialog de criação/edição de agente (volátil). */
+export type AgentEditorState =
+  | { mode: 'create'; draft?: AgentInput }
+  | { mode: 'edit'; agentId: string };
 
 /**
  * Surface shown inside the Code layout's center column. The Code workbench has
@@ -105,6 +116,12 @@ export function codeSubagentTabKey(tab: CodeSubagentTab): string {
 /** Tabs of the Code right panel (Arquivos | Alterações). */
 export type CodePanelTab = 'files' | 'changes' | 'terminal';
 
+/** Tabs of the agent right sidebar. */
+export type AgentPanelTab = 'screen' | 'routines' | 'browser' | 'data';
+
+/** Which panel owns the agent layout's right dock. */
+export type AgentRightPanel = 'agent' | 'workspace';
+
 /**
  * Diálogo de criação/edição do objetivo (docs/goals/code-goals/PLAN.md §10.4).
  * Volátil: abre pelo pill do composer, pelo card de atenção ou por `/goal`.
@@ -165,8 +182,20 @@ export function clampSidePanelWidth(width: number): number {
 
 interface UiState {
   theme: ThemeMode;
-  /** Active application layout (Chat | Code) — persisted (PLAN §2). */
+  /** Active application layout (Chat | Code | Agentes) — persisted (PLAN §2). */
   layoutMode: LayoutMode;
+  /** Agente selecionado no layout Agentes (persistido). */
+  activeAgentId: string | null;
+  /** Canal compartilhado selecionado (`null` = nenhum). */
+  activeChannelId: string | null;
+  /** Centro do layout Agentes sem agente/canal selecionado (volátil). */
+  agentView: AgentView;
+  /** Filter of the central routines page (`null` = all agents; volatile). */
+  agentRoutinesAgentId: string | null;
+  /** Diálogo de criação/edição de agente (volátil). */
+  agentEditor: AgentEditorState | null;
+  /** Quick avatar editor: agent id or `null` (volatile). */
+  agentAvatarEditor: string | null;
   /** Center surface inside the Code layout; reset to `session` on demand. */
   codeView: CodeView;
   /** Diff aberto como aba central (`null` = nenhum; pode ficar em segundo plano). */
@@ -193,6 +222,12 @@ interface UiState {
   codePanelOpen: boolean;
   /** Active tab of the Code right panel. */
   codePanelTab: CodePanelTab;
+  /** Whether the agent layout shows its right sidebar. */
+  agentPanelOpen: boolean;
+  /** Active tab of the agent right sidebar. */
+  agentPanelTab: AgentPanelTab;
+  /** Which panel owns the agent right dock (agent sidebar or workspace tools). */
+  agentRightPanel: AgentRightPanel;
   /** Workspace ativo do layout Code (`null` = nenhum/nenhuma pasta aberta). */
   activeWorkspaceId: string | null;
   /**
@@ -222,8 +257,19 @@ interface UiState {
   artifacts: Artifact[];
 
   setTheme: (theme: ThemeMode) => void;
-  /** Switches the whole application between the Chat and Code layouts. */
+  /** Switches the whole application between the Chat, Code and Agentes layouts. */
   setLayoutMode: (mode: LayoutMode) => void;
+  setActiveAgentId: (agentId: string | null) => void;
+  setActiveChannelId: (channelId: string | null) => void;
+  /** Switches the Agentes center between the team page, usage stats and routines. */
+  setAgentView: (view: AgentView) => void;
+  /** Opens the central routines page with an optional agent filter. */
+  openAgentRoutines: (agentId: string | null) => void;
+  setAgentRoutinesAgentId: (agentId: string | null) => void;
+  openAgentEditor: (target: AgentEditorState) => void;
+  closeAgentEditor: () => void;
+  openAgentAvatarEditor: (agentId: string) => void;
+  closeAgentAvatarEditor: () => void;
   /** Switches the Code center between the agent session and the Skills page. */
   setCodeView: (view: CodeView) => void;
   /** Abre o diff de um arquivo como aba central (codeView vira diff). */
@@ -267,6 +313,10 @@ interface UiState {
   setCodePanelOpen: (open: boolean) => void;
   toggleCodePanel: () => void;
   setCodePanelTab: (tab: CodePanelTab) => void;
+  setAgentPanelOpen: (open: boolean) => void;
+  toggleAgentPanel: () => void;
+  setAgentPanelTab: (tab: AgentPanelTab) => void;
+  setAgentRightPanel: (panel: AgentRightPanel) => void;
   /** Define o workspace ativo do layout Code (persistido). */
   setActiveWorkspace: (workspaceId: string | null) => void;
   /** Abre (ou ativa) uma aba de sessão dentro de um workspace. */
@@ -351,6 +401,12 @@ export const useUiStore = create<UiState>()(
     (set, get) => ({
       theme: 'system',
       layoutMode: 'chat',
+      activeAgentId: null,
+      activeChannelId: null,
+      agentView: 'team',
+      agentRoutinesAgentId: null,
+      agentEditor: null,
+      agentAvatarEditor: null,
       codeView: 'session',
       codeDiffTab: null,
       codeFileTabs: [],
@@ -364,6 +420,9 @@ export const useUiStore = create<UiState>()(
       codeCommitsTab: null,
       codePanelOpen: true,
       codePanelTab: 'changes',
+      agentPanelOpen: true,
+      agentPanelTab: 'screen',
+      agentRightPanel: 'agent',
       activeWorkspaceId: null,
       openSessionsByWorkspace: {},
       sidebarOpen: true,
@@ -386,7 +445,30 @@ export const useUiStore = create<UiState>()(
         get().applyTheme();
       },
       setLayoutMode: (layoutMode) =>
-        set({ layoutMode: layoutMode === 'code' ? 'code' : 'chat' }),
+        set({
+          layoutMode:
+            layoutMode === 'code' ? 'code' : layoutMode === 'agent' ? 'agent' : 'chat',
+        }),
+      setActiveAgentId: (activeAgentId) =>
+        set((state) => ({
+          activeAgentId,
+          activeChannelId: activeAgentId ? null : state.activeChannelId,
+          agentView: activeAgentId ? 'team' : state.agentView,
+        })),
+      setActiveChannelId: (activeChannelId) =>
+        set((state) => ({
+          activeChannelId,
+          activeAgentId: activeChannelId ? null : state.activeAgentId,
+          agentView: activeChannelId ? 'team' : state.agentView,
+        })),
+      setAgentView: (agentView) => set({ agentView }),
+      openAgentRoutines: (agentRoutinesAgentId) =>
+        set({ agentView: 'routines', agentRoutinesAgentId }),
+      setAgentRoutinesAgentId: (agentRoutinesAgentId) => set({ agentRoutinesAgentId }),
+      openAgentEditor: (agentEditor) => set({ agentEditor }),
+      closeAgentEditor: () => set({ agentEditor: null }),
+      openAgentAvatarEditor: (agentAvatarEditor) => set({ agentAvatarEditor }),
+      closeAgentAvatarEditor: () => set({ agentAvatarEditor: null }),
       setCodeView: (codeView) =>
         set({
           codeView:
@@ -542,6 +624,18 @@ export const useUiStore = create<UiState>()(
                 ? 'terminal'
                 : 'changes',
         }),
+      setAgentPanelOpen: (agentPanelOpen) => set({ agentPanelOpen }),
+      toggleAgentPanel: () => set((state) => ({ agentPanelOpen: !state.agentPanelOpen })),
+      setAgentPanelTab: (agentPanelTab) =>
+        set({
+          agentPanelTab: ['screen', 'routines', 'browser', 'data'].includes(agentPanelTab)
+            ? agentPanelTab
+            : 'screen',
+        }),
+      setAgentRightPanel: (agentRightPanel) =>
+        set({
+          agentRightPanel: agentRightPanel === 'workspace' ? 'workspace' : 'agent',
+        }),
       setActiveWorkspace: (activeWorkspaceId) => set({ activeWorkspaceId }),
       openWorkspaceSession: (workspaceId, conversationId) =>
         set((state) => {
@@ -655,7 +749,12 @@ export const useUiStore = create<UiState>()(
       partialize: (state) => ({
         theme: state.theme,
         layoutMode: state.layoutMode,
+        activeAgentId: state.activeAgentId,
+        activeChannelId: state.activeChannelId,
         codePanelOpen: state.codePanelOpen,
+        agentPanelOpen: state.agentPanelOpen,
+        agentPanelTab: state.agentPanelTab,
+        agentRightPanel: state.agentRightPanel,
         sidebarOpen: state.sidebarOpen,
         sidebarWidth: state.sidebarWidth,
         sidePanelWidth: state.sidePanelWidth,
@@ -686,9 +785,29 @@ export const useUiStore = create<UiState>()(
         return {
           ...current,
           ...stored,
-          layoutMode: stored.layoutMode === 'code' ? 'code' : 'chat',
+          layoutMode:
+            stored.layoutMode === 'code'
+              ? 'code'
+              : stored.layoutMode === 'agent'
+                ? 'agent'
+                : 'chat',
+          activeAgentId: validWorkspaceId(stored.activeChannelId)
+            ? null
+            : validWorkspaceId(stored.activeAgentId),
+          activeChannelId: validWorkspaceId(stored.activeChannelId),
           codePanelOpen:
             typeof stored.codePanelOpen === 'boolean' ? stored.codePanelOpen : current.codePanelOpen,
+          agentPanelOpen:
+            typeof stored.agentPanelOpen === 'boolean'
+              ? stored.agentPanelOpen
+              : current.agentPanelOpen,
+          agentPanelTab: ['screen', 'routines', 'browser', 'data'].includes(
+            stored.agentPanelTab as string,
+          )
+            ? (stored.agentPanelTab as AgentPanelTab)
+            : current.agentPanelTab,
+          agentRightPanel:
+            stored.agentRightPanel === 'workspace' ? 'workspace' : current.agentRightPanel,
           sidebarWidth: clampSidebarWidth(stored.sidebarWidth ?? current.sidebarWidth),
           sidePanelWidth: clampSidePanelWidth(stored.sidePanelWidth ?? current.sidePanelWidth),
           sidePanelMode: stored.sidePanelMode === 'docked' ? 'docked' : 'overlay',

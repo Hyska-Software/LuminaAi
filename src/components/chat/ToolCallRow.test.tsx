@@ -4,8 +4,12 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Bot } from 'lucide-react';
 import type { ToolCallRecord } from '@/lib/types';
 
-const mocks = vi.hoisted(() => ({ info: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  info: vi.fn(),
+  toolImagePreview: vi.fn(),
+}));
 vi.mock('sonner', () => ({ toast: { info: mocks.info, error: vi.fn() } }));
+vi.mock('@/lib/api', () => ({ api: { toolImagePreview: mocks.toolImagePreview } }));
 
 import { useUiStore } from '@/lib/store';
 import { ToolCallRow } from './ToolCallRow';
@@ -66,5 +70,26 @@ describe('ToolCallRow subagent chat tab', () => {
     state = useUiStore.getState();
     expect(state.codeSubagentTabs).toHaveLength(1);
     expect(mocks.info).toHaveBeenCalledWith('Este subagente já está aberto em uma aba.');
+  });
+
+  it('renders persisted tool screenshots from the app-data folder', async () => {
+    mocks.toolImagePreview.mockResolvedValue('data:image/jpeg;base64,abc');
+    const tool: ToolCallRecord = {
+      id: 'shot-1',
+      name: 'computer_screenshot',
+      arguments: '{}',
+      status: 'done',
+      result: '{"width":1440,"height":900}',
+      summary: 'Screenshot 1440×900',
+      images: [{ mimeType: 'image/jpeg', path: 'C:/app/tool-images/shot.jpg' }],
+    };
+    render(<ToolCallRow tool={tool} icon={Bot} />);
+
+    fireEvent.click(screen.getAllByRole('button')[0]);
+    const image = await screen.findByAltText('Screenshot retornado pela tool (1)');
+    expect(image.getAttribute('src')).toBe('data:image/jpeg;base64,abc');
+    expect(mocks.toolImagePreview).toHaveBeenCalledWith(
+      'C:/app/tool-images/shot.jpg',
+    );
   });
 });

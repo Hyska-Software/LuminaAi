@@ -594,6 +594,9 @@ fn rule_from_request(
         ),
         crate::domain::ApprovalDetail::Secret { path }
         | crate::domain::ApprovalDetail::Outside { path } => ("glob".to_string(), path.clone()),
+        crate::domain::ApprovalDetail::ComputerAction { target, .. } => {
+            ("exact".to_string(), target.clone())
+        }
         crate::domain::ApprovalDetail::Other { text } => ("exact".to_string(), text.clone()),
     };
     Ok((matcher, pattern, scope_id))
@@ -1039,7 +1042,10 @@ pub(crate) const ORPHAN_ROUND_DETAIL: &str =
 /// Sessão do layout Code? Nativo (`mode == "code"`) ou sessão do Chat
 /// explicitamente adicionada ao Code (`codeLinked`) — PLAN D18.
 pub(crate) fn is_code_session(conversation: &Conversation) -> bool {
-    conversation.mode == crate::domain::CONVERSATION_MODE_CODE || conversation.code_linked
+    conversation.mode == crate::domain::CONVERSATION_MODE_CODE
+        || conversation.code_linked
+        || (conversation.mode == crate::domain::CONVERSATION_MODE_AGENT
+            && conversation.workspace_id.is_some())
 }
 
 /// O objetivo só existe no layout Code (PLAN D18); o código estável no prefixo

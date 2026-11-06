@@ -275,6 +275,22 @@ describe('AgentSteps — raciocínio recolhido por padrão', () => {
     });
   }
 
+  it('starts collapsed in the Agentes layout even when the global setting is off', () => {
+    setThinkingCollapsedByDefault(false);
+    useUiStore.setState({ layoutMode: 'agent' });
+    render(
+      <AgentSteps
+        streaming
+        phase="reasoning"
+        startedAt={Date.now() - 1_000}
+        message={stepMessage({ status: 'streaming' })}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Pensando/ })).toBeTruthy();
+    expect(screen.getByRole('button', { expanded: false })).toBeTruthy();
+    expect(screen.queryByText(reasoning)).toBeNull();
+  });
+
   it('starts closed even while streaming and does not toggle by itself', async () => {
     const user = userEvent.setup();
     setThinkingCollapsedByDefault(true);

@@ -217,17 +217,24 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
 
   // Auto-open while the agent works and collapse once the answer is ready
   // (same behavior as the previous reasoning block; the user can reopen).
-  // When "raciocínio recolhido por padrão" is enabled the block starts closed
-  // and never toggles by itself: a manual expansion wins, even after the stream
-  // ends. Keeping `setOpen` out of the effect in that mode avoids races with
-  // the user's own expansion.
-  const collapsedByDefault = useAppStore((state) => state.settings.thinkingCollapsedByDefault);
+  // Layout Agentes: o bloco de pensamento/trabalho começa fechado por padrão,
+  // independentemente da preferência global. O usuário ainda pode expandir.
   // Layout Code: o tempo do turno inclui ferramentas e comandos, então o
   // título agregado fala em "Trabalhou por …". No Chat o bloco resume apenas o
   // raciocínio do modelo → "Pensou por …" (DESIGN §6.3).
   const layoutMode = useUiStore((state) => state.layoutMode);
+  const collapsedByDefault =
+    useAppStore((state) => state.settings.thinkingCollapsedByDefault) ||
+    layoutMode === 'agent';
   const [open, setOpen] = useState(() => (collapsedByDefault ? false : streaming));
   const wasStreaming = useRef(streaming);
+  const previousLayout = useRef(layoutMode);
+  useEffect(() => {
+    if (layoutMode === 'agent' && previousLayout.current !== 'agent') {
+      setOpen(false);
+    }
+    previousLayout.current = layoutMode;
+  }, [layoutMode]);
   useEffect(() => {
     const was = wasStreaming.current;
     wasStreaming.current = streaming;

@@ -149,6 +149,13 @@ export type MessageRole = 'user' | 'assistant' | 'system';
 export type MessageStatus = 'streaming' | 'complete' | 'error' | 'cancelled';
 export type ToolCallStatus = 'running' | 'done' | 'error';
 
+export interface ToolImageRef {
+  mimeType: string;
+  path: string;
+  width?: number;
+  height?: number;
+}
+
 export interface ToolCallRecord {
   id: string;
   name: string;
@@ -161,9 +168,11 @@ export interface ToolCallRecord {
   /**
    * Apresentação estruturada do resultado (diff, lista de tarefas, plano, job,
    * aprovação) usada pelos cards do harness de código e persistida no DB.
-   * JSON opaco versionado por `kind` — ver docs/goals/code-harness/TOOLS.md §1.1.
+   * JSON opaco versionado por `kind` - ver docs/goals/code-harness/TOOLS.md §1.1.
    */
   presentation?: ToolPresentation | null;
+  /** Screenshots devolvidos pela tool (caminho no app-data, sem base64 no DB). */
+  images?: ToolImageRef[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -182,6 +191,7 @@ export type RiskClass =
   | 'secret'
   | 'destroy'
   | 'network'
+  | 'computer'
   | 'ask';
 
 export type ApprovalScope = 'session' | 'workspace' | 'global';
@@ -199,6 +209,14 @@ export type ApprovalDetail =
   | { kind: 'paths'; paths: string[]; change: string }
   | { kind: 'secret'; path: string }
   | { kind: 'outside'; path: string }
+  | {
+      kind: 'computer_action';
+      action: string;
+      target: string;
+      screenshotPath?: string | null;
+      textLength?: number | null;
+      sensitive?: boolean;
+    }
   | { kind: 'other'; text: string };
 
 /** Pedido de aprovação mostrado no card da timeline (`approval_requested`). */
@@ -284,6 +302,8 @@ export interface Workspace {
   updatedAt: number;
   lastOpenedAt?: number | null;
   pinned?: boolean;
+  /** Posição manual dentro da seção da sidebar (0 = ordem por recência). */
+  sortOrder?: number;
   trusted?: boolean;
   git?: GitInfo | null;
 }
@@ -827,7 +847,467 @@ export interface ChatMessage {
 }
 
 /** Origem de uma sessão: o layout onde ela foi criada. */
-export type ConversationMode = 'chat' | 'code';
+export type ConversationMode = 'chat' | 'code' | 'agent';
+
+export interface AgentCapabilities {
+  webSearch: boolean;
+  fileAccess: boolean;
+  codeExecution: boolean;
+  /** Delegação de tarefas para outros agentes. */
+  delegation?: boolean;
+  /** Criação/edição das próprias rotinas. */
+  automation?: boolean;
+  /** Memória compartilhada entre agentes. */
+  sharedMemory?: boolean;
+  /** Escrita de skills do usuário. */
+  skillsWrite?: boolean;
+  /** Criação de novos agentes pela tool create_agent. */
+  createAgents?: boolean;
+  /** Computer use visual (screenshot + input). */
+  computerUse?: boolean;
+  /** Captura de tela sem input. */
+  screenCapture?: boolean;
+  /** Browser controlado por CDP. */
+  browserUse?: boolean;
+  /** Permite override de execução Docker por agente. */
+  dockerExecution?: boolean;
+  /** `null` herda todas as skills habilitadas; `[]` não usa nenhuma. */
+  skills: string[] | null;
+  tools: string[] | null;
+  mcpServers: string[] | null;
+}
+
+export type ComputerEnvironment =
+  | 'auto'
+  | 'private_desktop'
+  | 'this_computer'
+  | 'browser'
+  | 'off';
+
+export type AgentAvatarShape = 'mascot' | 'circle' | 'rounded' | 'square';
+export type AgentAvatarFace = 'white' | 'black';
+export type AgentAvatarBody =
+  | 'mascot'
+  | 'circle'
+  | 'bubble'
+  | 'rounded'
+  | 'square'
+  | 'drop'
+  | 'blob'
+  | 'hex'
+  | 'diamond'
+  | 'star';
+export type AgentAvatarExpression =
+  | 'neutral'
+  | 'happy'
+  | 'grin'
+  | 'wink'
+  | 'surprised'
+  | 'angry'
+  | 'sad'
+  | 'sleepy'
+  | 'smug'
+  | 'dizzy';
+export type AgentAvatarColor =
+  | 'green'
+  | 'blue'
+  | 'red'
+  | 'orange'
+  | 'purple'
+  | 'teal'
+  | 'pink'
+  | 'yellow'
+  | 'emerald'
+  | 'coral'
+  | 'gray'
+  | 'silver';
+
+/** Visual identity of an agent: built-in mascot, uploaded image or legacy emoji. */
+export type AgentAvatar = (
+  | {
+      kind: 'mascot';
+      body: AgentAvatarBody;
+      expression: AgentAvatarExpression;
+      color: AgentAvatarColor;
+      face: AgentAvatarFace;
+    }
+  | { kind: 'image'; dataUrl: string }
+  | { kind: 'emoji'; value: string }
+) & { shape: AgentAvatarShape };
+
+export interface Agent {
+  id: string;
+  name: string;
+  role: string;
+  description: string;
+  avatar: AgentAvatar;
+  department: string;
+  pinned: boolean;
+  sortOrder: number;
+  providerId: string;
+  modelId: string;
+  /** Backup route used when the primary route has no model/credential. */
+  fallbackProviderId?: string | null;
+  fallbackModelId?: string | null;
+  reasoning: ReasoningSelection | null;
+  instructions: string;
+  promptVersion: number;
+  starters: string[];
+  capabilities: AgentCapabilities;
+  memoryEnabled: boolean;
+  memoryRevision?: number;
+  /** Optional workspace for Code-profile turns (files/shell/approvals). */
+  workspaceId: string | null;
+  permissionMode: PermissionMode;
+  /** Optional Docker image override (requires capability dockerExecution). */
+  dockerImage?: string | null;
+  /** Where this persona uses the computer/browser. */
+  computerEnvironment?: ComputerEnvironment;
+  archivedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+  threadCount: number;
+  lastActiveAt: number | null;
+}
+
+export interface AgentInput {
+  name: string;
+  role: string;
+  description: string;
+  avatar: AgentAvatar;
+  department: string;
+  providerId: string;
+  modelId: string;
+  fallbackProviderId?: string | null;
+  fallbackModelId?: string | null;
+  reasoning: ReasoningSelection | null;
+  instructions: string;
+  starters: string[];
+  capabilities: AgentCapabilities;
+  memoryEnabled: boolean;
+  workspaceId: string | null;
+  permissionMode: PermissionMode;
+  dockerImage?: string | null;
+  computerEnvironment?: ComputerEnvironment;
+}
+
+export interface AgentChange {
+  field: string;
+  label: string;
+  before: unknown;
+  after: unknown;
+}
+
+export interface AgentRevision {
+  agentId: string;
+  before: AgentInput;
+  after: AgentInput;
+  changes: AgentChange[];
+}
+
+export type AgentMemoryKind = 'fact' | 'preference' | 'procedure' | 'note';
+
+export interface AgentMemory {
+  id: string;
+  agentId: string;
+  kind: AgentMemoryKind;
+  content: string;
+  sourceConversationId: string | null;
+  pinned: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AgentMemoryInput {
+  kind: AgentMemoryKind;
+  content: string;
+  sourceConversationId?: string | null;
+  pinned?: boolean;
+}
+
+export interface AgentSharedMemory {
+  id: string;
+  sourceAgentId: string | null;
+  sourceAgentName: string | null;
+  sourceConversationId: string | null;
+  kind: AgentMemoryKind;
+  content: string;
+  pinned: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AgentChannel {
+  id: string;
+  name: string;
+  kind?: 'channel' | 'dm';
+  /** Agent that answers first and may delegate work to other members. */
+  leaderAgentId?: string | null;
+  /** Posição manual na seção Canais (0 = ordem por recência). */
+  sortOrder?: number;
+  memberIds: string[];
+  createdAt: number;
+  updatedAt: number;
+  lastMessageAt: number | null;
+}
+
+export interface AgentChannelInput {
+  name: string;
+  memberIds: string[];
+  leaderAgentId?: string | null;
+}
+
+export interface AgentChannelMessage {
+  id: string;
+  channelId: string;
+  role: 'user' | 'agent' | 'system';
+  agentId: string | null;
+  content: string;
+  createdAt: number;
+}
+
+export interface AgentChannelPostResult {
+  messages: AgentChannelMessage[];
+  errors: string[];
+}
+
+export interface AgentInboxItem {
+  id: string;
+  recipientAgentId: string;
+  senderAgentId: string | null;
+  senderUser: boolean;
+  channelId: string;
+  channelName: string;
+  messageId: string;
+  senderName: string;
+  messageContent: string;
+  status: 'pending' | 'delivering' | 'delivered' | 'failed';
+  attempts: number;
+  lastError: string | null;
+  createdAt: number;
+  deliveredAt: number | null;
+}
+
+export interface AgentInboxCount {
+  channelId: string;
+  pending: number;
+}
+
+export type AgentTaskStatus =
+  | 'queued'
+  | 'accepted'
+  | 'running'
+  | 'waiting_input'
+  | 'waiting_approval'
+  | 'review'
+  | 'handoff_pending'
+  | 'done'
+  | 'cancelled'
+  | 'failed'
+  | 'declined';
+
+export interface DockerStatus {
+  available: boolean;
+  serverVersion: string | null;
+  images: string[];
+  error: string | null;
+}
+
+export interface DockerImageInfo {
+  image: string;
+  id: string;
+  architecture: string;
+}
+
+export interface AgentTask {
+  id: string;
+  channelId: string | null;
+  parentTaskId: string | null;
+  ownerAgentId: string;
+  createdByAgentId: string | null;
+  createdByUser: boolean;
+  title: string;
+  brief: string;
+  acceptance: string;
+  status: AgentTaskStatus;
+  priority: number;
+  maxTurns: number;
+  maxTokens: number;
+  maxCost: number;
+  deadlineAt: number | null;
+  conversationId: string | null;
+  originConversationId: string | null;
+  workspaceId?: string | null;
+  retryCount?: number;
+  result: string | null;
+  resultArtifactIds: string[];
+  leaseUntil: number | null;
+  handoffCount: number;
+  version: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AgentTaskInput {
+  toAgentId: string;
+  title: string;
+  brief: string;
+  acceptance?: string;
+  channelId?: string | null;
+  parentTaskId?: string | null;
+  workspaceId?: string | null;
+  maxTurns?: number;
+  maxTokens?: number;
+  maxCost?: number;
+  deadlineMinutes?: number;
+}
+
+export interface AgentTaskEvent {
+  id: string;
+  taskId: string;
+  fromStatus: string | null;
+  toStatus: string;
+  actor: string;
+  payload: unknown;
+  createdAt: number;
+}
+
+export interface AgentTaskDetail {
+  task: AgentTask;
+  events: AgentTaskEvent[];
+}
+
+export interface AgentTaskUpdatedEvent {
+  taskId: string;
+  ownerAgentId: string;
+  status: string;
+  title: string;
+  originConversationId?: string | null;
+}
+
+export interface AgentUsage {
+  agentId: string;
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  cost: number;
+  lastUsedAt: number | null;
+}
+
+export interface UsageStatsTotals {
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  cost: number;
+  lastUsedAt: number | null;
+}
+
+export interface ModelUsageStats {
+  providerId: string;
+  modelId: string;
+  turns: number;
+  totalTokens: number;
+  cost: number;
+}
+
+export interface DailyUsageStats {
+  /** Local day in `YYYY-MM-DD`. */
+  day: string;
+  totalTokens: number;
+}
+
+export interface UsageStats {
+  totals: UsageStatsTotals;
+  byModel: ModelUsageStats[];
+  byDay: DailyUsageStats[];
+}
+
+export interface AgentRoutine {
+  id: string;
+  agentId: string;
+  title: string;
+  prompt: string;
+  scheduleKind: 'interval' | 'daily';
+  intervalMinutes: number;
+  hour: number;
+  minute: number;
+  /** Bitmask: Monday=1 … Sunday=64; 127 = every day. Used by daily routines. */
+  daysOfWeek: number;
+  enabled: boolean;
+  conversationId: string | null;
+  nextRunAt: number;
+  lastRunAt: number | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  triggerKind: 'schedule' | 'event';
+  eventKind: 'channel.message' | 'task.status' | '';
+  eventFilterJson: string;
+  leaseUntil: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AgentRoutineInput {
+  title: string;
+  prompt: string;
+  scheduleKind: 'interval' | 'daily';
+  intervalMinutes: number;
+  hour: number;
+  minute: number;
+  /** Bitmask: Monday=1 … Sunday=64; 127 = every day. Used by daily routines. */
+  daysOfWeek: number;
+  enabled: boolean;
+  triggerKind: 'schedule' | 'event';
+  eventKind: 'channel.message' | 'task.status' | '';
+  eventFilterJson: string;
+}
+
+export interface AgentRoutineRunEvent {
+  routineId: string;
+  agentId: string;
+  conversationId: string | null;
+  title: string;
+  status: string;
+  error: string | null;
+  eventKind?: string | null;
+  eventId?: string | null;
+}
+
+export interface AgentRoutineRun {
+  id: string;
+  routineId: string;
+  conversationId: string | null;
+  status: string;
+  error: string | null;
+  startedAt: number;
+  endedAt: number | null;
+}
+
+export interface McpServerSummary {
+  name: string;
+  enabled?: boolean;
+  [key: string]: unknown;
+}
+
+export interface McpStatus {
+  servers: McpServerSummary[];
+  tools: Array<{ server: string; name: string; wireName: string }>;
+}
+
+export interface AgentThreadCursor {
+  updatedAt: number;
+  id: string;
+}
+
+export interface AgentThreadPage {
+  items: Conversation[];
+  nextCursor: AgentThreadCursor | null;
+  hasMore: boolean;
+}
 
 export interface Conversation {
   id: string;
@@ -835,6 +1315,8 @@ export interface Conversation {
   createdAt: number;
   updatedAt: number;
   pinned: boolean;
+  /** Posição manual dentro da seção da sidebar (0 = ordem por recência). */
+  sortOrder?: number;
   providerId: string;
   modelId: string;
   messageCount: number;
@@ -861,6 +1343,14 @@ export interface Conversation {
   subagentTaskCallId?: string | null;
   /** Subagent kind (`explore` | `review` | `general`). */
   subagentType?: string | null;
+  /** Persona dona da conversa (`mode === 'agent'`); ausente em Chat/Code. */
+  agentId?: string | null;
+  /** Shared channel that owns this hidden agent thread. */
+  channelId?: string | null;
+  /** Task that owns this hidden agent thread. */
+  taskId?: string | null;
+  /** Primary conversation of the agent persona; always pinned at the top. */
+  isMain?: boolean;
 }
 
 export interface ConversationDetail {
@@ -910,6 +1400,120 @@ export interface TurnPayload {
    */
   goalRequest?: boolean;
   turnId?: string | null;
+}
+
+export interface ActiveTurnInfo {
+  turnId: string;
+  conversationId: string;
+  startedAt: number;
+}
+
+export interface TurnEventRecord {
+  turnId: string;
+  seq: number;
+  event: TurnEvent;
+}
+
+export interface TurnEventBusPayload {
+  turnId: string;
+  seq: number;
+  conversationId: string;
+  event: TurnEvent;
+}
+
+export interface ComputerSession {
+  id: string;
+  agentId: string | null;
+  conversationId: string;
+  backend: string;
+  status: string;
+  startedAt: number;
+  endedAt: number | null;
+}
+
+export interface ComputerPreview {
+  dataUrl: string;
+  width: number;
+  height: number;
+  backend: 'local' | 'docker';
+  activeWindow: string;
+  paused: boolean;
+  takenOver: boolean;
+  controlTarget: string;
+  sessionId: string | null;
+  capturedAt: number;
+}
+
+export interface ComputerControlTarget {
+  kind: 'local' | 'vnc' | 'browser';
+  url: string | null;
+  generation: string | null;
+}
+
+export interface BrowserTab {
+  id: string;
+  title: string;
+  url: string;
+  active: boolean;
+}
+
+export interface BrowserStatus {
+  running: boolean;
+  port: number | null;
+  executable: string | null;
+  profileDir: string | null;
+  downloadDir: string | null;
+  tabs: BrowserTab[];
+  activeTab: string | null;
+}
+
+export interface BrowserFrame {
+  dataUrl: string;
+  url: string;
+  title: string;
+  width: number;
+  height: number;
+  capturedAt: number;
+}
+
+export interface BrowserElement {
+  ref: string;
+  role: string;
+  name: string;
+  value: string;
+  disabled: boolean;
+  backendNodeId: number;
+}
+
+export interface BrowserSnapshot {
+  url: string;
+  title: string;
+  elements: BrowserElement[];
+  screenshot: string | null;
+  width: number;
+  height: number;
+  capturedAt: number;
+}
+
+export interface ComputerActionRecord {
+  id: string;
+  sessionId: string;
+  agentId: string | null;
+  conversationId: string;
+  turnId: string;
+  tool: string;
+  action: string;
+  target: unknown;
+  approvalScope: string | null;
+  decision: string | null;
+  result: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  redactedTextLen: number | null;
+  policyRule: string | null;
+  initiator: string | null;
+  createdAt: number;
+  endedAt: number | null;
 }
 
 export interface TurnResult {
@@ -1138,6 +1742,18 @@ export interface SkillContent {
   content: string;
 }
 
+export interface SkillDraft {
+  name: string;
+  description: string;
+  content: string;
+  overwrite: boolean;
+}
+
+export interface SkillVersion {
+  file: string;
+  savedAt: number;
+}
+
 export interface CodeEnvironmentStatus {
   enabled: boolean;
   python?: InterpreterInfo | null;
@@ -1204,6 +1820,50 @@ export interface Settings {
   codeMaxSteps?: number;
   /** Permite ao agente executar comandos de shell (`run_command`). */
   shellEnabled?: boolean;
+  /** `local` (máquina do usuário) ou `docker` para os comandos do Code. */
+  executionEnvironment?: 'local' | 'docker';
+  /** Imagem usada quando `executionEnvironment === 'docker'`. */
+  dockerImage?: string;
+  /** Onde o computer use roda (`auto` por padrão; o agente pode sobrescrever). */
+  computerEnvironment?: ComputerEnvironment;
+  /** Allowlist de hosts do navegador (vazio = todos os hosts públicos). */
+  browserAllowedDomains?: string[];
+  /** Denylist de hosts do navegador. */
+  browserBlockedDomains?: string[];
+  /** Allowlist de apps do desktop (processo/classe). Vazio = todos. */
+  computerAllowedApps?: string[];
+  /** Apps do desktop sempre negados. */
+  computerBlockedApps?: string[];
+  /** Permite localhost/RFC1918 no navegador (desenvolvimento local). */
+  browserAllowPrivateHosts?: boolean;
+  /** Permite navegador em rotinas/tarefas sem canal de aprovação. */
+  computerAllowUnattendedBrowser?: boolean;
+  /** Permite rede no contêiner Docker (padrão: desligado). */
+  dockerNetwork?: boolean;
+  /** Limite de memória do sandbox Docker (MB). */
+  dockerMemoryMb?: number;
+  /** Limite de CPU do sandbox Docker. */
+  dockerCpus?: number;
+  /** Limite de PIDs do sandbox Docker. */
+  dockerPidsLimit?: number;
+  /** Monta o rootfs do contêiner como somente leitura. */
+  dockerReadOnlyRoot?: boolean;
+  /** Turnos simultâneos no app inteiro. */
+  maxConcurrentTurns?: number;
+  /** Turnos simultâneos por agente. */
+  maxConcurrentTurnsPerAgent?: number;
+  /** Mensagens máximas na fila de uma thread. */
+  maxQueueLengthPerThread?: number;
+  /** Limite diário de custo por agente (USD); `null` desliga. */
+  agentDailyCostLimitUsd?: number | null;
+  /** Imagem Docker do computer use gráfico. */
+  computerDockerImage?: string;
+  /** Nome do container do computer use gráfico. */
+  computerDockerContainer?: string;
+  /** Máximo de ações de computer use por turno. */
+  computerMaxActionsPerTurn?: number;
+  /** Máximo de ações de computer use por agente em uma hora. */
+  computerMaxActionsPerHour?: number;
   /** Compacta o contexto automaticamente quando a janela aperta. */
   autoCompact?: boolean;
   /** Retenção dos arquivos de spill, em dias. */
@@ -1212,6 +1872,16 @@ export interface Settings {
   approvalTimeoutSecs?: number;
   /** Notificações do sistema no fim de turnos em segundo plano. */
   notificationsEnabled?: boolean;
+  /** Notificar aprovações pedidas em segundo plano. */
+  notificationsApprovals?: boolean;
+  /** Notificar perguntas feitas em segundo plano. */
+  notificationsQuestions?: boolean;
+  /** Notificar conclusão de turnos de agente em segundo plano. */
+  notificationsCompletions?: boolean;
+  /** Notificar tarefas que precisam de uma pessoa. */
+  notificationsTasks?: boolean;
+  /** Não perturbe: mantém só os avisos in-app da Atividade. */
+  notificationsDnd?: boolean;
   /** Modo de permissão inicial de novas sessões do Code (padrão: Autônomo). */
   codeDefaultPermissionMode?: PermissionMode;
   /** Confia automaticamente em workspaces abertos antes. */

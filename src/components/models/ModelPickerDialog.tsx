@@ -7,6 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { Search } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import {
   defaultReasoningFor,
   findModelIn,
@@ -38,6 +39,7 @@ import type {
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
+  agentSelectionForLayout,
   modelLockCopy,
   modelLockReason,
   useAppStore,
@@ -150,7 +152,14 @@ interface ModelPickerDialogBodyProps {
  * by effects during render (the old `wasOpen` hack).
  */
 function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
-  const selection = useAppStore((state) => state.selection);
+  const globalSelection = useAppStore((state) => state.selection);
+  const layoutMode = useUiStore((state) => state.layoutMode);
+  // Agents own their route; the dialog must open on the pair the next turn
+  // will actually use instead of the global Chat/Code selection.
+  const agentSelection = useChatStore(
+    useShallow((state) => agentSelectionForLayout(state, layoutMode)),
+  );
+  const selection = agentSelection ?? globalSelection;
   const favorites = useAppStore((state) => state.favorites);
   const keys = useAppStore((state) => state.keys);
   const auth = useAppStore((state) => state.auth);

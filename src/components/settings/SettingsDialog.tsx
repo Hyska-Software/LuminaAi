@@ -13,6 +13,7 @@ import {
   TabsTrigger,
 } from '@/components/ui';
 import { AboutTab } from './AboutTab';
+import { AgentsTab } from './AgentsTab';
 import { DataTab } from './DataTab';
 import { GeneralTab } from './GeneralTab';
 import { InstructionsTab } from './InstructionsTab';
@@ -99,6 +100,9 @@ export function SettingsDialog() {
                   </TabsContent>
                   <TabsContent value="tools">
                     <ToolsTab />
+                  </TabsContent>
+                  <TabsContent value="agents">
+                    <AgentsTab />
                   </TabsContent>
                   <TabsContent value="data">
                     <DataTab />

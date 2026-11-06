@@ -52,4 +52,14 @@ describe('SettingsDialog — aba controlada pelo uiStore (deep-link da paleta)',
 
     expect(useUiStore.getState().settingsTab).toBe('about');
   });
+
+  it('opens the Agentes tab with the agent settings sections', async () => {
+    const user = userEvent.setup();
+    render(<SettingsDialog />);
+
+    await user.click(tab('Agentes'));
+
+    expect(useUiStore.getState().settingsTab).toBe('agents');
+    expect(await screen.findByText('Desktop privado (computer use)')).not.toBeNull();
+  });
 });

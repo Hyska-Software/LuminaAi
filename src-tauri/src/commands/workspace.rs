@@ -183,6 +183,11 @@ pub async fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<Workspace
     state.db.list_workspaces().map_err(map_err)
 }
 
+#[tauri::command]
+pub fn reorder_workspaces(state: State<'_, AppState>, ids: Vec<String>) -> Result<(), String> {
+    state.db.reorder_workspaces(&ids).map_err(map_err)
+}
+
 /// Workspace + contexto (git/projeto) para o header do layout Code.
 #[tauri::command]
 pub async fn get_workspace_context(
@@ -268,13 +273,42 @@ pub async fn set_conversation_workspace(
     conversation_id: String,
     workspace_id: Option<String>,
 ) -> Result<Conversation, String> {
-    state
-        .db
-        .set_conversation_workspace(&conversation_id, workspace_id.as_deref())
-        .map_err(map_err)?;
-    state
-        .db
-        .get_conversation(&conversation_id)
+    bind_conversation_workspace(&state.db, &conversation_id, workspace_id.as_deref(), crate::computer::browser::global()).await
+}
+
+pub(crate) async fn bind_conversation_workspace(db: &crate::db::Db, conversation_id: &str, workspace_id: Option<&str>, browser: Option<&crate::computer::browser::BrowserManager>) -> Result<Conversation, String> {
+    let conversation = db.get_conversation(conversation_id).map_err(map_err)?
+        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))?;
+    let gate = crate::agents::workspace_gate(conversation_id);
+    let _guard = if conversation.mode == crate::domain::CONVERSATION_MODE_AGENT {
+        Some(gate.try_write().map_err(|_| "AGENT_WORKSPACE_BUSY: aguarde o fim do turno".to_string())?)
+    } else {
+        None
+    };
+    if conversation.mode == crate::domain::CONVERSATION_MODE_AGENT {
+        if let Some(id) = workspace_id {
+            let workspace = db.get_workspace(id).map_err(map_err)?
+                .ok_or_else(|| format!("workspace não encontrado: {id}"))?;
+            if !workspace.trusted {
+                return Err("AGENT_WORKSPACE_UNTRUSTED: confie na pasta antes de usá-la".into());
+            }
+        }
+    }
+    let control_gate = crate::computer::control::gate(conversation_id);
+    let _action_guard = if conversation.mode == crate::domain::CONVERSATION_MODE_AGENT {
+        Some(control_gate.action.lock().await)
+    } else { None };
+    let browser_updated = if conversation.mode == crate::domain::CONVERSATION_MODE_AGENT && conversation.workspace_id.as_deref() != workspace_id {
+        if let Some(browser) = browser {
+            browser.prepare_workspace_change(db, conversation_id, workspace_id).await?
+        } else { false }
+    } else { false };
+    if let Err(error) = db.set_conversation_workspace(conversation_id, workspace_id) {
+        if browser_updated { if let Some(browser) = browser { browser.close(conversation_id); } }
+        return Err(map_err(error));
+    }
+    db
+        .get_conversation(conversation_id)
         .map_err(map_err)?
         .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))
 }
@@ -705,6 +739,34 @@ pub async fn read_workspace_file(
 mod tests {
     use super::*;
     use base64::Engine as _;
+
+    #[tokio::test]
+    async fn agent_workspace_binding_requires_trust_and_an_idle_conversation() {
+        let db = crate::db::Db::open_in_memory().expect("database");
+        let input = crate::agents::normalize_input(crate::agents::AgentInput {
+            name: "Agent".into(), role: "Assistant".into(), description: String::new(), avatar: crate::agents::AgentAvatar::emoji(""),
+            department: "General".into(), provider_id: "provider".into(), model_id: "model".into(),
+            fallback_provider_id: None, fallback_model_id: None, reasoning: None, instructions: String::new(),
+            starters: Vec::new(), capabilities: Default::default(), memory_enabled: false, workspace_id: None,
+            permission_mode: crate::domain::PermissionMode::Edit, docker_image: None, computer_environment: "auto".into(),
+        }).expect("agent input");
+        let agent = db.create_agent(&input).expect("agent");
+        let conversation = db.create_agent_conversation(&agent.id, "Thread").expect("conversation");
+        let workspace = db.create_workspace("Project", "test-workspace").expect("workspace");
+        let error = bind_conversation_workspace(&db, &conversation.id, Some(&workspace.id), None).await.expect_err("untrusted");
+        assert!(error.contains("AGENT_WORKSPACE_UNTRUSTED"));
+        db.set_workspace_trusted(&workspace.id, true).expect("trust");
+        let gate = crate::agents::workspace_gate(&conversation.id);
+        let turn = gate.read().await;
+        let error = bind_conversation_workspace(&db, &conversation.id, Some(&workspace.id), None).await.expect_err("busy");
+        assert!(error.contains("AGENT_WORKSPACE_BUSY"));
+        assert_eq!(db.get_conversation(&conversation.id).expect("lookup").expect("conversation").workspace_id, None);
+        drop(turn);
+        let bound = bind_conversation_workspace(&db, &conversation.id, Some(&workspace.id), None).await.expect("bind");
+        assert_eq!(bound.workspace_id.as_deref(), Some(workspace.id.as_str()));
+        let reset = bind_conversation_workspace(&db, &conversation.id, None, None).await.expect("reset");
+        assert!(reset.workspace_id.is_none());
+    }
 
     /// PNG 1x1 real (RGBA transparente, 70 bytes) usado para provar o
     /// round-trip do payload base64 (o backend não decodifica imagem).

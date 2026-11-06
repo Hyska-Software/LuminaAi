@@ -75,6 +75,9 @@ pub struct WorkspaceHandle {
     pub root: PathBuf,
     /// A pasta foi aprovada pelo usuário ("Confiar nesta pasta").
     pub trusted: bool,
+    /// Pasta interna do app (agente sem workspace explícito). Hooks do projeto
+    /// não podem rodar nela.
+    pub internal: bool,
     /// Modo de permissão efetivo da sessão.
     pub permission_mode: PermissionMode,
 }
@@ -96,6 +99,8 @@ pub struct ToolCtx {
     pub workspace: Option<WorkspaceHandle>,
     pub settings: Settings,
     pub cancel: CancellationToken,
+    /// Production hooks for agent task/channel events and real cancellation.
+    pub agent_hooks: Option<std::sync::Arc<dyn crate::tools::AgentHooks>>,
     pub data_dir: PathBuf,
     /// Aprovações interativas do app (presente no perfil Code em produção).
     pub approval: Option<Arc<crate::policy::approval::ApprovalRegistry>>,
@@ -127,6 +132,8 @@ pub struct ToolCtx {
     pub subagent_slots: Arc<tokio::sync::Semaphore>,
     /// Raízes de skills externas para `list_skills`/`read_skill`.
     pub skills_roots: Vec<crate::tools::skills::ExternalSkillRoot>,
+    /// Agent skill allowlist (`None` inherits all enabled skills).
+    pub allowed_skills: Option<Vec<String>>,
 }
 
 impl ToolCtx {
@@ -832,10 +839,12 @@ mod tests {
             workspace: Some(WorkspaceHandle {
                 root: std::env::temp_dir(),
                 trusted: true,
+                internal: false,
                 permission_mode: PermissionMode::Edit,
             }),
             settings: Settings::default(),
             cancel: CancellationToken::new(),
+            agent_hooks: None,
             data_dir: std::env::temp_dir().join("lumina-registry-test"),
             approval: None,
             observed: None,
@@ -857,6 +866,7 @@ mod tests {
                 crate::harness::code::subagent::MAX_CONCURRENT_SUBAGENTS,
             )),
             skills_roots: Vec::new(),
+            allowed_skills: None,
         }
     }
 }

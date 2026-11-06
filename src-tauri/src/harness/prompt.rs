@@ -23,7 +23,7 @@ use crate::tools::skills::Skill;
 /// Part of the persisted `prompt_snapshots` identity (`snapshot_key`, F2a):
 /// bump it whenever the prompt text/sections change so a session never reuses a
 /// snapshot built by an older prompt.
-pub const PROMPT_VERSION: u32 = 1;
+pub const PROMPT_VERSION: u32 = 2;
 
 /// Session date (`YYYY-MM-DD`) frozen from the conversation creation time.
 ///
@@ -52,6 +52,38 @@ pub fn build_system_prompt(
     skills: &[Skill],
     session_date: &str,
 ) -> String {
+    build_system_prompt_inner(model, options, settings, skills, session_date, None)
+}
+
+/// Chat prompt with a user-configured agent block inserted before the global
+/// user instructions. Chat/Code keep calling [`build_system_prompt`], so their
+/// bytes (and prompt snapshots) are unchanged.
+pub fn build_system_prompt_with_agent(
+    model: &ModelInfo,
+    options: &TurnOptions,
+    settings: &Settings,
+    skills: &[Skill],
+    session_date: &str,
+    agent_section: &str,
+) -> String {
+    build_system_prompt_inner(
+        model,
+        options,
+        settings,
+        skills,
+        session_date,
+        Some(agent_section),
+    )
+}
+
+fn build_system_prompt_inner(
+    model: &ModelInfo,
+    options: &TurnOptions,
+    settings: &Settings,
+    skills: &[Skill],
+    session_date: &str,
+    agent_section: Option<&str>,
+) -> String {
     let model_name = model.name.as_str();
     let extra = extra_instructions(settings, options);
 
@@ -71,8 +103,9 @@ pub fn build_system_prompt(
          for highlights. The full grammar and usage rules are in **Markdown formatting** below.\n\
          - Be concise when the question is simple and complete when the subject requires it. No \
          empty preambles (\"Claro!\", \"Com certeza!\") and no restating the question.\n\
-         - A Markdown table only for small, static comparisons; structured or actionable data goes \
-         in a `ui` block (**Generative UI** section) — never both with the same information.\n\
+         - Prefer a `ui` block whenever the answer has structured or actionable data (**Generative \
+         UI** section); keep a Markdown table only for small, static comparisons, and never \
+         duplicate the same information in both.\n\
          - Do not invent facts, numbers, citations, APIs, or tool results. If you do not know or do \
          not have access, say what is missing and propose the next step.\n\
          - At the end, offer a next step only when it is truly useful.\n\n"
@@ -136,6 +169,9 @@ pub fn build_system_prompt(
          - When creating HTML/SVG, do not include external scripts or tracking code.\n",
     );
 
+    if let Some(agent_section) = agent_section {
+        prompt.push_str(agent_section);
+    }
     if !extra.is_empty() {
         prompt.push_str("\n# Additional user instructions\n");
         prompt.push_str(&extra);
@@ -432,7 +468,7 @@ The interface renders **full GFM** and the extensions below. Use the simplest re
 
 ## Usage rules
 - Do not duplicate the same information in text, list, table, and `ui`: choose one format and complement only what is missing.
-- Markdown table = small, static comparison, no action. `ui` block = structured data the user will compare, scan, or act on; in that case it replaces the table/chart. When in doubt, a table for 2–3 supporting columns and `ui` for the main data.
+- Markdown table = small, static comparison, no action. `ui` block = structured data the user will compare, scan, or act on; in that case it replaces the table/chart. When in doubt, use the `ui` block for the main data.
 - Do not invent syntax: only what is listed here renders (no MDX, frontmatter, emoji shortcode, definition list, or wiki link).
 - Do not use HTML/CSS to control appearance: colors, fonts, and spacing come from the design system.
 
@@ -473,15 +509,18 @@ fn generative_ui_section_with(
 
     section.push_str("## When to use\n");
     section.push_str(
-        "- When the response benefits from being an interface: real data the user will compare, \
-         scan, or act on. In that case the block replaces the Markdown table/chart and can offer \
-         clickable actions.\n\
-         - A small, static comparison without action stays in a Markdown table",
+        "- **Default to a `ui` block whenever you judge it viable**: if the answer has real data or \
+         structure the contract can represent — comparisons, metrics, series, tables, steps, \
+         timelines, checklists, key/value specs, feeds, choices, next steps — use the block. Do not \
+         reserve it for special cases.\n\
+         - The block replaces the Markdown table/chart/list with the same information and may offer \
+         clickable actions; never repeat the same data in both formats.\n\
+         - A small, static comparison without action may stay in a Markdown table",
     );
     if let Some(name) = markdown_section {
         section.push_str(&format!(" (see **{name}**)"));
     }
-    section.push_str("; do not repeat the same data in both formats.\n");
+    section.push_str("; when in doubt, prefer the `ui` block for the main data.\n");
     section.push_str(&format!(
         "- Contract catalog: {} components in {} categories — {}. Use only components and props \
          documented below.\n",
@@ -509,7 +548,8 @@ fn generative_ui_section_with(
 
     section.push_str("\n## When not to use\n");
     section.push_str(
-        "- Running text, long explanations, code, or any content Markdown already handles.\n\
+        "- Running text, long explanations, code, or simple prose/lists that gain nothing from an \
+         interface.\n\
          - When there is no real data: never invent numbers, labels, or series to fill a \
          component.\n",
     );
@@ -1078,6 +1118,16 @@ mod tests {
         for category in contract::contract().categories() {
             assert!(prompt.contains(&format!("`{category}`")));
         }
+    }
+
+    #[test]
+    fn prompt_prefers_genui_whenever_viable() {
+        let prompt = default_prompt();
+        assert!(prompt.contains("Default to a `ui` block whenever you judge it viable"));
+        assert!(prompt.contains("Do not reserve it for special cases"));
+        assert!(prompt.contains("simple prose/lists that gain nothing from an interface"));
+        // O guardrail contra inventar dados continua explícito.
+        assert!(prompt.contains("never invent numbers, labels, or series"));
     }
 
     #[test]

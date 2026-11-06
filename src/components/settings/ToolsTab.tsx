@@ -10,7 +10,7 @@ import type {
 } from '@/lib/types';
 import { MAX_STEPS_LIMIT, useAppStore, useUiStore } from '@/lib/store';
 import { cn, copyText } from '@/lib/utils';
-import { Badge, Button, IconButton, NativeSelect, Slider, Spinner, Switch } from '@/components/ui';
+import { Badge, Button, IconButton, Input, NativeSelect, Slider, Spinner, Switch } from '@/components/ui';
 import { countSkillsByOrigin, skillSourceMeta } from '@/components/skills/sources';
 import { SettingRow, SettingsBlock, SettingsSection } from './shared';
 
@@ -62,6 +62,9 @@ export function ToolsTab() {
   const [maxSteps, setMaxSteps] = useState(settings.maxSteps);
   const [temperature, setTemperature] = useState(settings.temperature ?? 0.7);
   const [timeoutSecs, setTimeoutSecs] = useState(settings.codeTimeoutSecs);
+  const [dockerImage, setDockerImage] = useState(settings.dockerImage ?? 'node:22-bookworm');
+  const [dockerInfo, setDockerInfo] = useState<string | null>(null);
+  const [dockerBusy, setDockerBusy] = useState(false);
   const [environment, setEnvironment] = useState<CodeEnvironmentStatus | null>(null);
   const [environmentLoading, setEnvironmentLoading] = useState(true);
   const [environmentError, setEnvironmentError] = useState<string | null>(null);
@@ -73,6 +76,10 @@ export function ToolsTab() {
     if (settings.temperature != null) setTemperature(settings.temperature);
   }, [settings.temperature]);
   useEffect(() => setTimeoutSecs(settings.codeTimeoutSecs), [settings.codeTimeoutSecs]);
+  useEffect(
+    () => setDockerImage(settings.dockerImage ?? 'node:22-bookworm'),
+    [settings.dockerImage],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -97,6 +104,7 @@ export function ToolsTab() {
   }, [environmentAttempt]);
 
   const temperatureEnabled = settings.temperature != null;
+  const executionEnvironment = settings.executionEnvironment ?? 'local';
   const codeDefaultPermissionMode: PermissionMode =
     settings.codeDefaultPermissionMode ?? CODE_DEFAULT_PERMISSION_FALLBACK;
   const cacheSettings: CacheSettings = {
@@ -319,6 +327,187 @@ export function ToolsTab() {
             aria-label="Tempo limite de execução"
           />
         </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Sandbox de comandos"
+        description="Onde os comandos do agente de código rodam. O padrão executa nesta máquina; Docker isola o processo com o workspace montado em /workspace."
+      >
+        <SettingRow
+          label="Ambiente"
+          description="O terminal interativo do painel continua local; esta opção vale para as ferramentas run_command/run_checks e jobs do agente."
+        >
+          <NativeSelect
+            value={executionEnvironment}
+            aria-label="Ambiente de execução dos comandos do agente"
+            onChange={(event) =>
+              void saveSettings({
+                executionEnvironment: event.target.value === 'docker' ? 'docker' : 'local',
+              })
+            }
+          >
+            <option value="local">Este computador</option>
+            <option value="docker">Docker</option>
+          </NativeSelect>
+        </SettingRow>
+
+        {executionEnvironment === 'docker' ? (
+          <>
+            <SettingRow
+              vertical
+              label="Imagem Docker"
+              description="Precisa existir no Docker local (o app não baixa imagens automaticamente). Ex.: node:22-bookworm, python:3.12, ubuntu:24.04."
+            >
+              <Input
+                value={dockerImage}
+                maxLength={200}
+                aria-label="Imagem Docker dos comandos do agente"
+                placeholder="node:22-bookworm"
+                onChange={(event) => setDockerImage(event.target.value)}
+                onBlur={() => {
+                  const value = dockerImage.trim();
+                  if (value && value !== settings.dockerImage) {
+                    void saveSettings({ dockerImage: value });
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    const value = dockerImage.trim();
+                    if (value && value !== settings.dockerImage) {
+                      void saveSettings({ dockerImage: value });
+                    }
+                  }
+                }}
+              />
+            </SettingRow>
+            <SettingRow
+              label="Rede no contêiner"
+              description="Desligado, o comando roda com --network none. Ligue apenas quando a tarefa precisar baixar dependências ou acessar a internet."
+            >
+              <Switch
+                checked={settings.dockerNetwork ?? false}
+                onCheckedChange={(checked) => void saveSettings({ dockerNetwork: checked })}
+                aria-label="Permitir rede no contêiner Docker"
+              />
+            </SettingRow>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <SettingRow
+                vertical
+                label="Memória (MB)"
+                description="Limite do sandbox Docker."
+              >
+                <Input
+                  type="number"
+                  min={256}
+                  max={16384}
+                  defaultValue={settings.dockerMemoryMb ?? 2048}
+                  aria-label="Memória do sandbox Docker em MB"
+                  onBlur={(event) => {
+                    const value = Math.max(256, Math.min(16_384, Number(event.target.value) || 2048));
+                    void saveSettings({ dockerMemoryMb: value });
+                  }}
+                />
+              </SettingRow>
+              <SettingRow vertical label="CPUs" description="Limite de CPU do sandbox.">
+                <Input
+                  type="number"
+                  min={0.25}
+                  max={16}
+                  step={0.25}
+                  defaultValue={settings.dockerCpus ?? 2}
+                  aria-label="CPUs do sandbox Docker"
+                  onBlur={(event) => {
+                    const value = Math.max(0.25, Math.min(16, Number(event.target.value) || 2));
+                    void saveSettings({ dockerCpus: value });
+                  }}
+                />
+              </SettingRow>
+              <SettingRow vertical label="PIDs" description="Limite de processos do sandbox.">
+                <Input
+                  type="number"
+                  min={32}
+                  max={4096}
+                  defaultValue={settings.dockerPidsLimit ?? 256}
+                  aria-label="Limite de PIDs do sandbox Docker"
+                  onBlur={(event) => {
+                    const value = Math.max(32, Math.min(4096, Number(event.target.value) || 256));
+                    void saveSettings({ dockerPidsLimit: value });
+                  }}
+                />
+              </SettingRow>
+            </div>
+            <SettingRow
+              label="Rootfs somente leitura"
+              description="O workspace em /workspace continua gravável; o restante do contêiner fica read-only."
+            >
+              <Switch
+                checked={settings.dockerReadOnlyRoot ?? true}
+                onCheckedChange={(checked) => void saveSettings({ dockerReadOnlyRoot: checked })}
+                aria-label="Montar rootfs do contêiner como somente leitura"
+              />
+            </SettingRow>
+            <SettingsBlock>
+              <div className="flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft p-3">
+                <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
+                <p className="text-[11px] leading-relaxed text-warning">
+                  Docker Desktop/Engine precisa estar instalado e rodando. O workspace é montado
+                  em <code>/workspace</code>; o contêiner pode ler e alterar esses arquivos, mas
+                  não tem acesso ao resto do computador. Ainda assim, revise o que o agente executa.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={dockerBusy}
+                  onClick={() => {
+                    setDockerBusy(true);
+                    void api
+                      .dockerValidateImage(settings.dockerImage ?? 'node:22-bookworm')
+                      .then((info) =>
+                        setDockerInfo(
+                          `${info.image} · ${info.architecture} · ${info.id.slice(0, 19)}…`,
+                        ),
+                      )
+                      .catch((error) => {
+                        setDockerInfo(null);
+                        toast.error('Imagem Docker inválida', {
+                          description: String(error),
+                        });
+                      })
+                      .finally(() => setDockerBusy(false));
+                  }}
+                >
+                  {dockerBusy ? <Spinner className="mr-1.5 size-3.5" /> : null}
+                  Validar imagem
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={dockerBusy}
+                  aria-label="Baixar imagem dos comandos"
+                  onClick={() => {
+                    setDockerBusy(true);
+                    void api
+                      .dockerPullImage(settings.dockerImage ?? 'node:22-bookworm')
+                      .then((image) => toast.success(`Imagem disponível: ${image}`))
+                      .catch((error) =>
+                        toast.error('Não foi possível baixar a imagem', {
+                          description: String(error),
+                        }),
+                      )
+                      .finally(() => setDockerBusy(false));
+                  }}
+                >
+                  Baixar imagem
+                </Button>
+                {dockerInfo ? (
+                  <span className="text-[11px] text-foreground-muted">{dockerInfo}</span>
+                ) : null}
+              </div>
+            </SettingsBlock>
+          </>
+        ) : null}
       </SettingsSection>
 
       <SettingsSection

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   saveSettings: vi.fn(),
   getCodeEnvironment: vi.fn(),
   openSkillsDir: vi.fn(),
+  dockerPullImage: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({
@@ -14,6 +15,7 @@ vi.mock('@/lib/api', () => ({
     saveSettings: mocks.saveSettings,
     getCodeEnvironment: mocks.getCodeEnvironment,
     openSkillsDir: mocks.openSkillsDir,
+    dockerPullImage: mocks.dockerPullImage,
   },
 }));
 
@@ -188,6 +190,38 @@ describe('ToolsTab — execução de código', () => {
     });
     expect(useAppStore.getState().settings.codeTimeoutSecs).toBe(300);
     expect(screen.getByText(/após 300 segundos/)).toBeTruthy();
+  });
+});
+
+describe('ToolsTab — sandbox de comandos', () => {
+  it('salva o ambiente Docker, a imagem e a opção de rede', async () => {
+    render(<ToolsTab />);
+    fireEvent.change(screen.getByLabelText('Ambiente de execução dos comandos do agente'), {
+      target: { value: 'docker' },
+    });
+    await waitFor(() =>
+      expect(mocks.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ executionEnvironment: 'docker' }),
+      ),
+    );
+
+    const image = await screen.findByLabelText('Imagem Docker dos comandos do agente');
+    fireEvent.change(image, { target: { value: 'python:3.12' } });
+    fireEvent.blur(image);
+    await waitFor(() =>
+      expect(mocks.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ dockerImage: 'python:3.12' }),
+      ),
+    );
+
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Permitir rede no contêiner Docker' }),
+    );
+    await waitFor(() =>
+      expect(mocks.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ dockerNetwork: true }),
+      ),
+    );
   });
 });
 

@@ -7,6 +7,7 @@
 import {
   Activity,
   ArrowLeft,
+  Bot,
   Braces,
   Code,
   Copy,
@@ -61,6 +62,7 @@ const SETTINGS_TAB_DESCRIPTIONS: Record<SettingsTabId, string> = {
   model: 'Modelo e modo de pensamento padrão',
   instructions: 'Instruções do sistema',
   tools: 'Busca web, criação de arquivos, execução e passos',
+  agents: 'Concorrência, orçamento, notificações e computer use',
   data: 'Pasta de dados, exportação e limpeza',
   about: 'Versão e informações do aplicativo',
 };
@@ -241,6 +243,8 @@ export function usePaletteActions(): PaletteAction[] {
   const theme = useUiStore((state) => state.theme);
   const activeView = useUiStore((state) => state.activeView);
   const layoutMode = useUiStore((state) => state.layoutMode);
+  const activeAgentId = useUiStore((state) => state.activeAgentId);
+  const openAgentEditor = useUiStore((state) => state.openAgentEditor);
   const codeView = useUiStore((state) => state.codeView);
   const artifacts = useUiStore((state) => state.artifacts);
   // Chat locks the model of a started conversation; a Code session can switch it
@@ -260,18 +264,34 @@ export function usePaletteActions(): PaletteAction[] {
   actions.push({
     id: 'nova-conversa',
     group: 'conversas',
-    label: layoutMode === 'code' ? 'Novo agente' : 'Novo chat',
+    label:
+      layoutMode === 'code'
+        ? 'Nova sessão'
+        : layoutMode === 'agent'
+          ? 'Nova conversa com agente'
+          : 'Novo chat',
     description:
-      layoutMode === 'code' ? 'Comece uma nova sessão no layout Code' : 'Comece uma conversa em branco',
+      layoutMode === 'code'
+        ? 'Comece uma nova sessão no layout Code'
+        : layoutMode === 'agent'
+          ? 'Comece uma conversa com o agente selecionado'
+          : 'Comece uma conversa em branco',
     icon: MessageSquarePlus,
     shortcut: `${modKey}+N`,
     keywords:
       layoutMode === 'code'
-        ? 'novo agente sessão code criar'
-        : 'nova conversa criar blank',
+        ? 'nova sessao sessão code criar'
+        : layoutMode === 'agent'
+          ? 'nova conversa agente criar'
+          : 'nova conversa criar blank',
     run: () => {
       if (layoutMode === 'code') {
         void useChatStore.getState().startNewConversation('code');
+        return;
+      }
+      if (layoutMode === 'agent') {
+        const agentId = useUiStore.getState().activeAgentId;
+        if (agentId) void useChatStore.getState().startNewConversation('agent', { agentId });
         return;
       }
       // A Chat session is created in the Chat namespace; make sure its layout
@@ -377,6 +397,39 @@ export function usePaletteActions(): PaletteAction[] {
     run: () =>
       useUiStore.getState().setLayoutMode(layoutMode === 'chat' ? 'code' : 'chat'),
   });
+
+  if (layoutMode !== 'agent') {
+    actions.push({
+      id: 'modo-agentes',
+      group: 'navegacao',
+      label: 'Ir para o modo Agentes',
+      description: 'Abrir a equipe de agentes e as personas',
+      icon: Bot,
+      keywords: 'layout modo agentes equipe personas',
+      run: () => useUiStore.getState().setLayoutMode('agent'),
+    });
+  } else {
+    actions.push({
+      id: 'novo-agente',
+      group: 'navegacao',
+      label: 'Novo agente',
+      description: 'Criar uma persona com identidade, modelo e instruções',
+      icon: Bot,
+      keywords: 'agente novo criar persona',
+      run: () => openAgentEditor({ mode: 'create' }),
+    });
+    if (activeAgentId) {
+      actions.push({
+        id: 'editar-agente',
+        group: 'navegacao',
+        label: 'Editar agente',
+        description: 'Abrir as configurações do agente selecionado',
+        icon: Bot,
+        keywords: 'agente editar instruções modelo',
+        run: () => openAgentEditor({ mode: 'edit', agentId: activeAgentId }),
+      });
+    }
+  }
 
   actions.push({
     id: 'focar-composer',

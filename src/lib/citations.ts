@@ -7,7 +7,7 @@ import type { ChatMessage, Citation } from './types';
 import { hostnameOf } from './utils';
 
 /** Maximum inline source chips; the rest is shown in the sources side panel. */
-export const MAX_INLINE_CITATIONS = 8;
+export const MAX_INLINE_CITATIONS = 2;
 
 /** Human-readable domain of a source (site name wins, `www.` stripped). */
 export function citationDomain(citation: Citation): string {

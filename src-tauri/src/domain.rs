@@ -12,6 +12,7 @@ use serde_json::Value;
 /// Layout onde a sessão nasceu: o Chat ou o Code.
 pub const CONVERSATION_MODE_CHAT: &str = "chat";
 pub const CONVERSATION_MODE_CODE: &str = "code";
+pub const CONVERSATION_MODE_AGENT: &str = "agent";
 
 fn default_conversation_mode() -> String {
     CONVERSATION_MODE_CHAT.to_string()
@@ -23,6 +24,7 @@ fn default_conversation_mode() -> String {
 pub fn conversation_mode_or_default(mode: Option<&str>) -> String {
     match mode.map(str::trim) {
         Some(value) if value == CONVERSATION_MODE_CODE => CONVERSATION_MODE_CODE.to_string(),
+        Some(value) if value == CONVERSATION_MODE_AGENT => CONVERSATION_MODE_AGENT.to_string(),
         _ => CONVERSATION_MODE_CHAT.to_string(),
     }
 }
@@ -36,6 +38,9 @@ pub struct Conversation {
     pub updated_at: i64,
     #[serde(default)]
     pub pinned: bool,
+    /// Manual position inside its sidebar section (0 = recency order).
+    #[serde(default)]
+    pub sort_order: i64,
     pub provider_id: String,
     pub model_id: String,
     #[serde(default)]
@@ -68,6 +73,19 @@ pub struct Conversation {
     /// Subagent kind (`explore`, `review`, `general`).
     #[serde(default)]
     pub subagent_type: Option<String>,
+    /// Persona dona desta conversa (`mode == "agent"`); `None` em Chat/Code.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    /// Shared channel that owns this hidden agent thread (`None` = normal thread).
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    /// Delegated task that owns this hidden thread (`None` = normal thread).
+    #[serde(default)]
+    pub task_id: Option<String>,
+    /// One pinned primary conversation per agent (`None`/false for Chat, Code,
+    /// channels, tasks and other agent threads).
+    #[serde(default)]
+    pub is_main: bool,
 }
 
 fn default_agent_kind() -> String {
@@ -128,6 +146,22 @@ pub struct ToolCallRecord {
     /// JSON opaco versionado por `kind` — ver `docs/goals/code-harness/TOOLS.md` §1.1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presentation: Option<Value>,
+    /// Imagens devolvidas pela tool (screenshot). Só caminhos/metadados entram
+    /// no DB; o base64 é lido do disco na hora de montar o replay.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ToolImageRef>,
+}
+
+/// Persisted reference to a tool image (never the bytes).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolImageRef {
+    pub mime_type: String,
+    pub path: String,
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
 }
 
 fn default_tool_status() -> ToolCallStatus {
@@ -146,6 +180,7 @@ impl ToolCallRecord {
             started_at: Some(now_ms()),
             finished_at: None,
             presentation: None,
+            images: Vec::new(),
         }
     }
 }
@@ -562,6 +597,27 @@ impl ChatMessage {
             origin: TurnKind::User,
         }
     }
+
+    pub fn system(conversation_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            conversation_id: conversation_id.into(),
+            role: MessageRole::System,
+            content: content.into(),
+            reasoning: None,
+            status: MessageStatus::Complete,
+            tool_calls: Vec::new(),
+            citations: Vec::new(),
+            attachments: Vec::new(),
+            model_id: None,
+            provider_id: None,
+            usage: None,
+            created_at: now_ms(),
+            provider_state: None,
+            trace: Vec::new(),
+            origin: TurnKind::User,
+        }
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -602,8 +658,25 @@ pub struct TurnOptions {
     /// `Settings::code_execution_enabled`.
     pub run_code: bool,
     pub max_steps: u32,
+    /// Internal per-turn cap. Background tasks set this to a small value while
+    /// `settings.code_max_steps` remains the interactive default.
+    #[serde(skip)]
+    pub max_steps_override: Option<u32>,
     pub temperature: Option<f32>,
+    /// Internal subagent instructions. Never accepted from the renderer.
+    #[serde(skip)]
     pub system_prompt_override: Option<String>,
+    /// Volatile shared-channel history injected as a `surface_item`, never as
+    /// a persisted user message. Internal: only the channel runner sets it.
+    #[serde(skip)]
+    pub channel_context: Option<String>,
+    /// Channel leader turn. Internal: only the channel runner sets this.
+    #[serde(skip)]
+    pub channel_leader: bool,
+    /// Internal event payload for event-triggered routines; injected as a
+    /// `surface_item kind="event"`, never trusted as instructions.
+    #[serde(skip)]
+    pub event_context: Option<String>,
     /// Regenerate the last assistant answer (drops it before running).
     pub regenerate: bool,
     /// Profundidade de delegação (0 = sessão do usuário; 1 = subagente).
@@ -616,6 +689,30 @@ pub struct TurnOptions {
     /// `conversation_id`.
     #[serde(skip)]
     pub wire_session_id: Option<String>,
+    /// Agent capability allowlists. Internal: the harness resolves them from
+    /// the persona bound to the conversation, never from the renderer.
+    #[serde(skip)]
+    pub allowed_tools: Option<Vec<String>>,
+    #[serde(skip)]
+    pub allowed_skills: Option<Vec<String>>,
+    #[serde(skip)]
+    pub allowed_mcp_servers: Option<Vec<String>>,
+    /// Agent turn with durable memory enabled (`memory` tool available).
+    #[serde(skip)]
+    pub agent_memory: bool,
+    /// Persona bound to the turn (internal, used by the `memory` tool).
+    #[serde(skip)]
+    pub agent_id: Option<String>,
+    /// Agent capability gates for delegation/computer/browser/docker tools.
+    /// Internal: resolved from the persona, never accepted from the renderer.
+    #[serde(skip)]
+    pub agent_delegation: bool,
+    #[serde(skip)]
+    pub agent_computer: bool,
+    #[serde(skip)]
+    pub agent_browser: bool,
+    #[serde(skip)]
+    pub agent_docker: bool,
 }
 
 impl Default for TurnOptions {
@@ -625,11 +722,24 @@ impl Default for TurnOptions {
             create_files: true,
             run_code: true,
             max_steps: MAX_STEPS_DEFAULT,
+            max_steps_override: None,
             temperature: None,
             system_prompt_override: None,
+            channel_context: None,
+            channel_leader: false,
+            event_context: None,
             regenerate: false,
             delegation_depth: 0,
             wire_session_id: None,
+            allowed_tools: None,
+            allowed_skills: None,
+            allowed_mcp_servers: None,
+            agent_memory: false,
+            agent_id: None,
+            agent_delegation: false,
+            agent_computer: false,
+            agent_browser: false,
+            agent_docker: false,
         }
     }
 }
@@ -1026,6 +1136,72 @@ impl Default for CacheSettings {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_execution_environment() -> String {
+    "local".to_string()
+}
+
+fn default_docker_image() -> String {
+    "node:22-bookworm".to_string()
+}
+
+/// Published graphical image used by the Docker computer-use backend.
+///
+/// Kept here (and mirrored by `src/lib/computerDocker.ts`) so the settings
+/// default, the error guidance and the release workflow agree on one tag.
+pub const DEFAULT_COMPUTER_DOCKER_IMAGE: &str = "ghcr.io/hyska-software/lumina-computer:latest";
+
+fn default_computer_environment_setting() -> String {
+    "auto".to_string()
+}
+
+fn default_docker_memory_mb() -> u32 {
+    2_048
+}
+
+fn default_docker_cpus() -> f32 {
+    2.0
+}
+
+fn default_docker_pids_limit() -> u32 {
+    256
+}
+
+fn default_docker_read_only_root() -> bool {
+    true
+}
+
+fn default_max_concurrent_turns() -> u32 {
+    10
+}
+
+fn default_max_concurrent_turns_per_agent() -> u32 {
+    1
+}
+
+fn default_max_queue_length() -> u32 {
+    20
+}
+
+fn default_computer_docker_image() -> String {
+    crate::domain::DEFAULT_COMPUTER_DOCKER_IMAGE.to_string()
+}
+
+fn default_computer_docker_container() -> String {
+    "lumina-computer".to_string()
+}
+
+fn default_computer_max_actions_per_turn() -> u32 {
+    20
+}
+
+fn default_computer_max_actions_per_hour() -> u32 {
+    120
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -1066,6 +1242,76 @@ pub struct Settings {
     pub code_max_steps: u32,
     /// Permite ao agente executar comandos de shell (`run_command`).
     pub shell_enabled: bool,
+    /// Onde os comandos do perfil Code rodam: `local` (máquina do usuário) ou
+    /// `docker` (contêiner com o workspace montado em `/workspace`).
+    #[serde(default = "default_execution_environment")]
+    pub execution_environment: String,
+    /// Imagem usada quando `execution_environment == "docker"`.
+    #[serde(default = "default_docker_image")]
+    pub docker_image: String,
+    /// Where computer use runs: `auto`, `private_desktop`, `this_computer`,
+    /// `browser` or `off`. Agent turns override this from the persona.
+    #[serde(default = "default_computer_environment_setting")]
+    pub computer_environment: String,
+    /// Browser origin allowlist (host or suffix). Empty means all public hosts.
+    #[serde(default)]
+    pub browser_allowed_domains: Vec<String>,
+    /// Browser origin denylist (host or suffix), evaluated before allow.
+    #[serde(default)]
+    pub browser_blocked_domains: Vec<String>,
+    /// Allowlist of desktop apps (process/window class). Empty means all apps
+    /// except the denylist.
+    #[serde(default)]
+    pub computer_allowed_apps: Vec<String>,
+    /// Apps always denied before the allowlist.
+    #[serde(default)]
+    pub computer_blocked_apps: Vec<String>,
+    /// Allow localhost/RFC1918/link-local browser targets (local dev).
+    #[serde(default = "default_true")]
+    pub browser_allow_private_hosts: bool,
+    /// Allow browser actions in unattended routines/tasks when no approval
+    /// channel exists. Domain policy still applies. Default false.
+    #[serde(default)]
+    pub computer_allow_unattended_browser: bool,
+    /// Permite rede no contêiner Docker (desligado = `--network none`).
+    #[serde(default)]
+    pub docker_network: bool,
+    /// Memory cap for Docker sandboxes (MB).
+    #[serde(default = "default_docker_memory_mb")]
+    pub docker_memory_mb: u32,
+    /// CPU cap for Docker sandboxes.
+    #[serde(default = "default_docker_cpus")]
+    pub docker_cpus: f32,
+    /// PID cap for Docker sandboxes.
+    #[serde(default = "default_docker_pids_limit")]
+    pub docker_pids_limit: u32,
+    /// Mount the container root filesystem read-only (workspace stays writable).
+    #[serde(default = "default_docker_read_only_root")]
+    pub docker_read_only_root: bool,
+    /// Maximum simultaneous turns across the whole app.
+    #[serde(default = "default_max_concurrent_turns")]
+    pub max_concurrent_turns: u32,
+    /// Maximum simultaneous turns for one agent.
+    #[serde(default = "default_max_concurrent_turns_per_agent")]
+    pub max_concurrent_turns_per_agent: u32,
+    /// Maximum queued messages per agent thread.
+    #[serde(default = "default_max_queue_length")]
+    pub max_queue_length_per_thread: u32,
+    /// Optional daily cost cap per agent (USD). `None` disables the cap.
+    #[serde(default)]
+    pub agent_daily_cost_limit_usd: Option<f64>,
+    /// Docker image used by the graphical computer-use backend.
+    #[serde(default = "default_computer_docker_image")]
+    pub computer_docker_image: String,
+    /// Container name used by the graphical computer-use backend.
+    #[serde(default = "default_computer_docker_container")]
+    pub computer_docker_container: String,
+    /// Max computer-use actions in one turn.
+    #[serde(default = "default_computer_max_actions_per_turn")]
+    pub computer_max_actions_per_turn: u32,
+    /// Max computer-use actions per agent in a rolling hour.
+    #[serde(default = "default_computer_max_actions_per_hour")]
+    pub computer_max_actions_per_hour: u32,
     /// Compacta o contexto automaticamente quando a janela aperta.
     pub auto_compact: bool,
     /// Retenção dos arquivos de spill (saída completa de tools), em dias.
@@ -1074,6 +1320,21 @@ pub struct Settings {
     pub approval_timeout_secs: u32,
     /// Notificações do sistema no fim de turnos em segundo plano.
     pub notifications_enabled: bool,
+    /// Notify approvals requested by background threads.
+    #[serde(default = "default_true")]
+    pub notifications_approvals: bool,
+    /// Notify structured questions asked by background threads.
+    #[serde(default = "default_true")]
+    pub notifications_questions: bool,
+    /// Notify completed background agent turns.
+    #[serde(default = "default_true")]
+    pub notifications_completions: bool,
+    /// Notify task state changes that need a human.
+    #[serde(default = "default_true")]
+    pub notifications_tasks: bool,
+    /// Do not disturb: keep notifications in the in-app list only.
+    #[serde(default)]
+    pub notifications_dnd: bool,
     /// Modo de permissão inicial de novas sessões do Code (padrão: Autônomo),
     /// configurável em Configurações → Ferramentas. O Chat ignora os modos.
     pub code_default_permission_mode: PermissionMode,
@@ -1115,10 +1376,37 @@ impl Default for Settings {
             disabled_skills: Vec::new(),
             code_max_steps: 120,
             shell_enabled: true,
+            execution_environment: default_execution_environment(),
+            docker_image: default_docker_image(),
+            computer_environment: default_computer_environment_setting(),
+            browser_allowed_domains: Vec::new(),
+            browser_blocked_domains: Vec::new(),
+            browser_allow_private_hosts: true,
+            computer_allowed_apps: Vec::new(),
+            computer_blocked_apps: Vec::new(),
+            computer_allow_unattended_browser: false,
+            docker_network: false,
+            docker_memory_mb: default_docker_memory_mb(),
+            docker_cpus: default_docker_cpus(),
+            docker_pids_limit: default_docker_pids_limit(),
+            docker_read_only_root: default_docker_read_only_root(),
+            max_concurrent_turns: default_max_concurrent_turns(),
+            max_concurrent_turns_per_agent: default_max_concurrent_turns_per_agent(),
+            max_queue_length_per_thread: default_max_queue_length(),
+            agent_daily_cost_limit_usd: None,
+            computer_docker_image: default_computer_docker_image(),
+            computer_docker_container: default_computer_docker_container(),
+            computer_max_actions_per_turn: default_computer_max_actions_per_turn(),
+            computer_max_actions_per_hour: default_computer_max_actions_per_hour(),
             auto_compact: true,
             spill_retention_days: 30,
             approval_timeout_secs: 600,
             notifications_enabled: true,
+            notifications_approvals: true,
+            notifications_questions: true,
+            notifications_completions: true,
+            notifications_tasks: true,
+            notifications_dnd: false,
             // Padrão do produto: o Code nasce Autônomo (o usuário troca em
             // Configurações → Ferramentas e por sessão no chip do composer).
             code_default_permission_mode: PermissionMode::Autonomous,
@@ -1312,6 +1600,8 @@ pub enum RiskClass {
     Destroy,
     /// Tráfego de rede (busca/fetch).
     Network,
+    /// Computer use visual (screenshot/clique/teclado).
+    Computer,
     /// Pausa explícita para o usuário (plano/pergunta).
     Ask,
 }
@@ -1392,6 +1682,16 @@ pub enum ApprovalDetail {
     },
     Outside {
         path: String,
+    },
+    ComputerAction {
+        action: String,
+        target: String,
+        #[serde(default)]
+        screenshot_path: Option<String>,
+        #[serde(default)]
+        text_length: Option<u32>,
+        #[serde(default)]
+        sensitive: bool,
     },
     Other {
         text: String,
@@ -1504,6 +1804,9 @@ pub struct Workspace {
     pub last_opened_at: Option<i64>,
     #[serde(default)]
     pub pinned: bool,
+    /// Manual position inside the sidebar (0 = recency order).
+    #[serde(default)]
+    pub sort_order: i64,
     /// Aprovado pelo usuário na primeira abertura ("Confiar nesta pasta").
     #[serde(default)]
     pub trusted: bool,
@@ -2029,6 +2332,24 @@ pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+/// Start of the current local day in unix milliseconds. Used by the per-agent
+/// daily budget. Resolves DST gaps by taking the earliest valid instant and
+/// falls back to a 24 h window if the platform cannot resolve midnight.
+pub fn local_day_start_ms(now: i64) -> i64 {
+    use chrono::{Local, TimeZone};
+    let Some(now_dt) = Local.timestamp_millis_opt(now).single() else {
+        return now - 86_400_000;
+    };
+    let Some(naive) = now_dt.date_naive().and_hms_opt(0, 0, 0) else {
+        return now - 86_400_000;
+    };
+    Local
+        .from_local_datetime(&naive)
+        .earliest()
+        .map(|value| value.timestamp_millis())
+        .unwrap_or(now - 86_400_000)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2273,6 +2594,7 @@ mod tests {
             created_at: 1_700_000_000_000,
             updated_at: 1_700_000_001_000,
             pinned: false,
+            sort_order: 0,
             provider_id: "opencode-go".into(),
             model_id: "glm-5.3-flash".into(),
             message_count: 3,
@@ -2285,6 +2607,10 @@ mod tests {
             parent_conversation_id: None,
             subagent_task_call_id: None,
             subagent_type: None,
+            agent_id: None,
+            channel_id: None,
+            task_id: None,
+            is_main: false,
         };
         let json = serde_json::to_value(&conversation).expect("serialize conversation");
         assert_eq!(json["mode"], "code");
@@ -2340,6 +2666,10 @@ mod tests {
             conversation_mode_or_default(Some(" code ")),
             CONVERSATION_MODE_CODE,
             "espaços em volta do modo são tolerados"
+        );
+        assert_eq!(
+            conversation_mode_or_default(Some("agent")),
+            CONVERSATION_MODE_AGENT
         );
         for invalid in ["Chat", "CODE", "codex", "workspace", "projeto"] {
             assert_eq!(

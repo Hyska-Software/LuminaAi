@@ -35,6 +35,7 @@ const EMPTY: ConversationSearchState = { results: [], loading: false, fallback: 
 export function useConversationSearch(query: string, enabled: boolean): ConversationSearchState {
   const conversations = useChatStore((state) => state.conversations);
   const layoutMode = useUiStore((state) => state.layoutMode);
+  const activeAgentId = useUiStore((state) => state.activeAgentId);
   const conversationsRef = useRef(conversations);
   // Update the ref in an effect (not during render) so the debounced callback
   // always folds the latest local titles/previews without restarting the timer.
@@ -62,8 +63,13 @@ export function useConversationSearch(query: string, enabled: boolean): Conversa
       void (async () => {
         // Only sessions of the active layout are searchable: Chat never finds
         // Code sessions and vice versa (shared Chat sessions appear in both).
+        const agentScope = layoutMode === 'agent' ? activeAgentId : undefined;
         const localResults = rankConversations(
-          filterConversationsForLayout(conversationsRef.current, layoutMode),
+          filterConversationsForLayout(conversationsRef.current, layoutMode, {
+            agentId: agentScope,
+          }).filter(
+            (conversation) => layoutMode !== 'agent' || !conversation.taskId,
+          ),
           trimmedQuery,
           {
             requireMatch: true,
@@ -74,7 +80,9 @@ export function useConversationSearch(query: string, enabled: boolean): Conversa
           const backendResults = await api.searchConversations(trimmedQuery);
           if (token !== requestToken.current) return;
           const visibleBackendResults = (Array.isArray(backendResults) ? backendResults : []).filter(
-            (conversation) => isConversationVisibleIn(conversation, layoutMode),
+            (conversation) =>
+              isConversationVisibleIn(conversation, layoutMode, agentScope) &&
+              (layoutMode !== 'agent' || !conversation.taskId),
           );
           const merged = mergeConversationResults(
             localResults.map((entry) => entry.conversation),
@@ -93,7 +101,7 @@ export function useConversationSearch(query: string, enabled: boolean): Conversa
     }, CONVERSATION_SEARCH_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [eligible, trimmedQuery, layoutMode]);
+  }, [eligible, trimmedQuery, layoutMode, activeAgentId]);
 
   // Dropping the last request on unmount prevents "setState after unmount".
   useEffect(

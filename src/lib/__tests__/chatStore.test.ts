@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  Agent,
+  AgentInput,
   Artifact,
   ChatMessage,
   Conversation,
@@ -16,9 +18,13 @@ const mocks = vi.hoisted(() => {
     createConversation: vi.fn(),
     getConversation: vi.fn(),
     getCacheStats: vi.fn(),
+    notifyDesktop: vi.fn().mockResolvedValue(true),
+    listActiveTurns: vi.fn(),
+    listTurnEvents: vi.fn(),
     renameConversation: vi.fn(),
     deleteConversation: vi.fn(),
     setConversationPinned: vi.fn(),
+    reorderConversations: vi.fn(),
     setConversationCodeLinked: vi.fn(),
     setConversationModel: vi.fn(),
     searchConversations: vi.fn(),
@@ -33,6 +39,7 @@ const mocks = vi.hoisted(() => {
     updateGoal: vi.fn(),
     getSettings: vi.fn(),
     saveSettings: vi.fn(),
+    updateAgent: vi.fn(),
     setProviderKey: vi.fn(),
     getCatalog: vi.fn(),
     refreshCatalog: vi.fn(),
@@ -48,11 +55,14 @@ vi.mock('sonner', () => ({
 }));
 
 // Imported after the mocks above.
+import { useAgentQueueStore } from '@/lib/store/agentQueueStore';
+import { useAgentStore } from '@/lib/store/agentStore';
 import { useAppStore } from '@/lib/store/appStore';
 import {
   useChatStore,
   selectActiveConversationStarted,
   modelLockReason,
+  notificationsAllowed,
 } from '@/lib/store/chatStore';
 import { emptyCodeSession, useCodeStore } from '@/lib/store/codeStore';
 import { useUiStore } from '@/lib/store/uiStore';
@@ -69,6 +79,40 @@ const conversation = (overrides: Partial<Conversation> = {}): Conversation => ({
   providerId: 'opencode-go',
   modelId: 'deepseek-v4.1-flash',
   messageCount: 0,
+  ...overrides,
+});
+
+const agentRecord = (overrides: Partial<Agent> = {}): Agent => ({
+  id: 'agent-1',
+  name: 'Irineu',
+  role: 'Engenheiro',
+  description: '',
+  avatar: { kind: 'emoji', value: '🛠️', shape: 'rounded' },
+  department: 'Engenharia',
+  pinned: false,
+  sortOrder: 1,
+  providerId: 'opencode-go',
+  modelId: 'deepseek-v4.1-flash',
+  reasoning: null,
+  instructions: '',
+  promptVersion: 1,
+  starters: [],
+  capabilities: {
+    webSearch: true,
+    fileAccess: true,
+    codeExecution: true,
+    skills: null,
+    tools: null,
+    mcpServers: null,
+  },
+  memoryEnabled: false,
+  workspaceId: null,
+  permissionMode: 'edit',
+  archivedAt: null,
+  createdAt: 1,
+  updatedAt: 1,
+  threadCount: 2,
+  lastActiveAt: 2,
   ...overrides,
 });
 
@@ -121,15 +165,25 @@ function resetStores(): void {
     conversations: [],
     conversationsLoading: false,
     activeId: null,
-    activeIdByLayout: { chat: null, code: null },
+    activeIdByLayout: { chat: null, code: null, agent: null },
     messagesByConversation: {},
     loadingConversationId: null,
+    streamsByConversation: {},
     streaming: null,
     pendingAttachments: [],
     error: null,
   });
   useUiStore.setState({ artifacts: [], layoutMode: 'chat' });
   useCodeStore.setState({ byConversation: {} });
+  useAgentQueueStore.setState({ byConversation: {}, pausedByConversation: {} });
+  useAgentStore.setState({
+    agentsById: {},
+    orderedIds: [],
+    status: 'idle',
+    error: null,
+    mutationById: {},
+    initialized: false,
+  });
   useAppStore.setState({
     providers: [],
     selection: {
@@ -144,6 +198,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetStores();
   mocks.api.listConversations.mockResolvedValue([]);
+  mocks.api.listActiveTurns.mockResolvedValue([]);
+  mocks.api.listTurnEvents.mockResolvedValue([]);
   mocks.api.getConversation.mockResolvedValue(undefined);
   mocks.api.getCacheStats.mockResolvedValue(null);
   mocks.api.listArtifacts.mockResolvedValue([]);
@@ -166,6 +222,9 @@ beforeEach(() => {
     settings: useAppStore.getState().settings,
     keys: [],
   });
+  mocks.api.updateAgent.mockImplementation(async (id: string, input: AgentInput) =>
+    agentRecord({ id, ...input }),
+  );
   mocks.api.setConversationModel.mockImplementation(
     async (conversationId: string, providerId: string, modelId: string) =>
       conversation({ id: conversationId, providerId, modelId, messageCount: 2 }),
@@ -621,6 +680,40 @@ describe('chatStore other actions', () => {
     expect(mocks.api.cancelTurn).toHaveBeenCalledWith('turn-9');
   });
 
+  it('stopConversation cancels a background thread and keeps the visible one', async () => {
+    const background = {
+      turnId: 'turn-bg',
+      conversationId: 'conv-bg',
+      assistantId: 'assistant-bg',
+      userMessageId: null,
+      phase: 'tool' as const,
+      step: 2,
+      startedAt: Date.now(),
+      turnKind: 'user' as const,
+    };
+    const visible = {
+      turnId: 'turn-visible',
+      conversationId: 'conv-1',
+      assistantId: 'assistant-1',
+      userMessageId: null,
+      phase: 'text' as const,
+      step: 1,
+      startedAt: Date.now(),
+      turnKind: 'user' as const,
+    };
+    useChatStore.setState({
+      activeId: 'conv-1',
+      streamsByConversation: { 'conv-bg': background, 'conv-1': visible },
+      streaming: visible,
+    });
+
+    await useChatStore.getState().stopConversation('conv-bg');
+
+    expect(mocks.api.cancelTurn).toHaveBeenCalledWith('turn-bg');
+    expect(useChatStore.getState().streaming?.turnId).toBe('turn-visible');
+    expect(useChatStore.getState().streamsByConversation['conv-1']).toBeTruthy();
+  });
+
   it('openConversation loads messages and artifacts', async () => {
     const detail: ConversationDetail = {
       conversation: conversation({ messageCount: 2 }),
@@ -660,6 +753,35 @@ describe('chatStore other actions', () => {
   it('ships the DeepSeek V4.1 Flash model in the bundled catalog', () => {
     const go = catalog.providers.find((provider) => provider.id === 'opencode-go');
     expect(go?.models.some((model) => model.id === 'deepseek-v4.1-flash')).toBe(true);
+  });
+
+  it('reorderConversations updates positions and persists', async () => {
+    const first = conversation({ id: 'a', updatedAt: 20 });
+    const second = conversation({ id: 'b', updatedAt: 10 });
+    useChatStore.setState({ conversations: [first, second] });
+    mocks.api.reorderConversations.mockResolvedValue(undefined);
+
+    await useChatStore.getState().reorderConversations(['b', 'a']);
+
+    expect(mocks.api.reorderConversations).toHaveBeenCalledWith(['b', 'a']);
+    expect(useChatStore.getState().conversations.map((item) => item.id)).toEqual(['b', 'a']);
+    expect(useChatStore.getState().conversations[0].sortOrder).toBe(0);
+  });
+
+  it('reorderConversations reverts and refreshes when the backend fails', async () => {
+    const first = conversation({ id: 'a', updatedAt: 20 });
+    const second = conversation({ id: 'b', updatedAt: 10 });
+    useChatStore.setState({ conversations: [first, second] });
+    mocks.api.reorderConversations.mockRejectedValue(new Error('falhou'));
+    mocks.api.listConversations.mockResolvedValue([first, second]);
+
+    await useChatStore.getState().reorderConversations(['b', 'a']);
+
+    expect(toast.error).toHaveBeenCalledWith(
+      'Não foi possível reordenar as conversas',
+      expect.anything(),
+    );
+    expect(useChatStore.getState().conversations.map((item) => item.id)).toEqual(['a', 'b']);
   });
 });
 
@@ -1122,6 +1244,146 @@ describe('model lock', () => {
     expect(mocks.api.setConversationModel).not.toHaveBeenCalled();
   });
 
+  it('chooseModel on the Agents home updates the persona route', async () => {
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1' });
+    useAgentStore.setState({
+      agentsById: { 'agent-1': agentRecord() },
+      orderedIds: ['agent-1'],
+    });
+    useChatStore.setState({ activeId: null, conversations: [] });
+    const next = {
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet-5-5',
+      reasoning: { mode: 'effort' as const, effort: 'high' as const },
+    };
+
+    await expect(useChatStore.getState().chooseModel(next)).resolves.toBe(true);
+
+    expect(mocks.api.updateAgent).toHaveBeenCalledWith(
+      'agent-1',
+      expect.objectContaining(next),
+    );
+    expect(useAgentStore.getState().agentsById['agent-1']).toMatchObject(next);
+    expect(mocks.api.setConversationModel).not.toHaveBeenCalled();
+    // The agent owns the route: the global defaults stay untouched.
+    expect(useAppStore.getState().selection.modelId).toBe('deepseek-v4.1-flash');
+    expect(mocks.api.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('chooseModel keeps an empty agent thread in sync with the persona edit', async () => {
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1' });
+    useAgentStore.setState({
+      agentsById: { 'agent-1': agentRecord() },
+      orderedIds: ['agent-1'],
+    });
+    const thread = conversation({
+      id: 'agent-thread',
+      mode: 'agent',
+      agentId: 'agent-1',
+      messageCount: 0,
+    });
+    useChatStore.setState({
+      activeId: thread.id,
+      conversations: [thread],
+      messagesByConversation: { [thread.id]: [] },
+    });
+    const next = {
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet-5-5',
+      reasoning: { mode: 'effort' as const, effort: 'high' as const },
+    };
+    mocks.api.setConversationModel.mockResolvedValue({
+      ...thread,
+      providerId: next.providerId,
+      modelId: next.modelId,
+    });
+
+    await expect(useChatStore.getState().chooseModel(next)).resolves.toBe(true);
+
+    expect(mocks.api.updateAgent).toHaveBeenCalledWith(
+      'agent-1',
+      expect.objectContaining(next),
+    );
+    expect(mocks.api.setConversationModel).toHaveBeenCalledWith(
+      'agent-thread',
+      'anthropic',
+      'claude-sonnet-5-5',
+    );
+    expect(useChatStore.getState().conversations[0]).toMatchObject({
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet-5-5',
+    });
+  });
+
+  it('chooseModel refuses to switch the route of a started agent thread', async () => {
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1' });
+    useAgentStore.setState({
+      agentsById: { 'agent-1': agentRecord() },
+      orderedIds: ['agent-1'],
+    });
+    const thread = conversation({
+      id: 'agent-thread',
+      mode: 'agent',
+      agentId: 'agent-1',
+      messageCount: 2,
+    });
+    useChatStore.setState({
+      activeId: thread.id,
+      conversations: [thread],
+      messagesByConversation: {
+        [thread.id]: [userMessage({ conversationId: thread.id }), assistantMessage({ conversationId: thread.id })],
+      },
+    });
+
+    await expect(
+      useChatStore
+        .getState()
+        .chooseModel({ providerId: 'anthropic', modelId: 'claude-sonnet-5-5', reasoning: null }),
+    ).resolves.toBe(false);
+
+    expect(mocks.api.updateAgent).not.toHaveBeenCalled();
+    expect(mocks.api.setConversationModel).not.toHaveBeenCalled();
+    expect(toast.info).toHaveBeenCalled();
+  });
+
+  it('setReasoning updates the persona while the agent model is locked', async () => {
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1' });
+    useAgentStore.setState({
+      agentsById: {
+        'agent-1': agentRecord({ reasoning: { mode: 'effort', effort: 'high' } }),
+      },
+      orderedIds: ['agent-1'],
+    });
+    const thread = conversation({
+      id: 'agent-thread',
+      mode: 'agent',
+      agentId: 'agent-1',
+      messageCount: 2,
+    });
+    useChatStore.setState({
+      activeId: thread.id,
+      conversations: [thread],
+      messagesByConversation: {
+        [thread.id]: [userMessage({ conversationId: thread.id })],
+      },
+    });
+
+    useChatStore.getState().setReasoning({ mode: 'off' });
+
+    await vi.waitFor(() => {
+      expect(useAgentStore.getState().agentsById['agent-1'].reasoning).toEqual({ mode: 'off' });
+    });
+    expect(mocks.api.updateAgent).toHaveBeenCalledWith(
+      'agent-1',
+      expect.objectContaining({ reasoning: { mode: 'off' } }),
+    );
+    // The global chat selection is not the source of truth for agent turns.
+    expect(useAppStore.getState().selection.reasoning).toEqual({
+      mode: 'effort',
+      effort: 'max',
+    });
+  });
+
   it('send uses the composer selection of a started Code session (model unlocked)', async () => {
     useUiStore.setState({ layoutMode: 'code' });
     useChatStore.setState({
@@ -1415,7 +1677,7 @@ describe('chatStore — sessões separadas Chat/Code', () => {
     useChatStore.setState({
       conversations: [conversation({ id: 'chat-1', mode: 'chat' })],
       activeId: 'chat-1',
-      activeIdByLayout: { chat: 'chat-1', code: null },
+      activeIdByLayout: { chat: 'chat-1', code: null, agent: null },
       messagesByConversation: { 'chat-1': [] },
     });
 
@@ -1423,7 +1685,11 @@ describe('chatStore — sessões separadas Chat/Code', () => {
     await useChatStore.getState().enterLayout('code');
 
     expect(useChatStore.getState().activeId).toBeNull();
-    expect(useChatStore.getState().activeIdByLayout).toEqual({ chat: 'chat-1', code: null });
+    expect(useChatStore.getState().activeIdByLayout).toEqual({
+      chat: 'chat-1',
+      code: null,
+      agent: null,
+    });
 
     useUiStore.setState({ layoutMode: 'chat' });
     await useChatStore.getState().enterLayout('chat');
@@ -1436,7 +1702,7 @@ describe('chatStore — sessões separadas Chat/Code', () => {
     useChatStore.setState({
       conversations: [shared],
       activeId: null,
-      activeIdByLayout: { chat: null, code: 'shared-1' },
+      activeIdByLayout: { chat: null, code: 'shared-1', agent: null },
       messagesByConversation: { 'shared-1': [] },
     });
     mocks.api.getConversation.mockResolvedValue({ conversation: shared, messages: [] });
@@ -1496,7 +1762,7 @@ describe('chatStore — sessões separadas Chat/Code', () => {
     useChatStore.setState({
       conversations: [chat, code],
       activeId: 'code-1',
-      activeIdByLayout: { chat: 'chat-1', code: 'code-1' },
+      activeIdByLayout: { chat: 'chat-1', code: 'code-1', agent: null },
       messagesByConversation: { 'chat-1': [], 'code-1': [] },
     });
     useUiStore.setState({ layoutMode: 'chat', activeView: 'library', codeView: 'session' });
@@ -1515,7 +1781,7 @@ describe('chatStore — sessões separadas Chat/Code', () => {
     useChatStore.setState({
       conversations: [chat, code],
       activeId: 'chat-1',
-      activeIdByLayout: { chat: 'chat-1', code: 'code-1' },
+      activeIdByLayout: { chat: 'chat-1', code: 'code-1', agent: null },
       messagesByConversation: { 'chat-1': [], 'code-1': [] },
     });
     useUiStore.setState({ layoutMode: 'code', codeView: 'skills', activeView: 'chat' });
@@ -1532,7 +1798,7 @@ describe('chatStore — sessões separadas Chat/Code', () => {
     useChatStore.setState({
       conversations: [shared],
       activeId: 'shared-1',
-      activeIdByLayout: { chat: null, code: null },
+      activeIdByLayout: { chat: null, code: null, agent: null },
       messagesByConversation: { 'shared-1': [] },
     });
     useUiStore.setState({ layoutMode: 'code' });
@@ -1566,13 +1832,17 @@ describe('chatStore — sessões separadas Chat/Code', () => {
     useUiStore.setState({ layoutMode: 'code' });
     useChatStore.setState({
       activeId: 'code-1',
-      activeIdByLayout: { chat: 'chat-1', code: 'code-1' },
+      activeIdByLayout: { chat: 'chat-1', code: 'code-1', agent: null },
     });
 
     useChatStore.getState().clearActiveConversation();
 
     expect(useChatStore.getState().activeId).toBeNull();
-    expect(useChatStore.getState().activeIdByLayout).toEqual({ chat: 'chat-1', code: null });
+    expect(useChatStore.getState().activeIdByLayout).toEqual({
+      chat: 'chat-1',
+      code: null,
+      agent: null,
+    });
   });
 
   it('deleteConversation falls back to a session visible in the current layout', async () => {
@@ -1779,7 +2049,7 @@ describe('chatStore — rodadas do objetivo (Goal)', () => {
     useChatStore.setState({
       conversations: [conversation()],
       activeId: 'conv-1',
-      activeIdByLayout: { chat: null, code: 'conv-1' },
+      activeIdByLayout: { chat: null, code: 'conv-1', agent: null },
     });
     let live: SubagentLiveState | undefined;
     mocks.api.runTurn.mockImplementation(
@@ -1863,5 +2133,284 @@ describe('chatStore — rodadas do objetivo (Goal)', () => {
     expect(live?.trace[0]).toMatchObject({ toolCalls: 1 });
     expect(live?.toolCalls[0]).toMatchObject({ name: 'read_file', status: 'running' });
     expect(useChatStore.getState().streaming).toBeNull();
+  });
+});
+
+describe('chatStore — concorrência entre agentes', () => {
+  it('mantém dois turnos simultâneos e drena a fila da thread em segundo plano', async () => {
+    const pending: Array<{
+      payload: TurnPayload;
+      finish: (content: string) => void;
+    }> = [];
+    mocks.api.runTurn.mockImplementation(
+      (payload: TurnPayload, onEvent: (event: TurnEvent) => void) =>
+        new Promise((resolve) => {
+          pending.push({
+            payload,
+            finish: (content) => {
+              onEvent({
+                type: 'turn_started',
+                turnId: payload.turnId!,
+                userMessageId: `user-${payload.conversationId}`,
+                assistantMessageId: `assistant-${payload.conversationId}`,
+              });
+              const result = {
+                userMessage: userMessage({
+                  id: `user-${payload.conversationId}`,
+                  conversationId: payload.conversationId,
+                }),
+                assistantMessage: assistantMessage({
+                  id: `assistant-${payload.conversationId}`,
+                  conversationId: payload.conversationId,
+                  content,
+                }),
+                usage: null,
+                error: null,
+                conversation: conversation({
+                  id: payload.conversationId,
+                  mode: 'agent',
+                  agentId: 'agent-1',
+                  title: `Conversa ${payload.conversationId}`,
+                }),
+              };
+              onEvent({ type: 'done', result });
+              resolve(result);
+            },
+          });
+        }),
+    );
+
+    useAgentStore.setState({
+      agentsById: { 'agent-1': agentRecord() },
+      orderedIds: ['agent-1'],
+      status: 'ready',
+      error: null,
+      mutationById: {},
+      initialized: true,
+    });
+    useChatStore.setState({
+      conversations: [
+        conversation({ id: 'conv-1', mode: 'agent', agentId: 'agent-1', title: 'Primeira' }),
+        conversation({ id: 'conv-2', mode: 'agent', agentId: 'agent-1', title: 'Segunda' }),
+      ],
+      activeId: 'conv-1',
+      activeIdByLayout: { chat: null, code: null, agent: 'conv-1' },
+      messagesByConversation: { 'conv-1': [], 'conv-2': [] },
+    });
+    useUiStore.setState({ layoutMode: 'agent', activeAgentId: 'agent-1', activeChannelId: null });
+
+    await useChatStore.getState().send('primeira mensagem');
+    expect(pending).toHaveLength(1);
+    expect(useChatStore.getState().streamsByConversation['conv-1']).toBeTruthy();
+
+    // Second message to the same thread waits in its FIFO.
+    await useChatStore.getState().send('mensagem na fila');
+    expect(pending).toHaveLength(1);
+    expect(useAgentQueueStore.getState().count('conv-1')).toBe(1);
+
+    // The user moves to another agent thread; it starts its own turn while the
+    // first one keeps running in the background.
+    useChatStore.setState({
+      activeId: 'conv-2',
+      streaming: null,
+      activeIdByLayout: { chat: null, code: null, agent: 'conv-2' },
+    });
+    await useChatStore.getState().send('outra thread');
+
+    expect(pending).toHaveLength(2);
+    expect(pending.map((turn) => turn.payload.conversationId).sort()).toEqual([
+      'conv-1',
+      'conv-2',
+    ]);
+    expect(Object.keys(useChatStore.getState().streamsByConversation).sort()).toEqual([
+      'conv-1',
+      'conv-2',
+    ]);
+    expect(useChatStore.getState().streaming?.conversationId).toBe('conv-2');
+
+    // Finishing the visible thread must not clear the background stream.
+    pending[1].finish('resposta da segunda');
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+    expect(useChatStore.getState().streamsByConversation['conv-1']).toBeTruthy();
+
+    // Finishing the background thread drains its own queue immediately, even
+    // though the visible thread is idle.
+    pending[0].finish('resposta da primeira');
+    await vi.waitFor(() => expect(pending).toHaveLength(3), { timeout: 2000 });
+    expect(pending[2].payload.conversationId).toBe('conv-1');
+    expect(pending[2].payload.content).toBe('mensagem na fila');
+    expect(useChatStore.getState().streamsByConversation['conv-1']).toBeTruthy();
+    expect(useChatStore.getState().streaming).toBeNull();
+
+    pending[2].finish('resposta da fila');
+    await vi.waitFor(() =>
+      expect(useChatStore.getState().streamsByConversation['conv-1']).toBeUndefined(),
+    );
+  });
+});
+
+describe('chatStore — notificações por categoria', () => {
+  it('respeita DND, o master switch e cada categoria', () => {
+    const base = useAppStore.getState().settings;
+    useAppStore.setState({ settings: { ...base, notificationsEnabled: true, notificationsDnd: true } });
+    expect(notificationsAllowed('turn_complete')).toBe(false);
+    useAppStore.setState({ settings: { ...base, notificationsDnd: false } });
+    expect(notificationsAllowed('turn_complete')).toBe(true);
+    useAppStore.setState({ settings: { ...base, notificationsCompletions: false } });
+    expect(notificationsAllowed('turn_complete')).toBe(false);
+    expect(notificationsAllowed('approval_requested')).toBe(true);
+    useAppStore.setState({ settings: { ...base, notificationsEnabled: false } });
+    expect(notificationsAllowed('approval_requested')).toBe(false);
+  });
+});
+
+describe('chatStore — reattach de turnos', () => {  it('reconstrói um turno ativo a partir dos eventos persistidos', async () => {
+    const activeConversation = conversation({ id: 'conv-1', title: 'Reattach', messageCount: 2 });
+    mocks.api.listActiveTurns.mockResolvedValue([
+      { turnId: 'turn-reattach', conversationId: 'conv-1', startedAt: 1 },
+    ]);
+    mocks.api.getConversation.mockResolvedValue({
+      conversation: activeConversation,
+      messages: [
+        userMessage({ id: 'user-1' }),
+        assistantMessage({ id: 'assistant-1', content: '', status: 'streaming' }),
+      ],
+    });
+    const result = {
+      userMessage: userMessage({ id: 'user-1' }),
+      assistantMessage: assistantMessage({ id: 'assistant-1', content: 'Resposta final' }),
+      usage: null,
+      error: null,
+      conversation: activeConversation,
+    };
+    mocks.api.listTurnEvents.mockResolvedValue([
+      {
+        turnId: 'turn-reattach',
+        seq: 1,
+        event: {
+          type: 'turn_started',
+          turnId: 'turn-reattach',
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        },
+      },
+      {
+        turnId: 'turn-reattach',
+        seq: 2,
+        event: { type: 'text_delta', delta: 'Resposta ' },
+      },
+      { turnId: 'turn-reattach', seq: 3, event: { type: 'done', result } },
+    ]);
+    useChatStore.setState({
+      conversations: [activeConversation],
+      activeId: 'conv-1',
+      messagesByConversation: {},
+      streamsByConversation: {},
+      streaming: null,
+    });
+
+    await useChatStore.getState().reattachTurns();
+
+    const messages = useChatStore.getState().messagesByConversation['conv-1'] ?? [];
+    expect(messages.find((message) => message.id === 'assistant-1')?.content).toBe(
+      'Resposta final',
+    );
+    expect(useChatStore.getState().streamsByConversation['conv-1']).toBeUndefined();
+    expect(useChatStore.getState().streaming).toBeNull();
+  });
+
+  it('loads pending session state when opening an agent thread without a selected workspace', async () => {
+    const thread = conversation({ id: 'agent-thread', mode: 'agent', agentId: 'agent-1', workspaceId: null });
+    mocks.api.getConversation.mockResolvedValue({ conversation: thread, messages: [] });
+    useChatStore.setState({ conversations: [thread], activeId: null });
+    useUiStore.setState({ layoutMode: 'agent' });
+
+    await useChatStore.getState().openConversation(thread.id);
+
+    expect(mocks.api.getCodeSessionState).toHaveBeenCalledWith(thread.id);
+  });
+
+  it('não cria stream fantasma para turnos internos sem eventos', async () => {
+    mocks.api.listActiveTurns.mockResolvedValue([
+      { turnId: 'task-turn', conversationId: 'conv-task', startedAt: 1 },
+    ]);
+    mocks.api.listTurnEvents.mockResolvedValue([]);
+    mocks.api.getConversation.mockResolvedValue({
+      conversation: conversation({ id: 'conv-task', title: 'Tarefa' }),
+      messages: [],
+    });
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-task', title: 'Tarefa' })],
+      activeId: null,
+      messagesByConversation: {},
+      streamsByConversation: {},
+      streaming: null,
+    });
+
+    await useChatStore.getState().reattachTurns();
+
+    expect(useChatStore.getState().streamsByConversation['conv-task']).toBeUndefined();
+  });
+});
+
+describe('chatStore — notificações de agente', () => {
+  it('avisa quando um turno de agente termina fora do layout Agentes', async () => {
+    const agentConversation = conversation({
+      id: 'conv-1',
+      mode: 'agent',
+      agentId: 'agent-1',
+      title: 'Plano trimestral',
+    });
+    useChatStore.setState({
+      conversations: [agentConversation],
+      activeId: 'conv-1',
+      activeIdByLayout: { chat: 'conv-1', code: null, agent: 'conv-1' },
+      messagesByConversation: { 'conv-1': [] },
+      streaming: null,
+    });
+    useUiStore.setState({ layoutMode: 'chat' });
+    useAppStore.setState({
+      settings: { ...useAppStore.getState().settings, notificationsEnabled: true },
+    });
+    mocks.api.runTurn.mockImplementation(
+      async (_payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage({ content: 'Pronto' }),
+          usage: null,
+          error: null,
+          conversation: agentConversation,
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    await useChatStore.getState().send('Resuma o trimestre');
+
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        'Agente concluiu a resposta',
+        expect.objectContaining({ description: 'Plano trimestral' }),
+      ),
+    );
+  });
+});
+
+describe('chatStore — primary conversation pin', () => {
+  it('does not call the backend when the primary is unpinned', async () => {
+    useChatStore.setState({
+      conversations: [
+        conversation({ id: 'conv-1', pinned: true, isMain: true }),
+      ],
+      activeId: null,
+    });
+
+    await useChatStore.getState().togglePinned('conv-1');
+
+    expect(mocks.api.setConversationPinned).not.toHaveBeenCalled();
+    const stored = useChatStore.getState().conversations[0];
+    expect(stored.pinned).toBe(true);
+    expect(stored.isMain).toBe(true);
   });
 });

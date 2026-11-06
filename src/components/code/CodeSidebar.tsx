@@ -46,12 +46,15 @@ import {
   IconButton,
   Input,
   Kbd,
+  SortableList,
+  sortableDropClass,
 } from '@/components/ui';
+import type { SortableListApi } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import { filterConversationsForLayout } from '@/lib/conversations';
 import type { Conversation, Workspace } from '@/lib/types';
-import { cn, copyText, modKey } from '@/lib/utils';
+import { cn, compareConversationPosition, copyText, modKey } from '@/lib/utils';
 import { useIsCompact } from '@/components/layout/hooks';
 import { AddChatSessionDialog } from './AddChatSessionDialog';
 import { terminalManager } from './terminalManager';
@@ -116,6 +119,7 @@ interface SessionRowProps {
   active: boolean;
   /** Chat session explicitly added to the Code layout (docs/goals/chat-code-sessions). */
   shared: boolean;
+  sortable: SortableListApi;
   onSelect: () => void;
   onTogglePin: () => void;
   onStartRename: () => void;
@@ -133,6 +137,7 @@ function SessionRow({
   conversation,
   active,
   shared,
+  sortable,
   onSelect,
   onTogglePin,
   onStartRename,
@@ -141,9 +146,13 @@ function SessionRow({
   onDelete,
 }: SessionRowProps) {
   return (
-    <div className="group relative flex items-center">
+    <div
+      {...sortable.dropProps(conversation.id)}
+      className={cn('group relative flex items-center', sortableDropClass)}
+    >
       <button
         type="button"
+        {...sortable.itemProps(conversation.id)}
         onClick={onSelect}
         aria-current={active ? 'true' : undefined}
         aria-label={shared ? `${conversation.title}, sessão compartilhada do Chat` : undefined}
@@ -151,6 +160,7 @@ function SessionRow({
         className={cn(
           'flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 pr-8 text-left text-[13px]',
           'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+          !sortable.disabled && 'cursor-grab active:cursor-grabbing',
           active
             ? 'bg-surface-active text-foreground'
             : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
@@ -300,6 +310,9 @@ interface WorkspaceRowProps {
   active: boolean;
   expanded: boolean;
   activeConversationId: string | null;
+  sortable: SortableListApi;
+  sessionsDisabled: boolean;
+  onReorderSessions: (ids: string[]) => void;
   onToggle: () => void;
   onSelect: () => void;
   onNewSession: () => void;
@@ -322,6 +335,9 @@ function WorkspaceRow({
   active,
   expanded,
   activeConversationId,
+  sortable,
+  sessionsDisabled,
+  onReorderSessions,
   onToggle,
   onSelect,
   onNewSession,
@@ -342,7 +358,10 @@ function WorkspaceRow({
   const canExpand = sessions.length > 0;
 
   return (
-    <div className="rounded-lg">
+    <div
+      {...sortable.dropProps(workspace.id)}
+      className={cn('rounded-lg', sortableDropClass)}
+    >
       <div className="group flex h-8 min-w-0 items-center gap-0.5 rounded-lg pr-0.5">
         <button
           type="button"
@@ -372,6 +391,7 @@ function WorkspaceRow({
 
         <button
           type="button"
+          {...sortable.itemProps(workspace.id)}
           onClick={onSelect}
           aria-current={active ? 'true' : undefined}
           aria-label={workspace.name}
@@ -379,6 +399,7 @@ function WorkspaceRow({
           className={cn(
             'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 text-left text-[13px]',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+            !sortable.disabled && 'cursor-grab active:cursor-grabbing',
             active
               ? 'text-foreground'
               : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
@@ -428,22 +449,36 @@ function WorkspaceRow({
       </div>
 
       {expanded && canExpand ? (
-        <div className="mb-1 ml-4 mt-0.5 flex flex-col gap-0.5 border-l border-border pl-1.5">
-          {sessions.map((conversation) => (
-            <SessionRow
-              key={conversation.id}
-              conversation={conversation}
-              active={conversation.id === activeConversationId}
-              shared={conversation.codeLinked === true}
-              onSelect={() => onOpenConversation(conversation)}
-              onTogglePin={() => onSessionPin(conversation)}
-              onStartRename={() => onSessionRename(conversation)}
-              onExport={() => onSessionExport(conversation)}
-              onRemoveFromCode={() => onSessionRemoveFromCode(conversation)}
-              onDelete={() => onSessionDelete(conversation)}
-            />
-          ))}
-        </div>
+        <SortableList
+          ids={sessions.map((conversation) => conversation.id)}
+          label={`Sessões de ${workspace.name}`}
+          itemLabel={(id) => sessions.find((conversation) => conversation.id === id)?.title ?? id}
+          disabled={sessionsDisabled}
+          onReorder={onReorderSessions}
+        >
+          {(sessionSortable) => (
+            <div
+              ref={sessionSortable.containerRef}
+              className="mb-1 ml-4 mt-0.5 flex flex-col gap-0.5 border-l border-border pl-1.5"
+            >
+              {sessions.map((conversation) => (
+                <SessionRow
+                  key={conversation.id}
+                  conversation={conversation}
+                  active={conversation.id === activeConversationId}
+                  shared={conversation.codeLinked === true}
+                  sortable={sessionSortable}
+                  onSelect={() => onOpenConversation(conversation)}
+                  onTogglePin={() => onSessionPin(conversation)}
+                  onStartRename={() => onSessionRename(conversation)}
+                  onExport={() => onSessionExport(conversation)}
+                  onRemoveFromCode={() => onSessionRemoveFromCode(conversation)}
+                  onDelete={() => onSessionDelete(conversation)}
+                />
+              ))}
+            </div>
+          )}
+        </SortableList>
       ) : null}
 
       {expanded && !canExpand ? (
@@ -637,6 +672,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
     openFolder,
     startSession,
     rename,
+    reorder,
     remove,
     refreshContext,
   } = useWorkspaces();
@@ -742,9 +778,9 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
       }
     }
     for (const list of byWorkspace.values()) {
-      list.sort((left, right) => right.updatedAt - left.updatedAt);
+      list.sort(compareConversationPosition);
     }
-    unassigned.sort((left, right) => right.updatedAt - left.updatedAt);
+    unassigned.sort(compareConversationPosition);
     return { sessionsByWorkspace: byWorkspace, unassignedSessions: unassigned };
   }, [codeConversations, workspaceIds]);
 
@@ -940,7 +976,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
           leftIcon={<SquarePen className="size-4" />}
           className="h-9 flex-1 justify-start rounded-xl px-3 text-[13px] font-medium"
         >
-          Novo agente
+          Nova sessão
         </Button>
         {onClose ? (
           <IconButton label="Fechar barra lateral" size="sm" onClick={onClose}>
@@ -1164,34 +1200,49 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                 </Button>
               </div>
             ) : (
-              <div className="flex flex-col gap-0.5">
-                {visibleWorkspaces.map((workspace) => (
-                  <WorkspaceRow
-                    key={workspace.id}
-                    workspace={workspace}
-                    sessions={sessionsByWorkspace.get(workspace.id) ?? []}
-                    active={workspace.id === activeWorkspaceId}
-                    expanded={isExpanded(workspace.id)}
-                    activeConversationId={activeId}
-                    onToggle={() => toggleWorkspace(workspace.id)}
-                    onSelect={() => handleSelectWorkspace(workspace)}
-                    onNewSession={() => void handleNewSessionIn(workspace)}
-                    onRename={() => handleStartRename(workspace)}
-                    onOpenExplorer={() => void handleOpenExplorer(workspace)}
-                    onCopyPath={() => void handleCopyPath(workspace)}
-                    onRefresh={() => void refreshContext(workspace.id)}
-                    onRemove={() => setRemoveTarget(workspace)}
-                    onOpenConversation={openConversation}
-                    onSessionPin={handleSessionPin}
-                    onSessionRename={handleSessionRenameStart}
-                    onSessionExport={(conversation) => void handleSessionExport(conversation)}
-                    onSessionRemoveFromCode={(conversation) =>
-                      void handleSessionRemoveFromCode(conversation)
-                    }
-                    onSessionDelete={setDeleteSessionTarget}
-                  />
-                ))}
-              </div>
+              <SortableList
+                ids={visibleWorkspaces.map((workspace) => workspace.id)}
+                label="Workspaces"
+                itemLabel={(id) => workspaces.find((workspace) => workspace.id === id)?.name ?? id}
+                disabled={hasWorkspaceFilters}
+                onReorder={(ids) => void reorder(ids)}
+              >
+                {(sortable) => (
+                  <div ref={sortable.containerRef} className="flex flex-col gap-0.5">
+                    {visibleWorkspaces.map((workspace) => (
+                      <WorkspaceRow
+                        key={workspace.id}
+                        workspace={workspace}
+                        sessions={sessionsByWorkspace.get(workspace.id) ?? []}
+                        active={workspace.id === activeWorkspaceId}
+                        expanded={isExpanded(workspace.id)}
+                        activeConversationId={activeId}
+                        sortable={sortable}
+                        sessionsDisabled={hasWorkspaceFilters}
+                        onReorderSessions={(ids) =>
+                          void useChatStore.getState().reorderConversations(ids)
+                        }
+                        onToggle={() => toggleWorkspace(workspace.id)}
+                        onSelect={() => handleSelectWorkspace(workspace)}
+                        onNewSession={() => void handleNewSessionIn(workspace)}
+                        onRename={() => handleStartRename(workspace)}
+                        onOpenExplorer={() => void handleOpenExplorer(workspace)}
+                        onCopyPath={() => void handleCopyPath(workspace)}
+                        onRefresh={() => void refreshContext(workspace.id)}
+                        onRemove={() => setRemoveTarget(workspace)}
+                        onOpenConversation={openConversation}
+                        onSessionPin={handleSessionPin}
+                        onSessionRename={handleSessionRenameStart}
+                        onSessionExport={(conversation) => void handleSessionExport(conversation)}
+                        onSessionRemoveFromCode={(conversation) =>
+                          void handleSessionRemoveFromCode(conversation)
+                        }
+                        onSessionDelete={setDeleteSessionTarget}
+                      />
+                    ))}
+                  </div>
+                )}
+              </SortableList>
             )}
           </div>
         </section>
@@ -1236,22 +1287,35 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
               hidden={unassignedCollapsed}
               className="mt-1 max-h-44 overflow-y-auto overscroll-contain pb-1"
             >
-              <div className="flex flex-col gap-0.5">
-                {visibleUnassignedSessions.map((conversation) => (
-                  <SessionRow
-                    key={conversation.id}
-                    conversation={conversation}
-                    active={conversation.id === activeId}
-                    shared={conversation.codeLinked === true}
-                    onSelect={() => openConversation(conversation)}
-                    onTogglePin={() => handleSessionPin(conversation)}
-                    onStartRename={() => handleSessionRenameStart(conversation)}
-                    onExport={() => void handleSessionExport(conversation)}
-                    onRemoveFromCode={() => void handleSessionRemoveFromCode(conversation)}
-                    onDelete={() => setDeleteSessionTarget(conversation)}
-                  />
-                ))}
-              </div>
+              <SortableList
+                ids={visibleUnassignedSessions.map((conversation) => conversation.id)}
+                label="Sem workspace"
+                itemLabel={(id) =>
+                  visibleUnassignedSessions.find((conversation) => conversation.id === id)?.title ?? id
+                }
+                disabled={normalizedQuery.length > 0}
+                onReorder={(ids) => void useChatStore.getState().reorderConversations(ids)}
+              >
+                {(sortable) => (
+                  <div ref={sortable.containerRef} className="flex flex-col gap-0.5">
+                    {visibleUnassignedSessions.map((conversation) => (
+                      <SessionRow
+                        key={conversation.id}
+                        conversation={conversation}
+                        active={conversation.id === activeId}
+                        shared={conversation.codeLinked === true}
+                        sortable={sortable}
+                        onSelect={() => openConversation(conversation)}
+                        onTogglePin={() => handleSessionPin(conversation)}
+                        onStartRename={() => handleSessionRenameStart(conversation)}
+                        onExport={() => void handleSessionExport(conversation)}
+                        onRemoveFromCode={() => void handleSessionRemoveFromCode(conversation)}
+                        onDelete={() => setDeleteSessionTarget(conversation)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </SortableList>
             </div>
           </section>
         ) : null}

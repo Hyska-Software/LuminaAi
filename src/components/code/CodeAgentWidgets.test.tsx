@@ -109,6 +109,26 @@ describe('CodeContextMeterChip — medidor do header Code', () => {
     );
   });
 
+  it('showCache=false mantém o contexto do Agentes e remove o segmento de cache', () => {
+    seedCode(makeContext());
+    useCacheStore.setState({ byConversation: { [CONVERSATION_ID]: makeCache() } });
+    render(<CodeContextMeterChip conversationId={CONVERSATION_ID} showCache={false} />);
+
+    const button = screen.getByRole('button', { name: 'Contexto usado: 44%' });
+    expect(button.textContent).toContain('44%');
+    expect(button.textContent).not.toContain('98%');
+    expect(button.getAttribute('aria-describedby')).toBeNull();
+  });
+
+  it('showCache=false sem snapshot de contexto não cai para o chip de cache', () => {
+    useCacheStore.setState({ byConversation: { [CONVERSATION_ID]: makeCache() } });
+    const { container } = render(
+      <CodeContextMeterChip conversationId={CONVERSATION_ID} showCache={false} />,
+    );
+
+    expect(container.firstChild).toBeNull();
+  });
+
   it('cai para o chip cache-first quando só há cache (sessão sem snapshot de contexto)', () => {
     useCacheStore.setState({ byConversation: { [CONVERSATION_ID]: makeCache() } });
     render(<CodeContextMeterChip conversationId={CONVERSATION_ID} />);

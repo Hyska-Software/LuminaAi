@@ -13,12 +13,19 @@ import type { Conversation, ConversationMode } from './types';
  * missing mode is a Chat session.
  */
 export function conversationMode(conversation: Conversation): ConversationMode {
-  return conversation.mode === 'code' ? 'code' : 'chat';
+  if (conversation.mode === 'code') return 'code';
+  if (conversation.mode === 'agent') return 'agent';
+  return 'chat';
 }
 
 /** A session that only belongs to the Chat layout (shared or not). */
 export function isChatConversation(conversation: Conversation): boolean {
   return conversationMode(conversation) === 'chat';
+}
+
+/** A conversation owned by an agent persona. */
+export function isAgentConversation(conversation: Conversation): boolean {
+  return conversationMode(conversation) === 'agent';
 }
 
 /** A session visible in the Code layout: Code-born or shared from Chat. */
@@ -44,7 +51,15 @@ export function chatConversationsAvailableToLink(
 export function isConversationVisibleIn(
   conversation: Conversation,
   layout: ConversationMode,
+  agentId?: string | null,
 ): boolean {
+  if (layout === 'agent') {
+    return (
+      isAgentConversation(conversation) &&
+      !conversation.channelId &&
+      (agentId === undefined || agentId === null || conversation.agentId === agentId)
+    );
+  }
   return layout === 'code' ? isCodeConversation(conversation) : isChatConversation(conversation);
 }
 
@@ -52,6 +67,9 @@ export function isConversationVisibleIn(
 export function filterConversationsForLayout(
   conversations: readonly Conversation[],
   layout: ConversationMode,
+  options?: { agentId?: string | null },
 ): Conversation[] {
-  return conversations.filter((conversation) => isConversationVisibleIn(conversation, layout));
+  return conversations.filter((conversation) =>
+    isConversationVisibleIn(conversation, layout, options?.agentId),
+  );
 }

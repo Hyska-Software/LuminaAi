@@ -207,24 +207,49 @@ fn writable_root(ctx: &ToolCtx) -> Result<PathBuf, ToolOutcome> {
 }
 
 fn resolve_path(ctx: &ToolCtx, requested: &str, access: safe_path::Access) -> Result<PathBuf, ToolOutcome> {
-    let root = workspace_root(ctx)?;
-    safe_path::resolve(&root, requested, access).map_err(|error| err(error.code, error.message))
+    let workspace = workspace_handle(ctx)?;
+    let resolved = if workspace.internal && access != safe_path::Access::Write {
+        // No project folder selected: agents may read/list/search the machine.
+        // Writes stay confined to the internal scratch workspace.
+        safe_path::resolve_unconfined(&workspace.root, requested, access)
+    } else {
+        safe_path::resolve(&workspace.root, requested, access)
+    };
+    resolved.map_err(|error| {
+        if workspace.internal
+            && access == safe_path::Access::Write
+            && error.code == safe_path::FS_OUTSIDE_WORKSPACE
+        {
+            return err(
+                error.code,
+                "para editar arquivos fora da pasta do agente, selecione uma pasta de projeto",
+            );
+        }
+        err(error.code, error.message)
+    })
 }
 
 fn relative_path(ctx: &ToolCtx, path: &Path) -> String {
-    ctx.workspace_root()
-        .map(|root| safe_path::to_relative(root, path))
-        .unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"))
+    let Some(root) = ctx.workspace_root() else {
+        return path.to_string_lossy().replace('\\', "/");
+    };
+    let internal = ctx.workspace.as_ref().is_some_and(|workspace| workspace.internal);
+    if internal && !safe_path::is_within(root, path) {
+        return path.to_string_lossy().replace('\\', "/");
+    }
+    safe_path::to_relative(root, path)
 }
 
 /// Resolve um diretório dentro do workspace (`Access::ReadDir` valida que é
 /// pasta e não deixa escapar do workspace).
 fn resolve_dir(ctx: &ToolCtx, requested: &str) -> Result<PathBuf, ToolOutcome> {
-    let root = workspace_root(ctx)?;
-    match safe_path::resolve(&root, requested, safe_path::Access::ReadDir) {
-        Ok(path) => Ok(path),
-        Err(error) => Err(err(error.code, error.message)),
-    }
+    let workspace = workspace_handle(ctx)?;
+    let resolved = if workspace.internal {
+        safe_path::resolve_unconfined(&workspace.root, requested, safe_path::Access::ReadDir)
+    } else {
+        safe_path::resolve(&workspace.root, requested, safe_path::Access::ReadDir)
+    };
+    resolved.map_err(|error| err(error.code, error.message))
 }
 
 fn dir_skip_name(name: &str) -> bool {
@@ -547,7 +572,7 @@ fn mcp_result_text(result: &Value) -> String {
 
 /// Aplica a matriz de permissões e, se necessário, pausa o turno pedindo
 /// aprovação humana. `Allow` → `Ok`; `Deny`/`Ask` recusado → `Err(erro)`.
-async fn policy_check(
+pub(crate) async fn policy_check(
     ctx: &ToolCtx,
     tool: &str,
     risk: RiskClass,
@@ -624,7 +649,22 @@ async fn policy_check(
                 detail,
                 risk,
                 preview: None,
-                options: approval_options(),
+                options: if risk == RiskClass::Computer {
+                    vec![
+                        ApprovalOption {
+                            id: "allow".into(),
+                            label: "Permitir uma vez".into(),
+                            scope: None,
+                        },
+                        ApprovalOption {
+                            id: "deny".into(),
+                            label: "Negar".into(),
+                            scope: None,
+                        },
+                    ]
+                } else {
+                    approval_options()
+                },
                 created_at: now_ms(),
             };
             audit_append(
@@ -841,10 +881,6 @@ async fn list_dir(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Ok(path) => path,
         Err(outcome) => return outcome,
     };
-    let root = match workspace_root(ctx) {
-        Ok(root) => root,
-        Err(outcome) => return outcome,
-    };
     let depth = opt_u32(args, "depth").unwrap_or(2).clamp(1, 4) as usize;
     let include_hidden = opt_bool(args, "include_hidden").unwrap_or(false);
     let limit = opt_u32(args, "limit").unwrap_or(400).clamp(1, 2_000) as usize;
@@ -867,7 +903,12 @@ async fn list_dir(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             continue;
         }
         let path = entry.path();
-        let relative = safe_path::to_relative(&root, path);
+        let relative = path
+            .strip_prefix(&base)
+            .ok()
+            .map(|value| value.to_string_lossy().replace('\\', "/"))
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| relative_path(ctx, path));
         if relative.is_empty() {
             continue;
         }
@@ -941,10 +982,6 @@ async fn search_files(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Ok(path) => path,
         Err(outcome) => return outcome,
     };
-    let root = match workspace_root(ctx) {
-        Ok(root) => root,
-        Err(outcome) => return outcome,
-    };
     let cap = opt_u32(args, "max_results").unwrap_or(200).clamp(1, 1_000) as usize;
     let basename_only = !pattern.contains('/');
     let mut matches: Vec<String> = Vec::new();
@@ -956,7 +993,7 @@ async fn search_files(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             continue;
         }
         let path = entry.path();
-        let relative = safe_path::to_relative(&root, path);
+        let relative = relative_path(ctx, path);
         let candidate = if basename_only {
             path.file_name().map(|name| name.to_string_lossy().into_owned())
         } else {
@@ -1012,10 +1049,6 @@ async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Ok(path) => path,
         Err(outcome) => return outcome,
     };
-    let root = match workspace_root(ctx) {
-        Ok(root) => root,
-        Err(outcome) => return outcome,
-    };
     let pattern = if is_regex { query.clone() } else { regex::escape(&query) };
     let matcher = match regex::RegexBuilder::new(&pattern)
         .case_insensitive(!case_sensitive)
@@ -1040,7 +1073,13 @@ async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             continue;
         }
         let path = entry.path();
-        let relative = safe_path::to_relative(&root, path);
+        let relative = relative_path(ctx, path);
+        if is_secret_path(&relative) {
+            continue;
+        }
+        if resolve_path(ctx, &relative, safe_path::Access::Read).is_err() {
+            continue;
+        }
         if let Some(glob) = &glob {
             if !glob.is_match(relative.as_str()) {
                 continue;
@@ -1352,6 +1391,14 @@ fn project_post_write_hooks(root: &Path) -> Vec<String> {
 /// são configurados pelo usuário no próprio workspace (`.lumina/hooks.json`) e
 /// não mutam a decisão da política: falha vira aviso, nunca erro do turno.
 async fn with_post_write_hooks(ctx: &ToolCtx, relative: &str, content: String) -> String {
+    if !ctx.settings.shell_enabled
+        || ctx
+            .workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.internal)
+    {
+        return content;
+    }
     let Ok(root) = writable_root(ctx) else {
         return content;
     };
@@ -1581,9 +1628,10 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
 /// monta o `ToolRuntime` equivalente e delega para `tools::execute`.
 async fn bridge_chat_tool(ctx: &ToolCtx, name: &str, args: &Value) -> ToolOutcome {
     let mut options = crate::domain::TurnOptions::default();
-    options.web_search = true;
+    options.web_search = ctx.settings.web_search_enabled;
     options.create_files = false;
     options.run_code = false;
+    options.allowed_skills = ctx.allowed_skills.clone();
     options.max_steps = 1;
     let runtime = crate::tools::ToolRuntime {
         db: ctx.db.clone(),
@@ -1593,6 +1641,7 @@ async fn bridge_chat_tool(ctx: &ToolCtx, name: &str, args: &Value) -> ToolOutcom
         options,
         settings: ctx.settings.clone(),
         cancel: ctx.cancel.clone(),
+        agent_hooks: ctx.agent_hooks.clone(),
         data_dir: ctx.data_dir.clone(),
         skills_roots: ctx.skills_roots.clone(),
     };
@@ -1606,6 +1655,7 @@ async fn bridge_chat_tool(ctx: &ToolCtx, name: &str, args: &Value) -> ToolOutcom
         started_at: None,
         finished_at: None,
         presentation: None,
+        images: Vec::new(),
     };
     crate::tools::execute(&runtime, &call).await
 }
@@ -1872,7 +1922,7 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             Ok(path) => path,
             Err(outcome) => return outcome,
         },
-        None => root,
+        None => root.clone(),
     };
     let workdir_relative = relative_path(ctx, &workdir);
     let destructive = exec::is_destructive_command(&command);
@@ -1907,7 +1957,25 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         .map(|value| value.clamp(1_000, 600_000))
         .unwrap_or(120_000);
     let background = opt_bool(args, "run_in_background").unwrap_or(false);
-    let (program, program_args) = exec::shell_for(&command);
+    let (program, program_args) =
+        if ctx.settings.execution_environment == "docker" && !ctx.settings.docker_image.trim().is_empty()
+        {
+            exec::docker_shell_for(
+                &exec::SandboxConfig {
+                    image: ctx.settings.docker_image.clone(),
+                    network: ctx.settings.docker_network,
+                    memory_mb: ctx.settings.docker_memory_mb,
+                    cpus: ctx.settings.docker_cpus,
+                    pids_limit: ctx.settings.docker_pids_limit,
+                    read_only_root: ctx.settings.docker_read_only_root,
+                },
+                &root,
+                &workdir,
+                &command,
+            )
+        } else {
+            exec::shell_for(&command)
+        };
     let request = exec::ExecRequest {
         program,
         args: program_args,
@@ -2315,6 +2383,30 @@ async fn git_status(ctx: &ToolCtx, _args: &Value) -> ToolOutcome {
     )
 }
 
+fn redact_secret_diff(diff: &str) -> String {
+    let mut out = String::new();
+    let mut skipping = false;
+    for line in diff.lines() {
+        if let Some(rest) = line.strip_prefix("diff --git ") {
+            let path = rest
+                .split_whitespace()
+                .last()
+                .unwrap_or("")
+                .trim_start_matches("b/");
+            skipping = is_secret_path(path);
+            if skipping {
+                out.push_str(&format!("[arquivo sensível omitido: {path}]\n"));
+                continue;
+            }
+        }
+        if !skipping {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 async fn git_diff(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let root = match workspace_root(ctx) {
         Ok(root) => root,
@@ -2346,7 +2438,7 @@ async fn git_diff(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let content = if diff.trim().is_empty() {
         "(sem alterações)\n".to_string()
     } else {
-        diff
+        redact_secret_diff(&diff)
     };
     finish(
         ctx,
@@ -3160,10 +3252,12 @@ mod tests {
                 workspace: Some(WorkspaceHandle {
                     root: self.root.clone(),
                     trusted: true,
+                    internal: false,
                     permission_mode: PermissionMode::Edit,
                 }),
                 settings: Settings::default(),
                 cancel: tokio_util::sync::CancellationToken::new(),
+                agent_hooks: None,
                 data_dir: self.data_dir.clone(),
                 approval: Some(self.approvals.clone()),
                 observed: Some(self.observed.clone()),
@@ -3184,6 +3278,7 @@ mod tests {
                     crate::harness::code::subagent::MAX_CONCURRENT_SUBAGENTS,
                 )),
                 skills_roots: Vec::new(),
+                allowed_skills: None,
             }
         }
 
@@ -3222,6 +3317,40 @@ mod tests {
             .iter()
             .filter_map(|event| event.get("type").and_then(Value::as_str).map(str::to_string))
             .collect()
+    }
+
+    #[tokio::test]
+    async fn internal_workspace_reads_files_outside_but_keeps_writes_confined() {
+        let fixture = Fixture::new();
+        let outside_dir = fixture.root.parent().expect("temp root").join("fora");
+        std::fs::create_dir_all(&outside_dir).expect("outside dir");
+        let outside_file = outside_dir.join("nota.txt");
+        std::fs::write(&outside_file, "conteudo externo").expect("outside file");
+
+        let mut ctx = fixture.ctx();
+        ctx.workspace.as_mut().expect("workspace").internal = true;
+        let outside = outside_file.to_string_lossy().to_string();
+
+        let read = call(&ctx, "read_file", json!({ "path": outside })).await;
+        assert!(!read.is_error, "{}", read.content);
+        assert!(read.content.contains("conteudo externo"));
+
+        let listed = call(
+            &ctx,
+            "list_dir",
+            json!({ "path": outside_dir.to_string_lossy() }),
+        )
+        .await;
+        assert!(!listed.is_error, "{}", listed.content);
+        assert!(listed.content.contains("nota.txt"));
+
+        let write = call(
+            &ctx,
+            "write_file",
+            json!({ "path": outside, "content": "alterado" }),
+        )
+        .await;
+        assert_eq!(error_code(&write), "FS_OUTSIDE_WORKSPACE");
     }
 
     #[tokio::test]
@@ -3331,6 +3460,17 @@ mod tests {
         assert!(!outcome.is_error, "{}", outcome.content);
         assert!(outcome.content.contains("src/a.ts:2: fn foo()"), "{}", outcome.content);
         assert!(outcome.content.contains("src/a.ts:1- const x"), "{}", outcome.content);
+    }
+
+    #[tokio::test]
+    async fn search_text_skips_secret_files() {
+        let fixture = Fixture::new();
+        fixture.write("id_rsa", "SECRET KEY MATERIAL\n");
+        fixture.write("src/a.ts", "export const a = 1;\n");
+        let ctx = fixture.ctx();
+        let outcome = call(&ctx, "search_text", json!({ "query": "SECRET" })).await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(!outcome.content.contains("SECRET KEY MATERIAL"), "{}", outcome.content);
     }
 
     #[tokio::test]
@@ -4057,6 +4197,27 @@ mod tests {
     }
 
 
+
+    #[tokio::test]
+    async fn internal_agent_workspace_never_runs_project_hooks() {
+        let fixture = Fixture::new();
+        fixture.write(
+            ".lumina/hooks.json",
+            r#"{"postWrite":["echo hook-run >> hook.log"]}"#,
+        );
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let mut ctx = fixture.ctx();
+        ctx.workspace.as_mut().expect("workspace").internal = true;
+        let outcome = call(
+            &ctx,
+            "write_file",
+            json!({ "path": "src/novo.ts", "content": "export const a = 1;\n" }),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(!outcome.content.contains("Hooks do projeto"), "{}", outcome.content);
+        assert!(!fixture.root.join("hook.log").exists());
+    }
 
     #[tokio::test]
     async fn code_profile_reuses_chat_skills_catalog() {

@@ -143,12 +143,19 @@ fn tool_parts(message: &HistoryMessage) -> Vec<Value> {
         .ok()
         .filter(Value::is_object)
         .unwrap_or_else(|| json!({"result": message.text}));
-    vec![json!({
+    let mut parts = vec![json!({
         "functionResponse": {
             "name": name,
             "response": response,
         }
-    })]
+    })];
+    // Screenshots follow the function response as inline data in the same
+    // user turn; Gemini accepts both parts in one content block.
+    for image in &message.images {
+        let (mime_type, data) = image_base64(image);
+        parts.push(json!({"inlineData": {"mimeType": mime_type, "data": data}}));
+    }
+    parts
 }
 
 fn push_content(contents: &mut Vec<Value>, role: &str, parts: Vec<Value>) {
@@ -351,6 +358,18 @@ fn parse_usage(usage: &Value, provider_id: &str) -> UsageInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_image_is_appended_as_inline_data() {
+        let mut message = HistoryMessage::tool_result("call-1", "computer_screenshot", "ok");
+        message.images.push(crate::providers::ImagePart {
+            mime_type: "image/jpeg".to_string(),
+            data_base64: "abc".to_string(),
+        });
+        let parts = tool_parts(&message);
+        assert_eq!(parts[0]["functionResponse"]["name"], json!("computer_screenshot"));
+        assert_eq!(parts[1]["inlineData"]["mimeType"], json!("image/jpeg"));
+    }
 
     #[test]
     fn parse_usage_fills_cached_content_tokens() {

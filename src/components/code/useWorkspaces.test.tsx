@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getCodeSessionState: vi.fn(),
   removeWorkspace: vi.fn(),
   renameWorkspace: vi.fn(),
+  reorderWorkspaces: vi.fn(),
   getWorkspace: vi.fn(),
   setConversationWorkspace: vi.fn(),
   createConversation: vi.fn(),
@@ -21,7 +22,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+}));
 
+import { toast } from 'sonner';
 import { useChatStore, useUiStore } from '@/lib/store';
 import {
   __resetWorkspacesForTests,
@@ -76,7 +81,7 @@ beforeEach(() => {
     conversations: [],
     conversationsLoading: false,
     activeId: null,
-    activeIdByLayout: { chat: null, code: null },
+    activeIdByLayout: { chat: null, code: null, agent: null },
     messagesByConversation: {},
   });
   useUiStore.setState({
@@ -313,6 +318,35 @@ describe('useWorkspaces — ações do menu', () => {
     expect(mocks.removeWorkspace).toHaveBeenCalledWith('ws-1');
     expect(useUiStore.getState().activeWorkspaceId).toBe('ws-2');
     await waitFor(() => expect(result.current.workspaces).toHaveLength(1));
+  });
+
+  it('reordena e persiste; em erro volta à ordem anterior', async () => {
+    const first = workspace({ id: 'ws-1', name: 'a', lastOpenedAt: 20, sortOrder: 0 });
+    const second = workspace({
+      id: 'ws-2',
+      name: 'b',
+      path: 'C:/dev/b',
+      lastOpenedAt: 10,
+      sortOrder: 1,
+    });
+    mocks.listWorkspaces.mockResolvedValue([first, second]);
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    mocks.reorderWorkspaces.mockResolvedValue(undefined);
+    await act(async () => {
+      await result.current.reorder(['ws-2', 'ws-1']);
+    });
+    expect(mocks.reorderWorkspaces).toHaveBeenCalledWith(['ws-2', 'ws-1']);
+    expect(result.current.workspaces.map((item) => item.id)).toEqual(['ws-2', 'ws-1']);
+
+    mocks.reorderWorkspaces.mockRejectedValue(new Error('falhou'));
+    mocks.listWorkspaces.mockResolvedValue([first, second]);
+    await act(async () => {
+      await result.current.reorder(['ws-1', 'ws-2']);
+    });
+    expect(toast.error).toHaveBeenCalled();
+    expect(result.current.workspaces.map((item) => item.id)).toEqual(['ws-1', 'ws-2']);
   });
 
   it('atualiza o contexto git do workspace', async () => {

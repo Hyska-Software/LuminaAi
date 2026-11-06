@@ -19,6 +19,7 @@ import {
   type PlanAction,
 } from '@/components/agent';
 import { goalNeedsAttention } from '@/lib/goalRunner';
+import { Button } from '@/components/ui';
 import { useAppStore, useCodeStore, useUiStore } from '@/lib/store';
 import { useCacheStore } from '@/lib/store/cacheStore';
 import type {
@@ -48,6 +49,7 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
   const session = useCodeStore((state) => state.byConversation[conversationId]);
   const respondApproval = useCodeStore((state) => state.respondApproval);
   const respondQuestion = useCodeStore((state) => state.respondQuestion);
+  const layoutMode = useUiStore((state) => state.layoutMode);
   const [responding, setResponding] = useState<string | null>(null);
   /** Ação do objetivo aplicando (dispensa duplo clique nas ações do card). */
   const [goalBusy, setGoalBusy] = useState(false);
@@ -171,36 +173,53 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
           />
         );
       })}
-      {session.questions.map((request) => (
-        <AskUserCard
-          key={request.id}
-          questions={request.questions.map((question) => ({
-            id: question.id,
-            question: question.question,
-            options: question.options.map((option) => ({
-              label: option.label,
-              description: option.description ?? undefined,
-            })),
-            multi: question.multiSelect ?? false,
-            allowFreeText: true,
-          }))}
-          onSubmit={(answers) => {
-            void respondQuestion(
-              conversationId,
-              request.id,
-              answers.map((answer) => ({
-                questionId: answer.questionId,
-                selected: answer.selected,
-                custom: answer.freeText ?? null,
-              })),
-              false,
-            );
-          }}
-          onSkip={() => {
-            void respondQuestion(conversationId, request.id, [], true);
-          }}
-        />
-      ))}
+      {session.questions.map((request) => {
+        const assistance = request.questions.find(
+          (question) => question.header === 'computer_desktop' || question.header === 'computer_browser',
+        );
+        return (
+          <div key={request.id} className="flex flex-col gap-2">
+            <AskUserCard
+              questions={request.questions.map((question) => ({
+                id: question.id,
+                question: question.question,
+                options: question.options.map((option) => ({
+                  label: option.label,
+                  description: option.description ?? undefined,
+                })),
+                multi: question.multiSelect ?? false,
+                allowFreeText: !assistance,
+              }))}
+              onSubmit={(answers) => {
+                void respondQuestion(
+                  conversationId,
+                  request.id,
+                  answers.map((answer) => ({
+                    questionId: answer.questionId,
+                    selected: answer.selected,
+                    custom: answer.freeText ?? null,
+                  })),
+                  false,
+                );
+              }}
+              onSkip={() => {
+                void respondQuestion(conversationId, request.id, [], true);
+              }}
+            />
+            {assistance && layoutMode === 'agent' ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" size="sm" variant="secondary" onClick={() => {
+                  const ui = useUiStore.getState();
+                  ui.setAgentRightPanel('agent');
+                  ui.setAgentPanelTab(assistance.header === 'computer_browser' ? 'browser' : 'screen');
+                  ui.setAgentPanelOpen(true);
+                }}>Abrir ambiente para ajudar</Button>
+                <span className="text-[11px] text-foreground-muted">Assuma e devolva o controle no painel antes de responder.</span>
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
       {showGoalAttention && goal ? (
         <GoalAttentionCard
           goal={goal}
@@ -244,16 +263,23 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
  * requisito é mostrar em tempo real, então ele encolhe/reserva largura em vez
  * de sumir.
  */
-export function CodeContextMeterChip({ conversationId }: { conversationId: string }) {
+export function CodeContextMeterChip({
+  conversationId,
+  showCache = true,
+}: {
+  conversationId: string;
+  /** The Agents layout only needs context, not the prompt-cache segment. */
+  showCache?: boolean;
+}) {
   const stats = useCodeStore((state) => state.byConversation[conversationId]?.context);
   const cache = useCacheStore((state) => state.byConversation[conversationId] ?? null);
   const showCacheIndicator = useAppStore(
     (state) => state.settings.cache?.showIndicator !== false,
   );
-  const showCache = showCacheIndicator && cache != null;
+  const cacheVisible = showCache && showCacheIndicator && cache != null;
 
   if (!stats) {
-    if (!showCache) return null;
+    if (!cacheVisible) return null;
     return (
       <div className="hidden sm:block">
         <CacheHitChip cache={cache} />
@@ -263,7 +289,7 @@ export function CodeContextMeterChip({ conversationId }: { conversationId: strin
 
   return (
     <div className="hidden sm:block">
-      <ContextMeter stats={stats} cache={showCache ? cache : undefined} />
+      <ContextMeter stats={stats} cache={cacheVisible ? cache : undefined} />
     </div>
   );
 }

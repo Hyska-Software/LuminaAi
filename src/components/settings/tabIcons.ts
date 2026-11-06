@@ -4,6 +4,7 @@
  * same icon per tab (ids/labels live in `lib/settingsTabs`).
  */
 import {
+  Bot,
   Database,
   Info,
   KeyRound,
@@ -21,6 +22,7 @@ export const SETTINGS_TAB_ICONS: Record<SettingsTabId, LucideIcon> = {
   model: Sparkles,
   instructions: ScrollText,
   tools: Wrench,
+  agents: Bot,
   data: Database,
   about: Info,
 };

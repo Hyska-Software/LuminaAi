@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context};
 use include_dir::{include_dir, Dir};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::domain::SkillSummary;
@@ -225,6 +226,22 @@ pub struct Skill {
     /// Absolute directory that contains `SKILL.md`.
     pub dir: PathBuf,
     pub source: SkillSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDraft {
+    pub name: String,
+    pub description: String,
+    pub content: String,
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillVersion {
+    pub file: String,
+    pub saved_at: i64,
 }
 
 impl Skill {
@@ -718,6 +735,173 @@ fn collect_files(dir: &Path, out: &mut Vec<String>, depth: usize) -> anyhow::Res
 /* Tools                                                               */
 /* ------------------------------------------------------------------ */
 
+/// Writes a user skill atomically. Existing content is preserved under
+/// `<data>/skill-history/<name>/` before an overwrite.
+pub fn save_user_skill(data_dir: &Path, draft: &SkillDraft, now: i64) -> anyhow::Result<Skill> {
+    let name = draft.name.trim().to_string();
+    let description = draft.description.trim().to_string();
+    let content = draft.content.trim_end().to_string();
+    if !is_valid_skill_name(&name) {
+        bail!("SKILL_INVALID: nome inválido (use [a-z0-9] e hífens, até {MAX_NAME_CHARS} caracteres)");
+    }
+    if description.is_empty() || description.chars().count() > MAX_DESCRIPTION_CHARS {
+        bail!("SKILL_INVALID: a descrição deve ter de 1 a {MAX_DESCRIPTION_CHARS} caracteres");
+    }
+    if description.contains('\n') || description.contains('\r') {
+        bail!("SKILL_INVALID: a descrição deve ocupar uma única linha");
+    }
+    if content.is_empty() || content.len() > MAX_BODY_BYTES {
+        bail!("SKILL_INVALID: o conteúdo deve ter de 1 byte a 512 KB");
+    }
+    let root = data_dir.join(USER_DIR);
+    let history_root = data_dir.join("skill-history").join(&name);
+    std::fs::create_dir_all(&root).context("criar pasta de skills do usuário")?;
+    std::fs::create_dir_all(&history_root).context("criar histórico de skills")?;
+    let root = root.canonicalize().context("resolver pasta de skills")?;
+    let target = root.join(&name);
+    let raw = format!("---\nname: {name}\ndescription: {description}\n---\n{content}\n");
+    if target.exists() {
+        if !draft.overwrite {
+            bail!("SKILL_EXISTS: a skill `{name}` já existe; use overwrite para substituir");
+        }
+        let metadata = std::fs::symlink_metadata(&target).context("inspecionar skill existente")?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            bail!("SKILL_UNSAFE: o destino da skill não é um diretório regular");
+        }
+        let canonical_target = target.canonicalize().context("resolver skill existente")?;
+        if canonical_target.parent() != Some(root.as_path()) {
+            bail!("SKILL_UNSAFE: a skill escapa da pasta do usuário");
+        }
+        let current = canonical_target.join(SKILL_FILE);
+        if current.is_file() {
+            let history_file = history_root.join(format!(
+                "{now}-{}.md",
+                uuid::Uuid::new_v4().simple()
+            ));
+            std::fs::copy(&current, &history_file).context("arquivar versão anterior da skill")?;
+        }
+        let tmp = canonical_target.join(format!(".SKILL.md.{}.tmp", uuid::Uuid::new_v4().simple()));
+        {
+            let mut file = std::fs::File::create(&tmp).context("criar arquivo temporário da skill")?;
+            std::io::Write::write_all(&mut file, raw.as_bytes())
+                .context("escrever skill temporária")?;
+            file.sync_all().context("sincronizar skill temporária")?;
+        }
+        if current.exists() {
+            std::fs::remove_file(&current).context("remover versão anterior da skill")?;
+        }
+        std::fs::rename(&tmp, &current).context("instalar skill atualizada")?;
+        return load_skill(&canonical_target, SkillSource::User);
+    }
+    let tmp = root.join(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir(&tmp).context("criar diretório temporário da skill")?;
+    let tmp_file = tmp.join(SKILL_FILE);
+    {
+        let mut file = std::fs::File::create(&tmp_file).context("criar SKILL.md temporário")?;
+        std::io::Write::write_all(&mut file, raw.as_bytes()).context("escrever SKILL.md temporário")?;
+        file.sync_all().context("sincronizar SKILL.md temporário")?;
+    }
+    std::fs::rename(&tmp, &target).context("instalar nova skill")?;
+    load_skill(&target, SkillSource::User)
+}
+
+/// Lists archived versions of one user skill, newest first.
+pub fn list_skill_versions(data_dir: &Path, name: &str) -> anyhow::Result<Vec<SkillVersion>> {
+    if !is_valid_skill_name(name) {
+        bail!("SKILL_INVALID: nome inválido");
+    }
+    let dir = data_dir.join("skill-history").join(name);
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error).context("ler histórico de skills"),
+    };
+    let mut versions = Vec::new();
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let file = entry.file_name().to_string_lossy().to_string();
+        if !file.ends_with(".md") {
+            continue;
+        }
+        let saved_at = file
+            .split('-')
+            .next()
+            .and_then(|value| value.parse::<i64>().ok())
+            .unwrap_or(0);
+        versions.push(SkillVersion { file, saved_at });
+    }
+    versions.sort_by(|left, right| {
+        right
+            .saved_at
+            .cmp(&left.saved_at)
+            .then_with(|| right.file.cmp(&left.file))
+    });
+    Ok(versions)
+}
+
+/// Tool definition for agent-authored skills.
+pub fn save_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "skill_save".to_string(),
+        description: "Create or replace a reusable user skill. Writes only SKILL.md under \
+                      <app-data>/skills/<name>/ and archives the previous version."
+            .to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "maxLength": 64 },
+                "description": { "type": "string", "maxLength": 1024 },
+                "content": { "type": "string", "maxLength": 524288 },
+                "overwrite": { "type": "boolean" }
+            },
+            "required": ["name", "description", "content"],
+            "additionalProperties": false
+        }),
+    }
+}
+
+pub fn run_save(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
+    run_save_with(&rt.data_dir, args)
+}
+
+/// Shared implementation for Chat (ToolRuntime) and Code (ToolCtx).
+pub fn run_save_with(data_dir: &Path, args: &Value) -> ToolOutcome {
+    let Some(name) = json_str(args, "name") else {
+        return ToolOutcome::error("o argumento `name` é obrigatório");
+    };
+    let Some(description) = json_str(args, "description") else {
+        return ToolOutcome::error("o argumento `description` é obrigatório");
+    };
+    let Some(content) = json_str(args, "content") else {
+        return ToolOutcome::error("o argumento `content` é obrigatório");
+    };
+    let draft = SkillDraft {
+        name,
+        description,
+        content,
+        overwrite: args
+            .get("overwrite")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    };
+    match save_user_skill(data_dir, &draft, crate::domain::now_ms()) {
+        Ok(skill) => ToolOutcome {
+            content: json!({
+                "saved": true,
+                "name": skill.name,
+                "path": skill.dir.display().to_string(),
+                "overwritten": draft.overwrite,
+            })
+            .to_string(),
+            summary: Some(format!("Skill salva: {}", skill.name)),
+            ..Default::default()
+        },
+        Err(error) => ToolOutcome::error(format!("{error:#}")),
+    }
+}
+
 pub fn list_definition() -> ToolDefinition {
     ToolDefinition {
         name: "list_skills".to_string(),
@@ -760,9 +944,13 @@ pub fn run_list(rt: &ToolRuntime) -> ToolOutcome {
     match catalog_with_roots(&rt.data_dir, &rt.skills_roots) {
         Ok(skills) => {
             let disabled = rt.settings.disabled_skills.as_slice();
+            let allowed = rt.options.allowed_skills.as_deref();
             let active: Vec<&Skill> = skills
                 .iter()
                 .filter(|skill| is_enabled(&skill.name, disabled))
+                .filter(|skill| {
+                    allowed.map_or(true, |names| names.iter().any(|name| name == &skill.name))
+                })
                 .collect();
             let hidden = skills.len() - active.len();
             let items: Vec<Value> = active
@@ -819,8 +1007,12 @@ pub fn run_read(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
                     &rt.skills_roots,
                 )
                 .map(|skills| {
+                    let allowed = rt.options.allowed_skills.as_deref();
                     skills
                         .iter()
+                        .filter(|skill| {
+                            allowed.map_or(true, |names| names.iter().any(|name| name == &skill.name))
+                        })
                         .map(|skill| skill.name.clone())
                         .collect::<Vec<_>>()
                         .join(", ")
@@ -849,6 +1041,14 @@ pub fn run_read(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
              somente as skills ativas.",
             skill.name
         ));
+    }
+    if let Some(allowed) = rt.options.allowed_skills.as_deref() {
+        if !allowed.iter().any(|name| name == &skill.name) {
+            return ToolOutcome::error(format!(
+                "a skill `{}` não está autorizada para este agente",
+                skill.name
+            ));
+        }
     }
 
     let files = match skill.files() {
@@ -925,6 +1125,7 @@ mod tests {
             options: Default::default(),
             settings: Settings::default(),
             cancel: tokio_util::sync::CancellationToken::new(),
+            agent_hooks: None,
             data_dir: temp.path.clone(),
             // Tests never read the developer's real skill repositories.
             skills_roots: Vec::new(),
@@ -1739,4 +1940,57 @@ mod tests {
             "o catálogo precisa expor todas as skills externas descobertas"
         );
     }
+
+    #[test]
+    fn save_user_skill_validates_archives_and_roundtrips() {
+        let temp = tempfile::tempdir().expect("temp");
+        let draft = SkillDraft {
+            name: "revisao-pr".to_string(),
+            description: "Revisar pull requests.".to_string(),
+            content: "# Revisão\n\nLeia o diff e liste riscos.".to_string(),
+            overwrite: false,
+        };
+        let saved = save_user_skill(temp.path(), &draft, 1_700_000_000_000).expect("save");
+        assert_eq!(saved.name, "revisao-pr");
+        assert!(saved.body.contains("Leia o diff"));
+        let read = read(temp.path(), "revisao-pr").expect("read").expect("exists");
+        assert_eq!(read.description, "Revisar pull requests.");
+        assert!(save_user_skill(temp.path(), &draft, 1_700_000_000_001).is_err());
+        let updated = save_user_skill(
+            temp.path(),
+            &SkillDraft {
+                content: "# Revisão v2\n\nListe testes.".to_string(),
+                overwrite: true,
+                ..draft
+            },
+            1_700_000_000_002,
+        )
+        .expect("overwrite");
+        assert!(updated.body.contains("v2"));
+        assert_eq!(
+            list_skill_versions(temp.path(), "revisao-pr")
+                .expect("versions")
+                .len(),
+            1
+        );
+        assert!(save_user_skill(
+            temp.path(),
+            &SkillDraft {
+                name: "Nome Inválido".to_string(),
+                ..updated_draft()
+            },
+            1
+        )
+        .is_err());
+    }
+
+    fn updated_draft() -> SkillDraft {
+        SkillDraft {
+            name: "revisao-pr".to_string(),
+            description: "Descrição.".to_string(),
+            content: "corpo".to_string(),
+            overwrite: false,
+        }
+    }
 }
+

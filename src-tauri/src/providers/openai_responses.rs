@@ -174,11 +174,28 @@ fn build_input(request: &CompletionRequest) -> Vec<Value> {
             HistoryRole::System => {}
             HistoryRole::User => input.push(user_item(message)),
             HistoryRole::Assistant => append_assistant(message, &mut input),
-            HistoryRole::Tool => input.push(json!({
-                "type": "function_call_output",
-                "call_id": message.tool_call_id.clone().unwrap_or_default(),
-                "output": message.text,
-            })),
+            HistoryRole::Tool => {
+                let output = if message.images.is_empty() {
+                    json!(message.text)
+                } else {
+                    let mut content = vec![json!({
+                        "type": "input_text",
+                        "text": message.text,
+                    })];
+                    for image in &message.images {
+                        content.push(json!({
+                            "type": "input_image",
+                            "image_url": image_data_url(image),
+                        }));
+                    }
+                    json!(content)
+                };
+                input.push(json!({
+                    "type": "function_call_output",
+                    "call_id": message.tool_call_id.clone().unwrap_or_default(),
+                    "output": output,
+                }));
+            }
         }
     }
     // The plan route rejects `{role: "system"}` input items outright; the system
@@ -669,6 +686,20 @@ mod tests {
     use crate::catalog::{CatalogFile, ProviderAuth};
     use crate::providers::{ProviderConfig, ToolDefinition};
     use tokio_util::sync::CancellationToken;
+
+    #[test]
+    fn tool_image_is_sent_in_function_call_output_content() {
+        let mut request = test_request(RequestProfile::Standard, ReasoningRequest::Auto);
+        let mut message = HistoryMessage::tool_result("call_1", "computer_screenshot", "ok");
+        message.images.push(crate::providers::ImagePart {
+            mime_type: "image/jpeg".to_string(),
+            data_base64: "abc".to_string(),
+        });
+        request.history = vec![message];
+        let input = build_input(&request);
+        assert_eq!(input[0]["type"], json!("function_call_output"));
+        assert_eq!(input[0]["output"][1]["type"], json!("input_image"));
+    }
 
     fn test_request(profile: RequestProfile, reasoning: ReasoningRequest) -> CompletionRequest {
         let catalog = CatalogFile::load().expect("catalog");

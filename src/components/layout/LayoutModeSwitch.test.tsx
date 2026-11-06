@@ -17,15 +17,17 @@ afterEach(() => {
 });
 
 describe('LayoutModeSwitch', () => {
-  it('renders the group and both modes, marking the active one', () => {
+  it('renders the group and the three modes, marking the active one', () => {
     render(<LayoutModeSwitch />);
 
     expect(screen.getByRole('group', { name: 'Modo do aplicativo' })).toBeTruthy();
 
     const chat = screen.getByRole('button', { name: 'Chat' });
     const code = screen.getByRole('button', { name: 'Code' });
+    const agents = screen.getByRole('button', { name: 'Agentes' });
     expect(chat.getAttribute('aria-pressed')).toBe('true');
     expect(code.getAttribute('aria-pressed')).toBe('false');
+    expect(agents.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('uses icons instead of visible labels, keeping accessible names and hints', () => {
@@ -68,6 +70,16 @@ describe('LayoutModeSwitch', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
 
+    expect(useUiStore.getState().layoutMode).toBe('chat');
+  });
+
+  it('switches to Agentes and back without losing the choice', () => {
+    render(<LayoutModeSwitch />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Agentes' }));
+    expect(useUiStore.getState().layoutMode).toBe('agent');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
     expect(useUiStore.getState().layoutMode).toBe('chat');
   });
 });
