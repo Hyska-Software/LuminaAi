@@ -682,6 +682,7 @@ pub fn run_with_hooks(
                 "agent",
                 Some(agent_id),
                 content.trim(),
+                &[],
                 now,
             ) {
                 Ok(message) => {

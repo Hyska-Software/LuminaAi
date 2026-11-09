@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS agent_channel_messages (
   role        TEXT NOT NULL,
   agent_id    TEXT,
   content     TEXT NOT NULL,
+  attachments TEXT NOT NULL DEFAULT '[]',
   created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_agent_channel_messages
@@ -1081,6 +1082,17 @@ fn table_columns(conn: &Connection, table: &str) -> Result<Vec<(String, bool)>> 
         .with_context(|| format!("falha ao ler colunas de {table}"))
 }
 
+/// Shared channels: `attachments` (JSON) added after the first release; old
+/// messages get an empty list.
+fn migrate_agent_channel_messages_schema(conn: &Connection) -> Result<()> {
+    ensure_column(
+        conn,
+        "agent_channel_messages",
+        "attachments",
+        "ALTER TABLE agent_channel_messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'",
+    )
+}
+
 /// Migração aditiva e idempotente da tabela `artifacts`:
 ///
 /// 1. bancos anteriores à Biblioteca ganham `favorite INTEGER NOT NULL DEFAULT 0`;
@@ -1933,6 +1945,7 @@ fn agent_channel_message_from_row(row: &Row<'_>) -> rusqlite::Result<AgentChanne
         agent_id: row.get(3)?,
         content: row.get(4)?,
         created_at: row.get(5)?,
+        attachments: decode_json(&row.get::<_, String>(6)?),
     })
 }
 
@@ -2679,6 +2692,8 @@ impl Db {
         migrate_agents_avatar_schema(conn)?;
         // Biblioteca: `favorite` + `conversation_id` nullable (uploads do usuário).
         migrate_artifacts_schema(conn)?;
+        // Canais: anexos por mensagem (coluna JSON aditiva).
+        migrate_agent_channel_messages_schema(conn)?;
         // Cache de prompt: colunas aditivas em `usage_log` (as tabelas novas são
         // criadas pelo próprio `SCHEMA` com `IF NOT EXISTS`).
         migrate_usage_log_schema(conn)?;
@@ -5783,7 +5798,7 @@ impl Db {
         let limit = limit.unwrap_or(200).clamp(1, 500) as i64;
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, channel_id, role, agent_id, content, created_at \
+            "SELECT id, channel_id, role, agent_id, content, created_at, attachments \
              FROM agent_channel_messages WHERE channel_id = ?1 \
              ORDER BY created_at DESC, id DESC LIMIT ?2",
         )?;
@@ -5799,14 +5814,17 @@ impl Db {
         role: &str,
         agent_id: Option<&str>,
         content: &str,
+        attachments: &[AttachmentInfo],
         now: i64,
     ) -> Result<AgentChannelMessage> {
         let id = uuid::Uuid::new_v4().to_string();
+        let attachments_json = serde_json::to_string(attachments).unwrap_or_else(|_| "[]".to_string());
         let conn = self.conn.lock();
         conn.execute(
-            "INSERT INTO agent_channel_messages (id, channel_id, role, agent_id, content, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, channel_id, role, agent_id, content, now],
+            "INSERT INTO agent_channel_messages \
+             (id, channel_id, role, agent_id, content, created_at, attachments) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, channel_id, role, agent_id, content, now, attachments_json],
         )?;
         conn.execute(
             "UPDATE agent_channels SET updated_at = ?2 WHERE id = ?1",
@@ -5839,6 +5857,7 @@ impl Db {
             role: role.to_string(),
             agent_id: agent_id.map(str::to_string),
             content: content.to_string(),
+            attachments: attachments.to_vec(),
             created_at: now,
         })
     }
@@ -8415,7 +8434,7 @@ mod tests {
         assert_eq!(db.list_agent_channels().expect("channels").len(), 1);
 
         let message = db
-            .append_agent_channel_message(&channel.id, "user", None, "Olá", now_ms())
+            .append_agent_channel_message(&channel.id, "user", None, "Olá", &[], now_ms())
             .expect("message");
         assert_eq!(message.role, "user");
         assert_eq!(
@@ -8449,6 +8468,49 @@ mod tests {
         db.delete_agent_channel(&channel.id).expect("delete channel");
         assert!(db.list_agent_channels().expect("channels").is_empty());
         assert!(db.get_conversation(&thread.id).expect("get").is_none());
+    }
+
+    #[test]
+    fn agent_channel_messages_roundtrip_attachments() {
+        let db = test_db();
+        let agent = db.create_agent(&agent_input("Ana")).expect("agent");
+        let channel = db
+            .create_agent_channel(
+                &crate::agents::AgentChannelInput {
+                    name: "Anexos".to_string(),
+                    member_ids: vec![agent.id.clone()],
+                    leader_agent_id: None,
+                },
+                now_ms(),
+            )
+            .expect("channel");
+        let attachment = AttachmentInfo {
+            id: "att-1".to_string(),
+            name: "contrato.pdf".to_string(),
+            mime_type: "application/pdf".to_string(),
+            size: 2048,
+            kind: "pdf".to_string(),
+            page_count: Some(2),
+            ..Default::default()
+        };
+
+        let message = db
+            .append_agent_channel_message(
+                &channel.id,
+                "user",
+                None,
+                "olá",
+                std::slice::from_ref(&attachment),
+                now_ms(),
+            )
+            .expect("message");
+        assert_eq!(message.attachments, vec![attachment.clone()]);
+
+        let listed = db
+            .list_agent_channel_messages(&channel.id, Some(10))
+            .expect("messages");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].attachments, vec![attachment]);
     }
 
     #[test]
@@ -8525,6 +8587,44 @@ mod tests {
     }
 
     #[test]
+    fn migrates_legacy_agent_channel_messages_with_attachments_column() {
+        let temp = TempDir::new("lumina-db-legacy-channel-messages");
+        let path = temp.path.join("lumina.db");
+        {
+            let conn = rusqlite::Connection::open(&path).expect("legacy connection");
+            conn.execute_batch(
+                "CREATE TABLE agent_channels (
+                   id TEXT PRIMARY KEY,
+                   name TEXT NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL
+                 );
+                 CREATE TABLE agent_channel_messages (
+                   id TEXT PRIMARY KEY,
+                   channel_id TEXT NOT NULL,
+                   role TEXT NOT NULL,
+                   agent_id TEXT,
+                   content TEXT NOT NULL,
+                   created_at INTEGER NOT NULL
+                 );
+                 INSERT INTO agent_channels (id, name, created_at, updated_at)
+                   VALUES ('c1', 'Geral', 1, 1);
+                 INSERT INTO agent_channel_messages
+                   (id, channel_id, role, agent_id, content, created_at)
+                   VALUES ('m1', 'c1', 'user', NULL, 'oi', 1);",
+            )
+            .expect("legacy channel tables");
+        }
+
+        let db = Db::open(&path).expect("migrate legacy messages");
+        let messages = db
+            .list_agent_channel_messages("c1", Some(10))
+            .expect("messages");
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].attachments.is_empty());
+    }
+
+    #[test]
     fn event_routines_are_not_scheduled_and_record_channel_events() {
         let db = test_db();
         let agent = db.create_agent(&agent_input("Eventos")).expect("agent");
@@ -8567,7 +8667,7 @@ mod tests {
                 now_ms(),
             )
             .expect("channel");
-        db.append_agent_channel_message(&channel.id, "user", None, "oi", now_ms())
+        db.append_agent_channel_message(&channel.id, "user", None, "oi", &[], now_ms())
             .expect("message");
         let events = db.list_unprocessed_agent_events(10).expect("events");
         assert!(events.iter().any(|event| event.kind == "channel.message"));

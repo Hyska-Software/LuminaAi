@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{PermissionMode, ReasoningSelection};
+use crate::domain::{AttachmentInfo, PermissionMode, ReasoningSelection};
 
 pub mod avatar;
 pub use avatar::{
@@ -902,6 +902,9 @@ pub struct AgentChannelMessage {
     pub role: String,
     pub agent_id: Option<String>,
     pub content: String,
+    /// Files attached by the author (JSON column, default `[]`).
+    #[serde(default)]
+    pub attachments: Vec<AttachmentInfo>,
     pub created_at: i64,
 }
 

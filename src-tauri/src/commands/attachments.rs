@@ -217,6 +217,22 @@ fn path_list(paths: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+/// Resolves attachment ids from the renderer into stored metadata (order kept).
+pub(crate) fn resolve_attachments(
+    db: &Db,
+    ids: &[String],
+) -> Result<Vec<AttachmentInfo>, String> {
+    let mut attachments = Vec::with_capacity(ids.len());
+    for id in ids {
+        let stored = db
+            .get_attachment(id)
+            .map_err(to_error)?
+            .ok_or_else(|| format!("o anexo `{id}` não existe"))?;
+        attachments.push(stored.info());
+    }
+    Ok(attachments)
+}
+
 /* ------------------------------------------------------------------ */
 /* Clipboard paste (Ctrl+V)                                            */
 /* ------------------------------------------------------------------ */
@@ -604,6 +620,20 @@ mod tests {
             "base64 do PNG"
         );
         assert!(content.content.is_none(), "imagem não trafega texto");
+    }
+
+    #[test]
+    fn resolve_attachments_keeps_order_and_rejects_missing_ids() {
+        let data = TempDir::new("attach-resolve");
+        let db = test_db();
+        let first = store_attachment(&db, &data.path, "grafico.png", PNG).expect("imagem");
+        let second = store_attachment(&db, &data.path, "nota.txt", b"ola").expect("texto");
+
+        let resolved = resolve_attachments(&db, &[second.id.clone(), first.id.clone()])
+            .expect("resolver anexos");
+        assert_eq!(resolved[0].id, second.id);
+        assert_eq!(resolved[1].id, first.id);
+        assert!(resolve_attachments(&db, &["nao-existe".to_string()]).is_err());
     }
 
     #[test]

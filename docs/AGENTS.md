@@ -97,9 +97,9 @@ conversa principal, com `source` schedule/event/manual, `scheduled_for`,
 
 ### `agent_channels` / `agent_channel_members` / `agent_channel_messages`
 
-Um canal tem nome, membros (até 6) e um histórico cronológico `user`/`agent`.
-Cada membro tem uma thread privada oculta (`conversations.channel_id`) usada para
-o turno real.
+Um canal tem nome, membros (até 6) e um histórico cronológico `user`/`agent`;
+cada mensagem guarda `attachments` (JSON `[]` nas antigas). Cada membro tem uma
+thread privada oculta (`conversations.channel_id`) usada para o turno real.
 
 ## 3. Capabilities — aplicadas no backend
 
@@ -321,18 +321,27 @@ com erro — o fallback é de rota, não um retry infinito.
   dele estiver ativo. `task_wait` não entra no catálogo do líder nesse turno.
   Menções `@nome` viram dicas para o líder; sem líder, o roteamento antigo
   (menções ou todos) continua. Arquivar/excluir o líder limpa o campo.
+- O schema `agent_channel_messages` guarda `attachments` (JSON com os metadados
+  de `AttachmentInfo`; coluna aditiva, mensagens antigas têm `[]`).
 - A view do canal espelha o chat padrão dos agentes (mesma coluna, mensagens,
   rolagem inteligente e shell do composer), **sem seletor de modelos**: cada
   membro já tem a própria rota. O header mostra a pilha de avatares dos membros,
   a contagem e os nomes do grupo; `@` navega os membros por teclado e o envio
-  segue a preferência `sendKey` do chat.
-- Publicar um texto: Grava a mensagem `user`, e cada membro **mencionado**
-  (ou todos, quando não há `@nome`/`@everyone`) executa um turno em sua thread
-  privada oculta. O histórico compartilhado entra como `surface_item`
-  `kind="channel"` (volátil, últimas 24 mensagens/12 KiB, delimitado e marcado
-  como não confiável), não como mensagem `user` duplicada. A resposta é
-  publicada no canal e um evento `lumina:agent-channel-updated` atualiza a view;
-  como os turnos são sequenciais, o segundo agente vê a resposta do primeiro.
+  segue a preferência `sendKey` do chat. O composer aceita **anexos** pelo botão
+  `+`, por `Ctrl+V` (clipboard) e por drag & drop roteado pelo `App.tsx`
+  (`lumina:channel-drop`): os chips mostram tipo/tamanho, miniatura de imagens e
+  prévia ao clicar; remover o chip apaga o arquivo importado.
+- Publicar uma mensagem: Grava a mensagem `user` (texto pode ser vazio quando há
+  anexos), e cada membro **mencionado** (ou todos, quando não há
+  `@nome`/`@everyone`) executa um turno em sua thread privada oculta. Os anexos
+  do post entram no payload do turno (`attachment_ids`): o texto extraído é
+  sempre injetado e imagens são enviadas quando o modelo do membro tem visão. O
+  histórico compartilhado entra como `surface_item` `kind="channel"` (volátil,
+  últimas 24 mensagens/12 KiB, delimitado e marcado como não confiável, com os
+  nomes dos anexos de cada mensagem), não como mensagem `user` duplicada. A
+  resposta é publicada no canal e um evento `lumina:agent-channel-updated`
+  atualiza a view; como os turnos são sequenciais, o segundo agente vê a resposta
+  do primeiro.
 - Threads de canal são ocultas das listas/paleta (`channelId`), mas preservadas
   ao sair do canal; excluir o canal remove as threads derivadas. A criação da
   thread do membro é serializada para não duplicar histórico em posts

@@ -480,7 +480,15 @@ export default function App() {
           if (event.payload.type === 'drop') {
             const paths = event.payload.paths ?? [];
             if (paths.length) {
-              void useChatStore.getState().addAttachments(paths);
+              if (uiState.layoutMode === 'agent' && uiState.activeChannelId) {
+                // The channel composer owns its own attachments; the chat
+                // composer is not mounted in the Agentes layout.
+                window.dispatchEvent(
+                  new CustomEvent('lumina:channel-drop', { detail: { paths } }),
+                );
+              } else {
+                void useChatStore.getState().addAttachments(paths);
+              }
             }
           }
         })

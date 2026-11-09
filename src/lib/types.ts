@@ -1070,6 +1070,7 @@ export interface AgentChannelMessage {
   role: 'user' | 'agent' | 'system';
   agentId: string | null;
   content: string;
+  attachments: AttachmentInfo[];
   createdAt: number;
 }
 

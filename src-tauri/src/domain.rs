@@ -197,7 +197,7 @@ pub struct Citation {
     pub site_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentInfo {
     pub id: String,

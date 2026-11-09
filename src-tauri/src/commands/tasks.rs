@@ -313,6 +313,7 @@ pub async fn scheduler_tick(app: AppHandle) {
                             task.title,
                             task.result.as_deref().unwrap_or("AGENT_TASK_DEADLINE")
                         ),
+                        &[],
                         crate::domain::now_ms(),
                     );
                     let _ = app.emit(
@@ -370,6 +371,7 @@ fn publish_task_result_to_channel(
         "agent",
         Some(&task.owner_agent_id),
         &message,
+        &[],
         crate::domain::now_ms(),
     )
     .ok()?;
@@ -891,6 +893,7 @@ fn finish_failure(app: &AppHandle, task: &AgentTask, message: &str) -> Result<()
             "system",
             None,
             &format!("Tarefa `{}` falhou: {message}", task.title),
+            &[],
             crate::domain::now_ms(),
         );
         let _ = app.emit(

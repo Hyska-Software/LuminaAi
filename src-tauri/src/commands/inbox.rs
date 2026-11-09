@@ -164,6 +164,7 @@ async fn deliver_inbox_item(app: AppHandle, item: AgentInboxItem) {
                     "agent",
                     Some(&agent.id),
                     &reply,
+                    &[],
                     now_ms(),
                 );
             }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -7,15 +7,21 @@ const mocks = vi.hoisted(() => ({
   listAgentChannelMessages: vi.fn(),
   listAgentTasks: vi.fn(),
   postAgentChannelMessage: vi.fn(),
+  importAttachments: vi.fn(),
+  importClipboardAttachments: vi.fn(),
+  deleteAttachment: vi.fn(),
 }));
 
+const dialog = vi.hoisted(() => ({ open: vi.fn() }));
+
 vi.mock('@/lib/api', () => ({ api: mocks }));
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: dialog.open }));
 vi.mock('sonner', () => ({
-  toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }),
+  toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
 }));
 
 import { useAgentStore, useUiStore } from '@/lib/store';
-import type { Agent, AgentChannel } from '@/lib/types';
+import type { Agent, AgentChannel, AttachmentInfo } from '@/lib/types';
 import { AgentChannelView } from './AgentChannelView';
 
 const channel: AgentChannel = {
@@ -78,6 +84,10 @@ beforeEach(() => {
   mocks.listAgentChannelMessages.mockResolvedValue([]);
   mocks.listAgentTasks.mockResolvedValue([]);
   mocks.postAgentChannelMessage.mockResolvedValue({ messages: [], errors: [] });
+  mocks.importAttachments.mockResolvedValue([]);
+  mocks.importClipboardAttachments.mockResolvedValue([]);
+  mocks.deleteAttachment.mockResolvedValue(undefined);
+  dialog.open.mockResolvedValue(null);
   useAgentStore.setState({
     agentsById: { 'agent-1': agent('agent-1', 'Ana'), 'agent-2': agent('agent-2', 'Bia') },
     orderedIds: ['agent-1', 'agent-2'],
@@ -202,7 +212,97 @@ describe('AgentChannelView — chat parity', () => {
     expect(mocks.postAgentChannelMessage).not.toHaveBeenCalled();
     fireEvent.keyDown(composer, { key: 'Enter' });
     await waitFor(() =>
-      expect(mocks.postAgentChannelMessage).toHaveBeenCalledWith('channel-1', 'primeira linha'),
+      expect(mocks.postAgentChannelMessage).toHaveBeenCalledWith('channel-1', 'primeira linha', []),
+    );
+  });
+});
+
+function attachmentInfo(overrides: Partial<AttachmentInfo> = {}): AttachmentInfo {
+  return {
+    id: 'att-pdf',
+    name: 'relatorio.pdf',
+    mimeType: 'application/pdf',
+    size: 2048,
+    kind: 'pdf',
+    ...overrides,
+  };
+}
+
+describe('AgentChannelView — anexos', () => {
+  it('colar arquivos com Ctrl+V importa e mostra o chip', async () => {
+    mocks.importClipboardAttachments.mockResolvedValue([attachmentInfo()]);
+    render(<AgentChannelView channelId="channel-1" onBack={() => {}} onEdit={() => {}} />);
+    const composer = await screen.findByLabelText('Mensagem para o canal Lançamento');
+
+    fireEvent.paste(composer, { clipboardData: { types: ['Files'], files: [] } });
+
+    await waitFor(() => expect(mocks.importClipboardAttachments).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('relatorio.pdf')).toBeTruthy();
+    expect(screen.getByText('PDF · 2 KB')).toBeTruthy();
+  });
+
+  it('não intercepta a colagem de texto', async () => {
+    render(<AgentChannelView channelId="channel-1" onBack={() => {}} onEdit={() => {}} />);
+    const composer = await screen.findByLabelText('Mensagem para o canal Lançamento');
+
+    fireEvent.paste(composer, {
+      clipboardData: { types: ['text/plain'], files: [], getData: () => 'texto' },
+    });
+
+    expect(mocks.importClipboardAttachments).not.toHaveBeenCalled();
+  });
+
+  it('anexa pelo botão + e publica somente com anexo', async () => {
+    dialog.open.mockResolvedValue('C:\\docs\\relatorio.pdf');
+    mocks.importAttachments.mockResolvedValue([attachmentInfo()]);
+    render(<AgentChannelView channelId="channel-1" onBack={() => {}} onEdit={() => {}} />);
+    await screen.findByLabelText('Mensagem para o canal Lançamento');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Anexar arquivos' }));
+    await waitFor(() =>
+      expect(mocks.importAttachments).toHaveBeenCalledWith(['C:\\docs\\relatorio.pdf']),
+    );
+    await screen.findByText('relatorio.pdf');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Publicar no canal' }));
+
+    await waitFor(() =>
+      expect(mocks.postAgentChannelMessage).toHaveBeenCalledWith('channel-1', '', ['att-pdf']),
+    );
+  });
+
+  it('mostra os anexos das mensagens do histórico', async () => {
+    mocks.listAgentChannelMessages.mockResolvedValue([
+      {
+        id: 'm-1',
+        channelId: 'channel-1',
+        role: 'user',
+        agentId: null,
+        content: 'olha o anexo',
+        attachments: [attachmentInfo()],
+        createdAt: 1,
+      },
+    ]);
+
+    render(<AgentChannelView channelId="channel-1" onBack={() => {}} onEdit={() => {}} />);
+
+    expect(await screen.findByText('olha o anexo')).toBeTruthy();
+    expect(screen.getByText('relatorio.pdf')).toBeTruthy();
+    expect(screen.getByText('PDF · 2 KB')).toBeTruthy();
+  });
+
+  it('drag & drop roteado para o canal importa os arquivos', async () => {
+    render(<AgentChannelView channelId="channel-1" onBack={() => {}} onEdit={() => {}} />);
+    await screen.findByLabelText('Mensagem para o canal Lançamento');
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('lumina:channel-drop', { detail: { paths: ['C:\\a.pdf'] } }),
+      );
+    });
+
+    await waitFor(() =>
+      expect(mocks.importAttachments).toHaveBeenCalledWith(['C:\\a.pdf']),
     );
   });
 });

@@ -588,6 +588,7 @@ fn agent_message(
         "agent",
         Some(agent_id),
         content,
+        &[],
         crate::domain::now_ms(),
     ) {
         Ok(message) => message,

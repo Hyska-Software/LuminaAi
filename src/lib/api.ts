@@ -283,8 +283,12 @@ export const api = {
     invoke<AgentChannelMessage[]>('list_agent_channel_messages', { channelId }),
   listAgentChannelInboxCounts: () =>
     invoke<AgentInboxCount[]>('list_agent_channel_inbox_counts'),
-  postAgentChannelMessage: (channelId: string, content: string) =>
-    invoke<AgentChannelPostResult>('post_agent_channel_message', { channelId, content }),
+  postAgentChannelMessage: (channelId: string, content: string, attachmentIds: string[]) =>
+    invoke<AgentChannelPostResult>('post_agent_channel_message', {
+      channelId,
+      content,
+      attachmentIds,
+    }),
   mcpStatus: () => invoke<McpStatus>('mcp_status'),
   getConversation: (id: string) =>
     invoke<ConversationDetail | null>('get_conversation', { id }),

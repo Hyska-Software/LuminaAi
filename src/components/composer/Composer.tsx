@@ -8,7 +8,6 @@ import {
   type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
-import { open } from '@tauri-apps/plugin-dialog';
 import { ArrowUp, FilePlus, Globe, Plus, Square, Target, TriangleAlert } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
@@ -35,6 +34,11 @@ import {
 } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { AttachmentChips } from './AttachmentChips';
+import {
+  clipboardHasFiles,
+  clipboardText,
+  pickAttachmentPaths,
+} from './attachmentFiles';
 import { CacheMeterChip } from './CacheMeterChip';
 import { CodeSessionControls } from './CodeSessionControls';
 import { filterSlashCommands, type SlashCommand } from './commands';
@@ -50,13 +54,6 @@ import { PlanModeChip } from './PlanModeChip';
 import { SLASH_LISTBOX_ID, SlashMenu, slashOptionId } from './SlashMenu';
 import { ToolsToggle } from './ToolsToggle';
 
-/** Native picker filters: images and the documents `documents::extract` handles. */
-const ATTACHMENT_FILTERS = [
-  { name: 'Documentos', extensions: ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'json', 'csv'] },
-  { name: 'Imagens', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] },
-  { name: 'Todos os arquivos', extensions: ['*'] },
-];
-
 /** The textarea grows up to ten lines before scrolling (DESIGN §7). */
 const MAX_LINES = 10;
 
@@ -71,21 +68,6 @@ type ComposerMenu =
 function describeError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
-}
-
-/** True when the clipboard carries files (OS file copy, screenshot, image copy). */
-function clipboardHasFiles(data: DataTransfer | null): boolean {
-  if (!data) return false;
-  if (data.files && data.files.length > 0) return true;
-  return Array.from(data.types ?? []).includes('Files');
-}
-
-function clipboardText(data: DataTransfer | null): string {
-  try {
-    return data?.getData('text') ?? '';
-  } catch {
-    return '';
-  }
 }
 
 /** Message composer pinned to the bottom of the chat column. */
@@ -564,12 +546,7 @@ export function Composer() {
     if (attaching) return;
     setAttaching(true);
     try {
-      const selection = await open({
-        multiple: true,
-        title: 'Anexar arquivos',
-        filters: ATTACHMENT_FILTERS,
-      });
-      const paths = Array.isArray(selection) ? selection : selection ? [selection] : [];
+      const paths = await pickAttachmentPaths();
       if (paths.length) await useChatStore.getState().addAttachments(paths);
     } catch (error) {
       toast.error('Não foi possível anexar', { description: String(error) });

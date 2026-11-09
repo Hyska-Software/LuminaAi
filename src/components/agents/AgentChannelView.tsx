@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent as ReactClipboardEvent,
+} from 'react';
 import {
   ArrowDown,
   ArrowLeft,
@@ -8,6 +16,7 @@ import {
   Crown,
   ListChecks,
   Loader2,
+  Plus,
   Settings2,
   Users,
 } from 'lucide-react';
@@ -19,6 +28,12 @@ import { AgentTaskBoardDialog } from './AgentTaskBoardDialog';
 import { AgentPanelButton, AgentPanelOpener } from './AgentPanelToggle';
 import { TASK_STATUS_META, TASK_TERMINAL_STATUSES } from './agentTaskStatus';
 import { Markdown } from '@/components/chat/Markdown';
+import { AttachmentChips } from '@/components/composer/AttachmentChips';
+import {
+  clipboardHasFiles,
+  clipboardText,
+  pickAttachmentPaths,
+} from '@/components/composer/attachmentFiles';
 import { ComposerActivity } from '@/components/composer/ComposerActivity';
 import { useReduceMotion } from '@/components/layout/hooks';
 import { IconButton, Spinner } from '@/components/ui';
@@ -30,6 +45,7 @@ import type {
   AgentChannel,
   AgentChannelMessage,
   AgentTask,
+  AttachmentInfo,
 } from '@/lib/types';
 import { cn, copyText } from '@/lib/utils';
 
@@ -112,6 +128,8 @@ export function AgentChannelView({
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState('');
+  const [attachments, setAttachments] = useState<AttachmentInfo[]>([]);
+  const [attaching, setAttaching] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [taskBoardOpen, setTaskBoardOpen] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -120,10 +138,26 @@ export function AgentChannelView({
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
   const requestId = useRef(0);
+  const attachmentsRef = useRef<AttachmentInfo[]>([]);
   const [showJump, setShowJump] = useState(false);
   const reduceMotion = useReduceMotion();
   const activeChannelId = useUiStore((state) => state.activeChannelId);
   const setActiveChannelId = useUiStore((state) => state.setActiveChannelId);
+
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
+  /* Unsent channel attachments die with the view: the draft is local (unlike
+     the chat composer's store), so remove the stored rows on unmount. */
+  useEffect(
+    () => () => {
+      for (const attachment of attachmentsRef.current) {
+        void api.deleteAttachment(attachment.id).catch(() => undefined);
+      }
+    },
+    [],
+  );
 
   const names = useMemo(() => {
     const map = new Map<string, { name: string; avatar: AgentAvatarSpec }>();
@@ -195,6 +229,67 @@ export function AgentChannelView({
       resizeTextarea();
     });
   };
+
+  const importPaths = useCallback(async (paths: string[]) => {
+    if (!paths.length) return;
+    try {
+      const imported = await api.importAttachments(paths);
+      if (imported.length) {
+        setAttachments((current) => [...current, ...imported]);
+      }
+    } catch (error) {
+      toast.error('Falha ao importar anexo', { description: String(error) });
+    }
+  }, []);
+
+  const importClipboard = useCallback(async () => {
+    try {
+      const imported = await api.importClipboardAttachments();
+      if (imported.length) {
+        setAttachments((current) => [...current, ...imported]);
+      }
+    } catch (error) {
+      toast.error('Não foi possível colar o anexo', { description: String(error) });
+    }
+  }, []);
+
+  const handleAttach = async () => {
+    if (attaching) return;
+    setAttaching(true);
+    try {
+      await importPaths(await pickAttachmentPaths());
+    } catch (error) {
+      toast.error('Não foi possível anexar', { description: String(error) });
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  const handlePaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const data = event.clipboardData;
+    if (!clipboardHasFiles(data) && clipboardText(data).trim().length > 0) return;
+    event.preventDefault();
+    void importClipboard();
+  };
+
+  const removeAttachment = async (id: string) => {
+    setAttachments((current) => current.filter((attachment) => attachment.id !== id));
+    try {
+      await api.deleteAttachment(id);
+    } catch {
+      /* non-blocking */
+    }
+  };
+
+  /* Native drag & drop routed by `App.tsx` for the open channel. */
+  useEffect(() => {
+    const onDrop = (event: Event) => {
+      const detail = (event as CustomEvent<{ paths?: string[] }>).detail;
+      void importPaths(detail?.paths ?? []);
+    };
+    window.addEventListener('lumina:channel-drop', onDrop);
+    return () => window.removeEventListener('lumina:channel-drop', onDrop);
+  }, [importPaths]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const element = scrollRef.current;
@@ -277,7 +372,8 @@ export function AgentChannelView({
 
   const send = async () => {
     const content = draft.trim();
-    if (!content || sending) return;
+    const pendingAttachments = attachments;
+    if ((!content && pendingAttachments.length === 0) || sending) return;
     setSending(true);
     setErrors([]);
     setMentionOpen(false);
@@ -292,14 +388,21 @@ export function AgentChannelView({
       role: 'user',
       agentId: null,
       content,
+      attachments: pendingAttachments,
       createdAt: Date.now(),
     };
     setMessages((current) => [...current, optimistic]);
     setDraft('');
+    attachmentsRef.current = [];
+    setAttachments([]);
     setMentionIndex(0);
     requestAnimationFrame(resizeTextarea);
     try {
-      const result = await api.postAgentChannelMessage(channelId, content);
+      const result = await api.postAgentChannelMessage(
+        channelId,
+        content,
+        pendingAttachments.map((attachment) => attachment.id),
+      );
       setMessages(result.messages);
       setErrors(result.errors);
       if (result.errors.length > 0) {
@@ -310,6 +413,8 @@ export function AgentChannelView({
     } catch (error) {
       setMessages((current) => current.filter((message) => message.id !== optimistic.id));
       setDraft(content);
+      attachmentsRef.current = pendingAttachments;
+      setAttachments(pendingAttachments);
       void load(true);
       toast.error('Não foi possível publicar no canal', { description: String(error) });
     } finally {
@@ -342,6 +447,7 @@ export function AgentChannelView({
   const leader = channel.leaderAgentId
     ? (members.find((member) => member.id === channel.leaderAgentId) ?? null)
     : null;
+  const canPost = draft.trim().length > 0 || attachments.length > 0;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -461,12 +567,23 @@ export function AgentChannelView({
                       key={message.id}
                       className={cn('group/message flex flex-col items-end', spacing)}
                     >
-                      <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-3xl bg-user-bubble px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
-                        {message.content}
-                      </div>
-                      <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/message:opacity-100">
-                        <MessageCopyButton content={message.content} label="Copiar mensagem" />
-                      </div>
+                      {message.attachments.length > 0 ? (
+                        <AttachmentChips
+                          attachments={message.attachments}
+                          align="end"
+                          className="mb-1.5"
+                        />
+                      ) : null}
+                      {message.content ? (
+                        <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-3xl bg-user-bubble px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
+                          {message.content}
+                        </div>
+                      ) : null}
+                      {message.content ? (
+                        <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/message:opacity-100">
+                          <MessageCopyButton content={message.content} label="Copiar mensagem" />
+                        </div>
+                      ) : null}
                     </div>
                   );
                 }
@@ -627,6 +744,13 @@ export function AgentChannelView({
                       ))}
                     </div>
                   ) : null}
+                  {attachments.length > 0 ? (
+                    <AttachmentChips
+                      attachments={attachments}
+                      onRemove={(id) => void removeAttachment(id)}
+                      className="mb-2"
+                    />
+                  ) : null}
                   <textarea
                     ref={textareaRef}
                     value={draft}
@@ -657,6 +781,7 @@ export function AgentChannelView({
                       setMentionIndex(0);
                       setMentionOpen(/(?:^|\s)@([^\s@]*)$/.test(next));
                     }}
+                    onPaste={handlePaste}
                     onKeyDown={(event) => {
                       if (event.nativeEvent.isComposing) return;
 
@@ -703,6 +828,15 @@ export function AgentChannelView({
                   />
                 </div>
                 <div className="flex items-center gap-1 px-2 pb-2 pt-1">
+                  <IconButton
+                    label="Anexar arquivos"
+                    size="sm"
+                    variant="ghost"
+                    loading={attaching}
+                    onClick={() => void handleAttach()}
+                  >
+                    <Plus className="size-4" />
+                  </IconButton>
                   <div className="ml-auto flex items-center gap-1.5">
                     {sending ? (
                       <button
@@ -717,15 +851,15 @@ export function AgentChannelView({
                       <button
                         type="button"
                         onClick={() => void send()}
-                        disabled={!draft.trim()}
+                        disabled={!canPost}
                         aria-label="Publicar no canal"
                         className={cn(
                           'flex size-8 shrink-0 items-center justify-center rounded-full transition-[background-color,color,transform] duration-150',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                          draft.trim()
+                          canPost
                             ? 'bg-linear-to-br from-accent to-accent-hover text-accent-foreground hover:brightness-105'
                             : 'cursor-not-allowed bg-surface-active text-foreground-subtle',
-                          draft.trim() && !reduceMotion && 'active:scale-95',
+                          canPost && !reduceMotion && 'active:scale-95',
                         )}
                       >
                         <ArrowUp className="size-4" strokeWidth={2.25} />
