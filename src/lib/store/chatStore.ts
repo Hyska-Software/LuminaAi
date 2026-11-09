@@ -129,6 +129,7 @@ interface ChatState {
    */
   setReasoning: (reasoning: ReasoningSelection | null) => void;
   addAttachments: (paths: string[]) => Promise<void>;
+  importClipboardAttachments: () => Promise<void>;
   removeAttachment: (id: string) => Promise<void>;
   clearAttachments: () => void;
   send: (content: string, options?: SendOptions) => Promise<boolean>;
@@ -1928,6 +1929,16 @@ export const useChatStore = create<ChatState>()((set, get) => {
         set((state) => ({ pendingAttachments: [...state.pendingAttachments, ...imported] }));
       } catch (error) {
         toast.error('Falha ao importar anexo', { description: String(error) });
+      }
+    },
+
+    importClipboardAttachments: async () => {
+      try {
+        const imported = await api.importClipboardAttachments();
+        if (!imported.length) return;
+        set((state) => ({ pendingAttachments: [...state.pendingAttachments, ...imported] }));
+      } catch (error) {
+        toast.error('Não foi possível colar o anexo', { description: String(error) });
       }
     },
 

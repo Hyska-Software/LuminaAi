@@ -36,26 +36,39 @@ export interface BinaryPreviewProps extends ArtifactViewProps {
   onRetry?: () => void;
 }
 
-function ArtifactActions({ content, onRetry }: { content: ArtifactViewProps['content']; onRetry?: () => void }) {
+function ArtifactActions({
+  content,
+  onRetry,
+  showArtifactActions = true,
+}: {
+  content: ArtifactViewProps['content'];
+  onRetry?: () => void;
+  showArtifactActions?: boolean;
+}) {
   const { artifact } = content;
+  if (!showArtifactActions && !onRetry) return null;
   return (
     <div className="flex flex-wrap justify-center gap-2">
-      <Button
-        size="sm"
-        variant="secondary"
-        leftIcon={<Download className="size-3.5" />}
-        onClick={() => void saveArtifact(artifact.id, artifact.name)}
-      >
-        Salvar como…
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        leftIcon={<ExternalLink className="size-3.5" />}
-        onClick={() => void openArtifact(artifact.id)}
-      >
-        Abrir
-      </Button>
+      {showArtifactActions ? (
+        <>
+          <Button
+            size="sm"
+            variant="secondary"
+            leftIcon={<Download className="size-3.5" />}
+            onClick={() => void saveArtifact(artifact.id, artifact.name)}
+          >
+            Salvar como…
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            leftIcon={<ExternalLink className="size-3.5" />}
+            onClick={() => void openArtifact(artifact.id)}
+          >
+            Abrir
+          </Button>
+        </>
+      ) : null}
       {onRetry ? (
         <Button size="sm" variant="ghost" leftIcon={<RotateCcw className="size-3.5" />} onClick={onRetry}>
           Tentar novamente
@@ -71,6 +84,7 @@ function BinaryFallbackCard({
   className,
   detail,
   onRetry,
+  showArtifactActions = true,
 }: ArtifactViewProps & { detail?: string; onRetry?: () => void }) {
   const { artifact } = content;
   const meta = artifactKindMeta(artifact.kind);
@@ -90,7 +104,11 @@ function BinaryFallbackCard({
             <p className="mt-1.5 text-[11px] leading-relaxed text-foreground-muted">{detail}</p>
           ) : null}
         </div>
-        <ArtifactActions content={content} onRetry={onRetry} />
+        <ArtifactActions
+          content={content}
+          onRetry={onRetry}
+          showArtifactActions={showArtifactActions}
+        />
       </div>
     </div>
   );
@@ -101,7 +119,13 @@ function BinaryFallbackCard({
  * the file, adds a collapsible "Primeiros N bytes" hexdump. The card is always
  * rendered for `kind === 'binary'`, so it doubles as the loading/fallback state.
  */
-function BinaryArtifactPreview({ content, className, detail, onRetry }: BinaryPreviewProps) {
+function BinaryArtifactPreview({
+  content,
+  className,
+  detail,
+  onRetry,
+  showArtifactActions = true,
+}: BinaryPreviewProps) {
   const { artifact } = content;
   const { state, retry } = useArtifactPreview(artifact.id);
   const [expanded, setExpanded] = useState(true);
@@ -148,7 +172,11 @@ function BinaryArtifactPreview({ content, className, detail, onRetry }: BinaryPr
             </span>
           ) : null}
         </div>
-        <ArtifactActions content={content} onRetry={retryAction} />
+        <ArtifactActions
+          content={content}
+          onRetry={retryAction}
+          showArtifactActions={showArtifactActions}
+        />
       </div>
 
       {preview ? (
@@ -199,9 +227,25 @@ function BinaryArtifactPreview({ content, className, detail, onRetry }: BinaryPr
  * PDF/Office/Markdown fallbacks keep the plain card (and never double-fetch the
  * preview, which their own component already loaded).
  */
-export function BinaryPreview({ content, className, detail, onRetry }: BinaryPreviewProps) {
+export function BinaryPreview({ content, className, detail, onRetry, showArtifactActions }: BinaryPreviewProps) {
   if (content.artifact.kind === 'binary') {
-    return <BinaryArtifactPreview content={content} className={className} detail={detail} onRetry={onRetry} />;
+    return (
+      <BinaryArtifactPreview
+        content={content}
+        className={className}
+        detail={detail}
+        onRetry={onRetry}
+        showArtifactActions={showArtifactActions}
+      />
+    );
   }
-  return <BinaryFallbackCard content={content} className={className} detail={detail} onRetry={onRetry} />;
+  return (
+    <BinaryFallbackCard
+      content={content}
+      className={className}
+      detail={detail}
+      onRetry={onRetry}
+      showArtifactActions={showArtifactActions}
+    />
+  );
 }

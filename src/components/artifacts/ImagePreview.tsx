@@ -398,7 +398,7 @@ function isDataUrlPayload(value: string): boolean {
  * payload; unsupported/failed previews still try the raw base64 before falling
  * back to the binary card.
  */
-export function ImagePreview({ content, className }: ArtifactViewProps) {
+export function ImagePreview({ content, className, showArtifactActions }: ArtifactViewProps) {
   const { artifact, dataBase64, content: text } = content;
   const { state, retry } = useArtifactPreview(artifact.id);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -447,6 +447,7 @@ export function ImagePreview({ content, className }: ArtifactViewProps) {
       <BinaryPreview
         content={content}
         className={className}
+        showArtifactActions={showArtifactActions}
         detail={
           errorMessage ?? unsupportedReason ?? 'A imagem não tem dados para visualização.'
         }
@@ -460,6 +461,7 @@ export function ImagePreview({ content, className }: ArtifactViewProps) {
       <BinaryPreview
         content={content}
         className={className}
+        showArtifactActions={showArtifactActions}
         detail={unsupportedReason ?? 'Não foi possível decodificar a imagem.'}
         onRetry={() => {
           setLoadFailed(false);

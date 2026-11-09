@@ -14,8 +14,10 @@ vermelho, Rust em laranja, TypeScript em azul, Markdown em azul-claro, etc. —
 como em editores de código (VS Code/Zed), mantendo a árvore legível no tema
 claro e escuro.
 
-Superfícies atendidas: **FileTree** (aba Arquivos), **header da prévia** e
-**linha de arquivo da aba Alterações**. Pastas continuam com o par lucide
+Superfícies atendidas: **FileTree** (aba Arquivos), **header da prévia**,
+**linha de arquivo da aba Alterações** e os **chips de anexo do composer/chat**
+(o tile do chip usa o mesmo glifo por nome de arquivo; imagens continuam com a
+miniatura real). Pastas continuam com o par lucide
 `Folder`/`FolderOpen` (tingido pelo token `accent`), sem ícones coloridos — a
 distinção pasta × arquivo fica mais clara assim.
 

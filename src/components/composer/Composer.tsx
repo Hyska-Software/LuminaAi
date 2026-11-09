@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -70,6 +71,21 @@ type ComposerMenu =
 function describeError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+/** True when the clipboard carries files (OS file copy, screenshot, image copy). */
+function clipboardHasFiles(data: DataTransfer | null): boolean {
+  if (!data) return false;
+  if (data.files && data.files.length > 0) return true;
+  return Array.from(data.types ?? []).includes('Files');
+}
+
+function clipboardText(data: DataTransfer | null): string {
+  try {
+    return data?.getData('text') ?? '';
+  } catch {
+    return '';
+  }
 }
 
 /** Message composer pinned to the bottom of the chat column. */
@@ -562,6 +578,18 @@ export function Composer() {
     }
   };
 
+  /**
+   * Paste-to-attach: intercepts only when the clipboard carries files or when
+   * it has no text (some WebView builds do not expose files in `types`).
+   * Plain-text paste keeps the native textarea behavior.
+   */
+  const handlePaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const data = event.clipboardData;
+    if (!clipboardHasFiles(data) && clipboardText(data).trim().length > 0) return;
+    event.preventDefault();
+    void useChatStore.getState().importClipboardAttachments();
+  };
+
   const toggleWebSearch = () => {
     void useAppStore.getState().saveSettings({ webSearchEnabled: !webSearchEnabled });
   };
@@ -688,6 +716,7 @@ export function Composer() {
                 value={value}
                 onChange={handleChange}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 rows={1}
                 placeholder={placeholder}
                 aria-label={

@@ -23,7 +23,7 @@ export type ArtifactPreviewProps = ArtifactViewProps;
  * their structured preview through `api.getArtifactPreview` inside the
  * component, and unrenderable artifacts fall back to the binary card.
  */
-export function ArtifactPreview({ content, className }: ArtifactPreviewProps) {
+export function ArtifactPreview({ content, className, showArtifactActions }: ArtifactPreviewProps) {
   const { artifact } = content;
 
   switch (artifact.kind) {
@@ -45,7 +45,13 @@ export function ArtifactPreview({ content, className }: ArtifactPreviewProps) {
     case 'svg':
       return <SvgPreview content={content} className={className} />;
     case 'image':
-      return <ImagePreview content={content} className={className} />;
+      return (
+        <ImagePreview
+          content={content}
+          className={className}
+          showArtifactActions={showArtifactActions}
+        />
+      );
     case 'audio':
       return <AudioPreview content={content} className={className} />;
     case 'video':
@@ -53,7 +59,13 @@ export function ArtifactPreview({ content, className }: ArtifactPreviewProps) {
     case 'archive':
       return <ArchivePreview content={content} className={className} />;
     case 'pdf':
-      return <PdfPreview content={content} className={className} />;
+      return (
+        <PdfPreview
+          content={content}
+          className={className}
+          showArtifactActions={showArtifactActions}
+        />
+      );
     case 'docx':
       return <DocxPreview content={content} className={className} />;
     case 'xlsx':
@@ -62,6 +74,12 @@ export function ArtifactPreview({ content, className }: ArtifactPreviewProps) {
       return <PptxPreview content={content} className={className} />;
     case 'binary':
     default:
-      return <BinaryPreview content={content} className={className} />;
+      return (
+        <BinaryPreview
+          content={content}
+          className={className}
+          showArtifactActions={showArtifactActions}
+        />
+      );
   }
 }

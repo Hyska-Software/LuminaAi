@@ -73,6 +73,21 @@ describe('BinaryPreview — arquivo binário com hexdump', () => {
     expect(mocks.getArtifactPreview).toHaveBeenCalledWith('artifact-binary');
   });
 
+  it('esconde as ações de artefato quando showArtifactActions é false', async () => {
+    mocks.getArtifactPreview.mockResolvedValue({
+      kind: 'binary',
+      format: 'application/pdf',
+      previewBase64: base64Of(PDF_PREFIX),
+      previewBytes: PDF_PREFIX.length,
+    });
+
+    render(<BinaryPreview content={contentFor('binary')} showArtifactActions={false} />);
+
+    expect(await screen.findByText('Primeiros 8 bytes')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Salvar como…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Abrir' })).toBeNull();
+  });
+
   it('colapsa e expande o bloco de bytes com aria-expanded', async () => {
     mocks.getArtifactPreview.mockResolvedValue({
       kind: 'binary',

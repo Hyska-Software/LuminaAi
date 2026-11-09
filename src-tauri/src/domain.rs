@@ -216,6 +216,17 @@ pub struct AttachmentInfo {
     pub height: Option<u32>,
 }
 
+/// Anexo + payload de visualização, mesma forma de [`ArtifactContent`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentContent {
+    pub attachment: AttachmentInfo,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub data_base64: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageInfo {

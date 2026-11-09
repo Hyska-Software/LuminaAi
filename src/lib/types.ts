@@ -682,6 +682,13 @@ export interface AttachmentInfo {
   height?: number | null;
 }
 
+/** Anexo + payload, mesma forma de `ArtifactContent` (prévia no diálogo). */
+export interface AttachmentContent {
+  attachment: AttachmentInfo;
+  content?: string | null;
+  dataBase64?: string | null;
+}
+
 /**
  * One step of the agent loop (ARCHITECTURE §8): the reasoning the model
  * produced before acting and how many tool calls that step requested. The

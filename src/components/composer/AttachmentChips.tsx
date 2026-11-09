@@ -1,26 +1,48 @@
-import { Braces, FileText, Image, Presentation, Table, X, type LucideIcon } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
+import { FileIcon } from '@/components/code/FileIcon';
 import { IconButton } from '@/components/ui';
-import type { AttachmentInfo } from '@/lib/types';
-import { cn, formatBytes } from '@/lib/utils';
+import { api } from '@/lib/api';
+import type { ArtifactThumbnail, AttachmentInfo } from '@/lib/types';
+import { cn } from '@/lib/utils';
+import { describeAttachment } from './attachmentLabels';
+import { AttachmentPreviewDialog } from './AttachmentPreviewDialog';
 
-const KIND_ICONS: Record<AttachmentInfo['kind'], LucideIcon> = {
-  image: Image,
-  pdf: FileText,
-  docx: FileText,
-  xlsx: Table,
-  pptx: Presentation,
-  text: FileText,
-  code: Braces,
-  csv: Table,
-  json: Braces,
-  unknown: FileText,
-};
+/**
+ * Tile content: the real thumbnail for images, otherwise the colored
+ * file-explorer glyph (Material Icon Theme) resolved from the file name.
+ */
+function AttachmentTile({ attachment }: { attachment: AttachmentInfo }) {
+  const [thumb, setThumb] = useState<ArtifactThumbnail | null>(null);
 
-function describeAttachment(info: AttachmentInfo): string {
-  const parts = [formatBytes(info.size)];
-  if (info.pageCount) parts.push(`${info.pageCount} pág.`);
-  if (info.width && info.height) parts.push(`${info.width}×${info.height}`);
-  return parts.join(' · ');
+  useEffect(() => {
+    if (attachment.kind !== 'image') return;
+    let cancelled = false;
+    api
+      .getAttachmentThumbnail(attachment.id)
+      .then((value) => {
+        if (!cancelled) setThumb(value);
+      })
+      .catch(() => {
+        /* fallback: file-explorer icon */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment.id, attachment.kind]);
+
+  if (attachment.kind === 'image' && thumb) {
+    return (
+      <img
+        src={`data:${thumb.mime};base64,${thumb.dataBase64}`}
+        alt=""
+        aria-hidden
+        draggable={false}
+        className="size-full object-cover"
+      />
+    );
+  }
+  return <FileIcon path={attachment.name} className="size-5" />;
 }
 
 export interface AttachmentChipsProps {
@@ -34,45 +56,60 @@ export interface AttachmentChipsProps {
 
 /** Attachment chips used above user bubbles and inside the composer. */
 export function AttachmentChips({ attachments, onRemove, align = 'start', className }: AttachmentChipsProps) {
+  const [previewing, setPreviewing] = useState<AttachmentInfo | null>(null);
   if (!attachments.length) return null;
 
   return (
     <div className={cn('flex flex-wrap gap-1.5', align === 'end' ? 'justify-end' : 'justify-start', className)}>
-      {attachments.map((attachment) => {
-        const Icon = KIND_ICONS[attachment.kind] ?? FileText;
-        return (
-          <div
-            key={attachment.id}
+      {attachments.map((attachment) => (
+        <div
+          key={attachment.id}
+          className={cn(
+            'flex max-w-72 items-center gap-1.5 rounded-xl border border-border bg-surface-raised py-1 pl-1.5',
+            onRemove ? 'pr-0.5' : 'pr-2.5',
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => setPreviewing(attachment)}
+            aria-label={`Ver prévia de ${attachment.name}`}
+            title="Ver prévia"
             className={cn(
-              'flex max-w-72 items-center gap-2 rounded-xl border border-border bg-surface-raised py-1 pl-1.5',
-              onRemove ? 'pr-0.5' : 'pr-2.5',
+              'flex min-w-0 items-center gap-2 rounded-lg text-left',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
             )}
           >
-            <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-surface-active text-foreground-muted">
-              <Icon className="size-3.5" />
+            <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface-active text-foreground-muted">
+              <AttachmentTile attachment={attachment} />
             </span>
             <span className="min-w-0">
-              <span className="block max-w-52 truncate text-[12px] font-medium leading-tight text-foreground">
+              <span className="block max-w-48 truncate text-[12px] font-medium leading-tight text-foreground">
                 {attachment.name}
               </span>
               <span className="block text-[10.5px] leading-tight text-foreground-subtle">
                 {describeAttachment(attachment)}
               </span>
             </span>
-            {onRemove ? (
-              <IconButton
-                label={`Remover ${attachment.name}`}
-                size="sm"
-                variant="ghost"
-                className="size-6 rounded-md"
-                onClick={() => onRemove(attachment.id)}
-              >
-                <X className="size-3.5" />
-              </IconButton>
-            ) : null}
-          </div>
-        );
-      })}
+          </button>
+          {onRemove ? (
+            <IconButton
+              label={`Remover ${attachment.name}`}
+              size="sm"
+              variant="ghost"
+              className="size-6 rounded-md"
+              onClick={() => onRemove(attachment.id)}
+            >
+              <X className="size-3.5" />
+            </IconButton>
+          ) : null}
+        </div>
+      ))}
+      {previewing ? (
+        <AttachmentPreviewDialog
+          attachment={previewing}
+          onClose={() => setPreviewing(null)}
+        />
+      ) : null}
     </div>
   );
 }

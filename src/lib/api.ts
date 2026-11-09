@@ -45,6 +45,7 @@ import type {
   ArtifactThumbnail,
   AskUserAnswer,
   McpStatus,
+  AttachmentContent,
   AttachmentInfo,
   CatalogView,
   CacheStatsView,
@@ -317,6 +318,14 @@ export const api = {
   /* -------- attachments -------- */
   importAttachments: (paths: string[]) =>
     invoke<AttachmentInfo[]>('import_attachments', { paths }),
+  importClipboardAttachments: () =>
+    invoke<AttachmentInfo[]>('import_clipboard_attachments'),
+  getAttachmentContent: (id: string) =>
+    invoke<AttachmentContent | null>('get_attachment_content', { id }),
+  getAttachmentPreview: (id: string) =>
+    invoke<ArtifactPreview | null>('get_attachment_preview', { id }),
+  getAttachmentThumbnail: (id: string) =>
+    invoke<ArtifactThumbnail | null>('get_attachment_thumbnail', { id }),
   deleteAttachment: (id: string) => invoke<void>('delete_attachment', { id }),
 
   /* -------- artifacts -------- */

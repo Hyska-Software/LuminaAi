@@ -30,7 +30,7 @@ function errorMessage(error: unknown): string {
  * `@/lib/pdf`; failures fall back to a retry panel, and a PDF without payload
  * falls back to the binary card.
  */
-export function PdfPreview({ content, className }: ArtifactViewProps) {
+export function PdfPreview({ content, className, showArtifactActions }: ArtifactViewProps) {
   const { artifact, dataBase64 } = content;
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +140,7 @@ export function PdfPreview({ content, className }: ArtifactViewProps) {
       <BinaryPreview
         content={content}
         className={className}
+        showArtifactActions={showArtifactActions}
         detail="Este PDF veio sem os dados necessários para a prévia."
       />
     );

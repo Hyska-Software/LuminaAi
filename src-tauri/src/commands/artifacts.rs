@@ -266,7 +266,7 @@ pub fn set_artifact_favorite(
 /// de qualquer leitor de imagem. Formatos suportados: os decodificadores do
 /// crate `image` habilitados em `Cargo.toml` (PNG/JPEG/GIF/WebP/BMP/ICO/TIFF).
 /// O limite de dimensões evita bombas de descompressão; não faz upscale.
-fn render_thumbnail<R: BufRead + Seek>(reader: R) -> Result<ArtifactThumbnail, String> {
+pub(crate) fn render_thumbnail<R: BufRead + Seek>(reader: R) -> Result<ArtifactThumbnail, String> {
     let mut reader = image::ImageReader::new(reader)
         .with_guessed_format()
         .map_err(|error| format!("falha ao identificar o formato da imagem: {error}"))?;
@@ -359,7 +359,7 @@ pub const MAX_INLINE_MEDIA_BYTES: usize = 24 * 1024 * 1024;
 
 /// O que `get_artifact_content` devolve junto dos metadados do artefato.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ArtifactPayload {
+pub(crate) enum ArtifactPayload {
     /// Conteúdo textual em `content`.
     Text,
     /// Bytes originais em `dataBase64`.
@@ -402,7 +402,7 @@ fn webview_image_mime(mime: &str) -> bool {
 ///
 /// O match é exaustivo de propósito: um `ArtifactKind` novo precisa decidir
 /// explicitamente o que trafega no IPC.
-fn payload_for(kind: &ArtifactKind, mime_type: &str, size: i64) -> ArtifactPayload {
+pub(crate) fn payload_for(kind: &ArtifactKind, mime_type: &str, size: i64) -> ArtifactPayload {
     match kind {
         ArtifactKind::Audio | ArtifactKind::Video => {
             if size >= 0 && size as u64 <= MAX_INLINE_MEDIA_BYTES as u64 {
@@ -435,7 +435,7 @@ fn payload_for(kind: &ArtifactKind, mime_type: &str, size: i64) -> ArtifactPaylo
 }
 
 /// Codifica os bytes do artefato conforme a decisão de [`payload_for`].
-fn payload_strings(payload: ArtifactPayload, bytes: &[u8]) -> (Option<String>, Option<String>) {
+pub(crate) fn payload_strings(payload: ArtifactPayload, bytes: &[u8]) -> (Option<String>, Option<String>) {
     match payload {
         ArtifactPayload::Text => (Some(String::from_utf8_lossy(bytes).into_owned()), None),
         ArtifactPayload::Base64 => (

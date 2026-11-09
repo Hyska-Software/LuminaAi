@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type {
   Agent,
+  AttachmentInfo,
   CacheStats,
   Conversation,
   ProviderAuthStatus,
@@ -44,6 +45,7 @@ vi.mock('@/components/models/ModelPill', () => ({
 }));
 
 // Imported after the mocks above.
+import { api } from '@/lib/api';
 import { useAgentStore, useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import { useCacheStore } from '@/lib/store/cacheStore';
 import { Composer } from './Composer';
@@ -289,6 +291,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   seedApp({ provider: null, auth: null });
   useChatStore.setState({ activeId: null, conversations: [] });
   useCacheStore.getState().reset();
@@ -527,5 +530,65 @@ describe('Composer — indicador de execução', () => {
     expect(queue).toBeTruthy();
     fireEvent.click(queue);
     await waitFor(() => expect(send).toHaveBeenCalled());
+  });
+});
+
+describe('Composer — colar arquivos com Ctrl+V', () => {
+  function attachmentInfo(overrides: Partial<AttachmentInfo> = {}): AttachmentInfo {
+    return {
+      id: 'att-pdf',
+      name: 'relatorio.pdf',
+      mimeType: 'application/pdf',
+      size: 2048,
+      kind: 'pdf',
+      ...overrides,
+    };
+  }
+
+  const composerTextarea = () =>
+    screen.getByRole('textbox', { name: 'Mensagem para o Lumina' });
+
+  it('importa arquivos do clipboard e mostra o chip com tipo', async () => {
+    const spy = vi
+      .spyOn(api, 'importClipboardAttachments')
+      .mockResolvedValue([attachmentInfo()]);
+    render(<Composer />);
+
+    fireEvent.paste(composerTextarea(), {
+      clipboardData: {
+        types: ['Files'],
+        files: [new File(['x'], 'relatorio.pdf', { type: 'application/pdf' })],
+      },
+    });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('relatorio.pdf')).toBeTruthy();
+    expect(screen.getByText('PDF · 2 KB')).toBeTruthy();
+  });
+
+  it('não intercepta a colagem de texto', () => {
+    const spy = vi.spyOn(api, 'importClipboardAttachments').mockResolvedValue([]);
+    render(<Composer />);
+
+    fireEvent.paste(composerTextarea(), {
+      clipboardData: {
+        types: ['text/plain'],
+        files: [],
+        getData: () => 'texto colado',
+      },
+    });
+
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('consulta o clipboard quando o paste não traz texto', async () => {
+    const spy = vi.spyOn(api, 'importClipboardAttachments').mockResolvedValue([]);
+    render(<Composer />);
+
+    fireEvent.paste(composerTextarea(), {
+      clipboardData: { types: [], files: [], getData: () => '' },
+    });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
   });
 });

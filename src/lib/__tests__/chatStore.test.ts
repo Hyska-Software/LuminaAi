@@ -4,6 +4,7 @@ import type {
   Agent,
   AgentInput,
   Artifact,
+  AttachmentInfo,
   ChatMessage,
   Conversation,
   ConversationDetail,
@@ -30,6 +31,7 @@ const mocks = vi.hoisted(() => {
     searchConversations: vi.fn(),
     truncateConversation: vi.fn(),
     importAttachments: vi.fn(),
+    importClipboardAttachments: vi.fn(),
     deleteAttachment: vi.fn(),
     listArtifacts: vi.fn(),
     runTurn: vi.fn(),
@@ -2412,5 +2414,37 @@ describe('chatStore — primary conversation pin', () => {
     const stored = useChatStore.getState().conversations[0];
     expect(stored.pinned).toBe(true);
     expect(stored.isMain).toBe(true);
+  });
+});
+
+describe('chatStore — clipboard attachments', () => {
+  const clipboardAttachment: AttachmentInfo = {
+    id: 'att-clipboard',
+    name: 'print.png',
+    mimeType: 'image/png',
+    size: 2048,
+    kind: 'image',
+  };
+
+  it('appends clipboard attachments to the composer', async () => {
+    mocks.api.importClipboardAttachments.mockResolvedValue([clipboardAttachment]);
+    useChatStore.setState({ pendingAttachments: [] });
+
+    await useChatStore.getState().importClipboardAttachments();
+
+    expect(useChatStore.getState().pendingAttachments).toEqual([clipboardAttachment]);
+  });
+
+  it('keeps the composer untouched and shows a toast on failure', async () => {
+    mocks.api.importClipboardAttachments.mockRejectedValue(new Error('sem clipboard'));
+    useChatStore.setState({ pendingAttachments: [] });
+
+    await useChatStore.getState().importClipboardAttachments();
+
+    expect(useChatStore.getState().pendingAttachments).toEqual([]);
+    expect(toast.error).toHaveBeenCalledWith(
+      'Não foi possível colar o anexo',
+      expect.objectContaining({ description: expect.stringContaining('sem clipboard') }),
+    );
   });
 });

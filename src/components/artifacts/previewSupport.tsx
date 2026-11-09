@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { ArtifactContent, ArtifactPreview } from '@/lib/types';
@@ -9,6 +9,29 @@ import { Button, Spinner } from '@/components/ui';
 export interface ArtifactViewProps {
   content: ArtifactContent;
   className?: string;
+  /** `false` hides artifact-only actions (Salvar como…/Abrir). */
+  showArtifactActions?: boolean;
+}
+
+/**
+ * Preview loader used by the format-specific views. The default reads artifact
+ * previews; the attachment dialog overrides it with `getAttachmentPreview`.
+ */
+export type PreviewLoader = (id: string) => Promise<ArtifactPreview | null>;
+
+const loadArtifactPreview: PreviewLoader = (id) => api.getArtifactPreview(id);
+
+const PreviewLoaderContext = createContext<PreviewLoader>(loadArtifactPreview);
+
+/** Overrides the structured-preview loader for a subtree. */
+export function PreviewLoaderProvider({
+  loader,
+  children,
+}: {
+  loader: PreviewLoader;
+  children: ReactNode;
+}) {
+  return <PreviewLoaderContext.Provider value={loader}>{children}</PreviewLoaderContext.Provider>;
 }
 
 export type ArtifactPreviewState =
@@ -17,9 +40,9 @@ export type ArtifactPreviewState =
   | { status: 'ready'; preview: ArtifactPreview | null };
 
 /**
- * Loads the structured preview of an artifact (DOCX/XLSX/PPTX) through the IPC
- * bridge. Keeps the previous result out of the way while retrying so the UI can
- * show a clean loading state.
+ * Loads the structured preview of an attachment/artifact (DOCX/XLSX/PPTX/…)
+ * through the IPC bridge. Keeps the previous result out of the way while
+ * retrying so the UI can show a clean loading state.
  */
 export function useArtifactPreview(artifactId: string): {
   state: ArtifactPreviewState;
@@ -27,12 +50,12 @@ export function useArtifactPreview(artifactId: string): {
 } {
   const [state, setState] = useState<ArtifactPreviewState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
+  const loadPreview = useContext(PreviewLoaderContext);
 
   useEffect(() => {
     let cancelled = false;
     setState({ status: 'loading' });
-    api
-      .getArtifactPreview(artifactId)
+    loadPreview(artifactId)
       .then((preview) => {
         if (!cancelled) setState({ status: 'ready', preview });
       })
@@ -47,7 +70,7 @@ export function useArtifactPreview(artifactId: string): {
     return () => {
       cancelled = true;
     };
-  }, [artifactId, attempt]);
+  }, [artifactId, attempt, loadPreview]);
 
   return { state, retry: () => setAttempt((value) => value + 1) };
 }
