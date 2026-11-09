@@ -38,6 +38,7 @@ function resetUi(): void {
     activeArtifactId: null,
     artifacts: [],
     layoutMode: 'chat',
+    enabledLayouts: { chat: true, code: true, agent: true },
     codeView: 'session',
     codePanelOpen: true,
     codePanelTab: 'changes',
@@ -499,5 +500,101 @@ describe('useUiStore — cutover de estado órfão', () => {
       commandPaletteOpen: false,
       sourcesPanelOpen: false,
     });
+  });
+});
+
+describe('useUiStore — visibilidade dos layouts', () => {
+  it('hides a layout and persists the map', () => {
+    useUiStore.getState().setLayoutEnabled('code', false);
+
+    expect(useUiStore.getState().enabledLayouts).toEqual({
+      chat: true,
+      code: false,
+      agent: true,
+    });
+
+    const raw = window.localStorage.getItem('lumina.ui');
+    expect(raw).not.toBeNull();
+    const persisted = JSON.parse(raw as string) as {
+      state?: { enabledLayouts?: Record<string, boolean> };
+    };
+    expect(persisted.state?.enabledLayouts?.code).toBe(false);
+  });
+
+  it('re-enables a hidden layout', () => {
+    useUiStore.getState().setLayoutEnabled('agent', false);
+    useUiStore.getState().setLayoutEnabled('agent', true);
+
+    expect(useUiStore.getState().enabledLayouts.agent).toBe(true);
+  });
+
+  it('moves to the first remaining layout when the active one is hidden', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+
+    useUiStore.getState().setLayoutEnabled('code', false);
+
+    expect(useUiStore.getState().layoutMode).toBe('chat');
+  });
+
+  it('refuses to hide the last enabled layout', () => {
+    useUiStore.setState({
+      layoutMode: 'code',
+      enabledLayouts: { chat: false, code: true, agent: false },
+    });
+
+    useUiStore.getState().setLayoutEnabled('code', false);
+
+    expect(useUiStore.getState().enabledLayouts.code).toBe(true);
+    expect(useUiStore.getState().layoutMode).toBe('code');
+  });
+
+  it('ignores setLayoutMode for a hidden layout', () => {
+    useUiStore.setState({ enabledLayouts: { chat: true, code: false, agent: true } });
+
+    useUiStore.getState().setLayoutMode('code');
+
+    expect(useUiStore.getState().layoutMode).toBe('chat');
+  });
+
+  it('repairs a persisted snapshot that points at a hidden layout', async () => {
+    window.localStorage.setItem(
+      'lumina.ui',
+      JSON.stringify({
+        version: 0,
+        state: {
+          layoutMode: 'code',
+          enabledLayouts: { chat: true, code: false, agent: true },
+        },
+      }),
+    );
+    await useUiStore.persist.rehydrate();
+
+    expect(useUiStore.getState().layoutMode).toBe('chat');
+    expect(useUiStore.getState().enabledLayouts).toEqual({
+      chat: true,
+      code: false,
+      agent: true,
+    });
+
+    // `setState` persists, so the corrupted snapshot has to be written after it.
+    useUiStore.setState({ codeView: 'session' });
+    window.localStorage.setItem(
+      'lumina.ui',
+      JSON.stringify({
+        version: 0,
+        state: {
+          layoutMode: 'agent',
+          enabledLayouts: { chat: false, code: false, agent: false },
+        },
+      }),
+    );
+    await useUiStore.persist.rehydrate();
+
+    expect(useUiStore.getState().enabledLayouts).toEqual({
+      chat: true,
+      code: true,
+      agent: true,
+    });
+    expect(useUiStore.getState().layoutMode).toBe('agent');
   });
 });

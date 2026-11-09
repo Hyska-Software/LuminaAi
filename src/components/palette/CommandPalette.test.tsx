@@ -157,6 +157,7 @@ function baseState() {
     sourcesPanelOpen: false,
     activeView: 'chat',
     layoutMode: 'chat',
+    enabledLayouts: { chat: true, code: true, agent: true },
     codeView: 'session',
     codePanelOpen: true,
     codePanelTab: 'changes',
@@ -772,6 +773,15 @@ describe('CommandPalette — layouts Chat e Code', () => {
 
     typeQuery('painel de artefatos');
     expect(screen.queryByRole('option', { name: 'Abrir painel de artefatos' })).toBeNull();
+  });
+
+  it('does not offer a layout that is disabled in the settings', async () => {
+    useUiStore.setState({ enabledLayouts: { chat: true, code: false, agent: true } });
+    renderPalette();
+    typeQuery('ir para o modo');
+
+    expect(screen.queryByRole('option', { name: 'Ir para o modo Code' })).toBeNull();
+    expect(await screen.findByRole('option', { name: 'Ir para o modo Agentes' })).toBeTruthy();
   });
 
   it('opens the Skills page inside the Code center', async () => {

@@ -61,7 +61,11 @@ beforeEach(() => {
     keys: [],
   }));
   useAppStore.setState({ settings: settings() });
-  useUiStore.setState({ theme: 'light', settingsOpen: true });
+  useUiStore.setState({
+    theme: 'light',
+    settingsOpen: true,
+    enabledLayouts: { chat: true, code: true, agent: true },
+  });
 });
 
 describe('GeneralTab — raciocínio recolhido por padrão', () => {
@@ -106,5 +110,40 @@ describe('GeneralTab — raciocínio recolhido por padrão', () => {
       );
     });
     expect(useAppStore.getState().settings.thinkingCollapsedByDefault).toBe(false);
+  });
+});
+
+describe('GeneralTab — layouts visíveis', () => {
+  it('mostra os três layouts habilitados por padrão na seção Layouts', () => {
+    render(<GeneralTab />);
+
+    expect(screen.getByText('Layouts')).toBeTruthy();
+    for (const name of ['Layout Chat', 'Layout Code', 'Layout Agentes']) {
+      const control = screen.getByRole('switch', { name });
+      expect(control.getAttribute('aria-checked')).toBe('true');
+      expect((control as HTMLButtonElement).disabled).toBe(false);
+    }
+  });
+
+  it('desabilita um layout sem salvar settings no backend', () => {
+    render(<GeneralTab />);
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Layout Code' }));
+
+    expect(useUiStore.getState().enabledLayouts.code).toBe(false);
+    expect(mocks.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('não permite desligar o último layout ativo', () => {
+    useUiStore.setState({ enabledLayouts: { chat: true, code: false, agent: false } });
+
+    render(<GeneralTab />);
+
+    expect((screen.getByRole('switch', { name: 'Layout Chat' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(
+      (screen.getByRole('switch', { name: 'Layout Code' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 });

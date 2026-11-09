@@ -1,5 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import {
+  DEFAULT_LAYOUT_VISIBILITY,
+  enabledLayoutModes,
+  firstEnabledLayout,
+  sanitizeLayoutVisibility,
+  type LayoutVisibility,
+} from '../layoutModes';
 import { DEFAULT_SETTINGS_TAB, isSettingsTabId, type SettingsTabId } from '../settingsTabs';
 import type { AgentInput, Artifact, ThemeMode } from '../types';
 
@@ -186,6 +193,8 @@ interface UiState {
   theme: ThemeMode;
   /** Active application layout (Chat | Code | Agentes) — persisted (PLAN §2). */
   layoutMode: LayoutMode;
+  /** Which layouts the title-bar switcher offers (persisted; at least one is always enabled). */
+  enabledLayouts: LayoutVisibility;
   /** Agente selecionado no layout Agentes (persistido). */
   activeAgentId: string | null;
   /** Canal compartilhado selecionado (`null` = nenhum). */
@@ -261,6 +270,12 @@ interface UiState {
   setTheme: (theme: ThemeMode) => void;
   /** Switches the whole application between the Chat, Code and Agentes layouts. */
   setLayoutMode: (mode: LayoutMode) => void;
+  /**
+   * Shows/hides a layout button. Refuses to hide the last enabled layout, and
+   * moves the active layout to the first remaining one when the hidden layout
+   * was the current one.
+   */
+  setLayoutEnabled: (mode: LayoutMode, enabled: boolean) => void;
   setActiveAgentId: (agentId: string | null) => void;
   setActiveChannelId: (channelId: string | null) => void;
   /** Switches the Agentes center between the team page, usage stats and routines. */
@@ -403,6 +418,7 @@ export const useUiStore = create<UiState>()(
     (set, get) => ({
       theme: 'system',
       layoutMode: 'chat',
+      enabledLayouts: { ...DEFAULT_LAYOUT_VISIBILITY },
       activeAgentId: null,
       activeChannelId: null,
       agentView: 'team',
@@ -446,11 +462,28 @@ export const useUiStore = create<UiState>()(
         set({ theme });
         get().applyTheme();
       },
-      setLayoutMode: (layoutMode) =>
+      setLayoutMode: (mode) => {
+        const layoutMode: LayoutMode =
+          mode === 'code' ? 'code' : mode === 'agent' ? 'agent' : 'chat';
+        // A hidden layout is unreachable from every entry point (switch, palette,
+        // notifications), so the pill never has to render an inactive segment.
+        if (!get().enabledLayouts[layoutMode]) return;
+        set({ layoutMode });
+      },
+      setLayoutEnabled: (mode, enabled) => {
+        const { enabledLayouts, layoutMode } = get();
+        if (enabledLayouts[mode] === enabled) return;
+        const next = { ...enabledLayouts, [mode]: enabled };
+        const remaining = enabledLayoutModes(next);
+        // Never hide the last visible layout: the switcher would disappear and
+        // Settings would be the only way back, with no active mode to fall to.
+        if (remaining.length === 0) return;
         set({
+          enabledLayouts: next,
           layoutMode:
-            layoutMode === 'code' ? 'code' : layoutMode === 'agent' ? 'agent' : 'chat',
-        }),
+            !enabled && layoutMode === mode ? (remaining[0] ?? 'chat') : layoutMode,
+        });
+      },
       setActiveAgentId: (activeAgentId) =>
         set((state) => ({
           activeAgentId,
@@ -751,6 +784,7 @@ export const useUiStore = create<UiState>()(
       partialize: (state) => ({
         theme: state.theme,
         layoutMode: state.layoutMode,
+        enabledLayouts: state.enabledLayouts,
         activeAgentId: state.activeAgentId,
         activeChannelId: state.activeChannelId,
         codePanelOpen: state.codePanelOpen,
@@ -784,15 +818,20 @@ export const useUiStore = create<UiState>()(
           }
           return mapped;
         };
+        const enabledLayouts = sanitizeLayoutVisibility(stored.enabledLayouts);
+        const storedLayoutMode: LayoutMode =
+          stored.layoutMode === 'code'
+            ? 'code'
+            : stored.layoutMode === 'agent'
+              ? 'agent'
+              : 'chat';
         return {
           ...current,
           ...stored,
-          layoutMode:
-            stored.layoutMode === 'code'
-              ? 'code'
-              : stored.layoutMode === 'agent'
-                ? 'agent'
-                : 'chat',
+          layoutMode: enabledLayouts[storedLayoutMode]
+            ? storedLayoutMode
+            : firstEnabledLayout(enabledLayouts),
+          enabledLayouts,
           activeAgentId: validWorkspaceId(stored.activeChannelId)
             ? null
             : validWorkspaceId(stored.activeAgentId),

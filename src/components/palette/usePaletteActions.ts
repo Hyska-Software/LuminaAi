@@ -243,6 +243,7 @@ export function usePaletteActions(): PaletteAction[] {
   const theme = useUiStore((state) => state.theme);
   const activeView = useUiStore((state) => state.activeView);
   const layoutMode = useUiStore((state) => state.layoutMode);
+  const enabledLayouts = useUiStore((state) => state.enabledLayouts);
   const activeAgentId = useUiStore((state) => state.activeAgentId);
   const openAgentEditor = useUiStore((state) => state.openAgentEditor);
   const codeView = useUiStore((state) => state.codeView);
@@ -384,21 +385,24 @@ export function usePaletteActions(): PaletteAction[] {
   }
 
   /* -------- Navegação -------- */
-  actions.push({
-    id: layoutMode === 'chat' ? 'modo-code' : 'modo-chat',
-    group: 'navegacao',
-    label: layoutMode === 'chat' ? 'Ir para o modo Code' : 'Ir para o modo Chat',
-    description:
-      layoutMode === 'chat'
-        ? 'Abrir o workspace de código (sessões e alterações)'
-        : 'Voltar ao layout de conversa com o assistente',
-    icon: layoutMode === 'chat' ? Code : MessageSquare,
-    keywords: 'layout modo code chat conversa workspace agente',
-    run: () =>
-      useUiStore.getState().setLayoutMode(layoutMode === 'chat' ? 'code' : 'chat'),
-  });
+  // A hidden layout is unreachable, so the palette never offers it.
+  const alternateLayout = layoutMode === 'chat' ? 'code' : 'chat';
+  if (enabledLayouts[alternateLayout]) {
+    actions.push({
+      id: layoutMode === 'chat' ? 'modo-code' : 'modo-chat',
+      group: 'navegacao',
+      label: layoutMode === 'chat' ? 'Ir para o modo Code' : 'Ir para o modo Chat',
+      description:
+        layoutMode === 'chat'
+          ? 'Abrir o workspace de código (sessões e alterações)'
+          : 'Voltar ao layout de conversa com o assistente',
+      icon: layoutMode === 'chat' ? Code : MessageSquare,
+      keywords: 'layout modo code chat conversa workspace agente',
+      run: () => useUiStore.getState().setLayoutMode(alternateLayout),
+    });
+  }
 
-  if (layoutMode !== 'agent') {
+  if (layoutMode !== 'agent' && enabledLayouts.agent) {
     actions.push({
       id: 'modo-agentes',
       group: 'navegacao',

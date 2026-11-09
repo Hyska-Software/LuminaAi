@@ -1,4 +1,5 @@
 import type { ThemeMode } from '@/lib/types';
+import { LAYOUT_MODES } from '@/lib/layoutModes';
 import { useAppStore, useUiStore } from '@/lib/store';
 import { SegmentedControl, Slider, Switch } from '@/components/ui';
 import { SettingRow, SettingsSection } from './shared';
@@ -24,6 +25,9 @@ export function GeneralTab() {
   const saveSettings = useAppStore((state) => state.saveSettings);
   const theme = useUiStore((state) => state.theme);
   const setTheme = useUiStore((state) => state.setTheme);
+  const enabledLayouts = useUiStore((state) => state.enabledLayouts);
+  const setLayoutEnabled = useUiStore((state) => state.setLayoutEnabled);
+  const enabledCount = LAYOUT_MODES.filter((mode) => enabledLayouts[mode.value]).length;
 
   const handleTheme = (value: string) => {
     const next = value as ThemeMode;
@@ -72,6 +76,22 @@ export function GeneralTab() {
             aria-label="Tamanho da fonte"
           />
         </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Layouts"
+        description="Escolha quais modos aparecem no seletor da barra de título. Com apenas um layout ativo, o seletor fica oculto; pelo menos um permanece ativo."
+      >
+        {LAYOUT_MODES.map(({ value, label, description }) => (
+          <SettingRow key={value} label={label} description={description}>
+            <Switch
+              checked={enabledLayouts[value]}
+              disabled={enabledLayouts[value] && enabledCount === 1}
+              onCheckedChange={(checked) => setLayoutEnabled(value, checked)}
+              aria-label={`Layout ${label}`}
+            />
+          </SettingRow>
+        ))}
       </SettingsSection>
 
       <SettingsSection title="Comportamento" description="Como o composer envia e exibe as mensagens.">
