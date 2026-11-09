@@ -92,9 +92,9 @@ de versão não compila nada (a mesma versão é ignorada); uma versão menor fa
 Também é possível rodar manualmente em **Actions → Release** (input `draft`,
 útil para republicar a mesma versão).
 
-O app instalado consulta automaticamente essas releases (ao abrir e uma vez por
-dia) e mostra um aviso na barra de título quando há uma versão estável mais
-nova. O download é verificado por SHA-256 e a instalação usa o instalador da
+O app instalado consulta automaticamente essas releases (ao abrir e a cada hora
+enquanto estiver aberto) e mostra um aviso na barra de título quando há uma
+versão estável mais nova. O download é verificado por SHA-256 e a instalação usa o instalador da
 plataforma, sempre com confirmação — no Windows, o wizard do Lumina. A
 verificação manual fica em **Configurações → Sobre → Atualizações**. Detalhes:
 [`docs/INSTALLER.md`](docs/INSTALLER.md) §9.

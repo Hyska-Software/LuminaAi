@@ -1,14 +1,14 @@
 /**
  * Schedules automatic update checks: hydrate the cached state as soon as the
  * app is ready, check a moment later (without competing with bootstrap), then
- * once per day while the window stays open. Coming back to the window is a
- * cheap way to resume the daily cadence after a long-running session.
+ * every hour while the window stays open. Coming back to the window resumes
+ * the hourly cadence after a long-running session.
  */
 import { useEffect } from 'react';
-import { useUpdateStore } from '@/lib/store';
+import { UPDATE_CHECK_INTERVAL_MS, useUpdateStore } from '@/lib/store';
 
 const START_DELAY_MS = 2500;
-const TICK_MS = 60 * 60 * 1000;
+const TICK_MS = UPDATE_CHECK_INTERVAL_MS;
 
 export function useUpdateCheck(ready: boolean) {
   useEffect(() => {

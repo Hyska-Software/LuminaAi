@@ -370,9 +370,9 @@ release, o estado é “tudo atualizado” (sem toast de erro).
 
 ### 9.2 Cadência
 
-- Ao abrir o app (a primeira checagem da sessão roda sempre) e depois uma vez
-  por dia enquanto ele fica aberto; voltar o foco na janela aproveita a mesma
-  janela de 24h.
+- Ao abrir o app (a primeira checagem da sessão roda sempre) e depois a cada
+  60 minutos enquanto ele fica aberto; voltar o foco na janela aproveita a
+  mesma janela de 60 minutos.
 - Manual em **Configurações → Sobre → Atualizações → Verificar agora**.
 - O aviso aparece uma vez por versão (toast) e permanece como chip na title bar
   até instalar ou **Ignorar esta versão**. Uma versão mais nova supera o

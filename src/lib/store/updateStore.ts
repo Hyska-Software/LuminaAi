@@ -15,8 +15,15 @@ import type {
   UpdateStatus,
 } from '../types';
 
-/** One day, in milliseconds. */
-export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** One hour, in milliseconds. */
+export const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
+/**
+ * A timer tick can fire a few seconds before `lastCheckAt` completes the full
+ * interval because the timestamp is recorded after the request. Allow one
+ * minute so the hourly tick is not skipped until the next hour.
+ */
+const DUE_TOLERANCE_MS = 60_000;
 
 export type UpdatePhase =
   | 'idle'
@@ -61,7 +68,7 @@ export interface UpdateUiState {
 export interface UpdateStore extends UpdateUiState {
   init: () => Promise<void>;
   check: (options?: { silent?: boolean; force?: boolean }) => Promise<void>;
-  /** Automatic check when the 24h window has elapsed. */
+  /** Automatic check when the one-hour window has elapsed. */
   checkIfDue: () => Promise<void>;
   download: () => Promise<void>;
   cancel: () => Promise<void>;
@@ -223,7 +230,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
     if (!preferences.autoCheck || isBusy(phase)) return;
     if (sessionChecked) {
       const last = preferences.lastCheckAt ?? 0;
-      if (last > 0 && Date.now() - last < UPDATE_CHECK_INTERVAL_MS) return;
+      if (last > 0 && Date.now() - last < UPDATE_CHECK_INTERVAL_MS - DUE_TOLERANCE_MS) return;
     }
     set({ sessionChecked: true });
     await get().check({ silent: true, force: false });

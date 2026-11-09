@@ -2007,7 +2007,7 @@ export interface UpdateInfo {
 }
 
 export interface UpdatePreferences {
-  /** Verifica ao abrir e uma vez por dia. */
+  /** Verifica ao abrir e a cada hora enquanto o app estiver aberto. */
   autoCheck: boolean;
   lastCheckAt?: number | null;
   /** Versão ignorada pelo usuário; uma versão mais nova volta a aparecer. */

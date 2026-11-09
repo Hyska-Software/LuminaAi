@@ -64,7 +64,7 @@ pub struct DownloadedUpdate {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct UpdatePreferences {
-    /// Check on launch and once per day.
+    /// Check on launch and every hour while the app stays open.
     pub auto_check: bool,
     pub last_check_at: Option<i64>,
     /// Version the user chose to ignore. A newer version is shown again.

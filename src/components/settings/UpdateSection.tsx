@@ -73,7 +73,7 @@ export function UpdateSection() {
 
       <SettingRow
         label="Atualizações automáticas"
-        description="Verifica ao abrir e uma vez por dia. Baixar e instalar continuam sendo decisões suas."
+        description="Verifica ao abrir e a cada hora enquanto o app estiver aberto. Baixar e instalar continuam sendo decisões suas."
       >
         <Switch
           checked={preferences.autoCheck}

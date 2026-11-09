@@ -568,7 +568,7 @@ Atualizações (v1.12, `docs/INSTALLER.md` §9):
   `idle|checking|available|downloading|verifying|ready|installing|error|up-to-date`),
   `src/components/layout/UpdateChip.tsx` (pill da title bar),
   `src/components/layout/UpdatePanel.tsx` (popover + ações compartilhadas),
-  `src/components/layout/useUpdateCheck.ts` (start + 24h + foco) e
+  `src/components/layout/useUpdateCheck.ts` (start + 60 min + foco) e
   `src/components/settings/UpdateSection.tsx` (Configurações → Sobre). Contratos
   em `types.ts`/`api.ts`.
 - **Preferências**: `updates.json` no app-data (`autoCheck`, `lastCheckAt`,

@@ -25,7 +25,7 @@ vi.mock('sonner', () => ({
 
 // Imported after the mocks above.
 import { toast } from 'sonner';
-import { initialUpdateState, useUpdateStore } from '../updateStore';
+import { initialUpdateState, UPDATE_CHECK_INTERVAL_MS, useUpdateStore } from '../updateStore';
 
 function releaseInfo(overrides: Partial<UpdateInfo> = {}): UpdateInfo {
   return {
@@ -151,7 +151,64 @@ describe('updateStore', () => {
     expect(mocks.markUpdateNotified).not.toHaveBeenCalled();
   });
 
-  it('skips the automatic check inside the 24h window', async () => {
+  it('defaults automatic checks on for a fresh install', () => {
+    expect(initialUpdateState().preferences.autoCheck).toBe(true);
+  });
+
+  it('runs the first automatic check on launch even inside the one-hour window', async () => {
+    useUpdateStore.setState({
+      hydrated: true,
+      sessionChecked: false,
+      preferences: {
+        autoCheck: true,
+        lastCheckAt: Date.now() - 60_000,
+        skippedVersion: null,
+        notifiedVersion: null,
+      },
+    });
+
+    await useUpdateStore.getState().checkIfDue();
+
+    expect(mocks.checkForUpdate).toHaveBeenCalledTimes(1);
+    expect(mocks.checkForUpdate).toHaveBeenCalledWith(false);
+    expect(useUpdateStore.getState().sessionChecked).toBe(true);
+  });
+
+  it('checks again after the one-hour window', async () => {
+    useUpdateStore.setState({
+      hydrated: true,
+      sessionChecked: true,
+      preferences: {
+        autoCheck: true,
+        lastCheckAt: Date.now() - UPDATE_CHECK_INTERVAL_MS - 1,
+        skippedVersion: null,
+        notifiedVersion: null,
+      },
+    });
+
+    await useUpdateStore.getState().checkIfDue();
+
+    expect(mocks.checkForUpdate).toHaveBeenCalledWith(false);
+  });
+
+  it('checks on the hourly tick even when the last check is a few seconds short of the window', async () => {
+    useUpdateStore.setState({
+      hydrated: true,
+      sessionChecked: true,
+      preferences: {
+        autoCheck: true,
+        lastCheckAt: Date.now() - (UPDATE_CHECK_INTERVAL_MS - 30_000),
+        skippedVersion: null,
+        notifiedVersion: null,
+      },
+    });
+
+    await useUpdateStore.getState().checkIfDue();
+
+    expect(mocks.checkForUpdate).toHaveBeenCalledWith(false);
+  });
+
+  it('skips the automatic check inside the one-hour window', async () => {
     useUpdateStore.setState({
       hydrated: true,
       sessionChecked: true,

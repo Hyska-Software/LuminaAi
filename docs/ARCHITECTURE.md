@@ -912,7 +912,7 @@ Contrato completo: `docs/INSTALLER.md`.
 `release.json` da release estável mais recente via
 `/releases/latest/download/release.json` (sem rate limit; fallback para a API do
 GitHub), compara SemVer e guarda o resultado em `<app-data>/updates.json`. O
-renderer agenda a checagem ao abrir e a cada 24h (`useUpdateCheck`), mostra o
+renderer agenda a checagem ao abrir e a cada 60 min (`useUpdateCheck`), mostra o
 chip na title bar e o popover com notas/progresso. O download vai para
 `<app-data>/updates/<versão>/`, com SHA-256 conferido durante o stream e de novo
 antes de instalar. No Windows a instalação abre o wizard Lumina existente; não

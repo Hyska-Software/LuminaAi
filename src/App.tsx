@@ -187,7 +187,7 @@ export default function App() {
   }, [fontScale]);
 
   // Automatic update checks (hydrate the cached release immediately, check
-  // once the bootstrap is done and then once per day while the app is open).
+  // once the bootstrap is done and then every hour while the app is open).
   useUpdateCheck(ready);
 
   // Routine runs happen in the Rust scheduler, outside the renderer. Refresh
