@@ -26,7 +26,7 @@ import {
 import { Badge, Button } from '@/components/ui';
 import { api } from '@/lib/api';
 import {
-  useAgentQueueStore,
+  useMessageQueueStore,
   useAppStore,
   useChatStore,
   useUiStore,
@@ -62,8 +62,8 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
   const openAgentEditor = useUiStore((state) => state.openAgentEditor);
   const stopConversation = useChatStore((state) => state.stopConversation);
   const activeId = useChatStore((state) => state.activeId);
-  const queue = useAgentQueueStore((state) => state.byConversation);
-  const queuePaused = useAgentQueueStore((state) => state.pausedByConversation);
+  const queue = useMessageQueueStore((state) => state.byConversation);
+  const queuePaused = useMessageQueueStore((state) => state.pausedByConversation);
   const [usage, setUsage] = useState<AgentUsage | null>(null);
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [actions, setActions] = useState<ComputerActionRecord[]>([]);

@@ -24,7 +24,8 @@ Arquivos principais:
 - `src/components/agents/**` — sidebar, home, editor, memória, rotinas, canais,
   templates e construtor por IA.
 - `src/lib/store/agentStore.ts` — catálogo de personas.
-- `src/lib/store/agentQueueStore.ts` — fila FIFO persistida (localStorage).
+- `src/lib/store/messageQueueStore.ts` — fila FIFO de mensagens por conversa
+  (localStorage), compartilhada por Chat, Code e Agentes.
 - `src-tauri/src/agents/mod.rs` — domínio, validação, prompt, memória, rotinas,
   canais e documento de export.
 - `src-tauri/src/commands/agents.rs`, `routines.rs`, `channels.rs` — comandos.
@@ -241,11 +242,22 @@ com erro — o fallback é de rota, não um retry infinito.
   reata o stream daquela conversa e nunca apaga o de outra.
 - Várias threads de agente rodam ao mesmo tempo. O backend aceita **um turno
   por conversa** (`register_if_idle`); o renderer enfileira só a thread ocupada.
-- `agentQueueStore` persiste a fila em `localStorage` (`lumina.agent-queue.v1`).
-  O composer oferece **Enfileirar mensagem** enquanto há streaming no layout
-  Agentes; `done` drena o FIFO, `error` tenta o próximo item e `cancelled` pausa
-  a fila para o Stop não iniciar a próxima mensagem. As filas persistidas são
-  sanitizadas ao reidratar e retomadas depois do `reattachTurns`.
+- `messageQueueStore` persiste a fila em `localStorage` (`lumina.agent-queue.v1`,
+  chave legada) e cada item carrega texto, anexos, rota e `turnOptions`/`goalRequest`.
+  O composer oferece **Enfileirar mensagem** (padrão do Enter) em **todos os
+  layouts** enquanto há streaming; **Enviar agora** (botão ⚡ e ação do toast)
+  enfileira e interrompe o turno atual. O item só sai da fila quando o novo turno
+  começa; `settleTurn` reconcilia o snapshot do Code, entrega a preempção, drena
+  o FIFO e só então decide a autocontinuação do Goal (`processQueue` antes de
+  `maybeContinueGoal`). `cancelled` pausa a fila apenas no Stop (sem preempção).
+  As filas persistidas são sanitizadas ao reidratar e retomadas depois do
+  `reattachTurns` (`drainMessageQueues`, em qualquer layout).
+- Interromper uma rodada do Goal com **Enviar agora** retoma o objetivo depois
+  da nova mensagem (a rodada cancelada continua contada). Cancelar um gate
+  `submit_plan`/pergunta resolve o gate como cancelado: o plano volta a
+  `planning` com o feedback de revisão cancelada e a nova mensagem roda no modo
+  Plano. `waitForIdleTurn` espera o backend liberar a conversa antes de iniciar
+  o próximo turno (a `cancelled` chega antes do `finish_turn`).
 - A sidebar mostra o contador da fila e um spinner por thread/agente que está
   respondendo (lido do mapa, não do stream visível); threads com aprovação
   pendente, pergunta pendente ou último turno com erro exibem um ícone de
@@ -517,9 +529,10 @@ Contrato completo: `docs/DOCKER.md`.
 
 Testes específicos deste contrato:
 
-- `src/lib/store/__tests__/agentQueueStore.test.ts`
+- `src/lib/store/__tests__/messageQueueStore.test.ts`
+- `src/components/chat/MessageQueueBar.test.tsx`
 - `src/lib/__tests__/chatStore.test.ts` (streams simultâneos, fila em segundo
-  plano e notificações)
+  plano, Enviar agora e notificações)
 - `src/components/agents/AgentSidebar.test.tsx`
 - `src/components/agents/AgentMemoryPanel.test.tsx`
 - `src/components/agents/AgentRevisionDialog.test.tsx`

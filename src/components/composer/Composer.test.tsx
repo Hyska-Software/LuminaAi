@@ -531,6 +531,23 @@ describe('Composer — indicador de execução', () => {
     fireEvent.click(queue);
     await waitFor(() => expect(send).toHaveBeenCalled());
   });
+
+  it('oferece Fila e Enviar agora no Chat durante o streaming', async () => {
+    useUiStore.setState({ layoutMode: 'chat' });
+    useChatStore.setState({ streaming: streamingState(), activeId: 'conv-1' });
+    const send = vi.spyOn(useChatStore.getState(), 'send').mockResolvedValue(true);
+    render(<Composer />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Na fila' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Enfileirar mensagem' }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(send.mock.calls[0][1]).toBeUndefined();
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Agora' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar agora' }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1][1]).toMatchObject({ sendNow: true });
+  });
 });
 
 describe('Composer — colar arquivos com Ctrl+V', () => {

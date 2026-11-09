@@ -494,10 +494,10 @@ Contrato completo: **`docs/AGENTS.md`**. Resumo:
 - **Concorrência**: `chatStore.streamsByConversation` mantém um stream por
   conversa; `streaming` é a fatia visível de `activeId`. Várias threads de agente
   rodam ao mesmo tempo, com erro/notificação por thread.
-- **Fila**: FIFO por thread em `agentQueueStore` (persistida e sanitizada);
-  `done` drena, `error` tenta o próximo e `cancelled` pausa; o composer oferece
-  enfileirar durante o streaming. O backend aceita um turno por conversa
-  (`register_if_idle`).
+- **Fila**: FIFO por conversa em `messageQueueStore` (persistida e sanitizada),
+  usada por Chat, Code e Agentes; **Enviar agora** cancela o turno atual e inicia
+  o item assim que o backend libera a conversa, e a fila drena antes da rodada
+  automática do Goal. O backend aceita um turno por conversa (`register_if_idle`).
 - **Rotinas**: `agent_routines` + agendador Rust em paralelo (enquanto o app
   está aberto); cada run é um turno normal na conversa principal do agente,
   passando pela fila persistente `agent_routine_queue`, sob o governador e com

@@ -1,34 +1,43 @@
-import { ListOrdered, Pause, Play, Trash2, X } from 'lucide-react';
+import { ListOrdered, Pause, Play, Trash2, X, Zap } from 'lucide-react';
 
 import { Button, IconButton } from '@/components/ui';
-import { useAgentQueueStore, useChatStore, type AgentQueueItem } from '@/lib/store';
+import {
+  selectConversationStream,
+  useChatStore,
+  useMessageQueueStore,
+  type MessageQueueItem,
+} from '@/lib/store';
 import { cn } from '@/lib/utils';
 
 /** Stable fallback: a fresh `[]` on every selector call would loop React. */
-const EMPTY_QUEUE: AgentQueueItem[] = [];
+const EMPTY_QUEUE: MessageQueueItem[] = [];
 
 /**
- * FIFO above the composer for agent threads. The queue is persisted in
- * localStorage and drained when the current turn finishes (same conversation).
+ * FIFO above the composer for every layout. The queue is persisted in
+ * localStorage and drained when the conversation's turn finishes. While a turn
+ * is running, "Enviar agora" interrupts it and sends the chosen message.
  */
-export function AgentQueueBar({
+export function MessageQueueBar({
   conversationId,
   className,
 }: {
   conversationId: string;
   className?: string;
 }) {
-  const items = useAgentQueueStore(
+  const items = useMessageQueueStore(
     (state) => state.byConversation[conversationId] ?? EMPTY_QUEUE,
   );
-  const paused = useAgentQueueStore(
+  const paused = useMessageQueueStore(
     (state) => state.pausedByConversation[conversationId] === true,
   );
-  const pause = useAgentQueueStore((state) => state.pause);
-  const remove = useAgentQueueStore((state) => state.remove);
-  const clear = useAgentQueueStore((state) => state.clear);
-  const streaming = useChatStore((state) => state.streaming !== null);
+  const pause = useMessageQueueStore((state) => state.pause);
+  const remove = useMessageQueueStore((state) => state.remove);
+  const clear = useMessageQueueStore((state) => state.clear);
+  const streaming = useChatStore(
+    (state) => selectConversationStream(state, conversationId) !== null,
+  );
   const processQueue = useChatStore((state) => state.processQueue);
+  const sendQueuedNow = useChatStore((state) => state.sendQueuedNow);
 
   if (items.length === 0) return null;
 
@@ -38,7 +47,7 @@ export function AgentQueueBar({
         'mb-2 rounded-xl border border-border bg-surface-raised/80 px-2.5 py-2',
         className,
       )}
-      aria-label="Fila de mensagens do agente"
+      aria-label="Fila de mensagens"
     >
       <div className="flex items-center gap-2">
         <ListOrdered aria-hidden className="size-3.5 shrink-0 text-accent" />
@@ -57,8 +66,15 @@ export function AgentQueueBar({
         >
           {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
         </IconButton>
-        {!streaming && !paused ? (
-          <Button size="sm" variant="ghost" onClick={() => void processQueue(conversationId)}>
+        {!paused ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              if (streaming) void sendQueuedNow(conversationId, items[0].id);
+              else void processQueue(conversationId);
+            }}
+          >
             Enviar agora
           </Button>
         ) : null}
@@ -83,6 +99,16 @@ export function AgentQueueBar({
             <span className="min-w-0 flex-1 truncate text-[11px] text-foreground-muted">
               {item.content || `${item.attachments.length} anexo(s)`}
             </span>
+            <IconButton
+              label="Enviar agora"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                void sendQueuedNow(conversationId, item.id);
+              }}
+            >
+              <Zap className="size-3" />
+            </IconButton>
             <IconButton
               label="Remover da fila"
               size="sm"

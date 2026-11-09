@@ -3,11 +3,16 @@ import { persist } from 'zustand/middleware';
 
 import type { AttachmentInfo, ReasoningSelection, TurnOptions } from '@/lib/types';
 
-/** One message waiting for the conversation's current turn to finish. */
-export interface AgentQueueItem {
+/**
+ * One message waiting for the conversation's current turn to finish.
+ *
+ * `agentId` is only present for Agentes threads; Chat and Code sessions queue
+ * the same shape without a persona (the route comes from the conversation).
+ */
+export interface MessageQueueItem {
   id: string;
   conversationId: string;
-  agentId: string;
+  agentId?: string;
   content: string;
   attachments: AttachmentInfo[];
   providerId: string;
@@ -18,17 +23,17 @@ export interface AgentQueueItem {
   createdAt: number;
 }
 
-interface AgentQueueState {
+interface MessageQueueState {
   /** FIFO per conversation. */
-  byConversation: Record<string, AgentQueueItem[]>;
+  byConversation: Record<string, MessageQueueItem[]>;
   /** A paused queue is kept but never drained automatically. */
   pausedByConversation: Record<string, boolean>;
 
-  enqueue: (item: AgentQueueItem) => void;
+  enqueue: (item: MessageQueueItem) => void;
   /** Puts an item back at the head (used when TURN_BUSY rejects a drained item). */
-  enqueueFront: (item: AgentQueueItem) => void;
-  dequeue: (conversationId: string) => AgentQueueItem | null;
-  peek: (conversationId: string) => AgentQueueItem | null;
+  enqueueFront: (item: MessageQueueItem) => void;
+  dequeue: (conversationId: string) => MessageQueueItem | null;
+  peek: (conversationId: string) => MessageQueueItem | null;
   remove: (conversationId: string, itemId: string) => void;
   clear: (conversationId: string) => void;
   pause: (conversationId: string, paused: boolean) => void;
@@ -36,7 +41,7 @@ interface AgentQueueState {
   count: (conversationId: string) => number;
 }
 
-export const useAgentQueueStore = create<AgentQueueState>()(
+export const useMessageQueueStore = create<MessageQueueState>()(
   persist(
     (set, get) => ({
       byConversation: {},
@@ -112,12 +117,14 @@ export const useAgentQueueStore = create<AgentQueueState>()(
       count: (conversationId) => get().byConversation[conversationId]?.length ?? 0,
     }),
     {
+      // Legacy key: it already holds every queued message in the field, and a
+      // rename would silently drop them on the next boot.
       name: 'lumina.agent-queue.v1',
       version: 1,
-      migrate: (persisted) => sanitizeAgentQueue(persisted) as AgentQueueState,
+      migrate: (persisted) => sanitizeMessageQueue(persisted) as MessageQueueState,
       merge: (persisted, current) => ({
         ...current,
-        ...sanitizeAgentQueue(persisted),
+        ...sanitizeMessageQueue(persisted),
       }),
       partialize: (state) => ({
         byConversation: state.byConversation,
@@ -128,8 +135,8 @@ export const useAgentQueueStore = create<AgentQueueState>()(
 );
 
 /** Removes empty buckets so the persisted state does not grow forever. */
-export function compactAgentQueue(): void {
-  const state = useAgentQueueStore.getState();
+export function compactMessageQueue(): void {
+  const state = useMessageQueueStore.getState();
   const byConversation = Object.fromEntries(
     Object.entries(state.byConversation).filter(([, items]) => items.length > 0),
   );
@@ -143,27 +150,28 @@ export function compactAgentQueue(): void {
     Object.keys(pausedByConversation).length !==
       Object.keys(state.pausedByConversation).length
   ) {
-    useAgentQueueStore.setState({ byConversation, pausedByConversation });
+    useMessageQueueStore.setState({ byConversation, pausedByConversation });
   }
 }
 
-function isQueueItem(value: unknown): value is AgentQueueItem {
+function isQueueItem(value: unknown): value is MessageQueueItem {
   if (!value || typeof value !== 'object') return false;
-  const item = value as Partial<AgentQueueItem>;
+  const item = value as Partial<MessageQueueItem>;
   return (
     typeof item.id === 'string' &&
     typeof item.conversationId === 'string' &&
-    typeof item.agentId === 'string' &&
+    (item.agentId === undefined || typeof item.agentId === 'string') &&
     typeof item.content === 'string' &&
     Array.isArray(item.attachments) &&
     typeof item.providerId === 'string' &&
-    typeof item.modelId === 'string'
+    typeof item.modelId === 'string' &&
+    typeof item.createdAt === 'number'
   );
 }
 
 /** Drops malformed localStorage data instead of crashing the whole app. */
-export function sanitizeAgentQueue(value: unknown): {
-  byConversation: Record<string, AgentQueueItem[]>;
+export function sanitizeMessageQueue(value: unknown): {
+  byConversation: Record<string, MessageQueueItem[]>;
   pausedByConversation: Record<string, boolean>;
 } {
   if (!value || typeof value !== 'object') {
@@ -173,7 +181,7 @@ export function sanitizeAgentQueue(value: unknown): {
     byConversation?: unknown;
     pausedByConversation?: unknown;
   };
-  const byConversation: Record<string, AgentQueueItem[]> = {};
+  const byConversation: Record<string, MessageQueueItem[]> = {};
   if (raw.byConversation && typeof raw.byConversation === 'object') {
     for (const [conversationId, items] of Object.entries(
       raw.byConversation as Record<string, unknown>,

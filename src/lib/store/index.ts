@@ -21,8 +21,8 @@ export {
 } from './agentStore';
 export { useCodeStore, emptyCodeSession, applyCodeEvent, isCodeEvent } from './codeStore';
 export type { CodeSessionUi } from './codeStore';
-export { useAgentQueueStore, compactAgentQueue } from './agentQueueStore';
-export type { AgentQueueItem } from './agentQueueStore';
+export { useMessageQueueStore, compactMessageQueue } from './messageQueueStore';
+export type { MessageQueueItem } from './messageQueueStore';
 export {
   useChatStore,
   selectActiveConversation,

@@ -46,10 +46,9 @@ function bootstrap(): Promise<void> {
     // A webview reload must reattach turns that kept running in Rust before a
     // persisted FIFO decides that a thread is idle.
     await useChatStore.getState().reattachTurns();
-    // Persisted agent FIFOs resume when the app opens straight into Agentes.
-    if (useUiStore.getState().layoutMode === 'agent') {
-      await useChatStore.getState().drainAgentQueues();
-    }
+    // Persisted message FIFOs resume in every layout; each conversation starts
+    // on its own once it is idle.
+    await useChatStore.getState().drainMessageQueues();
   })();
   return bootstrapPromise;
 }

@@ -57,7 +57,7 @@ vi.mock('sonner', () => ({
 }));
 
 // Imported after the mocks above.
-import { useAgentQueueStore } from '@/lib/store/agentQueueStore';
+import { useMessageQueueStore } from '@/lib/store/messageQueueStore';
 import { useAgentStore } from '@/lib/store/agentStore';
 import { useAppStore } from '@/lib/store/appStore';
 import {
@@ -177,7 +177,7 @@ function resetStores(): void {
   });
   useUiStore.setState({ artifacts: [], layoutMode: 'chat' });
   useCodeStore.setState({ byConversation: {} });
-  useAgentQueueStore.setState({ byConversation: {}, pausedByConversation: {} });
+  useMessageQueueStore.setState({ byConversation: {}, pausedByConversation: {} });
   useAgentStore.setState({
     agentsById: {},
     orderedIds: [],
@@ -2208,7 +2208,7 @@ describe('chatStore — concorrência entre agentes', () => {
     // Second message to the same thread waits in its FIFO.
     await useChatStore.getState().send('mensagem na fila');
     expect(pending).toHaveLength(1);
-    expect(useAgentQueueStore.getState().count('conv-1')).toBe(1);
+    expect(useMessageQueueStore.getState().count('conv-1')).toBe(1);
 
     // The user moves to another agent thread; it starts its own turn while the
     // first one keeps running in the background.
@@ -2628,5 +2628,248 @@ describe('chatStore — narração separada por resposta (Code e Agentes)', () =
       text: 'Achei src/app.ts',
       toolCalls: 1,
     });
+  });
+});
+
+describe('chatStore — fila por conversa e Enviar agora', () => {
+  interface ControlledTurn {
+    payload: TurnPayload;
+    finish: (content: string) => void;
+    cancel: () => void;
+  }
+
+  function controlledTurns(mode: 'chat' | 'code' = 'chat'): ControlledTurn[] {
+    const pending: ControlledTurn[] = [];
+    mocks.api.runTurn.mockImplementation(
+      (payload: TurnPayload, onEvent: (event: TurnEvent) => void) =>
+        new Promise((resolve) => {
+          onEvent({
+            type: 'turn_started',
+            turnId: payload.turnId!,
+            userMessageId: `user-${payload.turnId}`,
+            assistantMessageId: `assistant-${payload.turnId}`,
+          });
+          const result = (content: string) => ({
+            userMessage: userMessage({
+              id: `user-${payload.turnId}`,
+              conversationId: payload.conversationId,
+              content: payload.content,
+            }),
+            assistantMessage: assistantMessage({
+              id: `assistant-${payload.turnId}`,
+              conversationId: payload.conversationId,
+              content,
+            }),
+            usage: null,
+            error: null,
+            conversation: conversation({ id: payload.conversationId, mode }),
+          });
+          pending.push({
+            payload,
+            finish: (content) => {
+              const value = result(content);
+              onEvent({ type: 'done', result: value });
+              resolve(value);
+            },
+            cancel: () => {
+              onEvent({ type: 'cancelled' });
+              resolve(result(''));
+            },
+          });
+        }),
+    );
+    return pending;
+  }
+
+  function seedSession(mode: 'chat' | 'code'): void {
+    useUiStore.setState({ layoutMode: mode });
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-1', mode })],
+      activeId: 'conv-1',
+      activeIdByLayout: {
+        chat: mode === 'chat' ? 'conv-1' : null,
+        code: mode === 'code' ? 'conv-1' : null,
+        agent: null,
+      },
+      messagesByConversation: { 'conv-1': [] },
+    });
+  }
+
+  function goalFixture(overrides: Partial<GoalView> = {}): GoalView {
+    return {
+      title: 'Objetivo',
+      objective: 'Concluir a refatoração.',
+      status: 'active',
+      autoContinue: true,
+      rounds: 1,
+      maxRounds: 25,
+      revision: 2,
+      origin: 'user',
+      createdAt: 1,
+      updatedAt: 2,
+      ...overrides,
+    };
+  }
+
+  function goalSnapshot(value: GoalView) {
+    return {
+      conversationId: 'conv-1',
+      permissionMode: 'edit' as const,
+      planMode: false,
+      goal: value,
+      todos: [],
+      jobs: [],
+      approvals: [],
+    };
+  }
+
+  it('enfileira no layout Chat durante o streaming e drena ao terminar', async () => {
+    seedSession('chat');
+    const pending = controlledTurns('chat');
+
+    await useChatStore.getState().send('primeira');
+    expect(pending).toHaveLength(1);
+
+    const accepted = await useChatStore.getState().send('segunda');
+    expect(accepted).toBe(true);
+    expect(useMessageQueueStore.getState().count('conv-1')).toBe(1);
+    expect(pending).toHaveLength(1);
+
+    pending[0].finish('resposta');
+    await vi.waitFor(() => expect(pending).toHaveLength(2), { timeout: 2000 });
+    expect(pending[1].payload.content).toBe('segunda');
+    expect(pending[1].payload.turnKind).toBe('user');
+    expect(useMessageQueueStore.getState().count('conv-1')).toBe(0);
+  });
+
+  it('Enviar agora cancela o turno e só então inicia a nova mensagem', async () => {
+    seedSession('chat');
+    const pending = controlledTurns('chat');
+
+    await useChatStore.getState().send('primeira');
+    await useChatStore.getState().send('nova', { sendNow: true });
+
+    expect(mocks.api.cancelTurn).toHaveBeenCalledWith(pending[0].payload.turnId);
+    // The item stays queued until the interrupted turn releases the slot.
+    expect(pending).toHaveLength(1);
+    expect(useMessageQueueStore.getState().count('conv-1')).toBe(1);
+
+    pending[0].cancel();
+    await vi.waitFor(() => expect(pending).toHaveLength(2), { timeout: 2000 });
+    expect(pending[1].payload.content).toBe('nova');
+    expect(pending[1].payload.turnKind).toBe('user');
+    expect(useMessageQueueStore.getState().count('conv-1')).toBe(0);
+  });
+
+  it('drena a fila antes da autocontinuação do objetivo', async () => {
+    seedSession('code');
+    // `applyResult` refreshes the sidebar; the mocked backend must return the
+    // session, otherwise the goal preflight cannot find the conversation.
+    mocks.api.listConversations.mockResolvedValue([
+      conversation({ id: 'conv-1', mode: 'code' }),
+    ]);
+    const active = goalFixture();
+    useCodeStore.setState({
+      byConversation: { 'conv-1': { ...emptyCodeSession('conv-1'), goal: active } },
+    });
+    mocks.api.getCodeSessionState.mockResolvedValue(goalSnapshot(active));
+    mocks.api.goalCanContinue.mockResolvedValue({ ok: true, goal: active });
+    const pending = controlledTurns('code');
+
+    await useChatStore.getState().send('primeira');
+    await useChatStore.getState().send('fila');
+    expect(pending).toHaveLength(1);
+
+    pending[0].finish('ok');
+    await vi.waitFor(() => expect(pending).toHaveLength(2), { timeout: 2000 });
+    expect(pending[1].payload.content).toBe('fila');
+    expect(pending[1].payload.turnKind).toBe('user');
+    expect(mocks.api.goalCanContinue).not.toHaveBeenCalled();
+
+    pending[1].finish('ok');
+    await vi.waitFor(() => expect(pending).toHaveLength(3), { timeout: 2000 });
+    expect(pending[2].payload.turnKind).toBe('goal_round');
+  });
+
+  it('interromper uma rodada do objetivo retoma o goal antes da nova mensagem', async () => {
+    seedSession('code');
+    const active = goalFixture();
+    useCodeStore.setState({
+      byConversation: { 'conv-1': { ...emptyCodeSession('conv-1'), goal: active } },
+    });
+    mocks.api.getCodeSessionState.mockResolvedValue(goalSnapshot(active));
+    const pending = controlledTurns('code');
+
+    const resumed: string[] = [];
+    let releaseResume: () => void = () => {};
+    const resumeGate = new Promise<void>((resolve) => {
+      releaseResume = resolve;
+    });
+    mocks.api.updateGoal.mockImplementation(async (_id: string, action: string) => {
+      resumed.push(action);
+      await resumeGate;
+      return goalSnapshot(goalFixture({ status: 'active', revision: 3 }));
+    });
+
+    await useChatStore.getState().runGoalRound('conv-1');
+    expect(pending[0].payload.turnKind).toBe('goal_round');
+
+    await useChatStore.getState().send('correção');
+    const itemId = useMessageQueueStore.getState().byConversation['conv-1'][0].id;
+    await useChatStore.getState().sendQueuedNow('conv-1', itemId);
+    expect(mocks.api.cancelTurn).toHaveBeenCalledWith(pending[0].payload.turnId);
+
+    // The cancellation closes the round as paused(user).
+    mocks.api.getCodeSessionState.mockResolvedValue(
+      goalSnapshot(goalFixture({ status: 'paused', pauseReason: 'user', revision: 2 })),
+    );
+    pending[0].cancel();
+
+    await vi.waitFor(() => expect(resumed).toContain('resume'), { timeout: 2000 });
+    expect(pending).toHaveLength(1);
+
+    releaseResume();
+    await vi.waitFor(() => expect(pending).toHaveLength(2), { timeout: 2000 });
+    expect(pending[1].payload.content).toBe('correção');
+    expect(pending[1].payload.turnKind).toBe('user');
+  });
+
+  it('Stop sem Enviar agora continua pausando a fila', async () => {
+    seedSession('chat');
+    const pending = controlledTurns('chat');
+
+    await useChatStore.getState().send('primeira');
+    await useChatStore.getState().send('fila');
+    pending[0].cancel();
+
+    await vi.waitFor(
+      () => expect(useMessageQueueStore.getState().isPaused('conv-1')).toBe(true),
+      { timeout: 2000 },
+    );
+    expect(pending).toHaveLength(1);
+  });
+
+  it('Stop não inicia a próxima rodada do objetivo', async () => {
+    seedSession('code');
+    const active = goalFixture();
+    useCodeStore.setState({
+      byConversation: { 'conv-1': { ...emptyCodeSession('conv-1'), goal: active } },
+    });
+    mocks.api.getCodeSessionState.mockResolvedValue(goalSnapshot(active));
+    mocks.api.goalCanContinue.mockResolvedValue({ ok: true, goal: active });
+    const pending = controlledTurns('code');
+
+    await useChatStore.getState().send('primeira');
+    await useChatStore.getState().stop();
+    pending[0].cancel();
+
+    await vi.waitFor(
+      () => expect(mocks.api.getCodeSessionState.mock.calls.length).toBeGreaterThanOrEqual(2),
+      { timeout: 2000 },
+    );
+    // Drain the promise chain; settle must decide without the goal driver.
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
+    expect(mocks.api.goalCanContinue).not.toHaveBeenCalled();
+    expect(pending).toHaveLength(1);
   });
 });

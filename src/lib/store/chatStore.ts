@@ -26,7 +26,7 @@ import { defaultSelection, findModelIn, getModel } from '../catalog';
 import { filterConversationsForLayout } from '../conversations';
 import { reasoningForModel } from '../modelMenu';
 import { shouldContinueGoal } from '../goalRunner';
-import { useAgentQueueStore, compactAgentQueue, type AgentQueueItem } from './agentQueueStore';
+import { useMessageQueueStore, compactMessageQueue, type MessageQueueItem } from './messageQueueStore';
 import { useAgentStore } from './agentStore';
 import { useAppStore } from './appStore';
 import { isCodeEvent, useCodeStore } from './codeStore';
@@ -48,7 +48,7 @@ export interface StreamingState {
   /** Live child agents of this turn, keyed by the parent `task` call id. */
   subagents?: Record<string, SubagentLiveState>;
   /** Queue item that started this turn; re-enqueued on TURN_BUSY. */
-  queuedItem?: AgentQueueItem;
+  queuedItem?: MessageQueueItem;
 }
 
 interface ChatState {
@@ -134,9 +134,14 @@ interface ChatState {
   clearAttachments: () => void;
   send: (content: string, options?: SendOptions) => Promise<boolean>;
   /** Drains the next queued message of a conversation (no-op when busy/paused). */
-  processQueue: (conversationId?: string | null) => Promise<void>;
-  /** Resumes every persisted agent queue that is idle and unpaused. */
-  drainAgentQueues: () => Promise<void>;
+  processQueue: (conversationId?: string | null) => Promise<boolean>;
+  /**
+   * Sends one queued message now: interrupts the conversation's running turn
+   * (if any) and starts the item as soon as the previous turn releases the slot.
+   */
+  sendQueuedNow: (conversationId: string, itemId: string) => Promise<boolean>;
+  /** Resumes every persisted message queue that is idle and unpaused. */
+  drainMessageQueues: () => Promise<void>;
   /** Applies a turn event mirrored on the global bus (reload/reattach). */
   applyExternalTurnEvent: (payload: TurnEventBusPayload) => Promise<void>;
   /** Rebuilds streams/messages of turns still running in Rust after a reload. */
@@ -186,6 +191,11 @@ export interface SendOptions {
    * humano normal; o backend injeta a instrução de criação no runtime context.
    */
   goalRequest?: boolean;
+  /**
+   * Send immediately: enqueue the message and, when a turn is running,
+   * interrupt it before starting the new one.
+   */
+  sendNow?: boolean;
 }
 
 const EMPTY: ChatMessage[] = [];
@@ -201,6 +211,27 @@ const terminalTurnIds = new Set<string>();
 /** Dedupe window per conversation+category to avoid notification spam. */
 const notificationThrottle = new Map<string, number>();
 const NOTIFICATION_DEDUPE_MS = 5_000;
+
+/** "Enviar agora" requested while a turn is still running. */
+interface Preemption {
+  item: MessageQueueItem;
+  /** The interrupted turn was a goal round that should resume afterwards. */
+  resumeGoal: boolean;
+}
+/** Pending interruption per conversation (one at a time). */
+const preemptions = new Map<string, Preemption>();
+/** Concurrency guard so the same turn never settles twice at once. */
+const settling = new Set<string>();
+/** Last turn already settled per conversation (event + invoke both trigger). */
+const settledTurns = new Map<string, string>();
+/** Concurrency guard for queue drains of one conversation. */
+const draining = new Set<string>();
+/**
+ * Turns whose end must not auto-continue the Goal: Stop and error/cancel.
+ * Only a successful `done` (or a benign interrupt via "Enviar agora", which
+ * delivers the queued item first) may start the next automatic round.
+ */
+const goalSkips = new Set<string>();
 
 export function notificationsAllowed(category: string): boolean {
   const settings = useAppStore.getState().settings;
@@ -717,13 +748,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
       /** Rodada automática: remove os otimistas se o turno nem começou. */
       removeOnFailure?: boolean;
       /** Item que iniciou este turno; reenfileirado quando o backend recusa. */
-      queueItem?: AgentQueueItem;
+      queueItem?: MessageQueueItem;
     },
   ) => {
     let local_turn_id: string | null = payload.turnId ?? null;
     let reasoningBuffer = '';
     let textBuffer = '';
-    let flushHandle: ReturnType<typeof setTimeout> | null = null;
+    let flushHandle: ReturnType<typeof setTimeout> | undefined;
     let finished = false;
     let started = false;
     /** Primeiro texto depois de um novo passo ganha um parágrafo. */
@@ -734,7 +765,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
     const flush = () => {
       if (flushHandle) {
         clearTimeout(flushHandle);
-        flushHandle = null;
+        flushHandle = undefined;
       }
       const target = context.assistantId;
       if (reasoningBuffer) {
@@ -1010,43 +1041,58 @@ export const useChatStore = create<ChatState>()((set, get) => {
               void api.notifyDesktop(title, finishedConversation.title);
             }
           }
-          // Sincroniza o snapshot da sessão e só então decide a próxima rodada
-          // do objetivo (o estado do goal_updated/finish_round precisa chegar).
-          void (async () => {
-            await useCodeStore.getState().refresh(context.conversationId);
-            await get().maybeContinueGoal(context.conversationId);
-            // A queued message is the next turn of the same thread. This runs
-            // for background agent threads too: each thread drains its own
-            // FIFO without waiting for the user to look at it.
-            await get().processQueue(context.conversationId);
-          })();
+          // Snapshot, queue drain and goal continuation happen in one place
+          // (`settleTurn`), after the turn releases the backend slot. Queued
+          // user messages always hop ahead of the next automatic goal round.
+          void settleTurn(context.conversationId, payload.turnId ?? '');
           // The per-request event carries only cache counters; TTL/min/savings
           // come from the authoritative snapshot, so refresh it at turn end.
           void syncCacheStats(context.conversationId);
           break;
-        case 'cancelled':
+        case 'cancelled': {
           flush();
           finished = true;
           terminal = 'cancelled';
           if (local_turn_id) terminalTurnIds.add(local_turn_id);
+          goalSkips.add(payload.turnId ?? '');
           void syncCacheStats(context.conversationId);
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
             status: 'cancelled',
           }));
-          setStream(context.conversationId, null);
-          if (useAgentQueueStore.getState().count(context.conversationId) > 0) {
-            useAgentQueueStore.getState().pause(context.conversationId, true);
+          // If settle already delivered the "Enviar agora" item before this
+          // event (invoke-first ordering), the queue must keep moving too.
+          const alreadySettled =
+            settledTurns.get(context.conversationId) === payload.turnId;
+          const preempting = preemptions.has(context.conversationId) || alreadySettled;
+          // Never clear a stream that already belongs to the next turn.
+          if (
+            get().streamsByConversation[context.conversationId]?.turnId ===
+            payload.turnId
+          ) {
+            setStream(context.conversationId, null);
+          }
+          // "Enviar agora" keeps the queue moving; Stop pauses it.
+          if (
+            !preempting &&
+            useMessageQueueStore.getState().count(context.conversationId) > 0
+          ) {
+            useMessageQueueStore.getState().pause(context.conversationId, true);
           }
           void syncArtifacts(context.conversationId);
-          void useCodeStore.getState().refresh(context.conversationId);
+          if (!preempting) {
+            void useCodeStore.getState().refresh(context.conversationId);
+          }
+          void settleTurn(context.conversationId, payload.turnId ?? '');
           break;
+        }
         case 'error': {
           flush();
           finished = true;
           terminal = 'error';
           if (local_turn_id) terminalTurnIds.add(local_turn_id);
           void syncCacheStats(context.conversationId);
+          goalSkips.add(payload.turnId ?? '');
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
             status: message.content ? 'complete' : 'error',
@@ -1063,13 +1109,15 @@ export const useChatStore = create<ChatState>()((set, get) => {
             });
           }
           void syncArtifacts(context.conversationId);
-          void useCodeStore.getState().refresh(context.conversationId);
+          if (!preemptions.has(context.conversationId)) {
+            void useCodeStore.getState().refresh(context.conversationId);
+          }
           toast.error('Falha na resposta', { description: event.hint ?? event.message });
           if (event.code === 'TURN_BUSY' && queuedItem) {
-            useAgentQueueStore.getState().enqueueFront(queuedItem);
-            useAgentQueueStore.getState().pause(context.conversationId, true);
+            useMessageQueueStore.getState().enqueueFront(queuedItem);
+            useMessageQueueStore.getState().pause(context.conversationId, true);
           } else {
-            void get().processQueue(context.conversationId);
+            void settleTurn(context.conversationId, payload.turnId ?? '');
           }
           break;
         }
@@ -1276,8 +1324,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
         removeMessage(context.conversationId, context.optimisticUserId ?? '');
         removeMessage(context.conversationId, context.assistantId);
         setStream(context.conversationId, null);
-        useAgentQueueStore.getState().enqueueFront(context.queueItem);
-        useAgentQueueStore.getState().pause(context.conversationId, true);
+        useMessageQueueStore.getState().enqueueFront(context.queueItem);
+        useMessageQueueStore.getState().pause(context.conversationId, true);
         toast.info('Thread ocupada', {
           description: 'A mensagem voltou para a fila; retome quando o turno atual terminar.',
         });
@@ -1307,10 +1355,16 @@ export const useChatStore = create<ChatState>()((set, get) => {
       toast.error('Não foi possível concluir a mensagem', { description: message });
       void syncArtifacts(context.conversationId);
     } finally {
-      if (flushHandle) clearTimeout(flushHandle);
+      clearTimeout(flushHandle);
       if (local_turn_id) {
         localTurnIds.delete(local_turn_id);
         local_turn_id = null;
+      }
+      // The invoke resolves only after Rust releases the conversation slot, so
+      // this is the authoritative point to drain the queue (the `done` event
+      // may arrive before `finish_turn`). Idempotent per turn id.
+      if (started || terminal) {
+        void settleTurn(context.conversationId, payload.turnId ?? '');
       }
     }
   };
@@ -1353,7 +1407,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       selection: ModelSelection;
       reasoning: ReasoningSelection | null;
       options?: SendOptions;
-      queueItem?: AgentQueueItem;
+      queueItem?: MessageQueueItem;
     },
     clearPendingAttachments = true,
   ) => {
@@ -1445,62 +1499,166 @@ export const useChatStore = create<ChatState>()((set, get) => {
   };
 
   /**
-   * Starts the next queued message of one conversation, if any. Each agent
-   * thread drains its own FIFO, including while it is in the background.
+   * Waits until Rust releases the conversation slot. The renderer may see the
+   * terminal event before `finish_turn`; starting a turn before that yields
+   * TURN_BUSY. Unknown/failed lookups count as idle (tests have no backend).
    */
-  const processQueue = async (conversationId?: string | null) => {
+  const waitForIdleTurn = async (conversationId: string): Promise<boolean> => {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        const active = await api.listActiveTurns();
+        if (
+          !Array.isArray(active) ||
+          !active.some((turn) => turn.conversationId === conversationId)
+        ) {
+          return true;
+        }
+      } catch {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    return false;
+  };
+
+  /**
+   * Starts one queued item. A persona is validated only when the item belongs
+   * to an Agentes thread; Chat/Code resolve the route from the item, then the
+   * conversation, then the global selection.
+   */
+  const startQueueItem = (
+    conversationId: string,
+    item: MessageQueueItem,
+  ): boolean => {
+    const agent = item.agentId
+      ? useAgentStore.getState().agentsById[item.agentId]
+      : undefined;
+    if (item.agentId && (!agent || agent.archivedAt !== null)) {
+      useMessageQueueStore.getState().pause(conversationId, true);
+      toast.error('A fila está pausada: restaure o agente para continuar');
+      return false;
+    }
+    const conversation = get().conversations.find(
+      (entry) => entry.id === conversationId,
+    );
+    const appSelection = useAppStore.getState().selection;
+    const reasoning = item.reasoning ?? agent?.reasoning ?? null;
+    const selection: ModelSelection = {
+      providerId: item.providerId || conversation?.providerId || appSelection.providerId,
+      modelId: item.modelId || conversation?.modelId || appSelection.modelId,
+      reasoning,
+    };
+    startTurn(
+      {
+        conversationId,
+        content: item.content,
+        attachments: item.attachments,
+        selection,
+        reasoning,
+        options: {
+          selection,
+          reasoning,
+          turnOptions: item.turnOptions,
+          goalRequest: item.goalRequest,
+        },
+        queueItem: item,
+      },
+      false,
+    );
+    return true;
+  };
+
+  /**
+   * Starts the next queued message of one conversation, if any. Runs for
+   * background threads too (each thread drains its own FIFO).
+   *
+   * Returns whether a turn was actually started.
+   */
+  const processQueue = async (
+    conversationId?: string | null,
+  ): Promise<boolean> => {
     const target = conversationId ?? get().activeId;
-    if (!target) return;
-    if (selectConversationStream(get(), target)) return;
-    const queue = useAgentQueueStore.getState();
-    if (queue.isPaused(target)) return;
+    if (!target) return false;
+    if (selectConversationStream(get(), target)) return false;
+    if (preemptions.has(target)) return false;
+    const queue = useMessageQueueStore.getState();
+    if (queue.isPaused(target)) return false;
     const item = queue.peek(target);
     if (!item) {
-      compactAgentQueue();
-      return;
+      compactMessageQueue();
+      return false;
     }
-    const agent = useAgentStore.getState().agentsById[item.agentId];
-    if (!agent || agent.archivedAt !== null) {
-      queue.pause(target, true);
-      toast.error('A fila está pausada: restaure o agente para continuar');
-      return;
-    }
+    if (draining.has(target)) return false;
+    draining.add(target);
     try {
-      const active = await api.listActiveTurns();
-      if (active.some((turn) => turn.conversationId === target)) return;
-    } catch {
-      /* backend may be unavailable in tests; the turn event still guards */
+      if (!(await waitForIdleTurn(target))) return false;
+      if (selectConversationStream(get(), target)) return false;
+      if (useMessageQueueStore.getState().isPaused(target)) return false;
+      if (!startQueueItem(target, item)) return false;
+      useMessageQueueStore.getState().dequeue(target);
+      return true;
+    } finally {
+      draining.delete(target);
     }
-    if (useAgentQueueStore.getState().isPaused(target)) return;
-    const selection: ModelSelection = {
-      providerId: item.providerId || agent?.providerId || useAppStore.getState().selection.providerId,
-      modelId: item.modelId || agent?.modelId || useAppStore.getState().selection.modelId,
-      reasoning: item.reasoning ?? agent?.reasoning ?? null,
-    };
-    startTurn({
-      conversationId: target,
-      content: item.content,
-      attachments: item.attachments,
-      selection,
-      reasoning: item.reasoning ?? agent?.reasoning ?? null,
-      options: {
-        selection,
-        reasoning: item.reasoning ?? agent?.reasoning ?? null,
-        turnOptions: item.turnOptions,
-        goalRequest: item.goalRequest,
-      },
-      queueItem: item,
-    }, false);
-    queue.dequeue(target);
+  };
+
+  /**
+   * One place decides what happens after a turn: reconcile the Code snapshot,
+   * then deliver the pending "Enviar agora" item, drain the FIFO, or continue
+   * the goal. Queued user messages always run before automatic goal rounds.
+   */
+  const settleTurn = async (
+    conversationId: string,
+    turnId: string,
+  ): Promise<void> => {
+    if (settling.has(conversationId)) return;
+    if (settledTurns.get(conversationId) === turnId) return;
+    settledTurns.set(conversationId, turnId);
+    settling.add(conversationId);
+    try {
+      await useCodeStore.getState().refresh(conversationId);
+      const preempt = preemptions.get(conversationId);
+      if (preempt) {
+        // The backend closed a cancelled goal round as paused(user); the user
+        // redirected the work, so the goal resumes instead of stopping.
+        if (preempt.resumeGoal) {
+          const goal = useCodeStore.getState().byConversation[conversationId]?.goal;
+          if (goal?.status === 'paused') {
+            await useCodeStore.getState().updateGoal(conversationId, 'resume');
+          }
+        }
+        // Keep the preemption registered while awaiting, so no other drain can
+        // start the FIFO behind our back; the delivery below is synchronous.
+        const idle = await waitForIdleTurn(conversationId);
+        preemptions.delete(conversationId);
+        if (!idle) {
+          useMessageQueueStore.getState().pause(conversationId, true);
+          toast.error('Não foi possível interromper a resposta atual');
+          return;
+        }
+        if (startQueueItem(conversationId, preempt.item)) {
+          useMessageQueueStore.getState().remove(conversationId, preempt.item.id);
+        }
+        return;
+      }
+      const started = await processQueue(conversationId);
+      // Another trigger (thread open/layout switch) may own the next queued
+      // turn; never start an automatic goal round behind it.
+      if (!started && !draining.has(conversationId) && !goalSkips.has(turnId)) {
+        await get().maybeContinueGoal(conversationId);
+      }
+    } finally {
+      goalSkips.delete(turnId);
+      settling.delete(conversationId);
+    }
   };
 
   /**
    * Resumes persisted FIFOs. Each thread starts independently, so a reload can
-   * pick up several queued agent tasks without waiting for the user to visit
-   * them one by one.
+   * pick up several queued messages without waiting for the user to visit them.
    */
-  const drainAgentQueues = async () => {
-    const ids = Object.keys(useAgentQueueStore.getState().byConversation);
+  const drainMessageQueues = async () => {
+    const ids = Object.keys(useMessageQueueStore.getState().byConversation);
     for (const id of ids) {
       await processQueue(id);
     }
@@ -1571,12 +1729,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
         // it was showing (Biblioteca/Skills) instead of being forced back to the
         // conversation, matching WorkspaceCenter's per-layout view state.
         await get().openConversation(target, { preserveView: true });
-        if (mode === 'agent') void get().drainAgentQueues();
+        void get().drainMessageQueues();
         return;
       }
       // No session for this layout: show its welcome state without touching the
       // other layout's cached conversation.
-      if (mode === 'agent') void get().drainAgentQueues();
+      void get().drainMessageQueues();
       set({ activeId: null, loadingConversationId: null, streaming: null });
       rememberActive(null, mode);
       useUiStore.getState().setArtifacts([]);
@@ -1726,7 +1884,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
     deleteConversation: async (id) => {
       try {
         await api.deleteConversation(id);
-        useAgentQueueStore.getState().clear(id);
+        useMessageQueueStore.getState().clear(id);
         const layout = currentLayout();
         set((state) => {
           const rest = state.conversations.filter((c) => c.id !== id);
@@ -1999,11 +2157,63 @@ export const useChatStore = create<ChatState>()((set, get) => {
 
     dismissError: () => set({ error: null, errorCode: null, errorHint: null }),
 
-    processQueue: async (conversationId) => {
-      await processQueue(conversationId);
+    processQueue: async (conversationId) => processQueue(conversationId),
+
+    sendQueuedNow: async (conversationId, itemId) => {
+      const queue = useMessageQueueStore.getState();
+      const item = (queue.byConversation[conversationId] ?? []).find(
+        (entry) => entry.id === itemId,
+      );
+      if (!item) return false;
+      if (item.agentId) {
+        const agent = useAgentStore.getState().agentsById[item.agentId];
+        if (!agent || agent.archivedAt !== null) {
+          toast.error('A fila está pausada: restaure o agente para continuar');
+          return false;
+        }
+      }
+      const stream = selectConversationStream(get(), conversationId);
+      if (!stream) {
+        // No local stream: the backend may still own a turn this renderer lost
+        // (reload/second window). Wait for it before starting the item.
+        if (!(await waitForIdleTurn(conversationId))) {
+          toast.info('Aguarde a resposta atual terminar');
+          return false;
+        }
+        if (!startQueueItem(conversationId, item)) return false;
+        useMessageQueueStore.getState().remove(conversationId, itemId);
+        useMessageQueueStore.getState().pause(conversationId, false);
+        return true;
+      }
+      if (preemptions.has(conversationId)) return false;
+      const goal = useCodeStore.getState().byConversation[conversationId]?.goal;
+      preemptions.set(conversationId, {
+        item,
+        resumeGoal: stream.turnKind === 'goal_round' && goal?.status === 'active',
+      });
+      setStream(conversationId, { ...stream, phase: 'starting' });
+      let cancelled = false;
+      try {
+        cancelled = await api.cancelTurn(stream.turnId);
+      } catch (error) {
+        console.error('cancel failed', error);
+      }
+      if (!cancelled) {
+        // The registry had no turn for this id: either it just ended (the
+        // invoke settle will not run) or it has not registered yet.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const active = await api.listActiveTurns().catch(() => []);
+        if (
+          !Array.isArray(active) ||
+          !active.some((turn) => turn.conversationId === conversationId)
+        ) {
+          void settleTurn(conversationId, stream.turnId);
+        }
+      }
+      return true;
     },
 
-    drainAgentQueues,
+    drainMessageQueues,
 
     send: async (content, options) => {
       const state = get();
@@ -2014,45 +2224,71 @@ export const useChatStore = create<ChatState>()((set, get) => {
       // never blocks another thread.
       const activeStream = selectActiveStream(state);
       if (activeStream) {
+        const conversationId = state.activeId;
+        if (!conversationId) {
+          toast.info('Aguarde a resposta atual terminar');
+          return false;
+        }
         const ui = useUiStore.getState();
-        const conversation = state.activeId
-          ? state.conversations.find((entry) => entry.id === state.activeId)
-          : undefined;
+        const conversation = state.conversations.find(
+          (entry) => entry.id === conversationId,
+        );
+        // Only Agentes threads own a persona; Chat/Code resolve the route from
+        // the conversation and the global selection.
         const agentId =
           ui.layoutMode === 'agent'
             ? (conversation?.agentId ?? ui.activeAgentId ?? null)
             : null;
-        if (ui.layoutMode === 'agent' && state.activeId && agentId) {
-          const queueLimit =
-            useAppStore.getState().settings.maxQueueLengthPerThread ?? 20;
-          if (useAgentQueueStore.getState().count(state.activeId) >= queueLimit) {
-            toast.error('Fila cheia', {
-              description: `Esta thread já tem ${queueLimit} mensagens na fila. Aguarde ou limpe a fila.`,
-            });
-            return false;
-          }
-          const agent = useAgentStore.getState().agentsById[agentId];
-          useAgentQueueStore.getState().enqueue({
-            id: newId(),
-            conversationId: state.activeId,
-            agentId,
-            content: trimmed,
-            attachments,
-            providerId: agent?.providerId ?? useAppStore.getState().selection.providerId,
-            modelId: agent?.modelId ?? useAppStore.getState().selection.modelId,
-            reasoning: agent?.reasoning ?? null,
-            turnOptions: options?.turnOptions,
-            goalRequest: options?.goalRequest,
-            createdAt: Date.now(),
+        const queueLimit =
+          useAppStore.getState().settings.maxQueueLengthPerThread ?? 20;
+        if (useMessageQueueStore.getState().count(conversationId) >= queueLimit) {
+          toast.error('Fila cheia', {
+            description: `Esta thread já tem ${queueLimit} mensagens na fila. Aguarde ou limpe a fila.`,
           });
-          set({ pendingAttachments: [] });
+          return false;
+        }
+        const agent = agentId ? useAgentStore.getState().agentsById[agentId] : undefined;
+        const agentSelection: ModelSelection | null = agent
+          ? {
+              providerId: agent.providerId,
+              modelId: agent.modelId,
+              reasoning: agent.reasoning,
+            }
+          : null;
+        const selection =
+          options?.selection ??
+          lockedSelectionFor(state) ??
+          agentSelection ??
+          useAppStore.getState().selection;
+        const reasoning =
+          options?.reasoning !== undefined ? options.reasoning : selection.reasoning;
+        const item: MessageQueueItem = {
+          id: newId(),
+          conversationId,
+          agentId: agentId ?? undefined,
+          content: trimmed,
+          attachments,
+          providerId: selection.providerId,
+          modelId: selection.modelId,
+          reasoning: reasoning ?? null,
+          turnOptions: options?.turnOptions,
+          goalRequest: options?.goalRequest,
+          createdAt: Date.now(),
+        };
+        useMessageQueueStore.getState().enqueue(item);
+        set({ pendingAttachments: [] });
+        if (!options?.sendNow) {
           toast.info('Mensagem na fila', {
             description: 'Ela será enviada quando a resposta atual terminar.',
+            action: {
+              label: 'Enviar agora',
+              onClick: () => void get().sendQueuedNow(conversationId, item.id),
+            },
           });
-          return true;
+        } else {
+          await get().sendQueuedNow(conversationId, item.id);
         }
-        toast.info('Aguarde a resposta atual terminar');
-        return false;
+        return true;
       }
 
       const app = useAppStore.getState();
@@ -2225,13 +2461,16 @@ export const useChatStore = create<ChatState>()((set, get) => {
     stop: async () => {
       const state = get();
       const conversationId = state.activeId;
+      // Stop cancels a pending "Enviar agora": the item stays queued (paused).
+      if (conversationId) preemptions.delete(conversationId);
       const streaming = selectConversationStream(state, conversationId) ?? state.streaming;
       if (!streaming) return;
+      goalSkips.add(streaming.turnId);
       if (conversationId) {
         setStream(conversationId, { ...streaming, phase: 'starting' });
       }
-      if (useAgentQueueStore.getState().count(streaming.conversationId) > 0) {
-        useAgentQueueStore.getState().pause(streaming.conversationId, true);
+      if (useMessageQueueStore.getState().count(streaming.conversationId) > 0) {
+        useMessageQueueStore.getState().pause(streaming.conversationId, true);
       }
       // Parar uma rodada do objetivo também pausa a continuidade automática:
       // sem isso o próximo `done` retomaria sozinho o que o usuário parou.
@@ -2247,12 +2486,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
 
     stopConversation: async (conversationId) => {
       const state = get();
+      preemptions.delete(conversationId);
       const streaming = selectConversationStream(state, conversationId);
       if (!streaming) {
         // The renderer may have reloaded and lost the stream object while the
         // Rust side still owns the turn; the conversation-level cancel covers it.
-        if (useAgentQueueStore.getState().count(conversationId) > 0) {
-          useAgentQueueStore.getState().pause(conversationId, true);
+        if (useMessageQueueStore.getState().count(conversationId) > 0) {
+          useMessageQueueStore.getState().pause(conversationId, true);
         }
         try {
           await api.cancelConversation(conversationId);
@@ -2262,8 +2502,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
         return;
       }
       setStream(conversationId, { ...streaming, phase: 'starting' });
-      if (useAgentQueueStore.getState().count(conversationId) > 0) {
-        useAgentQueueStore.getState().pause(conversationId, true);
+      goalSkips.add(streaming.turnId);
+      if (useMessageQueueStore.getState().count(conversationId) > 0) {
+        useMessageQueueStore.getState().pause(conversationId, true);
       }
       if (streaming.turnKind === 'goal_round') {
         void useCodeStore.getState().updateGoal(streaming.conversationId, 'pause');
@@ -2276,8 +2517,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
     },
 
     stopAllTurns: async () => {
+      preemptions.clear();
       const ids = Object.keys(get().streamsByConversation);
-      const queue = useAgentQueueStore.getState();
+      const queue = useMessageQueueStore.getState();
       for (const id of Object.keys(queue.byConversation)) {
         if ((queue.byConversation[id]?.length ?? 0) > 0) queue.pause(id, true);
       }
@@ -2631,6 +2873,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
           }
           void refreshList();
           void syncArtifacts(conversationId);
+          if (
+            preemptions.has(conversationId) ||
+            useMessageQueueStore.getState().count(conversationId) > 0
+          ) {
+            void settleTurn(conversationId, turnId);
+          }
           break;
         case 'cancelled':
           terminalTurnIds.add(turnId);
@@ -2638,7 +2886,16 @@ export const useChatStore = create<ChatState>()((set, get) => {
             ...message,
             status: 'cancelled',
           }));
-          setStream(conversationId, null);
+          if (get().streamsByConversation[conversationId]?.turnId === turnId) {
+            setStream(conversationId, null);
+          }
+          if (
+            preemptions.has(conversationId) ||
+            useMessageQueueStore.getState().count(conversationId) > 0
+          ) {
+            goalSkips.add(turnId);
+            void settleTurn(conversationId, turnId);
+          }
           break;
         case 'error':
           terminalTurnIds.add(turnId);
@@ -2646,13 +2903,22 @@ export const useChatStore = create<ChatState>()((set, get) => {
             ...message,
             status: message.content ? 'complete' : 'error',
           }));
-          setStream(conversationId, null);
+          if (get().streamsByConversation[conversationId]?.turnId === turnId) {
+            setStream(conversationId, null);
+          }
           if (get().activeId === conversationId) {
             set({
               error: event.message,
               errorCode: event.code ?? null,
               errorHint: event.hint ?? null,
             });
+          }
+          if (
+            preemptions.has(conversationId) ||
+            useMessageQueueStore.getState().count(conversationId) > 0
+          ) {
+            goalSkips.add(turnId);
+            void settleTurn(conversationId, turnId);
           }
           break;
         default:

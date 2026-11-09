@@ -8,7 +8,7 @@ import {
   type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
-import { ArrowUp, FilePlus, Globe, Plus, Square, Target, TriangleAlert } from 'lucide-react';
+import { ArrowUp, FilePlus, Globe, Plus, Square, Target, TriangleAlert, Zap } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
 import { credentialGateMessage } from '@/components/chat/turnError';
@@ -151,7 +151,7 @@ export function Composer() {
   const providerBlocked = selectedProvider !== undefined && !providerReady;
   const hasDraft =
     value.trim().length > 0 || mentioned.length > 0 || pendingAttachments.length > 0;
-  const canQueue = isAgentLayout && isStreaming && !providerBlocked && hasDraft;
+  const canQueue = isStreaming && !providerBlocked && hasDraft;
   const canSend = !isStreaming && !providerBlocked && hasDraft;
 
   const slashQuery = menu?.kind === 'slash' ? menu.query : '';
@@ -477,22 +477,30 @@ export function Composer() {
     [activeIndex, menu, optionCount],
   );
 
-  const submit = useCallback(async () => {
-    if (!canSend && !canQueue) return;
-    const text = composeMessage(value, mentioned);
-    if (!text && pendingAttachments.length === 0) return;
-    const goalRequest = goalIntent;
-    const accepted = await useChatStore
-      .getState()
-      .send(text, goalRequest ? { goalRequest: true } : undefined);
-    if (!accepted) return;
-    setValue('');
-    setMentioned([]);
-    setMenu(null);
-    setGoalIntent(false);
-    requestAnimationFrame(resizeTextarea);
-    window.dispatchEvent(new CustomEvent('lumina:scroll-bottom'));
-  }, [canQueue, canSend, goalIntent, mentioned, pendingAttachments.length, resizeTextarea, value]);
+  const submit = useCallback(
+    async (mode: 'queue' | 'now' = 'queue') => {
+      if (!canSend && !canQueue) return;
+      const text = composeMessage(value, mentioned);
+      if (!text && pendingAttachments.length === 0) return;
+      const options: {
+        goalRequest?: boolean;
+        sendNow?: boolean;
+      } = {};
+      if (goalIntent) options.goalRequest = true;
+      if (mode === 'now') options.sendNow = true;
+      const accepted = await useChatStore
+        .getState()
+        .send(text, Object.keys(options).length > 0 ? options : undefined);
+      if (!accepted) return;
+      setValue('');
+      setMentioned([]);
+      setMenu(null);
+      setGoalIntent(false);
+      requestAnimationFrame(resizeTextarea);
+      window.dispatchEvent(new CustomEvent('lumina:scroll-bottom'));
+    },
+    [canQueue, canSend, goalIntent, mentioned, pendingAttachments.length, resizeTextarea, value],
+  );
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;
@@ -811,7 +819,22 @@ export function Composer() {
                 {canQueue ? (
                   <button
                     type="button"
-                    onClick={() => void submit()}
+                    onClick={() => void submit('now')}
+                    aria-label="Enviar agora"
+                    title="Interromper a resposta atual e enviar"
+                    className={cn(
+                      'flex size-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150',
+                      'bg-surface-active text-foreground hover:bg-surface-hover',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                    )}
+                  >
+                    <Zap className="size-4" strokeWidth={2} />
+                  </button>
+                ) : null}
+                {canQueue ? (
+                  <button
+                    type="button"
+                    onClick={() => void submit('queue')}
                     aria-label="Enfileirar mensagem"
                     title="Enfileirar mensagem"
                     className={cn(
@@ -840,7 +863,7 @@ export function Composer() {
             ) : (
               <button
                 type="button"
-                onClick={submit}
+                onClick={() => void submit()}
                 disabled={!canSend}
                 aria-label="Enviar mensagem"
                 className={cn(

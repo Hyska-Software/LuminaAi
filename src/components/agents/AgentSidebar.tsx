@@ -70,7 +70,7 @@ import type { SortableListApi } from '@/components/ui';
 import {
   selectActiveAgents,
   selectPinnedAgents,
-  useAgentQueueStore,
+  useMessageQueueStore,
   useAgentStore,
   useChatStore,
   useCodeStore,
@@ -116,7 +116,7 @@ function ThreadRow({
   onDelete: () => void;
   onStop: () => void;
 }) {
-  const queued = useAgentQueueStore(
+  const queued = useMessageQueueStore(
     (state) => state.byConversation[conversation.id]?.length ?? 0,
   );
   const busy = useChatStore((state) =>

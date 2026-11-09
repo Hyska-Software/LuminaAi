@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown } from 'lucide-react';
-import { AgentQueueBar } from '@/components/agent/AgentQueueBar';
+import { MessageQueueBar } from './MessageQueueBar';
 import { CodeSessionCards } from '@/components/code/CodeAgentWidgets';
 import { Composer } from '@/components/composer/Composer';
 import { useReduceMotion } from '@/components/layout/hooks';
@@ -189,9 +189,7 @@ export function ChatView({ welcome }: { welcome?: ReactNode } = {}) {
         <div className="relative mx-auto w-full max-w-3xl">
           {/* Jobs em background vivem no popover do composer (CodeSessionControls),
               junto de plano/tarefas; não há mais faixa acima do composer. */}
-          {layoutMode === 'agent' && activeId ? (
-            <AgentQueueBar conversationId={activeId} />
-          ) : null}
+          {activeId ? <MessageQueueBar conversationId={activeId} /> : null}
           {showTurnError ? (
             <TurnErrorBanner
               code={errorCode}
