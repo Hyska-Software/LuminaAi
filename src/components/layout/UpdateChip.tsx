@@ -1,5 +1,6 @@
 /**
- * Title-bar update indicator (DESIGN §5): a compact pill next to the brand.
+ * Title-bar update indicator (DESIGN §5): a compact pill anchored to the top-right
+ * corner, immediately before the native window controls.
  *
  * It is the always-visible surface for an available release and also carries
  * live feedback while the download runs. Clicking it opens the full panel with
@@ -133,7 +134,7 @@ export function UpdateChip() {
         </button>
       </PopoverTrigger>
       <PopoverContent
-        align="start"
+        align="end"
         sideOffset={8}
         collisionPadding={12}
         aria-label="Atualização do Lumina"

@@ -28,7 +28,8 @@ const CONTROL_BASE =
  * Frameless window chrome (DESIGN §5): drag region, brand, command search and
  * native window controls. The model/thinking selector lives only in the chat
  * composer (`components/composer/Composer.tsx`); the "Plano ChatGPT" indicator
- * is account-level and lives here, next to the global actions.
+ * is account-level and lives here, next to the global actions. The update pill
+ * sits in the top-right corner, immediately before the window controls.
  *
  * The Chat | Code layout switch sits centered between the brand and the global
  * actions, like the reference pill (docs/goals/chat-code-layout/PLAN.md §3.1).
@@ -133,8 +134,6 @@ export function TitleBar() {
           </span>
         </div>
 
-        <UpdateChip />
-
         <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
       </div>
 
@@ -146,6 +145,8 @@ export function TitleBar() {
         <div className="hidden xl:block">
           <PlanUsageChip />
         </div>
+
+        <UpdateChip />
 
         <div className="ml-1 flex items-center gap-0.5">
           <button type="button" aria-label="Minimizar" onClick={handleMinimize} className={CONTROL_BASE}>
