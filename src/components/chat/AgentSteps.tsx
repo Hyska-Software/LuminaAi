@@ -40,7 +40,7 @@ import {
   buildAgentResponseBlocks,
   buildAgentTrace,
   countTraceTools,
-  describeExecutionGroup,
+  describeTraceActivity,
   hasTraceReasoning,
   type AgentResponseBlock,
   type AgentTraceEntry,
@@ -352,6 +352,7 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
         streaming={streaming}
         phase={phase}
         collapsedByDefault={collapsedByDefault}
+        turnDurationMs={message.usage?.durationMs ?? null}
         className={className}
       />
     );
@@ -444,12 +445,15 @@ function SegmentedTimeline({
   streaming,
   phase,
   collapsedByDefault,
+  turnDurationMs,
   className,
 }: {
   blocks: AgentResponseBlock[];
   streaming: boolean;
   phase: AgentStepsPhase | null;
   collapsedByDefault: boolean;
+  /** Total turn time, shown on the last execution line once it ends. */
+  turnDurationMs: number | null;
   className?: string;
 }) {
   let lastExecution = -1;
@@ -468,9 +472,12 @@ function SegmentedTimeline({
           <ExecutionGroup
             key={`exec-${index}`}
             entries={block.entries}
+            durationMs={block.durationMs}
+            turnDurationMs={turnDurationMs}
+            isLast={index === lastExecution}
             streaming={streaming}
             phase={phase}
-            live={streaming && index === lastExecution}
+            live={streaming && index === lastExecution && phase !== 'text'}
             collapsedByDefault={collapsedByDefault}
           />
         ),
@@ -481,6 +488,11 @@ function SegmentedTimeline({
 
 interface ExecutionGroupProps {
   entries: AgentTraceEntry[];
+  /** Work time of this stretch (model steps + tool calls). */
+  durationMs: number;
+  /** Total turn time, shown on the last line once the turn ends. */
+  turnDurationMs: number | null;
+  isLast: boolean;
   streaming: boolean;
   phase: AgentStepsPhase | null;
   /** Current (last) execution group of a streaming turn. */
@@ -489,18 +501,26 @@ interface ExecutionGroupProps {
 }
 
 /**
- * One collapsed "Usou N Shell e Editar" block of the per-response transcript.
- * Its rows are the reasoning/tool entries in chronological order; the group
- * auto-opens while it is the live one and closes when the turn ends.
+ * One execution line of the per-response transcript. While its stretch runs it
+ * shows the live activity ("Analisando a solicitação · …", "Executando
+ * comandos · …"); once done it summarizes the work as "Trabalhou por …". Its
+ * rows are the reasoning/tool entries in chronological order.
  */
 function ExecutionGroup({
   entries,
+  durationMs,
+  turnDurationMs,
+  isLast,
   streaming,
   phase,
   live,
   collapsedByDefault,
 }: ExecutionGroupProps) {
-  const summary = useMemo(() => describeExecutionGroup(entries), [entries]);
+  const reduceMotion = useReduceMotion();
+  const activity = live ? describeTraceActivity(entries) : null;
+  const hasTools = entries.some(
+    (entry) => entry.kind === 'tools' && entry.group.tools.length > 0,
+  );
   const running = entries.some(
     (entry) => entry.kind === 'tools' && entry.group.status === 'running',
   );
@@ -518,12 +538,20 @@ function ExecutionGroup({
     else if (was) setOpen(false);
   }, [live, collapsedByDefault]);
 
-  const label =
-    summary.count > 0
-      ? summary.label
-      : streaming && live
-        ? 'Raciocinando…'
-        : 'Raciocínio';
+  // The last line closes the turn, so it reports the whole turn time; earlier
+  // stretches report their own work time.
+  const elapsed = isLast ? (turnDurationMs ?? durationMs) : durationMs;
+  const finishedDuration = elapsed > 0 ? formatThinkingDuration(elapsed) : null;
+  const finishedLabel = finishedDuration
+    ? `Trabalhou por ${finishedDuration}`
+    : hasTools
+      ? 'Trabalhou'
+      : 'Raciocinou';
+  const label = live ? (activity?.label ?? 'Trabalhando…') : finishedLabel;
+  const preview = live ? (activity?.preview ?? null) : null;
+  const ActiveIcon =
+    activity?.kind === 'tool' ? (TOOL_ICONS[activity.toolName ?? ''] ?? Wrench) : null;
+  const shimmer = live && !reduceMotion;
 
   return (
     <div className="mb-3">
@@ -533,30 +561,51 @@ function ExecutionGroup({
             type="button"
             aria-controls={detailsId}
             className={cn(
-              'group/execution flex items-center gap-1.5 rounded-md py-0.5 text-left text-[13px] font-medium text-foreground-muted',
+              'group/execution flex w-full min-w-0 items-center gap-1.5 rounded-md py-0.5 text-left text-[13px] font-medium text-foreground-muted',
               'transition-colors duration-150 hover:text-foreground',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
             )}
           >
-            {summary.count > 0 ? (
+            {live ? (
+              ActiveIcon ? (
+                <ActiveIcon
+                  aria-hidden
+                  className={cn(
+                    'size-3.5 shrink-0',
+                    running ? 'text-accent' : 'text-foreground-subtle',
+                  )}
+                />
+              ) : (
+                <Spinner size="xs" className="text-accent" />
+              )
+            ) : hasTools ? (
               <Wrench aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
             ) : (
-              <Brain
-                aria-hidden
-                className={cn(
-                  'size-3.5 shrink-0',
-                  streaming && live ? 'text-accent' : 'text-foreground-subtle',
-                )}
-              />
+              <Brain aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
             )}
-            <span>{label}</span>
-            {running || (streaming && live && summary.count === 0) ? (
-              <Spinner size="xs" className="text-foreground-subtle" />
+            <span
+              className={cn(
+                'shrink-0',
+                shimmer &&
+                  'bg-linear-to-r from-foreground-muted via-foreground to-foreground-muted bg-[length:200%_100%] bg-clip-text text-transparent animate-shimmer',
+              )}
+            >
+              {label}
+            </span>
+            {preview ? (
+              <>
+                <span aria-hidden className="shrink-0 text-foreground-subtle">
+                  ·
+                </span>
+                <span className="min-w-0 truncate text-[12px] font-normal text-foreground-subtle">
+                  {preview}
+                </span>
+              </>
             ) : null}
             <ChevronDown
               aria-hidden
               className={cn(
-                'size-3.5 shrink-0 text-foreground-subtle transition-transform duration-150',
+                'ml-auto size-3.5 shrink-0 text-foreground-subtle transition-transform duration-150',
                 open && 'rotate-180',
               )}
             />

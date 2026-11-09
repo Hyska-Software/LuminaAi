@@ -198,10 +198,12 @@ estilo `Think/Edit/Pwsh`:
   chips) sem mudança — a diferença Chat × Code é intencional e preservada.
 - **Separação por resposta**: quando o passo emite narração antes de pedir tools
   (`trace[].text`), o layout Code (e o Agentes) deixa de usar o bloco único: a narração vira
-  Markdown no corpo e o trabalho seguinte é agrupado em um bloco recolhível **"Usou N …"**
-  (`run_command` → "Shell", `edit_file` → "Editar", …; ver `describeExecutionGroup` em
-  `src/lib/agentTrace.ts`), com as linhas de raciocínio `Raciocínio Ns` e as linhas de tool. O
-  bloco da execução corrente abre durante o streaming; turnos sem narração intermediária e
+  Markdown no corpo e o trabalho seguinte é resumido em uma linha de atividade ao vivo —
+  "Analisando a solicitação · <raciocínio>", "Executando comandos · <comando>", "Editando
+  arquivos · <path>", etc. (`toolActivityLabel`/`describeTraceActivity` em
+  `src/lib/agentTrace.ts`) — que passa a **"Trabalhou por X"** quando o trecho termina (o último
+  usa o tempo total do turno), com as linhas de raciocínio `Raciocínio Ns` e as linhas de tool.
+  A linha da execução corrente abre durante o streaming; turnos sem narração intermediária e
   mensagens antigas continuam no bloco único. O Chat nunca separa.
 
 Implementação: `AgentSteps` + `ToolCallRow` (chat) + `describeCodeTool` (`src/lib/agentTrace.ts`).

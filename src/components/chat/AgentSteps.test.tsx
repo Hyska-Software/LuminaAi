@@ -1025,7 +1025,7 @@ describe('AgentSteps — execução separada por resposta (Code e Agentes)', () 
     });
   }
 
-  it('mostra a narração no corpo e recolhe a execução em "Usou N …"', async () => {
+  it('mostra a narração no corpo e fecha a execução com "Trabalhou por …"', async () => {
     const user = userEvent.setup();
     useUiStore.setState({ layoutMode: 'code' });
 
@@ -1034,17 +1034,19 @@ describe('AgentSteps — execução separada por resposta (Code e Agentes)', () 
     // Narração intermediária fora de qualquer bloco recolhido.
     expect(screen.getByText('Ambos rejeitados (exit 65).')).toBeTruthy();
     expect(screen.getByText('Duplicado no 834. Localizando e corrigindo:')).toBeTruthy();
-    // Blocos de execução, todos fechados ao concluir o turno.
+    // Linhas de execução: tempo do trecho; a última fecha com o tempo total do turno.
     expect(
-      screen.getByRole('button', { name: 'Usou 1 Shell', expanded: false }),
+      screen.getByRole('button', { name: 'Trabalhou por 2s', expanded: false }),
     ).toBeTruthy();
     expect(
-      screen.getByRole('button', { name: 'Usou 1 Editar', expanded: false }),
+      screen.getByRole('button', { name: 'Trabalhou por 6s', expanded: false }),
     ).toBeTruthy();
-    // Nada de bloco único "Trabalhou por …" neste modo.
-    expect(screen.queryByRole('button', { name: /Trabalhou por/ })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Trabalhou por 10s', expanded: false }),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Usou / })).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: 'Usou 1 Shell' }));
+    await user.click(screen.getByRole('button', { name: 'Trabalhou por 6s' }));
     expect(screen.getByRole('listitem', { name: 'Executou pnpm test' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Raciocínio 6s' })).toBeTruthy();
   });
@@ -1055,7 +1057,7 @@ describe('AgentSteps — execução separada por resposta (Code e Agentes)', () 
 
     render(<AgentSteps streaming={false} phase={null} message={segmentedMessage()} />);
 
-    await user.click(screen.getByRole('button', { name: 'Raciocínio' }));
+    await user.click(screen.getByRole('button', { name: 'Trabalhou por 2s' }));
     expect(screen.getByRole('button', { name: 'Raciocínio 2s' })).toBeTruthy();
   });
 
@@ -1066,6 +1068,7 @@ describe('AgentSteps — execução separada por resposta (Code e Agentes)', () 
 
     expect(screen.getByRole('button', { name: /Pensou por 10s/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Usou / })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Trabalhou por/ })).toBeNull();
     expect(screen.queryByText('Ambos rejeitados (exit 65).')).toBeNull();
   });
 
@@ -1087,13 +1090,22 @@ describe('AgentSteps — execução separada por resposta (Code e Agentes)', () 
               arguments: '{"command":"pnpm test"}',
             }),
           ],
+          trace: [
+            {
+              reasoning: 'Vou checar o fixture.',
+              text: 'Ambos rejeitados (exit 65).',
+              durationMs: 2_000,
+              toolCalls: 1,
+            },
+          ],
         })}
       />,
     );
 
     expect(
-      screen.getByRole('button', { name: 'Usou 1 Shell', expanded: false }),
+      screen.getByRole('button', { name: /Executando comandos/, expanded: false }),
     ).toBeTruthy();
+    expect(screen.getByText(/pnpm test/)).toBeTruthy();
   });
 
   it('mantém aberto o bloco da execução corrente no layout Code', () => {
@@ -1126,11 +1138,55 @@ describe('AgentSteps — execução separada por resposta (Code e Agentes)', () 
       />,
     );
 
-    // The last execution group follows the streamed narration and auto-opens.
+    // The last execution line follows the streamed narration and auto-opens.
     expect(screen.getByText('Ambos rejeitados (exit 65).')).toBeTruthy();
     expect(
-      screen.getByRole('button', { name: 'Usou 1 Shell', expanded: true }),
+      screen.getByRole('button', { name: /Executando comandos/, expanded: true }),
     ).toBeTruthy();
     expect(screen.getByRole('listitem', { name: 'Executou pnpm test' })).toBeTruthy();
+  });
+
+  it('mostra "Analisando a solicitação" com a prévia do raciocínio ao vivo', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+
+    render(
+      <AgentSteps
+        streaming
+        phase="reasoning"
+        startedAt={Date.now() - 1_000}
+        message={segmentedMessage({
+          status: 'streaming',
+          toolCalls: [
+            tool({
+              id: 'tool-shell',
+              name: 'run_command',
+              status: 'done',
+              arguments: '{"command":"pnpm test"}',
+              result: 'ok',
+            }),
+          ],
+          trace: [
+            {
+              reasoning: 'Vou checar o fixture.',
+              text: 'Ambos rejeitados (exit 65).',
+              durationMs: 2_000,
+              toolCalls: 1,
+            },
+            {
+              reasoning:
+                'Given this is a large project, maybe I should use teammates.',
+              toolCalls: 0,
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: /Analisando a solicitação/, expanded: true }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText('Given this is a large project, maybe I should use teammates.'),
+    ).toBeTruthy();
   });
 });

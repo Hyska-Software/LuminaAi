@@ -271,7 +271,10 @@ describe('MessageItem — execução separada por resposta', () => {
     expect(
       screen.getByText('Agora a verificação final completa desta rodada.'),
     ).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Usou 1 Leitura' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Trabalhou por 4s' }),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Usou / })).toBeNull();
   });
 
   it('não renderiza a narração intermediária no layout Chat', () => {
@@ -284,5 +287,6 @@ describe('MessageItem — execução separada por resposta', () => {
       screen.getByText('Agora a verificação final completa desta rodada.'),
     ).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Usou / })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Trabalhou por/ })).toBeNull();
   });
 });

@@ -69,6 +69,11 @@ export function formatThinkingDuration(ms?: number | null): string | null {
   const seconds = Math.round(ms / 1000);
   if (seconds < 1) return 'menos de 1s';
   if (seconds < 60) return `${seconds}s`;
+  const hours = Math.floor(seconds / 3600);
+  if (hours >= 1) {
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return minutes ? `${hours} h ${minutes} min` : `${hours} h`;
+  }
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return rest ? `${minutes} min ${rest}s` : `${minutes} min`;

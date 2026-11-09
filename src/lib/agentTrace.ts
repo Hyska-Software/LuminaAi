@@ -119,18 +119,21 @@ export function hasTraceText(trace?: TraceStep[] | null): boolean {
  * One block of the per-response transcript (layouts Code and Agentes): either
  * the model's narration, rendered as normal Markdown in the message body, or
  * the execution that happened after it (reasoning + tool calls), rendered as a
- * collapsed "Usou N …" group.
+ * collapsed activity line.
  */
 export type AgentResponseBlock =
   | { kind: 'text'; text: string }
-  | { kind: 'execution'; entries: AgentTraceEntry[] };
+  | { kind: 'execution'; entries: AgentTraceEntry[]; durationMs: number };
 
 /**
  * Builds the chronological blocks of an assistant turn, splitting the trace at
  * every intermediate narration. Entries accumulate until a narration arrives,
- * so each text is followed by the work done before the next one (the image's
- * "Usou N Shell e Editar" grouping). The final answer text is not part of the
- * trace and stays in `ChatMessage.content`.
+ * so each text is followed by the work done before the next one. The final
+ * answer text is not part of the trace and stays in `ChatMessage.content`.
+ *
+ * Each execution block also carries the work time of its stretch: the model
+ * time of its steps plus the execution time of its tool calls (used by the
+ * finished "Trabalhou por …" line).
  */
 export function buildAgentResponseBlocks(
   message: Pick<ChatMessage, 'reasoning' | 'toolCalls' | 'trace'>,
@@ -139,14 +142,20 @@ export function buildAgentResponseBlocks(
   const steps = message.trace ?? [];
   const blocks: AgentResponseBlock[] = [];
   let pending: AgentTraceEntry[] = [];
+  let pendingDuration = 0;
   let cursor = 0;
 
   const flush = () => {
-    if (pending.length > 0) blocks.push({ kind: 'execution', entries: pending });
+    if (pending.length > 0) {
+      blocks.push({ kind: 'execution', entries: pending, durationMs: pendingDuration });
+    }
     pending = [];
+    pendingDuration = 0;
   };
 
   for (const step of steps) {
+    const stepDuration = Math.max(0, step.durationMs ?? 0);
+    let credited = false;
     const reasoning = step.reasoning?.trim() ?? '';
     if (reasoning) {
       pending.push({
@@ -154,6 +163,8 @@ export function buildAgentResponseBlocks(
         text: reasoning,
         durationMs: step.durationMs ?? null,
       });
+      pendingDuration += stepDuration;
+      credited = true;
     }
     const text = step.text?.trim() ?? '';
     if (text) {
@@ -163,21 +174,32 @@ export function buildAgentResponseBlocks(
     const count = Math.max(0, Math.floor(step.toolCalls ?? 0));
     const stepTools = tools.slice(cursor, cursor + count);
     cursor += count;
-    for (const group of groupTools(stepTools)) {
-      pending.push({ kind: 'tools', group });
+    if (stepTools.length > 0) {
+      if (!credited) pendingDuration += stepDuration;
+      for (const group of groupTools(stepTools)) {
+        pending.push({ kind: 'tools', group });
+        for (const tool of group.tools) pendingDuration += toolExecutionMs(tool);
+      }
     }
   }
 
   // Defensive: calls the trace did not account for must never disappear.
   for (const group of groupTools(tools.slice(cursor))) {
     pending.push({ kind: 'tools', group });
+    for (const tool of group.tools) pendingDuration += toolExecutionMs(tool);
   }
   flush();
 
   return blocks;
 }
 
-/** Short tool family names used by the "Usou N …" execution header. */
+/** Time the tool itself ran (start → finish), when both ends are known. */
+function toolExecutionMs(tool: ToolCallRecord): number {
+  if (tool.startedAt == null || tool.finishedAt == null) return 0;
+  return Math.max(0, tool.finishedAt - tool.startedAt);
+}
+
+/** Short tool family names used by the live activity fallback. */
 const TOOL_FAMILY_LABELS: Record<string, string> = {
   run_command: 'Shell',
   run_checks: 'Verificações',
@@ -215,32 +237,102 @@ export function toolFamilyLabel(name: string): string {
   return TOOL_FAMILY_LABELS[name] ?? name.replace(/_/g, ' ');
 }
 
-export interface ExecutionGroupSummary {
-  /** Header label: "Usou 3 Shell e Editar", or "Raciocínio" without tools. */
+/** Present-tense status phrase of a running tool call. */
+const TOOL_ACTIVITY_LABELS: Record<string, string> = {
+  run_command: 'Executando comandos',
+  run_checks: 'Rodando verificações',
+  read_file: 'Lendo arquivos',
+  read_tool_output: 'Lendo a saída da ferramenta',
+  list_dir: 'Explorando arquivos',
+  search_files: 'Buscando arquivos',
+  search_text: 'Buscando no código',
+  write_file: 'Criando arquivos',
+  edit_file: 'Editando arquivos',
+  todo_write: 'Atualizando as tarefas',
+  submit_plan: 'Enviando o plano',
+  ask_user: 'Aguardando resposta do usuário',
+  task: 'Delegando ao subagente',
+  job_list: 'Consultando os jobs',
+  job_output: 'Lendo a saída de um job',
+  job_kill: 'Parando um job',
+  git_status: 'Consultando o git',
+  git_diff: 'Lendo o diff do git',
+  git_log: 'Consultando o histórico do git',
+  goal: 'Atualizando o objetivo',
+  validate_ui: 'Validando a interface',
+  web_search: 'Pesquisando na web',
+  fetch_url: 'Lendo páginas',
+  create_file: 'Criando arquivos',
+  run_code: 'Executando código',
+  list_skills: 'Consultando as skills',
+  read_skill: 'Lendo uma skill',
+  list_artifacts: 'Consultando os artefatos',
+  read_artifact: 'Lendo um artefato',
+};
+
+/** Present-tense status phrase of a tool (fallback to its family). */
+export function toolActivityLabel(name: string): string {
+  return TOOL_ACTIVITY_LABELS[name] ?? `Usando ${toolFamilyLabel(name)}`;
+}
+
+/** What the agent is doing right now, for the collapsed execution line. */
+export interface TraceActivity {
+  kind: 'reasoning' | 'tool';
+  /** Status phrase, e.g. "Analisando a solicitação" / "Executando comandos". */
   label: string;
-  /** Total number of tool calls in the group. */
-  count: number;
+  /** One-line preview of the reasoning or of the tool target. */
+  preview: string | null;
+  /** Tool name when the activity is a tool call. */
+  toolName?: string;
+  /** True while the tool call is still running. */
+  running: boolean;
 }
 
-/** Summarizes one execution block for its collapsed header. */
-export function describeExecutionGroup(entries: AgentTraceEntry[]): ExecutionGroupSummary {
-  const families: string[] = [];
-  let count = 0;
-  for (const entry of entries) {
-    if (entry.kind !== 'tools') continue;
-    for (const tool of entry.group.tools) {
-      count += 1;
-      const family = toolFamilyLabel(tool.name);
-      if (!families.includes(family)) families.push(family);
-    }
+/**
+ * Resolves the latest activity of an execution block: the running tool wins
+ * over a finished one, and a trailing reasoning block means the model is
+ * analyzing before its next action.
+ */
+export function describeTraceActivity(entries: AgentTraceEntry[]): TraceActivity | null {
+  const last = entries[entries.length - 1];
+  if (!last) return null;
+  if (last.kind === 'reasoning') {
+    return {
+      kind: 'reasoning',
+      label: 'Analisando a solicitação',
+      preview: oneLinePreview(last.text),
+      running: true,
+    };
   }
-  if (count === 0) return { label: 'Raciocínio', count };
-  return { label: `Usou ${count} ${joinFamilies(families)}`, count };
+  const tools = last.group.tools;
+  const tool =
+    [...tools].reverse().find((call) => call.status === 'running') ?? tools[tools.length - 1];
+  if (!tool) return null;
+  return {
+    kind: 'tool',
+    label: toolActivityLabel(tool.name),
+    preview: toolPreview(tool),
+    toolName: tool.name,
+    running: tool.status === 'running',
+  };
 }
 
-function joinFamilies(families: string[]): string {
-  if (families.length <= 1) return families[0] ?? '';
-  return `${families.slice(0, -1).join(', ')} e ${families[families.length - 1]}`;
+/** Collapses Markdown/line breaks into a single preview line. */
+function oneLinePreview(text: string): string | null {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat ? truncate(flat, 220) : null;
+}
+
+/** Target of a tool call (command, path, query, URL…), one line. */
+function toolPreview(tool: ToolCallRecord): string | null {
+  const detail = describeCodeTool(tool).detail;
+  if (detail) return oneLinePreview(detail);
+  const args = safeJsonParse<Record<string, unknown>>(tool.arguments, {});
+  for (const key of ['command', 'path', 'url', 'query', 'pattern', 'name', 'prompt', 'description']) {
+    const value = args?.[key];
+    if (typeof value === 'string' && value.trim()) return oneLinePreview(value);
+  }
+  return tool.summary ? oneLinePreview(tool.summary) : null;
 }
 
 function pushToolGroups(entries: AgentTraceEntry[], tools: ToolCallRecord[]): void {

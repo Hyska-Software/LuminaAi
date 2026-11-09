@@ -96,6 +96,9 @@ describe('formatThinkingDuration', () => {
     [10_000, '10s'],
     [65_000, '1 min 5s'],
     [120_000, '2 min'],
+    [3_600_000, '1 h'],
+    [5_400_000, '1 h 30 min'],
+    [7_320_000, '2 h 2 min'],
     [null, null],
   ])('formats %s as %s', (input, expected) => {
     expect(formatThinkingDuration(input as number | null)).toBe(expected);

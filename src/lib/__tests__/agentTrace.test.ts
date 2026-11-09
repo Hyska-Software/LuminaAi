@@ -4,9 +4,10 @@ import {
   buildAgentTrace,
   countTraceTools,
   describeCodeTool,
-  describeExecutionGroup,
+  describeTraceActivity,
   hasTraceReasoning,
   hasTraceText,
+  toolActivityLabel,
   toolFamilyLabel,
   type AgentResponseBlock,
   type AgentTraceEntry,
@@ -765,12 +766,20 @@ function blockKinds(blocks: AgentResponseBlock[]): string[] {
   return blocks.map((block) => block.kind);
 }
 
-function executionBlocks(blocks: AgentResponseBlock[]): AgentTraceEntry[][] {
-  return blocks.flatMap((block) => (block.kind === 'execution' ? [block.entries] : []));
+function executionBlocks(
+  blocks: AgentResponseBlock[],
+): Array<Extract<AgentResponseBlock, { kind: 'execution' }>> {
+  return blocks.flatMap((block) => (block.kind === 'execution' ? [block] : []));
 }
 
 function textBlocks(blocks: AgentResponseBlock[]): string[] {
   return blocks.flatMap((block) => (block.kind === 'text' ? [block.text] : []));
+}
+
+function toolEntry(tools: ToolCallRecord[]): AgentTraceEntry[] {
+  return buildAgentTrace({ reasoning: null, toolCalls: tools }).filter(
+    (entry): entry is Extract<AgentTraceEntry, { kind: 'tools' }> => entry.kind === 'tools',
+  );
 }
 
 describe('buildAgentResponseBlocks', () => {
@@ -825,24 +834,38 @@ describe('buildAgentResponseBlocks', () => {
     ]);
 
     const executions = executionBlocks(blocks);
-    expect(executions[0].map((entry) => entry.kind)).toEqual(['reasoning']);
-    expect(executions[0][0]).toMatchObject({
+    expect(executions[0].entries.map((entry) => entry.kind)).toEqual(['reasoning']);
+    expect(executions[0].entries[0]).toMatchObject({
       kind: 'reasoning',
       text: 'Vou checar o fixture.',
       durationMs: 2_000,
     });
-    expect(describeExecutionGroup(executions[0]).label).toBe('Raciocínio');
 
     const firstWork = executions[1];
-    expect(firstWork.map((entry) => entry.kind)).toEqual(['tools', 'reasoning']);
-    expect(describeExecutionGroup(firstWork)).toEqual({
-      label: 'Usou 1 Shell',
-      count: 1,
-    });
+    expect(firstWork.entries.map((entry) => entry.kind)).toEqual(['tools', 'reasoning']);
 
     const lastWork = executions[2];
-    expect(lastWork.map((entry) => entry.kind)).toEqual(['tools', 'reasoning']);
-    expect(describeExecutionGroup(lastWork).label).toBe('Usou 1 Editar');
+    expect(lastWork.entries.map((entry) => entry.kind)).toEqual(['tools', 'reasoning']);
+
+    // Work time per stretch: the model step time (2s/6s/4s), plus tool time when known.
+    expect(executions.map((block) => block.durationMs)).toEqual([2_000, 6_000, 4_000]);
+  });
+
+  it('soma a duração real das tools quando conhecida', () => {
+    const blocks = buildAgentResponseBlocks({
+      reasoning: null,
+      toolCalls: [
+        tool({
+          name: 'run_command',
+          arguments: '{"command":"pnpm test"}',
+          result: 'ok',
+          startedAt: 1_000,
+          finishedAt: 4_500,
+        }),
+      ],
+      trace: [{ reasoning: null, text: 'Rodando.', toolCalls: 1, durationMs: 1_000 }],
+    });
+    expect(executionBlocks(blocks)[0].durationMs).toBe(1_000 + 3_500);
   });
 
   it('nunca perde tool calls fora do trace e ignora passos vazios', () => {
@@ -856,29 +879,76 @@ describe('buildAgentResponseBlocks', () => {
     });
 
     expect(blockKinds(blocks)).toEqual(['text', 'execution']);
-    expect(describeExecutionGroup(executionBlocks(blocks)[0])).toEqual({
-      label: 'Usou 2 Shell e Editar',
-      count: 2,
+    expect(executionBlocks(blocks)[0].entries.length).toBe(2);
+    expect(executionBlocks(blocks)[0].durationMs).toBe(0);
+  });
+});
+
+describe('describeTraceActivity', () => {
+  it('descreve o raciocínio em uma linha com prévia', () => {
+    const activity = describeTraceActivity([
+      {
+        kind: 'reasoning',
+        text: 'Given this is a large project,\n\nmaybe I should use teammates.',
+        durationMs: 2_000,
+      },
+    ]);
+    expect(activity).toEqual({
+      kind: 'reasoning',
+      label: 'Analisando a solicitação',
+      preview: 'Given this is a large project, maybe I should use teammates.',
+      running: true,
     });
   });
 
-  it('mantém as famílias de tool distintas na ordem de primeira aparição', () => {
-    const blocks = buildAgentResponseBlocks({
-      reasoning: null,
-      toolCalls: [SHELL, EDIT, SHELL],
-      trace: [{ reasoning: null, text: 'Feito.', toolCalls: 3 }],
+  it('descreve a tool em execução e o alvo como prévia', () => {
+    const shell = tool({
+      name: 'run_command',
+      status: 'running',
+      arguments: '{"command":"Select-String -Path docs/ARCHITECTURE.md"}',
     });
-    expect(describeExecutionGroup(executionBlocks(blocks)[0])).toEqual({
-      label: 'Usou 3 Shell e Editar',
-      count: 3,
+    expect(describeTraceActivity(toolEntry([shell]))).toEqual({
+      kind: 'tool',
+      label: 'Executando comandos',
+      preview: 'Select-String -Path docs/ARCHITECTURE.md',
+      toolName: 'run_command',
+      running: true,
+    });
+
+    const edit = tool({
+      name: 'edit_file',
+      status: 'running',
+      arguments: '{"path":"src/app.ts"}',
+      presentation: { kind: 'file_change', path: 'src/app.ts', change: 'modified', added: 1, removed: 1 },
+    });
+    expect(describeTraceActivity(toolEntry([edit]))).toMatchObject({
+      label: 'Editando arquivos',
+      preview: 'src/app.ts',
+    });
+
+    const fetch = tool({
+      name: 'fetch_url',
+      status: 'running',
+      arguments: '{"url":"https://tauri.app/start/"}',
+    });
+    expect(describeTraceActivity(toolEntry([fetch]))).toMatchObject({
+      label: 'Lendo páginas',
+      preview: 'https://tauri.app/start/',
     });
   });
 
-  it('cai no resumo de raciocínio quando o bloco não tem tools', () => {
-    expect(describeExecutionGroup([{ kind: 'reasoning', text: 'Só pensei.' }])).toEqual({
-      label: 'Raciocínio',
-      count: 0,
+  it('marca a tool concluída e cai no vazio sem entradas', () => {
+    const read = tool({ name: 'read_file', arguments: '{"path":"src/app.ts"}' });
+    expect(describeTraceActivity(toolEntry([read]))).toMatchObject({
+      label: 'Lendo arquivos',
+      running: false,
     });
+    expect(describeTraceActivity([])).toBeNull();
+  });
+
+  it('traduz a atividade e mantém fallback legível', () => {
+    expect(toolActivityLabel('run_checks')).toBe('Rodando verificações');
+    expect(toolActivityLabel('minha_tool_nova')).toBe('Usando minha tool nova');
   });
 });
 
