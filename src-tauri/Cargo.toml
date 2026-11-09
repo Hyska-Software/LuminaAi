@@ -1,6 +1,6 @@
 [package]
 name = "lumina"
-version = "0.3.7"
+version = "0.3.8"
 description = "Lumina — desktop AI chat harness (OpenCode Go / Zen / OpenAI ChatGPT plan)"
 authors = ["Lumina"]
 edition = "2021"
