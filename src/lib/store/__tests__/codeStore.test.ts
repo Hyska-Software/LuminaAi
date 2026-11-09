@@ -129,6 +129,55 @@ describe('codeStore reducer', () => {
     expect(state.changes?.files).toHaveLength(3);
   });
 
+  it('tracks the most recent turn separately from the cumulative session', () => {
+    let state = emptyCodeSession('conv-1');
+    const start = (turnId: string): TurnEvent => ({
+      type: 'turn_started',
+      turnId,
+      userMessageId: `user-${turnId}`,
+      assistantMessageId: `assistant-${turnId}`,
+    });
+
+    expect(isCodeEvent(start('t1'))).toBe(true);
+    state = applyCodeEvent(state, start('t1'));
+    expect(state.lastTurnChanges).toEqual({
+      turnId: 't1',
+      files: [],
+      added: 0,
+      removed: 0,
+    });
+
+    state = applyCodeEvent(state, {
+      type: 'file_changed',
+      change: { path: 'a.ts', kind: 'modified', added: 2, removed: 1 },
+    });
+    expect(state.changes?.files).toHaveLength(1);
+    expect(state.lastTurnChanges?.files).toHaveLength(1);
+    expect(state.lastTurnChanges?.files[0].path).toBe('a.ts');
+
+    state = applyCodeEvent(state, {
+      type: 'workspace_changes',
+      summary: {
+        turnId: 't1',
+        files: [{ path: 'a.ts', kind: 'modified', added: 3, removed: 1 }],
+        added: 3,
+        removed: 1,
+      },
+    });
+    expect(state.lastTurnChanges?.turnId).toBe('t1');
+    expect(state.lastTurnChanges?.files).toHaveLength(1);
+
+    state = applyCodeEvent(state, start('t2'));
+    expect(state.lastTurnChanges).toEqual({
+      turnId: 't2',
+      files: [],
+      added: 0,
+      removed: 0,
+    });
+    // O acumulado da sessão não é limpo ao começar um novo turno.
+    expect(state.changes?.files).toHaveLength(1);
+  });
+
   it('updates context, compaction and jobs', () => {
     let state = emptyCodeSession('conv-1');
     state = applyCodeEvent(state, { type: 'context_stats', stats: context(50_000) });
@@ -204,6 +253,12 @@ describe('codeStore reducer', () => {
       workspace: null,
       context: context(1_000),
       changes: null,
+      lastTurnChanges: {
+        turnId: 'turn-9',
+        files: [{ path: 'src/a.ts', kind: 'modified', added: 1, removed: 0 }],
+        added: 1,
+        removed: 0,
+      },
       jobs: [],
       approvals: [],
     };
@@ -212,6 +267,8 @@ describe('codeStore reducer', () => {
     expect(next.permissionMode).toBe('read_only');
     expect(next.loading).toBe(false);
     expect(next.context?.used).toBe(1_000);
+    expect(next.lastTurnChanges?.turnId).toBe('turn-9');
+    expect(next.lastTurnChanges?.files[0].path).toBe('src/a.ts');
     // resoluções de UI sobrevivem ao snapshot
     expect(next.resolutions).toBe(previous.resolutions);
   });

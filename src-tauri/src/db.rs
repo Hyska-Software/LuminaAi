@@ -6678,6 +6678,37 @@ impl Db {
             .context("falha ao listar o journal do turno")
     }
 
+    /// Turno mais recente com eventos persistidos (`turn_events`), mesmo sem
+    /// alterações de arquivo.
+    pub fn last_turn_id(&self, conversation_id: &str) -> anyhow::Result<Option<String>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT turn_id FROM turn_events WHERE conversation_id = ?1 \
+             ORDER BY created_at DESC, seq DESC LIMIT 1",
+            [conversation_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("falha ao ler o último turno da conversa")
+    }
+
+    /// Fallback para sessões antigas sem `turn_events`: último turno que
+    /// registrou escrita de arquivo.
+    pub fn last_file_journal_turn(
+        &self,
+        conversation_id: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT turn_id FROM file_journal WHERE conversation_id = ?1 \
+             ORDER BY id DESC LIMIT 1",
+            [conversation_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("falha ao ler o último turno do journal")
+    }
+
     /// Journal completo da sessão, em ordem cronológica.
     pub fn list_file_journal(
         &self,
@@ -9129,6 +9160,19 @@ mod tests {
             .expect("event 1");
         db.append_turn_event("turn-1", 2, "conv-1", r#"{"type":"text_delta"}"#, now)
             .expect("event 2");
+        db.append_turn_event(
+            "turn-2",
+            1,
+            "conv-1",
+            r#"{"type":"turn_started"}"#,
+            now + 1,
+        )
+        .expect("event turn-2");
+        assert_eq!(
+            db.last_turn_id("conv-1").expect("last turn").as_deref(),
+            Some("turn-2")
+        );
+        assert!(db.last_turn_id("conv-9").expect("sem eventos").is_none());
         let events = db.list_turn_events("turn-1", None).expect("list");
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].0, 1);
@@ -11050,6 +11094,16 @@ mod tests {
         assert_eq!(turn[1].change_kind, FileChangeKind::Modified);
         assert_eq!(turn[1].before_hash.as_deref(), Some("old"));
 
+        assert_eq!(
+            db.last_file_journal_turn("conv-1")
+                .expect("último turno")
+                .as_deref(),
+            Some("turn-2")
+        );
+        assert!(db
+            .last_file_journal_turn("conv-9")
+            .expect("sem journal")
+            .is_none());
         let all = db.list_file_journal("conv-1").expect("por conversa");
         assert_eq!(all.len(), 3);
         assert_eq!(all[2].change_kind, FileChangeKind::Deleted);

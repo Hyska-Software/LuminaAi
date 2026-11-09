@@ -340,6 +340,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::code::delete_approval_rule,
             commands::code::get_workspace_changes,
             commands::code::get_file_diff,
+            commands::code::get_file_diff_at,
             commands::code::revert_file,
             commands::code::revert_turn,
             commands::code::compact_session,
@@ -354,6 +355,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::code::kill_job,
             /* -------- harness de código: git -------- */
             commands::git::git_status,
+            commands::git::git_compare,
             commands::git::git_fetch,
             commands::git::git_pull,
             commands::git::git_push,

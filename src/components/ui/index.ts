@@ -72,6 +72,8 @@ export {
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from './dropdown-menu';
 export type { DropdownMenuContentProps, DropdownMenuItemProps } from './dropdown-menu';

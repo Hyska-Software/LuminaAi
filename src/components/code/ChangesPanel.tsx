@@ -24,12 +24,21 @@ import {
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import type { FileChange, FileChangeKind, FileChangeSummary, WorkspaceGitStatus } from '@/lib/types';
-import { CommitBar } from './CommitBar';
+import type {
+  FileChange,
+  FileChangeKind,
+  FileChangeSummary,
+  WorkspaceCommitDetail,
+  WorkspaceGitCommit,
+  WorkspaceGitCompare,
+  WorkspaceGitStatus,
+} from '@/lib/types';
+import { CommitBar, shortHash } from './CommitBar';
+import { ChangesFilterMenu, type ChangesFilter } from './ChangesFilterMenu';
 import { DiffView } from './DiffView';
 import { FileIcon } from './FileIcon';
 
-export type ChangeGroup = 'staged' | 'unstaged' | 'untracked' | 'session';
+export type ChangeGroup = 'staged' | 'unstaged' | 'untracked' | 'session' | 'commit' | 'branch';
 export type ChangeOrigin = 'session' | 'git' | 'both';
 
 /**
@@ -51,6 +60,8 @@ export interface ChangeRow {
   removed?: number;
   /** Diff already known from the session journal (skips the API call). */
   knownDiff?: string | null;
+  /** Base revision for a comparison diff (`git diff <base>`). */
+  base?: string | null;
 }
 
 export interface ChangesPanelProps {
@@ -62,6 +73,11 @@ export interface ChangesPanelProps {
   gitError?: string | null;
   /** Files touched by the current session (journal) plus git working tree entries. */
   sessionChanges?: ChangeInput[] | null;
+  /** Files touched only by the most recent turn. `null`/`undefined` = unknown. */
+  lastTurnChanges?: ChangeInput[] | null;
+  /** Recent commits shown in the Commit filter submenu. */
+  commits?: WorkspaceGitCommit[];
+  commitsLoading?: boolean;
   sessionLoading?: boolean;
   sessionError?: string | null;
   /** Called after stage/unstage/revert/commit so the container reloads the data. */
@@ -73,6 +89,8 @@ export interface ChangesPanelProps {
    * chama `onOpenDiffTab` e o painel não abre o diff interno.
    */
   onOpenDiffTab?: ((row: ChangeRow) => void) | null;
+  /** Hides low-priority toolbar text at the panel's minimum width. */
+  compact?: boolean;
   className?: string;
 }
 
@@ -81,6 +99,8 @@ const GROUPS: ReadonlyArray<{ id: ChangeGroup; label: string }> = [
   { id: 'unstaged', label: 'Não preparados' },
   { id: 'untracked', label: 'Novos' },
   { id: 'session', label: 'Da sessão' },
+  { id: 'commit', label: 'Commit' },
+  { id: 'branch', label: 'Branch' },
 ];
 
 const KIND_STATUS: Record<FileChangeKind, string> = {
@@ -110,6 +130,65 @@ function describeError(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error.trim()) return error;
   return fallback;
+}
+
+/** Picks the default comparison branch: main, master, then the first other. */
+export function pickBranchBase(
+  branches: readonly string[],
+  current: string | null | undefined,
+): string | null {
+  const others = branches.filter((branch) => branch !== current);
+  if (others.length === 0) return null;
+  return (
+    others.find((branch) => branch === 'main') ??
+    others.find((branch) => branch === 'master') ??
+    others[0]
+  );
+}
+
+function emptyCopyFor(
+  filter: ChangesFilter,
+  hasWorkspace: boolean,
+): { title: string; description: string } {
+  if (!hasWorkspace) {
+    return {
+      title: 'Nenhum workspace selecionado',
+      description: 'Abra uma pasta para ver as alterações do código.',
+    };
+  }
+  switch (filter.kind) {
+    case 'last-turn':
+      return {
+        title: 'Nenhuma alteração no último turno',
+        description: 'As edições do agente no último turno aparecem aqui.',
+      };
+    case 'staged':
+      return {
+        title: 'Nenhum arquivo marcado para commit',
+        description: 'Marque arquivos na lista de não marcados para prepará-los.',
+      };
+    case 'unstaged':
+      return {
+        title: 'Nenhum arquivo fora do stage',
+        description: 'As alterações ainda não preparadas aparecem aqui.',
+      };
+    case 'commit':
+      return {
+        title: 'Nenhum arquivo neste commit',
+        description: 'O commit selecionado não alterou arquivos.',
+      };
+    case 'branch':
+      return {
+        title: `Nenhuma diferença em relação a ${filter.base}`,
+        description: 'As alterações desde o ponto comum com essa branch aparecem aqui.',
+      };
+    case 'uncommitted':
+    default:
+      return {
+        title: 'Nenhuma alteração pendente',
+        description: 'As edições do agente e as mudanças do git aparecem aqui.',
+      };
+  }
 }
 
 /** Merges git status and session journal into a unique, ordered row list. */
@@ -221,10 +300,14 @@ export function ChangesPanel({
   gitLoading = false,
   gitError = null,
   sessionChanges,
+  lastTurnChanges,
+  commits = [],
+  commitsLoading = false,
   sessionLoading = false,
   sessionError = null,
   onRefresh,
   onOpenDiffTab = null,
+  compact = false,
   className,
 }: ChangesPanelProps) {
   const rows = useMemo(() => buildChangeRows(gitStatus, sessionChanges), [gitStatus, sessionChanges]);
@@ -242,14 +325,34 @@ export function ChangesPanel({
   const [diffError, setDiffError] = useState<string | null>(null);
   const diffRun = useRef(0);
 
+  const [explicitFilter, setExplicitFilter] = useState<ChangesFilter | null>(null);
+  const activeFilter: ChangesFilter = explicitFilter ?? { kind: 'uncommitted' };
+  const filterKind = activeFilter.kind;
+  const filterCommitHash = activeFilter.kind === 'commit' ? activeFilter.hash : null;
+  const filterBranchBase = activeFilter.kind === 'branch' ? activeFilter.base : null;
+  const filterReadOnly = filterKind === 'commit' || filterKind === 'branch';
+
+  const [commitDetail, setCommitDetail] = useState<WorkspaceCommitDetail | null>(null);
+  const [commitLoading, setCommitLoading] = useState(false);
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const commitRun = useRef(0);
+
+  const [branchCompare, setBranchCompare] = useState<WorkspaceGitCompare | null>(null);
+  const [branchLoading, setBranchLoading] = useState(false);
+  const [branchError, setBranchError] = useState<string | null>(null);
+  const branchRun = useRef(0);
+
+  const [branches, setBranches] = useState<{
+    current: string | null;
+    branches: string[];
+  } | null>(null);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchesError, setBranchesError] = useState<string | null>(null);
+  const branchesRun = useRef(0);
+  const [branchButtonBusy, setBranchButtonBusy] = useState(false);
+
   const stagedPaths = useMemo(
     () => rows.filter((row) => row.group === 'staged').map((row) => row.path),
-    [rows],
-  );
-  /* Conflitos ficam fora do "Preparar tudo": `git add -A` os marcaria como
-     resolvidos sem o usuário revisar o conteúdo. */
-  const stageablePaths = useMemo(
-    () => rows.filter((row) => !row.staged && row.status !== 'U').map((row) => row.path),
     [rows],
   );
   const totals = useMemo(
@@ -260,6 +363,208 @@ export function ChangesPanel({
       ),
     [rows],
   );
+
+  const lastTurnPaths = useMemo(
+    () => new Set((lastTurnChanges ?? sessionChanges ?? []).map((change) => change.path)),
+    [lastTurnChanges, sessionChanges],
+  );
+
+  const commitRows = useMemo<ChangeRow[]>(() => {
+    if (!commitDetail) return [];
+    return commitDetail.files
+      .map((file) => ({
+        path: file.path,
+        status: normalizeStatus(file.status),
+        group: 'commit' as const,
+        origin: 'git' as const,
+        staged: false,
+        added: file.added,
+        removed: file.removed,
+        knownDiff: file.diff,
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path, 'pt-BR'));
+  }, [commitDetail]);
+
+  const branchRows = useMemo<ChangeRow[]>(() => {
+    if (!branchCompare) return [];
+    return branchCompare.files
+      .map((file) => ({
+        path: file.path,
+        status: normalizeStatus(file.status),
+        group: 'branch' as const,
+        origin: 'git' as const,
+        staged: false,
+        added: file.added,
+        removed: file.removed,
+        base: branchCompare.mergeBase,
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path, 'pt-BR'));
+  }, [branchCompare]);
+
+  const visibleRows = useMemo<ChangeRow[]>(() => {
+    // Without a repository the panel keeps the historical session-only list.
+    if (!isRepo) return rows;
+    switch (filterKind) {
+      case 'last-turn':
+        return rows.filter((row) => lastTurnPaths.has(row.path));
+      case 'unstaged':
+        return rows.filter((row) => row.group === 'unstaged' || row.group === 'untracked');
+      case 'staged':
+        return rows.filter((row) => row.group === 'staged');
+      case 'commit':
+        return commitRows;
+      case 'branch':
+        return branchRows;
+      case 'uncommitted':
+      default:
+        return rows.filter((row) => row.group !== 'session');
+    }
+  }, [branchRows, commitRows, filterKind, isRepo, lastTurnPaths, rows]);
+
+  const visibleStagedPaths = useMemo(
+    () =>
+      filterReadOnly
+        ? []
+        : visibleRows.filter((row) => row.group === 'staged').map((row) => row.path),
+    [filterReadOnly, visibleRows],
+  );
+  const visibleStageablePaths = useMemo(
+    () =>
+      filterReadOnly
+        ? []
+        : visibleRows
+            .filter(
+              (row) => row.origin !== 'session' && !row.staged && row.status !== 'U',
+            )
+            .map((row) => row.path),
+    [filterReadOnly, visibleRows],
+  );
+
+  const loadCommit = useCallback(
+    async (hash: string) => {
+      if (!workspaceId) return;
+      const run = commitRun.current + 1;
+      commitRun.current = run;
+      setCommitLoading(true);
+      setCommitError(null);
+      setCommitDetail(null);
+      try {
+        const detail = await api.gitCommitDetail(workspaceId, hash);
+        if (run !== commitRun.current) return;
+        setCommitDetail(detail);
+      } catch (error) {
+        if (run !== commitRun.current) return;
+        setCommitError(describeError(error, 'Não foi possível carregar o commit.'));
+      } finally {
+        if (run === commitRun.current) setCommitLoading(false);
+      }
+    },
+    [workspaceId],
+  );
+
+  const loadBranch = useCallback(
+    async (base: string) => {
+      if (!workspaceId || !isRepo) return;
+      const run = branchRun.current + 1;
+      branchRun.current = run;
+      setBranchLoading(true);
+      setBranchError(null);
+      setBranchCompare(null);
+      try {
+        const compare = await api.gitCompare(workspaceId, base);
+        if (run !== branchRun.current) return;
+        setBranchCompare(compare);
+      } catch (error) {
+        if (run !== branchRun.current) return;
+        setBranchError(describeError(error, 'Não foi possível comparar com a branch.'));
+      } finally {
+        if (run === branchRun.current) setBranchLoading(false);
+      }
+    },
+    [isRepo, workspaceId],
+  );
+
+  const loadBranches = useCallback(async () => {
+    if (!workspaceId || branches || branchesLoading) return;
+    const run = branchesRun.current + 1;
+    branchesRun.current = run;
+    setBranchesLoading(true);
+    setBranchesError(null);
+    try {
+      const result = await api.gitBranches(workspaceId);
+      if (run !== branchesRun.current) return;
+      setBranches(result ?? { current: null, branches: [] });
+    } catch (error) {
+      if (run !== branchesRun.current) return;
+      setBranchesError(describeError(error, 'Não foi possível carregar as branches.'));
+    } finally {
+      if (run === branchesRun.current) setBranchesLoading(false);
+    }
+  }, [branches, branchesLoading, workspaceId]);
+
+  const openBranchDiff = useCallback(async () => {
+    if (!workspaceId || !isRepo || branchButtonBusy) return;
+    setBranchButtonBusy(true);
+    try {
+      let result = branches;
+      if (!result) {
+        const run = branchesRun.current + 1;
+        branchesRun.current = run;
+        setBranchesLoading(true);
+        setBranchesError(null);
+        try {
+          const loaded = await api.gitBranches(workspaceId);
+          if (run !== branchesRun.current) return;
+          result = loaded ?? { current: null, branches: [] };
+          setBranches(result);
+        } finally {
+          if (run === branchesRun.current) setBranchesLoading(false);
+        }
+      }
+      const base = pickBranchBase(result?.branches ?? [], result?.current ?? null);
+      if (!base) {
+        toast.info('Não há outra branch para comparar');
+        return;
+      }
+      setExplicitFilter({ kind: 'branch', base });
+    } catch (error) {
+      toast.error(describeError(error, 'Não foi possível carregar as branches'));
+    } finally {
+      setBranchButtonBusy(false);
+    }
+  }, [branchButtonBusy, branches, isRepo, workspaceId]);
+
+  useEffect(() => {
+    setExplicitFilter(null);
+    commitRun.current += 1;
+    branchRun.current += 1;
+    branchesRun.current += 1;
+    setCommitDetail(null);
+    setCommitError(null);
+    setCommitLoading(false);
+    setBranchCompare(null);
+    setBranchError(null);
+    setBranchLoading(false);
+    setBranches(null);
+    setBranchesError(null);
+    setBranchesLoading(false);
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (filterCommitHash) void loadCommit(filterCommitHash);
+  }, [filterCommitHash, loadCommit]);
+
+  useEffect(() => {
+    if (filterBranchBase) void loadBranch(filterBranchBase);
+  }, [filterBranchBase, gitStatus, loadBranch]);
+
+  useEffect(() => {
+    // Switching branches changes the available comparison targets.
+    branchesRun.current += 1;
+    setBranches(null);
+    setBranchesError(null);
+    setBranchesLoading(false);
+  }, [gitStatus?.branch]);
 
   useEffect(
     () => () => {
@@ -292,7 +597,9 @@ export function ChangesPanel({
       setDiffText('');
       setDiffLoading(true);
       try {
-        const text = await api.getFileDiff(workspaceId, row.path, row.staged);
+        const text = row.base
+          ? await api.getFileDiffAt(workspaceId, row.path, row.base)
+          : await api.getFileDiff(workspaceId, row.path, row.staged);
         if (run !== diffRun.current) return;
         setDiffText(text ?? '');
       } catch (error) {
@@ -328,14 +635,21 @@ export function ChangesPanel({
   };
 
   const mutateAll = async (action: 'stage' | 'unstage') => {
-    if (!workspaceId || bulkBusy || busyPath) return;
+    if (!workspaceId || bulkBusy || busyPath || filterReadOnly) return;
     if (action === 'stage' && conflicted) return;
-    const count = action === 'stage' ? stageablePaths.length : stagedPaths.length;
+    const paths = action === 'stage' ? visibleStageablePaths : visibleStagedPaths;
+    const count = paths.length;
     if (count === 0) return;
     setBulkBusy(action);
     try {
-      if (action === 'stage') await api.gitStageAll(workspaceId);
-      else await api.gitUnstageAll(workspaceId);
+      if (filterKind === 'uncommitted') {
+        if (action === 'stage') await api.gitStageAll(workspaceId);
+        else await api.gitUnstageAll(workspaceId);
+      } else if (action === 'stage') {
+        await api.gitStage(workspaceId, paths);
+      } else {
+        await api.gitUnstage(workspaceId, paths);
+      }
       const noun = count === 1 ? 'arquivo' : 'arquivos';
       toast.success(
         action === 'stage'
@@ -377,7 +691,11 @@ export function ChangesPanel({
     }
   };
 
-  const loading = gitLoading || sessionLoading;
+  const filterLoading =
+    (filterKind === 'commit' && commitLoading) ||
+    (filterKind === 'branch' && branchLoading);
+  const loading = gitLoading || sessionLoading || filterLoading;
+  const emptyCopy = emptyCopyFor(activeFilter, Boolean(workspaceId));
   const commitBar = (
     <CommitBar
       workspaceId={workspaceId}
@@ -456,12 +774,69 @@ export function ChangesPanel({
           </div>
         ) : null}
 
-        {isRepo && rows.length > 0 ? (
-          <div className="flex items-center gap-1.5 border-b border-border px-3 py-1.5">
-            <span className="min-w-0 flex-1 truncate text-[11px] text-foreground-subtle">
-              {rows.length} {rows.length === 1 ? 'arquivo' : 'arquivos'}
+        {filterKind === 'commit' && commitError ? (
+          <div
+            role="alert"
+            className="flex items-start gap-2 border-b border-border bg-danger-soft px-3 py-2 text-[11.5px] text-danger"
+          >
+            <CircleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1">{commitError}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 shrink-0 px-2 text-[11px]"
+              onClick={() => {
+                if (filterCommitHash) void loadCommit(filterCommitHash);
+              }}
+            >
+              Tentar novamente
+            </Button>
+          </div>
+        ) : null}
+
+        {filterKind === 'branch' && branchError ? (
+          <div
+            role="alert"
+            className="flex items-start gap-2 border-b border-border bg-danger-soft px-3 py-2 text-[11.5px] text-danger"
+          >
+            <CircleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1">{branchError}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 shrink-0 px-2 text-[11px]"
+              onClick={() => {
+                if (filterBranchBase) void loadBranch(filterBranchBase);
+              }}
+            >
+              Tentar novamente
+            </Button>
+          </div>
+        ) : null}
+
+        {isRepo ? (
+          <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border px-2">
+            <ChangesFilterMenu
+              value={activeFilter}
+              onChange={(next) => setExplicitFilter(next)}
+              commits={commits}
+              commitsLoading={commitsLoading}
+              branches={branches?.branches ?? null}
+              currentBranch={branches?.current ?? null}
+              branchesLoading={branchesLoading}
+              branchesError={branchesError}
+              onOpenBranches={() => void loadBranches()}
+              className="min-w-0 flex-1"
+            />
+            <span
+              className={cn(
+                'shrink-0 text-[11px] tabular-nums text-foreground-subtle',
+                compact && 'sr-only',
+              )}
+            >
+              {visibleRows.length} {visibleRows.length === 1 ? 'arquivo' : 'arquivos'}
             </span>
-            {stagedPaths.length > 0 ? (
+            {visibleStagedPaths.length > 0 ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -474,7 +849,7 @@ export function ChangesPanel({
                 Desmarcar tudo
               </Button>
             ) : null}
-            {stageablePaths.length > 0 ? (
+            {visibleStageablePaths.length > 0 ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -484,7 +859,7 @@ export function ChangesPanel({
                 title={
                   conflicted
                     ? 'Resolva os conflitos de merge antes de preparar tudo'
-                    : 'Adiciona todas as alterações ao stage'
+                    : 'Adiciona as alterações visíveis ao stage'
                 }
                 leftIcon={<Plus aria-hidden className="size-3.5" strokeWidth={2} />}
                 onClick={() => void mutateAll('stage')}
@@ -495,7 +870,7 @@ export function ChangesPanel({
           </div>
         ) : null}
 
-        {loading && rows.length === 0 ? (
+        {loading && visibleRows.length === 0 && !commitError && !branchError ? (
           <div aria-hidden className="space-y-1.5 p-2">
             {[0, 1, 2, 3].map((row) => (
               <div
@@ -505,27 +880,41 @@ export function ChangesPanel({
               />
             ))}
           </div>
-        ) : rows.length === 0 ? (
+        ) : visibleRows.length === 0 && !commitError && !branchError ? (
           <div className="flex h-full flex-col items-center justify-center gap-1.5 px-6 py-8 text-center">
             <FileDiff aria-hidden className="size-5 text-foreground-subtle" strokeWidth={1.75} />
-            <p className="text-[12.5px] font-medium text-foreground">
-              {workspaceId ? 'Nenhuma alteração pendente' : 'Nenhum workspace selecionado'}
-            </p>
+            <p className="text-[12.5px] font-medium text-foreground">{emptyCopy.title}</p>
             <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">
-              {workspaceId
-                ? 'As edições do agente e as mudanças do git aparecem aqui.'
-                : 'Abra uma pasta para ver as alterações do código.'}
+              {emptyCopy.description}
             </p>
+            {isRepo && !filterReadOnly ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-1"
+                loading={branchButtonBusy}
+                leftIcon={<GitBranch aria-hidden className="size-3.5" strokeWidth={1.75} />}
+                onClick={() => void openBranchDiff()}
+              >
+                Ver diff da branch
+              </Button>
+            ) : null}
           </div>
         ) : (
           <div>
             {GROUPS.map((group) => {
-              const groupRows = rows.filter((row) => row.group === group.id);
+              const groupRows = visibleRows.filter((row) => row.group === group.id);
               if (groupRows.length === 0) return null;
+              const label =
+                group.id === 'commit' && activeFilter.kind === 'commit'
+                  ? `Commit ${shortHash(activeFilter.hash)}`
+                  : group.id === 'branch' && activeFilter.kind === 'branch'
+                    ? `Branch ${activeFilter.base}`
+                    : group.label;
               return (
-                <section key={group.id} aria-label={group.label} className="border-b border-border">
+                <section key={group.id} aria-label={label} className="border-b border-border">
                   <h3 className="sticky top-0 z-10 flex h-7 items-center gap-1.5 bg-surface px-3 text-[10.5px] font-medium uppercase tracking-wider text-foreground-subtle">
-                    {group.label}
+                    {label}
                     <span className="tabular-nums">({groupRows.length})</span>
                   </h3>
                   <ul>
@@ -573,35 +962,37 @@ export function ChangesPanel({
                             ) : null}
                           </button>
 
-                          <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
-                            {row.group === 'staged' ? (
+                          {filterReadOnly ? null : (
+                            <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
+                              {row.group === 'staged' ? (
+                                <IconButton
+                                  label={`Remover ${row.path} do stage`}
+                                  size="sm"
+                                  disabled={busyPath === row.path || bulkBusy !== null}
+                                  onClick={() => void mutate(row, 'unstage')}
+                                >
+                                  <Minus aria-hidden className="size-3.5" strokeWidth={2} />
+                                </IconButton>
+                              ) : (
+                                <IconButton
+                                  label={`Preparar ${row.path}`}
+                                  size="sm"
+                                  disabled={busyPath === row.path || bulkBusy !== null || !isRepo}
+                                  onClick={() => void mutate(row, 'stage')}
+                                >
+                                  <Plus aria-hidden className="size-3.5" strokeWidth={2} />
+                                </IconButton>
+                              )}
                               <IconButton
-                                label={`Remover ${row.path} do stage`}
+                                label={`Reverter ${row.path}`}
                                 size="sm"
                                 disabled={busyPath === row.path || bulkBusy !== null}
-                                onClick={() => void mutate(row, 'unstage')}
+                                onClick={() => setConfirmRow(row)}
                               >
-                                <Minus aria-hidden className="size-3.5" strokeWidth={2} />
+                                <Undo2 aria-hidden className="size-3.5" strokeWidth={1.75} />
                               </IconButton>
-                            ) : (
-                              <IconButton
-                                label={`Preparar ${row.path}`}
-                                size="sm"
-                                disabled={busyPath === row.path || bulkBusy !== null || !isRepo}
-                                onClick={() => void mutate(row, 'stage')}
-                              >
-                                <Plus aria-hidden className="size-3.5" strokeWidth={2} />
-                              </IconButton>
-                            )}
-                            <IconButton
-                              label={`Reverter ${row.path}`}
-                              size="sm"
-                              disabled={busyPath === row.path || bulkBusy !== null}
-                              onClick={() => setConfirmRow(row)}
-                            >
-                              <Undo2 aria-hidden className="size-3.5" strokeWidth={1.75} />
-                            </IconButton>
-                          </div>
+                            </div>
+                          )}
                         </li>
                       );
                     })}
@@ -614,7 +1005,7 @@ export function ChangesPanel({
       </div>
       )}
 
-      {commitBar}
+      {filterReadOnly ? null : commitBar}
 
       <Dialog
         open={confirmRow !== null}

@@ -14,8 +14,8 @@ use tauri::State;
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::{
-    WorkspaceCommitDetail, WorkspaceCommitFile, WorkspaceGitCommit, WorkspaceGitFile,
-    WorkspaceGitStatus,
+    WorkspaceCommitDetail, WorkspaceCommitFile, WorkspaceGitCommit, WorkspaceGitCompare,
+    WorkspaceGitCompareFile, WorkspaceGitFile, WorkspaceGitStatus,
 };
 use crate::state::AppState;
 use crate::workspace::exec::{self, ExecRequest};
@@ -103,6 +103,38 @@ pub async fn git_status(
     workspace_id: String,
 ) -> Result<WorkspaceGitStatus, String> {
     status_of(&state, &workspace_id).await
+}
+
+/// Arquivos alterados entre o merge-base da branch escolhida e a working tree.
+#[tauri::command]
+pub async fn git_compare(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    base: String,
+) -> Result<WorkspaceGitCompare, String> {
+    crate::workspace::git::validate_ref(&base)?;
+    let root = workspace_path(&state, &workspace_id)?;
+    let status = crate::workspace::git::detect(&root).await;
+    if !status.is_repo {
+        return Err("não é um repositório Git".to_string());
+    }
+    let (merge_base, files) =
+        crate::workspace::git::compare(&root, &base, &status.untracked)
+            .await
+            .map_err(map_err)?;
+    Ok(WorkspaceGitCompare {
+        base,
+        merge_base,
+        files: files
+            .into_iter()
+            .map(|file| WorkspaceGitCompareFile {
+                path: file.path,
+                status: file.status,
+                added: file.added,
+                removed: file.removed,
+            })
+            .collect(),
+    })
 }
 
 #[tauri::command]

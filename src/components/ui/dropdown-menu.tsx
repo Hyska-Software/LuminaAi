@@ -1,6 +1,6 @@
 import * as React from 'react';
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
-import { Check } from 'lucide-react';
+import { Check, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export const DropdownMenu = DropdownMenuPrimitive.Root;
@@ -68,6 +68,48 @@ export const DropdownMenuItem = React.forwardRef<HTMLDivElement, DropdownMenuIte
     );
   },
 );
+
+export const DropdownMenuSubTrigger = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger>
+>(function DropdownMenuSubTrigger({ className, children, ...props }, ref) {
+  return (
+    <DropdownMenuPrimitive.SubTrigger
+      ref={ref}
+      className={cn(
+        'relative flex cursor-default select-none items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] outline-none',
+        'transition-colors data-[highlighted]:bg-surface-hover data-[state=open]:bg-surface-hover',
+        'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        className,
+      )}
+      {...props}
+    >
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      <ChevronRight className="size-4 shrink-0 text-foreground-subtle" />
+    </DropdownMenuPrimitive.SubTrigger>
+  );
+});
+
+export const DropdownMenuSubContent = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
+>(function DropdownMenuSubContent({ className, sideOffset = 4, ...props }, ref) {
+  return (
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.SubContent
+        ref={ref}
+        sideOffset={sideOffset}
+        collisionPadding={8}
+        className={cn(
+          'z-[65] min-w-44 overflow-hidden rounded-xl border border-border bg-surface-raised p-1 text-foreground shadow-xl',
+          'data-[state=open]:animate-fade-in motion-reduce:animate-none',
+          className,
+        )}
+        {...props}
+      />
+    </DropdownMenuPrimitive.Portal>
+  );
+});
 
 export const DropdownMenuCheckboxItem = React.forwardRef<
   HTMLDivElement,

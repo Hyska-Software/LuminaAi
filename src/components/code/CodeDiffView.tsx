@@ -40,14 +40,16 @@ export function CodeDiffView({ target, className }: CodeDiffViewProps) {
     setLoading(true);
     setError(null);
     try {
-      const text = await api.getFileDiff(target.workspaceId, target.path, target.staged);
+      const text = target.base
+        ? await api.getFileDiffAt(target.workspaceId, target.path, target.base)
+        : await api.getFileDiff(target.workspaceId, target.path, target.staged);
       setDiff(text ?? '');
     } catch (loadError) {
       setError(describeError(loadError));
     } finally {
       setLoading(false);
     }
-  }, [target.knownDiff, target.path, target.staged, target.workspaceId]);
+  }, [target.base, target.knownDiff, target.path, target.staged, target.workspaceId]);
 
   useEffect(() => {
     void load();
@@ -59,6 +61,7 @@ export function CodeDiffView({ target, className }: CodeDiffViewProps) {
         <span className="min-w-0 flex-1 truncate text-[12px] text-foreground-muted">
           Diff
           {target.staged ? ' (preparado)' : ''}
+          {target.base ? ` · ${target.base.slice(0, 7)}` : ''}
         </span>
         {loading ? <Spinner size="xs" label="Carregando diff" /> : null}
         <Tooltip content="Recarregar diff" side="bottom">

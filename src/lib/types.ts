@@ -552,6 +552,8 @@ export interface CodeSessionState {
   project?: ProjectInfo | null;
   context?: ContextStats | null;
   changes?: ChangesSummary | null;
+  /** Alterações do turno mais recente (subconjunto de `changes`). */
+  lastTurnChanges?: ChangesSummary | null;
   jobs: JobView[];
   approvals: ApprovalRequest[];
   questions?: AskUserRequest[];
@@ -627,6 +629,21 @@ export interface WorkspaceGitStatus {
   unstaged: WorkspaceGitFile[];
   untracked: string[];
   conflicted: string[];
+}
+
+/** Um arquivo alterado entre uma branch (merge-base) e a working tree. */
+export interface WorkspaceGitCompareFile {
+  path: string;
+  status: string;
+  added: number;
+  removed: number;
+}
+
+/** Resultado da comparação de uma branch com a working tree. */
+export interface WorkspaceGitCompare {
+  base: string;
+  mergeBase: string;
+  files: WorkspaceGitCompareFile[];
 }
 
 /** Commit recente para o painel. */

@@ -68,6 +68,30 @@ fn pending_questions_for(state: &AppState, conversation_id: &str) -> Vec<AskUser
         .collect()
 }
 
+/// Summary of the most recent turn: the running turn when there is one, the
+/// last persisted `turn_events` id otherwise, and the journal as a fallback
+/// for sessions created before turn events were persisted. A turn without file
+/// writes yields an explicit empty summary (never the previous turn's files).
+fn latest_turn_changes(state: &AppState, conversation_id: &str) -> Option<ChangesSummary> {
+    let active_turn = state
+        .active_turns()
+        .into_iter()
+        .find_map(|(turn_id, conversation)| {
+            (conversation == conversation_id).then_some(turn_id)
+        });
+    let turn_id = active_turn
+        .or_else(|| state.db.last_turn_id(conversation_id).ok().flatten())
+        .or_else(|| state.db.last_file_journal_turn(conversation_id).ok().flatten())?;
+    crate::harness::code::session::turn_changes(&state.db, conversation_id, &turn_id).or_else(|| {
+        Some(ChangesSummary {
+            turn_id: Some(turn_id),
+            files: Vec::new(),
+            added: 0,
+            removed: 0,
+        })
+    })
+}
+
 /// Reconstrói o estado da sessão a partir do log de eventos + journal + git.
 async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSessionState, String> {
     let conversation = state
@@ -91,6 +115,7 @@ async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSe
     }
 
     let changes = collect_changes(state, conversation_id, workspace.as_ref()).await;
+    let last_turn_changes = latest_turn_changes(state, conversation_id);
 
     let approvals = pending_approvals_for(state, conversation_id);
     let questions = pending_questions_for(state, conversation_id);
@@ -135,6 +160,7 @@ async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSe
         project,
         context,
         changes,
+        last_turn_changes,
         jobs: state.jobs.list(conversation_id),
         approvals,
         questions,
@@ -717,24 +743,44 @@ pub async fn get_workspace_changes(
         .collect())
 }
 
-/// Diff de um arquivo: journal da sessão quando existe, senão git.
-#[tauri::command]
-pub async fn get_file_diff(
-    state: State<'_, AppState>,
-    workspace_id: String,
-    path: String,
+/// Shared body of the file diff commands: working tree/index (`base = None`)
+/// or a ref comparison (`base = Some(merge_base)`).
+async fn diff_file(
+    state: &AppState,
+    workspace_id: &str,
+    path: &str,
     staged: bool,
+    base: Option<&str>,
 ) -> Result<String, String> {
-    let root = workspace_path(&state, &workspace_id)?;
+    let root = workspace_path(state, workspace_id)?;
     let resolved = crate::workspace::safe_path::resolve(
         &root,
-        &path,
+        path,
         crate::workspace::safe_path::Access::Read,
     )
     .map_err(map_err)?;
     let relative = crate::workspace::safe_path::to_relative(&root, &resolved);
+
+    if let Some(base) = base {
+        let text = crate::workspace::git::diff_ref(
+            &root,
+            base,
+            std::slice::from_ref(&relative),
+            3,
+            200_000,
+        )
+        .await
+        .map_err(|error| format!("{}: {}", error.code, error.message))?;
+        // Untracked não aparece no `git diff` nem contra uma ref.
+        if text.trim().is_empty() && !crate::workspace::git::is_tracked(&root, &relative).await {
+            return crate::workspace::git::untracked_diff(&root, &relative, 200_000)
+                .map_err(|error| format!("{}: {}", error.code, error.message));
+        }
+        return Ok(text);
+    }
+
     if !staged {
-        if let Some(diff) = journal_diff(&state, &relative)? {
+        if let Some(diff) = journal_diff(state, &relative)? {
             return Ok(diff);
         }
     }
@@ -751,6 +797,29 @@ pub async fn get_file_diff(
             .map_err(|error| format!("{}: {}", error.code, error.message));
     }
     Ok(text)
+}
+
+/// Diff de um arquivo: journal da sessão quando existe, senão git.
+#[tauri::command]
+pub async fn get_file_diff(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: String,
+    staged: bool,
+) -> Result<String, String> {
+    diff_file(&state, &workspace_id, &path, staged, None).await
+}
+
+/// Diff de um arquivo contra uma ref (merge-base da branch selecionada).
+#[tauri::command]
+pub async fn get_file_diff_at(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: String,
+    base: String,
+) -> Result<String, String> {
+    crate::workspace::git::validate_ref(&base)?;
+    diff_file(&state, &workspace_id, &path, false, Some(&base)).await
 }
 
 /// Diff do journal para um path (usa o object store de checkpoints).

@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { FileChange, WorkspaceGitStatus } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
   getFileDiff: vi.fn(),
+  getFileDiffAt: vi.fn(),
   gitStage: vi.fn(),
   gitStageAll: vi.fn(),
   gitUnstage: vi.fn(),
@@ -14,13 +16,16 @@ const mocks = vi.hoisted(() => ({
   gitLog: vi.fn(),
   gitCommit: vi.fn(),
   suggestCommitMessage: vi.fn(),
+  gitBranches: vi.fn(),
+  gitCompare: vi.fn(),
+  gitCommitDetail: vi.fn(),
 }));
 const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
 vi.mock('sonner', () => ({ toast: toastMocks }));
 
-import { buildChangeRows, ChangesPanel } from './ChangesPanel';
+import { buildChangeRows, ChangesPanel, pickBranchBase } from './ChangesPanel';
 
 function status(overrides: Partial<WorkspaceGitStatus> = {}): WorkspaceGitStatus {
   return {
@@ -52,6 +57,33 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getFileDiff.mockResolvedValue('@@ -1 +1 @@\n-a\n+b');
+  mocks.getFileDiffAt.mockResolvedValue('@@ -1 +1 @@\n-a\n+b');
+  mocks.gitBranches.mockResolvedValue({ current: 'main', branches: ['main', 'feature'] });
+  mocks.gitCompare.mockResolvedValue({
+    base: 'feature',
+    mergeBase: 'abc1234deadbeef',
+    files: [{ path: 'src/b.ts', status: 'M', added: 4, removed: 1 }],
+  });
+  mocks.gitCommitDetail.mockResolvedValue({
+    hash: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678',
+    author: 'Ana',
+    email: 'ana@example.com',
+    date: '2026-11-09',
+    subject: 'Add clipboard previews',
+    body: '',
+    files: [
+      {
+        path: 'src/app.ts',
+        oldPath: null,
+        status: 'M',
+        added: 2,
+        removed: 1,
+        binary: false,
+        diff: '@@ -1 +1 @@\n-a\n+b',
+      },
+    ],
+    truncated: false,
+  });
   mocks.gitStage.mockResolvedValue(status());
   mocks.gitStageAll.mockResolvedValue(status());
   mocks.gitUnstage.mockResolvedValue(status());
@@ -366,6 +398,187 @@ describe('ChangesPanel', () => {
     );
     expect(screen.getByText('git indisponível')).toBeTruthy();
     expect(screen.getByText('journal indisponível')).toBeTruthy();
+  });
+
+  it('defaults to uncommitted and hides session-only rows', () => {
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status({ staged: [], unstaged: [], untracked: [] })}
+        sessionChanges={[{ path: 'src/so-sessao.ts', kind: 'modified', added: 1, removed: 0 }]}
+      />,
+    );
+    expect(screen.queryByTitle('src/so-sessao.ts')).toBeNull();
+    expect(screen.getByText('Nenhuma alteração pendente')).toBeTruthy();
+  });
+
+  it('filters staged, unstaged and last-turn rows', async () => {
+    const cumulative: FileChange[] = [
+      ...sessionChanges,
+      { path: 'src/velho.ts', kind: 'modified', added: 1, removed: 0 },
+    ];
+    const view = render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status()}
+        sessionChanges={cumulative}
+        lastTurnChanges={[sessionChanges[0]]}
+      />,
+    );
+    const user = userEvent.setup();
+    const choose = async (name: string) => {
+      await user.click(screen.getByRole('button', { name: 'Filtrar alterações' }));
+      await user.click(screen.getByRole('menuitem', { name }));
+    };
+
+    await choose('Marcadas para commit');
+    expect(rowButton('src/a.ts')).toBeTruthy();
+    expect(screen.queryByTitle('src/b.ts')).toBeNull();
+    expect(screen.queryByTitle('novo.ts')).toBeNull();
+
+    await choose('Não marcadas para commit');
+    expect(rowButton('src/b.ts')).toBeTruthy();
+    expect(rowButton('novo.ts')).toBeTruthy();
+    expect(screen.queryByTitle('src/a.ts')).toBeNull();
+
+    await choose('Último turno');
+    expect(rowButton('src/b.ts')).toBeTruthy();
+    expect(screen.queryByTitle('src/velho.ts')).toBeNull();
+
+    await choose('Sem commit');
+    expect(rowButton('src/a.ts')).toBeTruthy();
+    expect(rowButton('src/b.ts')).toBeTruthy();
+    expect(rowButton('novo.ts')).toBeTruthy();
+    expect(screen.queryByTitle('src/velho.ts')).toBeNull();
+
+    view.unmount();
+  });
+
+  it('lists a commit and opens its known patch without stage actions', async () => {
+    const commits = [
+      {
+        hash: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678',
+        subject: 'Add clipboard previews',
+        author: 'Ana',
+        date: '2026-11-09',
+      },
+    ];
+    const onOpenDiffTab = vi.fn();
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status()}
+        sessionChanges={[]}
+        commits={commits}
+        onOpenDiffTab={onOpenDiffTab}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Filtrar alterações' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Commit' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /a1b2c3d · Add clipboard previews/ }));
+
+    await waitFor(() =>
+      expect(mocks.gitCommitDetail).toHaveBeenCalledWith('ws-1', commits[0].hash),
+    );
+    const row = await screen.findByTitle('src/app.ts');
+    expect(screen.queryByRole('button', { name: 'Preparar src/app.ts' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull();
+    fireEvent.click(row);
+    expect(onOpenDiffTab).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: 'src/app.ts',
+        knownDiff: '@@ -1 +1 @@\n-a\n+b',
+      }),
+    );
+  });
+
+  it('compares against a branch and opens the ref diff', async () => {
+    render(<ChangesPanel workspaceId="ws-1" gitStatus={status()} sessionChanges={[]} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Filtrar alterações' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Branch' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'feature' }));
+
+    await waitFor(() => expect(mocks.gitCompare).toHaveBeenCalledWith('ws-1', 'feature'));
+    expect(await screen.findByRole('heading', { name: /Branch feature/ })).toBeTruthy();
+    fireEvent.click(await screen.findByTitle('src/b.ts'));
+    await waitFor(() =>
+      expect(mocks.getFileDiffAt).toHaveBeenCalledWith(
+        'ws-1',
+        'src/b.ts',
+        'abc1234deadbeef',
+      ),
+    );
+  });
+
+  it('passes the branch merge-base to the central diff tab', async () => {
+    const onOpenDiffTab = vi.fn();
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status()}
+        sessionChanges={[]}
+        onOpenDiffTab={onOpenDiffTab}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Filtrar alterações' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Branch' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'feature' }));
+    await waitFor(() => expect(mocks.gitCompare).toHaveBeenCalled());
+    fireEvent.click(await screen.findByTitle('src/b.ts'));
+    expect(onOpenDiffTab).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'src/b.ts', base: 'abc1234deadbeef' }),
+    );
+  });
+
+  it('resolves the default branch from the empty state', async () => {
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status({ staged: [], unstaged: [], untracked: [] })}
+        sessionChanges={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Ver diff da branch' }));
+
+    await waitFor(() => expect(mocks.gitBranches).toHaveBeenCalledWith('ws-1'));
+    await waitFor(() => expect(mocks.gitCompare).toHaveBeenCalledWith('ws-1', 'feature'));
+    expect(await screen.findByRole('heading', { name: /Branch feature/ })).toBeTruthy();
+  });
+
+  it('scopes bulk actions to the visible filter', async () => {
+    render(<ChangesPanel workspaceId="ws-1" gitStatus={status()} sessionChanges={[]} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Filtrar alterações' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Marcadas para commit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Desmarcar tudo' }));
+    await waitFor(() =>
+      expect(mocks.gitUnstage).toHaveBeenCalledWith('ws-1', ['src/a.ts']),
+    );
+    expect(mocks.gitUnstageAll).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Filtrar alterações' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Não marcadas para commit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Preparar tudo' }));
+    await waitFor(() =>
+      expect(mocks.gitStage).toHaveBeenCalledWith(
+        'ws-1',
+        expect.arrayContaining(['src/b.ts', 'novo.ts']),
+      ),
+    );
+    expect(mocks.gitStageAll).not.toHaveBeenCalled();
+  });
+});
+
+describe('pickBranchBase', () => {
+  it('prefers main, then master, then the first other branch', () => {
+    expect(pickBranchBase(['main', 'dev'], null)).toBe('main');
+    expect(pickBranchBase(['master', 'dev'], 'feature')).toBe('master');
+    expect(pickBranchBase(['dev', 'outra'], 'main')).toBe('dev');
+    expect(pickBranchBase(['main'], 'main')).toBeNull();
+    expect(pickBranchBase([], null)).toBeNull();
   });
 });
 

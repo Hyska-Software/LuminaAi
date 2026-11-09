@@ -2200,6 +2200,9 @@ pub struct CodeSessionState {
     pub context: Option<ContextStats>,
     #[serde(default)]
     pub changes: Option<ChangesSummary>,
+    /// Alterações do turno mais recente (subconjunto de `changes`).
+    #[serde(default)]
+    pub last_turn_changes: Option<ChangesSummary>,
     #[serde(default)]
     pub jobs: Vec<JobView>,
     #[serde(default)]
@@ -2283,6 +2286,29 @@ pub struct WorkspaceGitStatus {
     pub untracked: Vec<String>,
     #[serde(default)]
     pub conflicted: Vec<String>,
+}
+
+/// Arquivo alterado entre uma branch (merge-base) e a working tree.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitCompareFile {
+    pub path: String,
+    /// `A` | `M` | `D` | `R` | `C` | `T`.
+    pub status: String,
+    #[serde(default)]
+    pub added: u32,
+    #[serde(default)]
+    pub removed: u32,
+}
+
+/// Resultado de `git_compare`: branch escolhida, merge-base usado no diff e
+/// os arquivos alterados.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitCompare {
+    pub base: String,
+    pub merge_base: String,
+    pub files: Vec<WorkspaceGitCompareFile>,
 }
 
 /// Commit recente para o painel (git log).

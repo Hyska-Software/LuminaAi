@@ -132,6 +132,9 @@ export function CodePanel() {
   const sessionChangeFiles = useCodeStore((state) =>
     activeId ? (state.byConversation[activeId]?.changes?.files ?? null) : null,
   );
+  const lastTurnChangeFiles = useCodeStore((state) =>
+    activeId ? (state.byConversation[activeId]?.lastTurnChanges?.files ?? null) : null,
+  );
   const refreshSession = useCodeStore((state) => state.refresh);
 
   /** Width previewed while dragging; `null` means "use the persisted width". */
@@ -361,12 +364,16 @@ export function CodePanel() {
             </div>
             {workspaceId ? (
               <ChangesPanel
+                key={workspaceId}
                 workspaceId={workspaceId}
                 conversationId={activeId}
                 gitStatus={panel.gitStatus}
                 gitLoading={panel.gitLoading}
                 gitError={panel.gitError}
                 sessionChanges={sessionChanges}
+                lastTurnChanges={lastTurnChangeFiles}
+                commits={panel.commits}
+                commitsLoading={panel.commitsLoading}
                 sessionLoading={false}
                 sessionError={null}
                 onRefresh={refreshAll}
@@ -380,9 +387,11 @@ export function CodePanel() {
                           path: row.path,
                           staged: row.staged,
                           knownDiff: row.knownDiff ?? null,
+                          base: row.base ?? null,
                         });
                       }
                 }
+                compact={compactTabs}
                 className="min-h-0 flex-1"
               />
             ) : (

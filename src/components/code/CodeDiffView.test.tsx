@@ -2,7 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 
-const mocks = vi.hoisted(() => ({ getFileDiff: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  getFileDiff: vi.fn(),
+  getFileDiffAt: vi.fn(),
+}));
 vi.mock('@/lib/api', () => ({ api: mocks }));
 
 import { CodeDiffView } from './CodeDiffView';
@@ -10,6 +13,7 @@ import { CodeDiffView } from './CodeDiffView';
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getFileDiff.mockResolvedValue('@@ -1 +1 @@\n-a\n+b');
+  mocks.getFileDiffAt.mockResolvedValue('@@ -1 +1 @@\n-a\n+b');
 });
 
 afterEach(cleanup);
@@ -40,6 +44,26 @@ describe('CodeDiffView', () => {
     await waitFor(() => expect(mocks.getFileDiff).toHaveBeenCalledWith('ws-1', 'novo.ts', true));
     expect(await screen.findByRole('group', { name: 'Diff de novo.ts' })).toBeTruthy();
     expect(screen.getByText('Diff (preparado)')).toBeTruthy();
+  });
+
+  it('carrega o diff contra uma ref e mostra o hash no cabeçalho', async () => {
+    render(
+      <CodeDiffView
+        target={{
+          workspaceId: 'ws-1',
+          path: 'src/a.ts',
+          staged: false,
+          base: 'abc1234deadbeef',
+        }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(mocks.getFileDiffAt).toHaveBeenCalledWith('ws-1', 'src/a.ts', 'abc1234deadbeef'),
+    );
+    expect(mocks.getFileDiff).not.toHaveBeenCalled();
+    expect(screen.getByText('Diff · abc1234')).toBeTruthy();
+    expect(await screen.findByRole('group', { name: 'Diff de src/a.ts' })).toBeTruthy();
   });
 
   it('mostra erro honesto quando a API falha e permite recarregar', async () => {

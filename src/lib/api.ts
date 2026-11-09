@@ -91,6 +91,7 @@ import type {
   WorkspaceFileContent,
   WorkspaceFileEntry,
   WorkspaceGitCommit,
+  WorkspaceGitCompare,
   WorkspaceGitStatus,
 } from './types';
 
@@ -536,6 +537,8 @@ export const api = {
     invoke<FileChange[]>('get_workspace_changes', { conversationId }),
   getFileDiff: (workspaceId: string, path: string, staged = false) =>
     invoke<string>('get_file_diff', { workspaceId, path, staged }),
+  getFileDiffAt: (workspaceId: string, path: string, base: string) =>
+    invoke<string>('get_file_diff_at', { workspaceId, path, base }),
   revertFile: (conversationId: string, path: string) =>
     invoke<boolean>('revert_file', { conversationId, path }),
   revertTurn: (conversationId: string, turnId: string) =>
@@ -611,6 +614,8 @@ export const api = {
     invoke<WorkspaceGitStatus>('git_commit', { workspaceId, message, paths: paths ?? null }),
   gitBranches: (workspaceId: string) =>
     invoke<{ current: string | null; branches: string[] }>('git_branches', { workspaceId }),
+  gitCompare: (workspaceId: string, base: string) =>
+    invoke<WorkspaceGitCompare>('git_compare', { workspaceId, base }),
   gitSwitchBranch: (workspaceId: string, branch: string) =>
     invoke<WorkspaceGitStatus>('git_switch_branch', { workspaceId, branch }),
   gitLog: (workspaceId: string, limit = 20) =>

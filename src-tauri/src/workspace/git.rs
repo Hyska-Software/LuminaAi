@@ -7,7 +7,7 @@
 
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -249,6 +249,202 @@ fn parse_numstat_z(raw: &str) -> HashMap<String, GitLineStat> {
 
 fn parse_numstat_count(raw: &str) -> u32 {
     raw.trim().parse().unwrap_or(0)
+}
+
+/// Um arquivo alterado entre uma branch (merge-base) e a working tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitCompareFile {
+    pub path: String,
+    /// Código de status (`M`, `A`, `D`, `R`, `C`, `T`).
+    pub status: String,
+    pub added: u32,
+    pub removed: u32,
+}
+
+/// Rejects refs that could be parsed as git options or span multiple argv
+/// entries. Branch/hash names never contain whitespace, so this is strict.
+pub fn validate_ref(reference: &str) -> Result<(), String> {
+    let trimmed = reference.trim();
+    if trimmed.is_empty() {
+        return Err("referência git vazia".to_string());
+    }
+    if trimmed.len() > 200 {
+        return Err("referência git longa demais".to_string());
+    }
+    if trimmed.starts_with('-') {
+        return Err("referência git inválida".to_string());
+    }
+    if trimmed
+        .chars()
+        .any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        return Err("referência git inválida".to_string());
+    }
+    Ok(())
+}
+
+/// Common ancestor between `base` and `HEAD` (`git merge-base <base> HEAD`).
+pub async fn merge_base(root: &Path, base: &str) -> Result<String, ExecError> {
+    let output = run_git_checked(root, &["merge-base", base, "HEAD"], TEXT_CAP).await?;
+    let hash = output.stdout.trim().to_string();
+    if hash.is_empty() {
+        return Err(ExecError::failed(
+            "não foi possível calcular a base comum com a branch",
+            None,
+        ));
+    }
+    Ok(hash)
+}
+
+/// Parses `git diff --name-status -z`.
+///
+/// Normal record: `status\0path\0`. Rename/copy with `-z`:
+/// `R100\0old_path\0new_path\0`; the new path is the one the UI shows.
+fn parse_name_status_z(raw: &str) -> Vec<GitFile> {
+    let tokens: Vec<&str> = raw.split('\0').collect();
+    let mut files = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        let status = tokens[index].trim();
+        index += 1;
+        if status.is_empty() {
+            continue;
+        }
+        let Some(path) = tokens.get(index) else {
+            break;
+        };
+        index += 1;
+        if path.is_empty() {
+            continue;
+        }
+        let letter = status
+            .chars()
+            .next()
+            .unwrap_or('M')
+            .to_string();
+        let path = if matches!(letter.as_str(), "R" | "C") {
+            let Some(new_path) = tokens.get(index) else {
+                break;
+            };
+            index += 1;
+            (*new_path).to_string()
+        } else {
+            (*path).to_string()
+        };
+        if !path.is_empty() {
+            files.push(GitFile { path, status: letter });
+        }
+    }
+    files
+}
+
+/// Arquivos alterados entre `base` e a working tree (por status).
+pub async fn diff_ref_name_status(root: &Path, base: &str) -> Result<Vec<GitFile>, ExecError> {
+    let output = run_git_checked(
+        root,
+        &[
+            "diff",
+            "--name-status",
+            "-z",
+            "--no-color",
+            "--no-ext-diff",
+            base,
+            "--",
+        ],
+        STATUS_CAP,
+    )
+    .await?;
+    Ok(parse_name_status_z(&output.stdout))
+}
+
+/// Per-file stats between `base` and the working tree.
+pub async fn diff_ref_stats(
+    root: &Path,
+    base: &str,
+) -> Result<HashMap<String, GitLineStat>, ExecError> {
+    let output = run_git_checked(
+        root,
+        &[
+            "diff",
+            "--numstat",
+            "-z",
+            "--no-color",
+            "--no-ext-diff",
+            base,
+            "--",
+        ],
+        DIFF_CAP,
+    )
+    .await?;
+    Ok(parse_numstat_z(&output.stdout))
+}
+
+/// Unified diff between `base` and the working tree, optionally limited to
+/// `paths`. Mirrors [`diff`]'s cap/truncation contract.
+pub async fn diff_ref(
+    root: &Path,
+    base: &str,
+    paths: &[String],
+    context: u32,
+    max_bytes: usize,
+) -> Result<String, ExecError> {
+    let unified = format!("--unified={context}");
+    let mut args: Vec<&str> = vec![
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        &unified,
+        base,
+        "--",
+    ];
+    for path in paths {
+        args.push(path.as_str());
+    }
+    let cap = if max_bytes == 0 { DIFF_CAP } else { max_bytes };
+    let output = run_git_checked(root, &args, cap).await?;
+    let mut text = output.stdout;
+    if output.truncated {
+        text.push_str("\n[diff truncado pelo limite de saída]\n");
+    }
+    Ok(text)
+}
+
+/// Files changed between the merge-base of `base`/`HEAD` and the working tree,
+/// including untracked files (which `git diff` never shows).
+pub async fn compare(
+    root: &Path,
+    base: &str,
+    untracked: &[String],
+) -> Result<(String, Vec<GitCompareFile>), ExecError> {
+    let merge_base = merge_base(root, base).await?;
+    let statuses = diff_ref_name_status(root, &merge_base).await?;
+    let stats = diff_ref_stats(root, &merge_base).await?;
+    let mut files: BTreeMap<String, GitCompareFile> = BTreeMap::new();
+    for file in statuses {
+        let stat = stats.get(&file.path).copied().unwrap_or_default();
+        files.insert(
+            file.path.clone(),
+            GitCompareFile {
+                path: file.path,
+                status: file.status,
+                added: stat.added,
+                removed: stat.removed,
+            },
+        );
+    }
+    for path in untracked {
+        let stat = untracked_stats(root, path);
+        files.insert(
+            path.clone(),
+            GitCompareFile {
+                path: path.clone(),
+                status: "A".to_string(),
+                added: stat.added,
+                removed: stat.removed,
+            },
+        );
+    }
+    Ok((merge_base, files.into_values().collect()))
 }
 
 /// Added lines of an **untracked** file (`git diff` ignores it). Reads at most
@@ -1247,6 +1443,133 @@ mod tests {
         );
         assert_eq!(stats.get("bin.dat"), Some(&GitLineStat::default()));
         assert!(!stats.contains_key("antes.txt"));
+    }
+
+    #[test]
+    fn parses_name_status_z_with_renames() {
+        let raw = concat!(
+            "M\0a.txt\0",
+            "R100\0antes.txt\0depois.txt\0",
+            "D\0removido.txt\0",
+            "C75\0origem.txt\0copia.txt\0",
+        );
+        let files = parse_name_status_z(raw);
+        assert_eq!(
+            files,
+            vec![
+                GitFile {
+                    path: "a.txt".to_string(),
+                    status: "M".to_string(),
+                },
+                GitFile {
+                    path: "depois.txt".to_string(),
+                    status: "R".to_string(),
+                },
+                GitFile {
+                    path: "removido.txt".to_string(),
+                    status: "D".to_string(),
+                },
+                GitFile {
+                    path: "copia.txt".to_string(),
+                    status: "C".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn validate_ref_rejects_options_and_whitespace() {
+        assert!(validate_ref("").is_err());
+        assert!(validate_ref("--cached").is_err());
+        assert!(validate_ref("a b").is_err());
+        assert!(validate_ref(&"a".repeat(201)).is_err());
+        assert!(validate_ref("main").is_ok());
+        assert!(validate_ref("origin/main").is_ok());
+        assert!(validate_ref("feature/nova").is_ok());
+        assert!(validate_ref("0123456789abcdef0123456789abcdef01234567").is_ok());
+    }
+
+    #[tokio::test]
+    async fn compare_uses_merge_base_and_includes_untracked() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        assert!(run_git(temp.path(), &["checkout", "-b", "feature"]));
+        fs::write(temp.path().join("a.txt"), "linha1\nfeature\n").expect("escrever");
+        assert!(run_git(temp.path(), &["add", "a.txt"]));
+        assert!(run_git(temp.path(), &["commit", "-m", "feature change"]));
+
+        assert!(run_git(temp.path(), &["checkout", "main"]));
+        fs::write(temp.path().join("main-only.txt"), "só na main\n").expect("escrever");
+        assert!(run_git(temp.path(), &["add", "."]));
+        assert!(run_git(temp.path(), &["commit", "-m", "main only"]));
+
+        assert!(run_git(temp.path(), &["checkout", "feature"]));
+        fs::write(temp.path().join("a.txt"), "linha1\nfeature\nunstaged\n").expect("escrever");
+        fs::write(temp.path().join("novo.txt"), "novo\n").expect("escrever");
+
+        let status = detect(temp.path()).await;
+        assert!(status.untracked.iter().any(|path| path == "novo.txt"));
+
+        let (merge_base, files) = compare(temp.path(), "main", &status.untracked)
+            .await
+            .expect("compare");
+
+        let initial = git_stdout(temp.path(), &["rev-list", "--max-parents=0", "HEAD"])
+            .expect("initial hash");
+        assert_eq!(merge_base, initial);
+
+        let a = files.iter().find(|file| file.path == "a.txt").expect("a.txt");
+        assert_eq!(a.status, "M");
+        assert_eq!((a.added, a.removed), (2, 0));
+        let novo = files
+            .iter()
+            .find(|file| file.path == "novo.txt")
+            .expect("novo.txt");
+        assert_eq!(novo.status, "A");
+        assert_eq!((novo.added, novo.removed), (1, 0));
+        assert!(
+            !files.iter().any(|file| file.path == "main-only.txt"),
+            "commit exclusivo da main não pode entrar no diff da branch: {files:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn diff_ref_compares_against_the_merge_base() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        fs::write(temp.path().join("a.txt"), "linha1\nlinha2\n").expect("modificar a");
+        let text = diff_ref(temp.path(), "main", &["a.txt".to_string()], 3, 0)
+            .await
+            .expect("diff ref");
+        assert!(text.contains("+linha2"), "diff: {text}");
+        assert!(text.contains("a/a.txt"));
+        let empty = diff_ref(temp.path(), "main", &["ausente.txt".to_string()], 3, 0)
+            .await
+            .expect("diff ref vazio");
+        assert!(empty.trim().is_empty());
+    }
+
+    #[tokio::test]
+    async fn compare_reports_renamed_file_under_new_path() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        assert!(run_git(temp.path(), &["mv", "a.txt", "b.txt"]));
+
+        let (_, files) = compare(temp.path(), "main", &[])
+            .await
+            .expect("compare");
+        let renamed = files
+            .iter()
+            .find(|file| file.path == "b.txt")
+            .expect("b.txt");
+        assert_eq!(renamed.status, "R");
+        assert!(!files.iter().any(|file| file.path == "a.txt"));
     }
 
     #[test]

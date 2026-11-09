@@ -52,6 +52,8 @@ export interface CodeSessionUi {
   todos: TodoItem[];
   context: ContextStats | null;
   changes: ChangesSummary | null;
+  /** Alterações do turno mais recente (subconjunto de `changes`). */
+  lastTurnChanges: ChangesSummary | null;
   jobs: JobView[];
   approvals: ApprovalRequest[];
   /** Perguntas estruturadas pendentes do agente (`ask_user`). */
@@ -81,6 +83,7 @@ export function emptyCodeSession(conversationId: string): CodeSessionUi {
     todos: [],
     context: null,
     changes: null,
+    lastTurnChanges: null,
     jobs: [],
     approvals: [],
     questions: [],
@@ -217,10 +220,30 @@ export function applyCodeEvent(state: CodeSessionUi, event: TurnEvent): CodeSess
             }
           : state.context,
       };
+    case 'turn_started':
+      /* A new turn starts empty: the filter must not keep last turn's files
+         while this turn's edits are still arriving. */
+      return {
+        ...state,
+        lastTurnChanges: {
+          turnId: event.turnId,
+          files: [],
+          added: 0,
+          removed: 0,
+        },
+      };
     case 'workspace_changes':
-      return { ...state, changes: mergeSummary(state.changes, event.summary) };
+      return {
+        ...state,
+        changes: mergeSummary(state.changes, event.summary),
+        lastTurnChanges: event.summary,
+      };
     case 'file_changed':
-      return { ...state, changes: mergeChange(state.changes, event.change) };
+      return {
+        ...state,
+        changes: mergeChange(state.changes, event.change),
+        lastTurnChanges: mergeChange(state.lastTurnChanges, event.change),
+      };
     case 'job_updated':
       return { ...state, jobs: upsertJob(state.jobs, event.job) };
     case 'profile_changed':
@@ -237,6 +260,7 @@ export function applyCodeEvent(state: CodeSessionUi, event: TurnEvent): CodeSess
 /** Eventos que o `chatStore` deve repassar ao `codeStore`. */
 export function isCodeEvent(event: TurnEvent): boolean {
   switch (event.type) {
+    case 'turn_started':
     case 'approval_requested':
     case 'approval_resolved':
     case 'question_requested':
@@ -278,6 +302,7 @@ export function fromSnapshot(
     todos: snapshot.todos ?? [],
     context: snapshot.context ?? null,
     changes: snapshot.changes ?? null,
+    lastTurnChanges: snapshot.lastTurnChanges ?? null,
     jobs: snapshot.jobs ?? [],
     approvals: snapshot.approvals ?? [],
     questions: snapshot.questions ?? [],
@@ -436,9 +461,18 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
 
   applyEvent: (conversationId, event) => {
     if (!isCodeEvent(event)) return;
-    set((state) => ({
-      byConversation: patch(state.byConversation, conversationId, (current) => applyCodeEvent(current, event)),
-    }));
+    set((state) => {
+      // Chat conversations also emit `turn_started`; don't create a code
+      // session entry just because a turn began there.
+      if (event.type === 'turn_started' && !state.byConversation[conversationId]) {
+        return state;
+      }
+      return {
+        byConversation: patch(state.byConversation, conversationId, (current) =>
+          applyCodeEvent(current, event),
+        ),
+      };
+    });
   },
 
   respondApproval: async (conversationId, approvalId, decision, options) => {

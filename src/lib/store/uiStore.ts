@@ -58,6 +58,8 @@ export interface CodeDiffTab {
   staged: boolean;
   /** Diff já conhecido pelo journal da sessão (evita a chamada de API). */
   knownDiff?: string | null;
+  /** Ref base de uma comparação (`get_file_diff_at`); ausente = working tree. */
+  base?: string | null;
 }
 
 /**

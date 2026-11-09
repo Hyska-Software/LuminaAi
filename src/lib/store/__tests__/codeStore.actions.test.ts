@@ -45,6 +45,18 @@ beforeEach(() => {
   useCodeStore.setState({ byConversation: {} });
 });
 
+describe('codeStore — eventos de sessão', () => {
+  it('não cria estado de código para turn_started de uma conversa sem sessão', () => {
+    useCodeStore.getState().applyEvent('chat-1', {
+      type: 'turn_started',
+      turnId: 'turn-1',
+      userMessageId: 'user-1',
+      assistantMessageId: 'assistant-1',
+    });
+    expect(useCodeStore.getState().byConversation['chat-1']).toBeUndefined();
+  });
+});
+
 describe('codeStore — ações de plano/aprovação (Fase 0)', () => {
   it('setPlanMode é otimista: o chip liga antes do IPC e confirma com o snapshot', async () => {
     seed();

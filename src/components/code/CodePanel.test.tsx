@@ -274,6 +274,14 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
       activeId: 'conv-1',
     });
     apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    apiMock.gitStatus.mockResolvedValue({
+      isRepo: true,
+      branch: 'main',
+      staged: [],
+      unstaged: [],
+      untracked: [],
+      conflicted: [],
+    });
     useUiStore.setState({ codePanelTab: 'files' });
 
     render(<CodePanel />);
@@ -281,6 +289,7 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
     expect(screen.queryByText(/lumina · main/)).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: 'Alterações' }));
     expect(await screen.findByText(/lumina · main/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Filtrar alterações' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Terminal' }));
     expect(screen.queryByText(/lumina · main/)).toBeNull();
