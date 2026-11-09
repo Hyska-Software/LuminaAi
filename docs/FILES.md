@@ -428,6 +428,9 @@ automático.
 - Env: herda o ambiente, com `PYTHONIOENCODING=utf-8`, `PYTHONUTF8=1`,
   `PYTHONDONTWRITEBYTECODE=1`, `NODE_NO_WARNINGS=1`; remove variáveis
   sensíveis (`*API_KEY*`, `*TOKEN*`, `*SECRET*`) e nunca injeta chaves do app.
+  Também remove overrides do launcher que quebrariam o runtime do workspace:
+  `LD_*`/`DYLD_*`, variáveis/caminhos do AppImage, `SHELLOPTS`/`BASH_ENV` e
+  `GIT_DIR`/`GIT_WORK_TREE` (`process_env`).
 - `stdin` fechado; `stdout`/`stderr` capturados com teto de 64 KB cada
   (o restante é drenado e descartado), devolvendo a cauda ao modelo.
 - Timeout (`timeoutMs`, clamp 5s..10min, default `code_timeout_secs`) e
@@ -448,7 +451,8 @@ e acesso à rede. Mitigações v1:
 - **Opt-in**: `codeExecutionEnabled` default **false**; a tool nem é exposta ao
   modelo quando desligada. O prompt só descreve a ferramenta quando habilitada.
 - Workspace dedicado, timeout, teto de saída/arquivos, cancelamento.
-- Remoção de variáveis de ambiente sensíveis; nenhuma chave do app é passada.
+- Remoção de variáveis de ambiente sensíveis e de overrides do loader/AppImage
+  herdados do launcher; nenhuma chave do app é passada.
 - System prompt trata conteúdo web/anexos como não confiável e proíbe executar
   instruções vindas deles (já existente, reforçado na seção de skills/código).
 - UI mostra aviso na tela de configuração e o comando sugerido de instalação de

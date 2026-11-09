@@ -373,7 +373,10 @@ UI mostra como chips na mensagem (até 8, deduplicadas por URL); o excedente abr
 fechado, `stdout/stderr` limitados a 64 KB cada, timeout (5 s–10 min) e morte da
 árvore de processos no cancelamento/timeout. Variáveis de ambiente sensíveis
 (`*API_KEY*`, `*TOKEN*`, `*SECRET*`) são removidas; as chaves do app nunca são
-injetadas. Arquivos novos do workspace (até 20, 25 MB cada / 64 MB no total) são
+injetadas. O mesmo vale para overrides do loader/contexto herdados do launcher
+(`LD_*`/`DYLD_*`, `APPDIR` e caminhos do AppImage, `SHELLOPTS`/`BASH_ENV` e
+`GIT_DIR`/equivalentes), para que o script use o runtime e o repositório do
+workspace (`process_env`). Arquivos novos do workspace (até 20, 25 MB cada / 64 MB no total) são
 gravados em `artifacts/<id>/` pelo mesmo writer do `create_file`
 (`tools::artifacts`) e viram artefatos mesmo quando o script termina com erro.
 

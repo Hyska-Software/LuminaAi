@@ -14,6 +14,8 @@
 //! no limite enquanto estiver rodando. Fechar a aba remove a sessão; fechar o
 //! app encerra todas as árvores de processo.
 
+mod env;
+
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -107,38 +109,6 @@ pub struct TerminalInfo {
     pub exit_code: Option<i32>,
 }
 
-fn sanitized_env(program_env: &[(String, String)]) -> Vec<(String, String)> {
-    program_env
-        .iter()
-        .filter(|(key, _)| {
-            let upper = key.to_ascii_uppercase();
-            !(upper.contains("API_KEY")
-                || upper.contains("TOKEN")
-                || upper.contains("SECRET")
-                || upper.contains("PASSWORD")
-                || upper.starts_with("LUMINA_"))
-        })
-        .cloned()
-        .collect()
-}
-
-fn shell_program() -> String {
-    #[cfg(windows)]
-    {
-        if let Some(path) = crate::workspace::exec::find_executable("pwsh") {
-            return path.to_string_lossy().to_string();
-        }
-        if let Some(path) = crate::workspace::exec::find_executable("powershell") {
-            return path.to_string_lossy().to_string();
-        }
-        std::env::var("ComSpec").unwrap_or_else(|_| "powershell.exe".to_string())
-    }
-    #[cfg(not(windows))]
-    {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
-    }
-}
-
 fn terminal_command(cwd: &std::path::Path, settings: &Settings) -> (CommandBuilder, Option<String>) {
     let docker_image = (settings
         .execution_environment
@@ -147,6 +117,7 @@ fn terminal_command(cwd: &std::path::Path, settings: &Settings) -> (CommandBuild
         && !settings.docker_image.trim().is_empty())
     .then(|| settings.docker_image.trim().to_string());
     let mut container = None;
+    let shell = env::shell_program();
     let mut builder = if let Some(image) = docker_image.as_deref() {
         let name = format!("lumina-term-{}", uuid::Uuid::new_v4());
         let mut builder = CommandBuilder::new("docker");
@@ -187,27 +158,47 @@ fn terminal_command(cwd: &std::path::Path, settings: &Settings) -> (CommandBuild
         container = Some(name);
         builder
     } else {
-        CommandBuilder::new(shell_program())
+        CommandBuilder::new(&shell)
     };
     builder.cwd(cwd);
+    #[cfg(target_os = "macos")]
+    if container.is_none() {
+        for arg in env::login_args(&shell) {
+            builder.arg(*arg);
+        }
+    }
+
+    // A PTY is a user terminal: it must not inherit the runtime environment of
+    // whatever launched the app (conda/mamba, Nix dev shells, AppImage/`LD_*`
+    // overrides). Otherwise the shell can load a mismatched library and die
+    // before the first prompt (e.g. `undefined symbol:
+    // rl_trim_arg_from_keyseq`). On Windows the loader does not use these
+    // variables, so the existing secret scrubbing is kept as-is.
+    #[cfg(unix)]
+    {
+        builder.env_clear();
+        let appdir = crate::process_env::appdir();
+        for (key, value) in env::sanitized_env(std::env::vars_os(), appdir.as_deref()) {
+            builder.env(key, value);
+        }
+        // portable-pty fills SHELL from the passwd database; keep it in sync
+        // with the shell actually spawned (including the fallback path).
+        builder.env("SHELL", shell.as_os_str());
+    }
+    #[cfg(windows)]
+    {
+        for (key, _) in std::env::vars_os() {
+            if env::is_secret_or_internal(&key)
+                || crate::process_env::is_launcher_context_var(&key)
+            {
+                builder.env_remove(&key);
+            }
+        }
+    }
+
     builder.env("TERM", "xterm-256color");
     builder.env("COLORTERM", "truecolor");
     builder.env("LUMINA_AGENT", "1");
-    // Higiene: remove variáveis sensíveis herdadas do ambiente do app. In
-    // Docker mode they are also withheld from the container (no `-e`).
-    let inherited: Vec<(String, String)> = std::env::vars().collect();
-    let sensitive: Vec<String> = inherited
-        .iter()
-        .map(|(key, _)| key.clone())
-        .filter(|key| {
-            !sanitized_env(&[(key.clone(), String::new())])
-                .iter()
-                .any(|(kept, _)| kept == key)
-        })
-        .collect();
-    for key in sensitive {
-        builder.env_remove(&key);
-    }
     (builder, container)
 }
 
@@ -558,23 +549,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shell_env_is_scrubbed_from_secrets() {
-        let env = vec![
-            ("PATH".to_string(), "C:\\bin".to_string()),
-            ("OPENAI_API_KEY".to_string(), "sk-1".to_string()),
-            ("GH_TOKEN".to_string(), "ghp".to_string()),
-            ("DB_PASSWORD".to_string(), "pw".to_string()),
-            ("LUMINA_INTERNAL".to_string(), "x".to_string()),
-            ("TERM".to_string(), "dumb".to_string()),
-        ];
-        let clean = sanitized_env(&env);
-        let keys: Vec<&str> = clean.iter().map(|(key, _)| key.as_str()).collect();
-        assert!(keys.contains(&"PATH"));
-        assert!(keys.contains(&"TERM"));
-        assert!(!keys.contains(&"OPENAI_API_KEY"));
-        assert!(!keys.contains(&"GH_TOKEN"));
-        assert!(!keys.contains(&"DB_PASSWORD"));
-        assert!(!keys.contains(&"LUMINA_INTERNAL"));
+    fn terminal_builder_gets_the_pty_markers() {
+        let settings = Settings::default();
+        let (builder, _) = terminal_command(&std::env::temp_dir(), &settings);
+        let value = |key: &str| {
+            builder
+                .get_env(key)
+                .map(|value| value.to_string_lossy().into_owned())
+        };
+        assert_eq!(value("TERM").as_deref(), Some("xterm-256color"));
+        assert_eq!(value("COLORTERM").as_deref(), Some("truecolor"));
+        assert_eq!(value("LUMINA_AGENT").as_deref(), Some("1"));
+        #[cfg(unix)]
+        assert!(value("SHELL").is_some());
     }
 
     #[test]

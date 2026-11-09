@@ -816,10 +816,18 @@ fn cancelled_outcome(language: Language) -> ToolOutcome {
 
 fn apply_environment(command: &mut Command) {
     command.env_clear();
+    let appdir = crate::process_env::appdir();
     for (key, value) in std::env::vars_os() {
-        if !is_sensitive_env(&key) {
+        if is_sensitive_env(&key) || key.to_string_lossy().to_ascii_uppercase().starts_with("LUMINA_")
+        {
+            continue;
+        }
+        if let Some(value) = crate::process_env::clean_value(&key, value, appdir.as_deref()) {
             command.env(key, value);
         }
+    }
+    if std::env::var_os("PATH").is_none() {
+        command.env("PATH", crate::process_env::default_path());
     }
     command
         .env("PYTHONIOENCODING", "utf-8")

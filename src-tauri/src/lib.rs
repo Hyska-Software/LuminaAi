@@ -9,6 +9,7 @@
 //!                and artifact previews (docx→html, xlsx, pptx)
 //! - `db`:        SQLite persistence
 //! - `commands`:  Tauri command surface used by the React app
+//! - `process_env`: environment hygiene for child processes (loader/AppImage/git)
 
 mod agents;
 mod catalog;
@@ -28,6 +29,7 @@ mod jobs;
 mod mcp;
 mod oauth;
 mod policy;
+mod process_env;
 mod providers;
 mod state;
 mod terminal;

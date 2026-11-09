@@ -6,6 +6,7 @@
 
 #![allow(dead_code)]
 
+use std::ffi::OsStr;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
@@ -277,9 +278,11 @@ pub async fn run(
     })
 }
 
-/// Env para processos do agente: remove segredos e variáveis internas, mantém o
-/// ambiente do usuário e adiciona marcadores estáveis.
+/// Environment for agent processes: removes secrets, internal variables and
+/// loader/AppImage overrides, keeps the user environment and adds stable
+/// markers.
 pub fn sanitized_env(extra: &[(&str, &str)]) -> Vec<(String, String)> {
+    let appdir = crate::process_env::appdir();
     let mut env = std::collections::BTreeMap::new();
     for (key, value) in std::env::vars_os() {
         let (Some(key), Some(value)) = (key.to_str(), value.to_str()) else {
@@ -288,7 +291,11 @@ pub fn sanitized_env(extra: &[(&str, &str)]) -> Vec<(String, String)> {
         if is_sensitive_env(key) || key.to_ascii_uppercase().starts_with("LUMINA_") {
             continue;
         }
-        env.insert(key.to_string(), value.to_string());
+        if let Some(value) =
+            crate::process_env::clean_value(OsStr::new(key), value.into(), appdir.as_deref())
+        {
+            env.insert(key.to_string(), value.to_string_lossy().into_owned());
+        }
     }
     for (key, value) in extra {
         env.insert((*key).to_string(), (*value).to_string());
@@ -301,6 +308,14 @@ pub fn sanitized_env(extra: &[(&str, &str)]) -> Vec<(String, String)> {
         ("GIT_OPTIONAL_LOCKS", "0"),
     ] {
         env.insert(key.to_string(), value.to_string());
+    }
+    if !env.keys().any(|key| key.eq_ignore_ascii_case("PATH")) {
+        env.insert(
+            "PATH".to_string(),
+            crate::process_env::default_path()
+                .to_string_lossy()
+                .into_owned(),
+        );
     }
     env.into_iter().collect()
 }
