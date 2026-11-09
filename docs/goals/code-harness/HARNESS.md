@@ -468,8 +468,9 @@ pub struct ExecRequest {
   `commit -m`, incluindo modificados, novos e deletados); mensagem obrigatória (não vazia), convenção
   detectada do repo (Commitlint/Conventional Commits se configurado); rodar hooks do git (usuário
   conhece).
-  A mensagem sugerida pela IA é gerada por request curto não-streaming (sanitizada, máx 200 chars)
-  e **nunca** commitada automaticamente.
+  A mensagem sugerida pela IA é gerada por request curto não-streaming com o diff do alvo
+  escolhido (tudo/preparados/seleção), sanitizada para uma linha de no máximo 72 caracteres, e
+  **nunca** commitada automaticamente.
 
 ## 10. Contexto
 

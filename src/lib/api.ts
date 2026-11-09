@@ -51,6 +51,7 @@ import type {
   CacheStatsView,
   CodeEnvironmentStatus,
   CodeSessionState,
+  CommitTarget,
   Conversation,
   ConversationDetail,
   ConversationMode,
@@ -610,8 +611,13 @@ export const api = {
     invoke<WorkspaceGitStatus>('git_unstage_all', { workspaceId }),
   gitDiscard: (workspaceId: string, paths: string[]) =>
     invoke<WorkspaceGitStatus>('git_discard', { workspaceId, paths }),
-  gitCommit: (workspaceId: string, message: string, paths?: string[]) =>
-    invoke<WorkspaceGitStatus>('git_commit', { workspaceId, message, paths: paths ?? null }),
+  gitCommit: (workspaceId: string, message: string, target: CommitTarget, paths?: string[]) =>
+    invoke<WorkspaceGitStatus>('git_commit', {
+      workspaceId,
+      message,
+      target,
+      paths: paths ?? null,
+    }),
   gitBranches: (workspaceId: string) =>
     invoke<{ current: string | null; branches: string[] }>('git_branches', { workspaceId }),
   gitCompare: (workspaceId: string, base: string) =>
@@ -622,8 +628,12 @@ export const api = {
     invoke<WorkspaceGitCommit[]>('git_log', { workspaceId, limit }),
   gitCommitDetail: (workspaceId: string, revision: string) =>
     invoke<WorkspaceCommitDetail>('git_commit_detail', { workspaceId, revision }),
-  suggestCommitMessage: (workspaceId: string) =>
-    invoke<string>('suggest_commit_message', { workspaceId }),
+  suggestCommitMessage: (workspaceId: string, target: CommitTarget, paths?: string[]) =>
+    invoke<string>('suggest_commit_message', {
+      workspaceId,
+      target,
+      paths: paths ?? null,
+    }),
 
   /* -------- jobs (processos em background) -------- */
   listJobs: (conversationId: string) => invoke<JobView[]>('list_jobs', { conversationId }),

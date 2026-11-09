@@ -7,7 +7,7 @@
 
 #![allow(dead_code)]
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -21,6 +21,10 @@ const NETWORK_TIMEOUT: Duration = Duration::from_secs(180);
 const STATUS_CAP: usize = 4 * 1024 * 1024;
 const DIFF_CAP: usize = 4 * 1024 * 1024;
 const TEXT_CAP: usize = 1024 * 1024;
+/// Upper bound of new files whose synthetic diff enters the commit context.
+const MAX_UNTRACKED_FILES: usize = 5;
+/// Per-file byte budget for a synthetic untracked diff.
+const UNTRACKED_FILE_BUDGET: usize = 4_000;
 
 /// Arquivo com status do git (path relativo ao root, com `/`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +46,17 @@ pub struct GitStatus {
     pub unstaged: Vec<GitFile>,
     pub untracked: Vec<String>,
     pub conflicted: Vec<String>,
+}
+
+/// Which changes the commit diff context must describe.
+#[derive(Debug, Clone, Copy)]
+pub enum CommitDiffScope<'a> {
+    /// Everything that `git add -A` would commit.
+    All,
+    /// Only what is already in the index.
+    Staged(&'a [String]),
+    /// Only the selected paths, staged and unstaged.
+    Selection(&'a [String]),
 }
 
 /// Entrada de `git log`.
@@ -177,6 +192,92 @@ pub async fn diff(
         text.push_str("\n[diff truncado pelo limite de saída]\n");
     }
     Ok(text)
+}
+
+/// Textual diff context for the commit message suggestion.
+///
+/// `All` mirrors `git add -A` (index + working tree + untracked), `Staged`
+/// mirrors the existing index, and `Selection` mirrors staging only the given
+/// paths. Never uses `git diff HEAD`, so an unborn HEAD still works.
+pub async fn commit_diff(
+    root: &Path,
+    status: &GitStatus,
+    scope: CommitDiffScope<'_>,
+    max_bytes: usize,
+) -> Result<String, ExecError> {
+    let mut sections: Vec<String> = Vec::new();
+    match scope {
+        CommitDiffScope::All => {
+            let staged = diff(root, &[], true, 1, max_bytes).await?;
+            if !staged.trim().is_empty() {
+                sections.push(format!("Staged changes:\n{staged}"));
+            }
+            let unstaged = diff(root, &[], false, 1, max_bytes).await?;
+            if !unstaged.trim().is_empty() {
+                sections.push(format!("Unstaged changes:\n{unstaged}"));
+            }
+            append_untracked_diffs(root, status.untracked.iter().cloned(), &mut sections);
+        }
+        CommitDiffScope::Staged(paths) => {
+            let staged = diff(root, paths, true, 1, max_bytes).await?;
+            if !staged.trim().is_empty() {
+                sections.push(format!("Staged changes:\n{staged}"));
+            }
+        }
+        CommitDiffScope::Selection(paths) => {
+            let staged = diff(root, paths, true, 1, max_bytes).await?;
+            if !staged.trim().is_empty() {
+                sections.push(format!("Staged changes:\n{staged}"));
+            }
+            let unstaged = diff(root, paths, false, 1, max_bytes).await?;
+            if !unstaged.trim().is_empty() {
+                sections.push(format!("Unstaged changes:\n{unstaged}"));
+            }
+            let selected: HashSet<&str> = paths.iter().map(String::as_str).collect();
+            append_untracked_diffs(
+                root,
+                status
+                    .untracked
+                    .iter()
+                    .filter(|path| selected.contains(path.as_str()))
+                    .cloned(),
+                &mut sections,
+            );
+        }
+    }
+    let mut text = sections.join("\n\n");
+    truncate_utf8(&mut text, max_bytes);
+    Ok(text)
+}
+
+fn append_untracked_diffs(
+    root: &Path,
+    paths: impl IntoIterator<Item = String>,
+    sections: &mut Vec<String>,
+) {
+    let mut paths: Vec<String> = paths.into_iter().collect();
+    paths.sort();
+    paths.dedup();
+    for path in paths.into_iter().take(MAX_UNTRACKED_FILES) {
+        let section = match untracked_diff(root, &path, UNTRACKED_FILE_BUDGET) {
+            Ok(text) if !text.trim().is_empty() => format!("New file: {path}\n{text}"),
+            Ok(_) => continue,
+            Err(error) => format!("New file: {path} (content unavailable: {})", error.message),
+        };
+        sections.push(section);
+    }
+}
+
+fn truncate_utf8(text: &mut String, max_bytes: usize) {
+    if max_bytes == 0 || text.len() <= max_bytes {
+        return;
+    }
+    let mut boundary = max_bytes;
+    while boundary > 0 && !text.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    text.truncate(boundary);
+    text.push_str("\n[diff truncated]\n");
 }
 
 /// Added/removed lines for one file in the working tree (or the index when
@@ -1096,15 +1197,14 @@ fn rename_status(xy: &str, _orig: &str) -> String {
 /* ------------------------------------------------------------------ */
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
+pub(crate) mod test_support {
+    use std::path::Path;
     use std::process::Command;
 
     #[cfg(windows)]
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    fn git_available() -> bool {
+    pub fn git_available() -> bool {
         let mut command = Command::new("git");
         command.arg("--version");
         #[cfg(windows)]
@@ -1115,7 +1215,7 @@ mod tests {
         matches!(command.output(), Ok(out) if out.status.success())
     }
 
-    fn run_git(dir: &Path, args: &[&str]) -> bool {
+    pub fn run_git(dir: &Path, args: &[&str]) -> bool {
         let mut command = Command::new("git");
         command.args(args).current_dir(dir);
         #[cfg(windows)]
@@ -1126,7 +1226,7 @@ mod tests {
         matches!(command.output(), Ok(out) if out.status.success())
     }
 
-    fn git_stdout(dir: &Path, args: &[&str]) -> Option<String> {
+    pub fn git_stdout(dir: &Path, args: &[&str]) -> Option<String> {
         let mut command = Command::new("git");
         command.args(args).current_dir(dir);
         #[cfg(windows)]
@@ -1143,7 +1243,7 @@ mod tests {
     }
 
     /// Cria repo com um commit inicial. `None` quando git não está disponível.
-    fn setup_repo(dir: &Path) -> Option<()> {
+    pub fn setup_repo(dir: &Path) -> Option<()> {
         if !git_available() {
             eprintln!("git ausente no PATH: teste ignorado");
             return None;
@@ -1155,13 +1255,20 @@ mod tests {
         }
         let _ = run_git(dir, &["config", "user.email", "teste@lumina.local"]);
         let _ = run_git(dir, &["config", "user.name", "Teste Lumina"]);
-        fs::write(dir.join("a.txt"), "linha1\n").expect("escrever a.txt");
+        std::fs::write(dir.join("a.txt"), "linha1\n").expect("escrever a.txt");
         if !run_git(dir, &["add", "."]) || !run_git(dir, &["commit", "-m", "initial commit"]) {
             eprintln!("commit inicial falhou: teste ignorado");
             return None;
         }
         Some(())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::{git_stdout, run_git, setup_repo};
+    use super::*;
+    use std::fs;
 
     #[tokio::test]
     async fn detects_status_and_untracked() {
@@ -1783,5 +1890,89 @@ mod tests {
             .any(|file| file.path == "novo.txt" && file.status == "R"));
         assert!(status.conflicted.iter().any(|path| path == "conflito.txt"));
         assert!(status.untracked.iter().any(|path| path == "sem-track.txt"));
+    }
+
+    #[tokio::test]
+    async fn commit_diff_staged_only_includes_cached_changes() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        fs::write(temp.path().join("a.txt"), "linha1\nlinha2\n").expect("modificar a");
+        assert!(run_git(temp.path(), &["add", "a.txt"]));
+        fs::write(temp.path().join("a.txt"), "linha1\nlinha2\nlinha3\n")
+            .expect("modificar a de novo");
+
+        let status = detect(temp.path()).await;
+        let paths = vec!["a.txt".to_string()];
+        let diff = commit_diff(temp.path(), &status, CommitDiffScope::Staged(&paths), 12_000)
+            .await
+            .expect("diff");
+        assert!(diff.contains("+linha2"), "{diff}");
+        assert!(!diff.contains("+linha3"), "{diff}");
+        assert!(!diff.contains("Unstaged changes:"), "{diff}");
+    }
+
+    #[tokio::test]
+    async fn commit_diff_all_includes_unstaged_and_untracked() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        fs::write(temp.path().join("a.txt"), "linha1\nlinha2\n").expect("modificar a");
+        fs::write(temp.path().join("b.txt"), "conteudo novo\n").expect("criar b");
+
+        let status = detect(temp.path()).await;
+        let diff = commit_diff(temp.path(), &status, CommitDiffScope::All, 12_000)
+            .await
+            .expect("diff");
+        assert!(diff.contains("Unstaged changes:"), "{diff}");
+        assert!(diff.contains("+linha2"), "{diff}");
+        assert!(diff.contains("New file: b.txt"), "{diff}");
+        assert!(diff.contains("+conteudo novo"), "{diff}");
+    }
+
+    #[tokio::test]
+    async fn commit_diff_selection_limits_paths() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        fs::write(temp.path().join("a.txt"), "linha1\nlinha2\n").expect("modificar a");
+        fs::write(temp.path().join("b.txt"), "outra\n").expect("modificar b");
+
+        let status = detect(temp.path()).await;
+        let paths = vec!["a.txt".to_string()];
+        let diff = commit_diff(temp.path(), &status, CommitDiffScope::Selection(&paths), 12_000)
+            .await
+            .expect("diff");
+        assert!(diff.contains("a.txt"), "{diff}");
+        assert!(diff.contains("+linha2"), "{diff}");
+        assert!(!diff.contains("b.txt"), "{diff}");
+    }
+
+    #[tokio::test]
+    async fn commit_diff_staged_ignores_untracked() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        fs::write(temp.path().join("b.txt"), "novo\n").expect("criar b");
+
+        let status = detect(temp.path()).await;
+        let paths = vec!["a.txt".to_string()];
+        let diff = commit_diff(temp.path(), &status, CommitDiffScope::Staged(&paths), 12_000)
+            .await
+            .expect("diff");
+        assert!(!diff.contains("b.txt"), "{diff}");
+    }
+
+    #[test]
+    fn truncate_utf8_keeps_a_char_boundary() {
+        let mut text = "áéíóú".to_string();
+        truncate_utf8(&mut text, 3);
+        assert!(text.starts_with('á'), "{text:?}");
+        assert!(text.contains("[diff truncated]"), "{text:?}");
+        assert!(!text.contains('\u{FFFD}'), "{text:?}");
     }
 }

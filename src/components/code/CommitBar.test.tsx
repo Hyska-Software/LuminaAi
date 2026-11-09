@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { WorkspaceGitStatus } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
@@ -82,7 +82,12 @@ describe('CommitBar', () => {
     fireEvent.click(commitButton());
 
     await waitFor(() =>
-      expect(mocks.gitCommit).toHaveBeenCalledWith('ws-1', 'Corrige o contador', undefined),
+      expect(mocks.gitCommit).toHaveBeenCalledWith(
+        'ws-1',
+        'Corrige o contador',
+        'all',
+        undefined,
+      ),
     );
     await waitFor(() => expect(toastMocks.success).toHaveBeenCalledWith('Commit criado (abc1234)'));
     expect(onCommitted).toHaveBeenCalled();
@@ -90,7 +95,7 @@ describe('CommitBar', () => {
     expect(message().value).toBe('');
   });
 
-  it('commits only the paths of the selected target', async () => {
+  it('commits the prepared index for the staged target', async () => {
     mocks.gitLog.mockResolvedValue(commits);
     render(<CommitBar workspaceId="ws-1" hasChanges stagedPaths={['src/a.ts']} />);
     fireEvent.change(screen.getByRole('combobox', { name: 'Alvo do commit' }), {
@@ -100,7 +105,31 @@ describe('CommitBar', () => {
     fireEvent.click(commitButton());
 
     await waitFor(() =>
-      expect(mocks.gitCommit).toHaveBeenCalledWith('ws-1', 'Commit preparado', ['src/a.ts']),
+      expect(mocks.gitCommit).toHaveBeenCalledWith(
+        'ws-1',
+        'Commit preparado',
+        'staged',
+        undefined,
+      ),
+    );
+  });
+
+  it('sends selected paths only for the selection target', async () => {
+    mocks.gitLog.mockResolvedValue(commits);
+    render(<CommitBar workspaceId="ws-1" hasChanges selectedPaths={['src/b.ts']} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Alvo do commit' }), {
+      target: { value: 'selection' },
+    });
+    fireEvent.change(message(), { target: { value: 'Commit selecionado' } });
+    fireEvent.click(commitButton());
+
+    await waitFor(() =>
+      expect(mocks.gitCommit).toHaveBeenCalledWith(
+        'ws-1',
+        'Commit selecionado',
+        'selection',
+        ['src/b.ts'],
+      ),
     );
   });
 
@@ -108,7 +137,73 @@ describe('CommitBar', () => {
     render(<CommitBar workspaceId="ws-1" hasChanges />);
     fireEvent.click(screen.getByRole('button', { name: 'Sugerir mensagem' }));
     await waitFor(() => expect(message().value).toBe('Mensagem sugerida pela IA'));
-    expect(mocks.suggestCommitMessage).toHaveBeenCalledWith('ws-1');
+    expect(mocks.suggestCommitMessage).toHaveBeenCalledWith('ws-1', 'all', undefined);
+  });
+
+  it('suggests using the staged target', async () => {
+    render(<CommitBar workspaceId="ws-1" hasChanges stagedPaths={['src/a.ts']} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Alvo do commit' }), {
+      target: { value: 'staged' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Sugerir mensagem' }));
+    await waitFor(() =>
+      expect(mocks.suggestCommitMessage).toHaveBeenCalledWith('ws-1', 'staged', undefined),
+    );
+    expect(message().value).toBe('Mensagem sugerida pela IA');
+  });
+
+  it('suggests using the selection target paths', async () => {
+    render(<CommitBar workspaceId="ws-1" hasChanges selectedPaths={['src/b.ts']} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Alvo do commit' }), {
+      target: { value: 'selection' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Sugerir mensagem' }));
+    await waitFor(() =>
+      expect(mocks.suggestCommitMessage).toHaveBeenCalledWith('ws-1', 'selection', [
+        'src/b.ts',
+      ]),
+    );
+  });
+
+  it('disables the suggestion when there is nothing to describe', () => {
+    render(<CommitBar workspaceId="ws-1" hasChanges={false} />);
+    const suggest = screen.getByRole('button', {
+      name: 'Sugerir mensagem',
+    }) as HTMLButtonElement;
+    expect(suggest.disabled).toBe(true);
+    expect(suggest.getAttribute('title')).toBe('Nenhuma alteração para commitar');
+  });
+
+  it('ignores a suggestion that arrives after the workspace changes', async () => {
+    let resolveSuggestion!: (value: string) => void;
+    mocks.suggestCommitMessage.mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        resolveSuggestion = resolve;
+      }),
+    );
+    const { rerender } = render(<CommitBar workspaceId="ws-1" hasChanges />);
+    fireEvent.click(screen.getByRole('button', { name: 'Sugerir mensagem' }));
+    rerender(<CommitBar workspaceId="ws-2" hasChanges />);
+    await act(async () => {
+      resolveSuggestion('Mensagem antiga');
+    });
+    expect(message().value).toBe('');
+  });
+
+  it('does not overwrite text typed while the suggestion is pending', async () => {
+    let resolveSuggestion!: (value: string) => void;
+    mocks.suggestCommitMessage.mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        resolveSuggestion = resolve;
+      }),
+    );
+    render(<CommitBar workspaceId="ws-1" hasChanges />);
+    fireEvent.click(screen.getByRole('button', { name: 'Sugerir mensagem' }));
+    fireEvent.change(message(), { target: { value: 'Minha mensagem' } });
+    await act(async () => {
+      resolveSuggestion('Mensagem da IA');
+    });
+    expect(message().value).toBe('Minha mensagem');
   });
 
   it('shows an inline error when the suggestion fails', async () => {

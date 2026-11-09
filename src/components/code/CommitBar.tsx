@@ -4,9 +4,7 @@ import { Button, NativeSelect, Spinner, Textarea, Tooltip } from '@/components/u
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import type { WorkspaceGitCommit, WorkspaceGitStatus } from '@/lib/types';
-
-export type CommitTarget = 'all' | 'staged' | 'selection';
+import type { CommitTarget, WorkspaceGitCommit, WorkspaceGitStatus } from '@/lib/types';
 
 export interface CommitBarProps {
   workspaceId?: string | null;
@@ -76,6 +74,7 @@ export function CommitBar({
   const [logError, setLogError] = useState<string | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const logRun = useRef(0);
+  const suggestRun = useRef(0);
 
   const loadLog = useCallback(async () => {
     const run = logRun.current + 1;
@@ -106,9 +105,17 @@ export function CommitBar({
   }, [loadLog]);
 
   useEffect(() => {
+    suggestRun.current += 1;
     setMessage('');
     setSuggestError(null);
+    setSuggesting(false);
   }, [workspaceId]);
+
+  useEffect(() => {
+    suggestRun.current += 1;
+    setSuggestError(null);
+    setSuggesting(false);
+  }, [target]);
 
   const stageCount = stagedPaths.length;
   const selectionCount = selectedPaths.length;
@@ -119,7 +126,7 @@ export function CommitBar({
     if (target === 'selection' && selectionCount === 0) setTarget('all');
   }, [target, stageCount, selectionCount]);
 
-  const disabledReason = !workspaceId
+  const suggestDisabledReason = !workspaceId
     ? 'Abra um workspace para commitar'
     : !isRepo
       ? 'Não é um repositório Git'
@@ -131,33 +138,40 @@ export function CommitBar({
             ? 'Nenhum arquivo preparado'
             : target === 'selection' && selectionCount === 0
               ? 'Selecione arquivos na lista'
-              : !message.trim()
-                ? 'Escreva a mensagem do commit'
-                : null;
+              : null;
+  const disabledReason =
+    suggestDisabledReason ?? (!message.trim() ? 'Escreva a mensagem do commit' : null);
 
   const canCommit = !disabledReason && !committing;
+  const targetPaths = target === 'selection' ? selectedPaths : undefined;
 
   const handleSuggest = async () => {
-    if (!workspaceId || suggesting) return;
+    if (!workspaceId || suggesting || suggestDisabledReason) return;
+    const run = ++suggestRun.current;
+    const requestedMessage = message;
     setSuggesting(true);
     setSuggestError(null);
     try {
-      const suggestion = await api.suggestCommitMessage(workspaceId);
-      if (suggestion?.trim()) setMessage(suggestion.trim());
-      else setSuggestError('A sugestão veio vazia — escreva a mensagem do commit.');
+      const suggestion = await api.suggestCommitMessage(workspaceId, target, targetPaths);
+      if (run !== suggestRun.current) return;
+      if (suggestion?.trim()) {
+        setMessage((current) => (current === requestedMessage ? suggestion.trim() : current));
+      } else {
+        setSuggestError('A sugestão veio vazia — escreva a mensagem do commit.');
+      }
     } catch (error) {
+      if (run !== suggestRun.current) return;
       setSuggestError(describeError(error, 'Não foi possível sugerir uma mensagem.'));
     } finally {
-      setSuggesting(false);
+      if (run === suggestRun.current) setSuggesting(false);
     }
   };
 
   const handleCommit = async () => {
     if (!workspaceId || !canCommit) return;
-    const paths = target === 'staged' ? stagedPaths : target === 'selection' ? selectedPaths : undefined;
     setCommitting(true);
     try {
-      const status = await api.gitCommit(workspaceId, message.trim(), paths);
+      const status = await api.gitCommit(workspaceId, message.trim(), target, targetPaths);
       setMessage('');
       setSuggestError(null);
       onCommitted?.(status);
@@ -216,12 +230,16 @@ export function CommitBar({
       </div>
 
       <div className="flex items-center gap-2 px-3 py-2">
-        <Tooltip content="Sugerir mensagem com IA" side="top">
+        <Tooltip
+          content={suggestDisabledReason ?? 'Sugerir mensagem com IA'}
+          side="top"
+        >
           <Button
             size="sm"
             variant="subtle"
             loading={suggesting}
-            disabled={!workspaceId || !isRepo}
+            disabled={Boolean(suggestDisabledReason)}
+            title={suggestDisabledReason ?? 'Sugerir mensagem com IA'}
             aria-label="Sugerir mensagem"
             leftIcon={<Sparkles aria-hidden className="size-3.5" strokeWidth={1.75} />}
             onClick={() => void handleSuggest()}

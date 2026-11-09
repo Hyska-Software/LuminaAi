@@ -631,6 +631,9 @@ export interface WorkspaceGitStatus {
   conflicted: string[];
 }
 
+/** Alvo do commit: tudo, somente o índice ou os caminhos selecionados. */
+export type CommitTarget = 'all' | 'staged' | 'selection';
+
 /** Um arquivo alterado entre uma branch (merge-base) e a working tree. */
 export interface WorkspaceGitCompareFile {
   path: string;
