@@ -221,6 +221,8 @@ describe('appStore — OpenAI plan usage', () => {
       attemptId: 'a1',
       authUrl: 'https://auth.openai.com/api/accounts/authorize?x=1',
       expiresAt: Date.now() + 600_000,
+      browserOpened: true,
+      browserError: null,
     };
     mocks.api.openaiLoginStart.mockResolvedValue(challenge);
     mocks.api.openaiLoginWait.mockResolvedValue(authStatus());
@@ -244,6 +246,8 @@ describe('appStore — OpenAI plan usage', () => {
       attemptId: 'a1',
       authUrl: 'https://example',
       expiresAt: Date.now() + 1000,
+      browserOpened: true,
+      browserError: null,
     });
     mocks.api.openaiLoginCancel.mockResolvedValue(undefined);
     await useAppStore.getState().startChatGptLogin('openai');

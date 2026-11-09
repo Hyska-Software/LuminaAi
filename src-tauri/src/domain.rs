@@ -1458,6 +1458,14 @@ pub struct LoginChallenge {
     pub attempt_id: String,
     pub auth_url: String,
     pub expires_at: i64,
+    /// Whether the backend handed the URL to the system browser. A `false`
+    /// value means the UI must offer the link for manual copy/paste.
+    #[serde(default)]
+    pub browser_opened: bool,
+    /// Sanitized opener failure; never contains the authorization URL (it can
+    /// carry `id_token_hint`).
+    #[serde(default)]
+    pub browser_error: Option<String>,
 }
 
 /// Auth state of one provider, derived from stored credentials (no network).
@@ -2451,11 +2459,15 @@ mod tests {
             attempt_id: "a1".into(),
             auth_url: "https://auth.openai.com/api/accounts/authorize?x=1".into(),
             expires_at: 123,
+            browser_opened: false,
+            browser_error: Some("xdg-open ausente".into()),
         };
         let json = serde_json::to_value(&challenge).expect("serialize challenge");
         assert_eq!(json["attemptId"], "a1");
         assert_eq!(json["authUrl"], "https://auth.openai.com/api/accounts/authorize?x=1");
         assert_eq!(json["expiresAt"], 123);
+        assert_eq!(json["browserOpened"], false);
+        assert_eq!(json["browserError"], "xdg-open ausente");
     }
 
     /// O replay opaco do provedor fica só no backend (SQLite): o renderer nunca

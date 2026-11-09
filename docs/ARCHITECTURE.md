@@ -848,10 +848,12 @@ open_terminal, write_terminal, resize_terminal, kill_terminal, close_terminal, l
 ```
 
 O login ChatGPT é **em duas fases**: `openai_login_start` devolve
-`{ attemptId, authUrl, expiresAt }` e abre o navegador; `openai_login_wait`
-(`async`, até 10 min) resolve quando o callback chega; `openai_login_cancel`
-encerra. `refresh_provider_models` devolve o `CatalogView` mesclado
-(catálogo + modelos da conta).
+`{ attemptId, authUrl, expiresAt, browserOpened, browserError }` e tenta abrir o
+navegador; `browserOpened: false` (com `browserError` redigido, sem a URL)
+significa que o opener do sistema falhou e a UI oferece **Copiar link**.
+`openai_login_wait` (`async`, até 10 min) resolve quando o callback chega;
+`openai_login_cancel` encerra. `refresh_provider_models` devolve o `CatalogView`
+mesclado (catálogo + modelos da conta).
 
 ## 13. Segurança
 

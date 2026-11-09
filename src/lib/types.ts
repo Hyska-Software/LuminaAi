@@ -1945,6 +1945,10 @@ export interface LoginChallenge {
   attemptId: string;
   authUrl: string;
   expiresAt: number;
+  /** False when the backend could not hand the URL to the system browser. */
+  browserOpened: boolean;
+  /** Sanitized opener failure (never includes the authorization URL). */
+  browserError?: string | null;
 }
 
 export type ProviderAuthState =

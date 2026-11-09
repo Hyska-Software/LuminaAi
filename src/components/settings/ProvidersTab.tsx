@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
+  Check,
   CheckCircle2,
+  Copy,
   ExternalLink,
   FolderOpen,
   KeyRound,
@@ -15,6 +17,7 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { providerAuth, providerSupportsPlan, providers as catalogProviders } from '@/lib/catalog';
 import { openExternal } from '@/lib/genui/open-external';
+import { copyText } from '@/lib/utils';
 import type {
   LoginChallenge,
   ProviderAuthStatus,
@@ -205,7 +208,9 @@ export function ProvidersTab() {
   const [canceling, setCanceling] = useState(false);
   const [loginErrors, setLoginErrors] = useState<Record<string, string>>({});
   const [noticeOpen, setNoticeOpen] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const finishingAttemptRef = useRef<string | null>(null);
+  const copiedLinkTimerRef = useRef<number | null>(null);
   /** Attempts cancelled by the user: their rejection is not an error to show. */
   const canceledAttemptsRef = useRef<Set<string>>(new Set());
 
@@ -221,6 +226,44 @@ export function ProvidersTab() {
     const oauthProvider = providerList.find((provider) => providerSupportsPlan(provider));
     if (oauthProvider) setPendingProviderId(oauthProvider.id);
   }, [loginChallenge, pendingProviderId, providerList]);
+
+  // A new attempt (or a finished one) resets the transient "copy" feedback.
+  useEffect(() => {
+    setCopiedLink(false);
+    if (copiedLinkTimerRef.current != null) {
+      window.clearTimeout(copiedLinkTimerRef.current);
+      copiedLinkTimerRef.current = null;
+    }
+  }, [loginChallenge?.attemptId]);
+
+  useEffect(
+    () => () => {
+      if (copiedLinkTimerRef.current != null) {
+        window.clearTimeout(copiedLinkTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  /** Copies the authorization URL when the desktop opener cannot open a browser. */
+  const copyLoginLink = async (url: string) => {
+    const copied = await copyText(url);
+    if (!copied) {
+      toast.error('Não foi possível copiar o link', {
+        description: 'Abra "Mostrar link de login" e copie o endereço manualmente.',
+      });
+      return;
+    }
+    setCopiedLink(true);
+    toast.success('Link de login copiado');
+    if (copiedLinkTimerRef.current != null) {
+      window.clearTimeout(copiedLinkTimerRef.current);
+    }
+    copiedLinkTimerRef.current = window.setTimeout(() => {
+      copiedLinkTimerRef.current = null;
+      setCopiedLink(false);
+    }, 2_500);
+  };
 
   const setLoginError = (providerId: string, message: string | null) => {
     setLoginErrors((current) => {
@@ -545,6 +588,21 @@ export function ProvidersTab() {
               <div className="mt-2.5 flex flex-wrap items-center gap-2">
                 <Button
                   size="sm"
+                  variant={challenge?.browserOpened === false ? 'primary' : 'secondary'}
+                  onClick={() => challenge && void copyLoginLink(challenge.authUrl)}
+                  disabled={!challenge}
+                  leftIcon={
+                    copiedLink ? (
+                      <Check className="size-3.5" />
+                    ) : (
+                      <Copy className="size-3.5" />
+                    )
+                  }
+                >
+                  {copiedLink ? 'Link copiado' : 'Copiar link'}
+                </Button>
+                <Button
+                  size="sm"
                   variant="secondary"
                   onClick={() => challenge && void openExternal(challenge.authUrl)}
                   disabled={!challenge}
@@ -561,6 +619,38 @@ export function ProvidersTab() {
                   Cancelar
                 </Button>
               </div>
+              {challenge?.browserOpened === false ? (
+                <div className="mt-2.5 flex gap-2.5 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2.5 text-[11.5px] leading-relaxed text-warning">
+                  <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">O navegador não abriu automaticamente</p>
+                    <p className="mt-0.5 text-foreground-muted">
+                      Copie o link e cole no seu navegador. Esta janela continua aguardando a
+                      confirmação do login.
+                    </p>
+                    {challenge.browserError ? (
+                      <details className="mt-1.5 text-[11px] text-foreground-subtle">
+                        <summary className="cursor-pointer select-none">Detalhes do erro</summary>
+                        <code className="mt-1 block break-all font-mono">
+                          {challenge.browserError}
+                        </code>
+                      </details>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+              <p className="mt-2 text-[11px] leading-relaxed text-foreground-subtle">
+                Se o navegador não abrir, use <span className="font-medium">Copiar link</span> e
+                cole o endereço no seu navegador.
+              </p>
+              {challenge ? (
+                <details className="mt-1.5 text-[11px] text-foreground-subtle">
+                  <summary className="cursor-pointer select-none">Mostrar link de login</summary>
+                  <code className="mt-1 block max-h-24 select-all overflow-auto break-all rounded-md bg-surface-raised px-2 py-1.5 font-mono text-[10.5px] leading-relaxed">
+                    {challenge.authUrl}
+                  </code>
+                </details>
+              ) : null}
             </div>
           ) : null}
 

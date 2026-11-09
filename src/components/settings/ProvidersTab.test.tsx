@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 
 const mocks = vi.hoisted(() => ({
   setProviderKey: vi.fn(),
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   refreshProviderModels: vi.fn(),
   openDataDir: vi.fn(),
   openExternal: vi.fn(),
+  copyText: vi.fn<(text: string) => Promise<boolean>>(),
 }));
 
 vi.mock('@/lib/api', () => ({
@@ -35,6 +37,11 @@ vi.mock('@/lib/api', () => ({
 vi.mock('@/lib/genui/open-external', () => ({
   openExternal: mocks.openExternal,
 }));
+
+vi.mock('@/lib/utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/utils')>();
+  return { ...actual, copyText: mocks.copyText };
+});
 
 vi.mock('sonner', () => ({
   toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() },
@@ -71,6 +78,8 @@ const CHALLENGE: LoginChallenge = {
   attemptId: 'attempt-1',
   authUrl: 'https://auth.openai.com/api/accounts/authorize?state=abc',
   expiresAt: Date.now() + 10 * 60_000,
+  browserOpened: true,
+  browserError: null,
 };
 
 const SIGNED_IN: ProviderAuthStatus = {
@@ -118,6 +127,7 @@ beforeEach(() => {
     models: 27,
   });
   mocks.openaiAuthStatus.mockResolvedValue([]);
+  mocks.copyText.mockResolvedValue(true);
   mocks.refreshProviderModels.mockResolvedValue({
     catalog,
     keys: defaultKeys(),
@@ -208,7 +218,7 @@ describe('ProvidersTab — cards de provedor', () => {
     });
   });
 
-  it('dois fases do login: aguardando o navegador, reabrir link e cancelar', async () => {
+  it('dois fases do login: aguardando o navegador, copiar/reabrir link e cancelar', async () => {
     mocks.openaiLoginStart.mockResolvedValue(CHALLENGE);
     // Keeps the wait pending so the UI stays in the two-phase "awaiting" state.
     mocks.openaiLoginWait.mockReturnValue(new Promise(() => {}));
@@ -221,6 +231,15 @@ describe('ProvidersTab — cards de provedor', () => {
     await screen.findByText('Aguardando o navegador…');
     expect(mocks.openaiLoginStart).toHaveBeenCalledWith(OPENAI, false);
     expect(useAppStore.getState().loginChallenge?.attemptId).toBe('attempt-1');
+    expect(screen.queryByText('O navegador não abriu automaticamente')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: /Copiar link/ }));
+    expect(mocks.copyText).toHaveBeenCalledWith(CHALLENGE.authUrl);
+    expect(await screen.findByRole('button', { name: /Link copiado/ })).toBeTruthy();
+
+    // The raw URL stays available even when the clipboard is unavailable.
+    await user.click(screen.getByText('Mostrar link de login'));
+    expect(screen.getByText(CHALLENGE.authUrl)).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: /Abrir novamente/ }));
     expect(mocks.openExternal).toHaveBeenCalledWith(CHALLENGE.authUrl);
@@ -228,6 +247,48 @@ describe('ProvidersTab — cards de provedor', () => {
     await user.click(screen.getByRole('button', { name: 'Cancelar' }));
     await waitFor(() => expect(mocks.openaiLoginCancel).toHaveBeenCalledWith('attempt-1'));
     await waitFor(() => expect(screen.queryByText('Aguardando o navegador…')).toBeNull());
+  });
+
+  it('quando o navegador não abre, avisa e prioriza o link copiável', async () => {
+    mocks.openaiLoginStart.mockResolvedValue({
+      ...CHALLENGE,
+      browserOpened: false,
+      browserError: 'Launcher "xdg-open" failed with exit status: 3',
+    });
+    mocks.openaiLoginWait.mockReturnValue(new Promise(() => {}));
+    await renderTab();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /Continuar com ChatGPT/ }));
+
+    expect(await screen.findByText('O navegador não abriu automaticamente')).toBeTruthy();
+    expect(screen.getByText(/xdg-open/)).toBeTruthy();
+    // The copy button becomes the primary action in this state.
+    expect(
+      (screen.getByRole('button', { name: /Copiar link/ }) as HTMLButtonElement).className,
+    ).toContain('bg-foreground');
+
+    await user.click(screen.getByRole('button', { name: /Copiar link/ }));
+    expect(mocks.copyText).toHaveBeenCalledWith(CHALLENGE.authUrl);
+  });
+
+  it('falha ao copiar mantém o estado pendente e reporta o erro', async () => {
+    mocks.openaiLoginStart.mockResolvedValue(CHALLENGE);
+    mocks.openaiLoginWait.mockReturnValue(new Promise(() => {}));
+    mocks.copyText.mockResolvedValue(false);
+    await renderTab();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /Continuar com ChatGPT/ }));
+    await screen.findByText('Aguardando o navegador…');
+
+    await user.click(screen.getByRole('button', { name: /Copiar link/ }));
+    expect(screen.getByRole('button', { name: /Copiar link/ })).toBeTruthy();
+    expect(screen.getByText('Aguardando o navegador…')).toBeTruthy();
+    expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+      'Não foi possível copiar o link',
+      expect.anything(),
+    );
   });
 
   it('conta conectada: e-mail, selo, detalhes, Gerenciar uso e Sair', async () => {

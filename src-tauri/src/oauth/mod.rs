@@ -465,14 +465,39 @@ pub async fn login_start(
         notify.notify_waiters();
     });
 
-    // Opening the browser is best-effort: the UI always receives the URL.
-    let _ = app.opener().open_url(&authorize_url, None::<&str>);
+    // Opening the browser is best-effort: the UI always receives the URL so the
+    // user can copy it when the desktop opener is missing or misconfigured
+    // (common on minimal Linux installs without xdg-utils).
+    let opened_url = app.opener().open_url(&authorize_url, None::<&str>);
+    let (browser_opened, browser_error) = match opened_url {
+        Ok(()) => (true, None),
+        Err(error) => (
+            false,
+            Some(redact_auth_url(&format!("{error}"), &authorize_url)),
+        ),
+    };
 
     Ok(LoginChallenge {
         attempt_id,
         auth_url: authorize_url,
         expires_at,
+        browser_opened,
+        browser_error,
     })
+}
+
+/// Keeps opener diagnostics useful without echoing the authorization URL (it
+/// may contain `id_token_hint`) into the renderer or logs.
+fn redact_auth_url(message: &str, auth_url: &str) -> String {
+    let redacted = message.replace(auth_url, "<login-link>");
+    const MAX_CHARS: usize = 300;
+    if redacted.chars().count() <= MAX_CHARS {
+        redacted
+    } else {
+        let mut shortened: String = redacted.chars().take(MAX_CHARS).collect();
+        shortened.push('…');
+        shortened
+    }
 }
 
 async fn run_login_task(
@@ -1067,6 +1092,23 @@ mod tests {
         assert_eq!(mask(Some("short")), Some("••••".to_string()));
         let masked = mask(Some("oaiapp_abcdefghijklmnop")).expect("masked");
         assert_eq!(masked, "oaiapp_a…mnop");
+    }
+
+    #[test]
+    fn opener_error_redacts_the_authorization_url_and_is_bounded() {
+        let url =
+            "https://auth.openai.com/api/accounts/authorize?code_challenge=x&id_token_hint=secret";
+        let message = format!("Launcher \"xdg-open\" \"{url}\" failed with exit status: 3");        let redacted = redact_auth_url(&message, url);
+        assert!(!redacted.contains(url));
+        assert!(!redacted.contains("id_token_hint"));
+        assert!(redacted.contains("<login-link>"));
+        assert!(redacted.chars().count() <= 301);
+
+        // A pathological message is truncated instead of flooding the UI.
+        let huge = format!("{url}{}", "x".repeat(1_000));
+        let shortened = redact_auth_url(&huge, url);
+        assert_eq!(shortened.chars().count(), 301);
+        assert!(shortened.ends_with('…'));
     }
 
     #[test]
