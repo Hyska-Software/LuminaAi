@@ -11,6 +11,7 @@ import { useAppStore, useAgentStore, useChatStore, useUiStore } from '@/lib/stor
 import type { ChatMessage } from '@/lib/types';
 import { cn, copyText, formatDuration, formatTokens } from '@/lib/utils';
 import { AgentAvatar } from '@/components/agents/AgentAvatar';
+import { hasTraceText } from '@/lib/agentTrace';
 import { CitationChips } from './CitationChips';
 import { BrandMark } from './BrandMark';
 import { GoalRoundDivider } from './GoalRoundDivider';
@@ -255,7 +256,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
       {showAssistantAvatar ? assistantAvatar : null}
 
       <div className="min-w-0 flex-1">
-        {reasoning || reasoningActive || toolCalls.length > 0 ? (
+        {reasoning || reasoningActive || toolCalls.length > 0 || hasTraceText(message.trace) ? (
           <AgentSteps
             message={message}
             streaming={isStreaming}

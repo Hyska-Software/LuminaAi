@@ -528,6 +528,8 @@ struct StepAttempt {
     digest: Option<PrefixDigest>,
     /// Safe raw usage slice of the provider (cache telemetry/popover, F6/B2).
     raw_usage: Option<Value>,
+    /// Wall time of the provider request that produced this attempt.
+    duration_ms: Option<u64>,
 }
 
 enum AttemptOutcome {
@@ -550,6 +552,7 @@ async fn run_stream_attempt(
     on_event: &Arc<dyn EventEmitter>,
     cancel: &CancellationToken,
 ) -> AttemptOutcome {
+    let started = std::time::Instant::now();
     let mut attempt = StepAttempt::default();
     let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
     let stream_task = {
@@ -626,6 +629,9 @@ async fn run_stream_attempt(
             }
         }
     }
+
+    attempt.duration_ms =
+        Some(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
 
     if cancelled {
         stream_task.abort();
@@ -2852,6 +2858,7 @@ pub async fn run_turn(
             step_state,
             step_usage,
             step_digest,
+            step_duration,
             step_raw_usage,
             streaming_calls,
             failure,
@@ -2866,6 +2873,7 @@ pub async fn run_turn(
                 attempt.state,
                 attempt.usage,
                 attempt.digest,
+                attempt.duration_ms,
                 attempt.raw_usage,
                 attempt.tool_calls,
                 None,
@@ -2876,6 +2884,7 @@ pub async fn run_turn(
                 attempt.state,
                 attempt.usage,
                 attempt.digest,
+                attempt.duration_ms,
                 attempt.raw_usage,
                 attempt.tool_calls,
                 Some(TurnFailure::from_anyhow(&error, &credential)),
@@ -2964,7 +2973,7 @@ pub async fn run_turn(
                 record.finished_at = Some(now_ms());
                 failed.push(record);
             }
-            push_trace_step(&mut trace, &step_reasoning, failed.len());
+            push_trace_step(&mut trace, &step_reasoning, &step_text, step_duration, failed.len());
             // As chamadas que falharam continuam em `tool_calls`; o replay
             // precisa do assistant que as declara para não deixar o output órfão.
             replay_steps.push(ReplayStep {
@@ -2985,7 +2994,7 @@ pub async fn run_turn(
         if step_calls.is_empty() {
             // The model produced a final answer. Intermediate narration from
             // tool-calling steps is intentionally not part of the final message.
-            push_trace_step(&mut trace, &step_reasoning, 0);
+            push_trace_step(&mut trace, &step_reasoning, "", step_duration, 0);
             full_text = step_text.trim().to_string();
             replay_steps.push(ReplayStep {
                 text: full_text.clone(),
@@ -2995,7 +3004,13 @@ pub async fn run_turn(
             break;
         }
 
-        push_trace_step(&mut trace, &step_reasoning, step_calls.len());
+        push_trace_step(
+            &mut trace,
+            &step_reasoning,
+            &step_text,
+            step_duration,
+            step_calls.len(),
+        );
 
         // Tools requested on the last allowed step still run: artifacts and other
         // deliverables must never be lost. A forced final-answer pass (below)
@@ -3240,7 +3255,13 @@ pub async fn run_turn(
                 }
                 full_reasoning.push_str(&forced_reasoning);
             }
-            push_trace_step(&mut trace, &forced_reasoning, 0);
+            push_trace_step(
+                &mut trace,
+                &forced_reasoning,
+                "",
+                forced_attempt.duration_ms,
+                0,
+            );
             if !forced_text.trim().is_empty() {
                 full_text = forced_text.trim().to_string();
             } else if turn_failure.is_none() {
@@ -4430,14 +4451,25 @@ fn code_tool_prompts(
 }
 
 /// Appends one step of the agent loop to the persisted thinking trace. Steps
-/// without visible reasoning and without tool calls are ignored.
-fn push_trace_step(trace: &mut Vec<TraceStep>, reasoning: &str, tool_calls: usize) {
+/// without visible reasoning/narration and without tool calls are ignored.
+/// Narration is only recorded for steps that requested tools; the final answer
+/// stays in `ChatMessage.content`.
+fn push_trace_step(
+    trace: &mut Vec<TraceStep>,
+    reasoning: &str,
+    text: &str,
+    duration_ms: Option<u64>,
+    tool_calls: usize,
+) {
     let reasoning = reasoning.trim();
-    if reasoning.is_empty() && tool_calls == 0 {
+    let text = text.trim();
+    if reasoning.is_empty() && text.is_empty() && tool_calls == 0 {
         return;
     }
     trace.push(TraceStep {
         reasoning: (!reasoning.is_empty()).then(|| reasoning.to_string()),
+        text: (!text.is_empty()).then(|| text.to_string()),
+        duration_ms,
         tool_calls: u32::try_from(tool_calls).unwrap_or(u32::MAX),
     });
 }
@@ -5925,14 +5957,17 @@ mod agent_loop_tests {
         assert!(result.error.is_none());
         assert!(has_event(&events, "done"));
         assert!(has_event(&events, "tool_call_finished"));
-        // One acting step in the thinking trace, without visible reasoning.
+        // One acting step in the thinking trace: its narration is persisted for
+        // the per-response transcript, with the model time of the step.
+        let trace = &result.assistant_message.trace;
+        assert_eq!(trace.len(), 1);
+        assert_eq!(trace[0].reasoning, None);
         assert_eq!(
-            result.assistant_message.trace,
-            vec![TraceStep {
-                reasoning: None,
-                tool_calls: 1,
-            }]
+            trace[0].text.as_deref(),
+            Some("Narração intermediária que não deve virar resposta.")
         );
+        assert_eq!(trace[0].tool_calls, 1);
+        assert!(trace[0].duration_ms.is_some());
 
         let reloaded = temp
             .db
@@ -6065,19 +6100,19 @@ mod agent_loop_tests {
         .await
         .expect("turn should complete");
 
+        let trace = &result.assistant_message.trace;
+        assert_eq!(trace.len(), 2);
+        assert_eq!(trace[0].reasoning.as_deref(), Some("Vou buscar os dados."));
+        assert_eq!(trace[0].text, None);
+        assert_eq!(trace[0].tool_calls, 1);
+        assert!(trace[0].duration_ms.is_some());
         assert_eq!(
-            result.assistant_message.trace,
-            vec![
-                TraceStep {
-                    reasoning: Some("Vou buscar os dados.".to_string()),
-                    tool_calls: 1,
-                },
-                TraceStep {
-                    reasoning: Some("Já tenho o que preciso.".to_string()),
-                    tool_calls: 0,
-                },
-            ]
+            trace[1].reasoning.as_deref(),
+            Some("Já tenho o que preciso.")
         );
+        assert_eq!(trace[1].text, None);
+        assert_eq!(trace[1].tool_calls, 0);
+        assert!(trace[1].duration_ms.is_some());
         assert_eq!(
             result.assistant_message.reasoning.as_deref(),
             Some("Vou buscar os dados.\n\nJá tenho o que preciso.")

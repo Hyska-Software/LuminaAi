@@ -977,3 +977,160 @@ describe('AgentSteps — título do Thinking por layout', () => {
     }
   });
 });
+
+describe('AgentSteps — execução separada por resposta (Code e Agentes)', () => {
+  const SHELL = tool({
+    id: 'tool-shell',
+    name: 'run_command',
+    arguments: '{"command":"pnpm test"}',
+    result: 'ok',
+  });
+  const EDIT = tool({
+    id: 'tool-edit',
+    name: 'edit_file',
+    arguments: '{"path":"tests/validation/834.spec"}',
+    presentation: {
+      kind: 'file_change',
+      path: 'tests/validation/834.spec',
+      change: 'modified',
+      added: 1,
+      removed: 1,
+      diff: '--- a\n+++ b\n',
+    },
+  });
+
+  function segmentedMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
+    return message({
+      content: 'Agora a verificação final completa desta rodada.',
+      reasoning:
+        'Vou checar o fixture.\n\nLocalizando o duplicado.\n\nVerificação final.',
+      toolCalls: [SHELL, EDIT],
+      trace: [
+        {
+          reasoning: 'Vou checar o fixture.',
+          text: 'Ambos rejeitados (exit 65).',
+          durationMs: 2_000,
+          toolCalls: 1,
+        },
+        {
+          reasoning: 'Localizando o duplicado.',
+          text: 'Duplicado no 834. Localizando e corrigindo:',
+          durationMs: 6_000,
+          toolCalls: 1,
+        },
+        { reasoning: 'Verificação final.', durationMs: 4_000, toolCalls: 0 },
+      ],
+      usage: { durationMs: 10_000 },
+      ...overrides,
+    });
+  }
+
+  it('mostra a narração no corpo e recolhe a execução em "Usou N …"', async () => {
+    const user = userEvent.setup();
+    useUiStore.setState({ layoutMode: 'code' });
+
+    render(<AgentSteps streaming={false} phase={null} message={segmentedMessage()} />);
+
+    // Narração intermediária fora de qualquer bloco recolhido.
+    expect(screen.getByText('Ambos rejeitados (exit 65).')).toBeTruthy();
+    expect(screen.getByText('Duplicado no 834. Localizando e corrigindo:')).toBeTruthy();
+    // Blocos de execução, todos fechados ao concluir o turno.
+    expect(
+      screen.getByRole('button', { name: 'Usou 1 Shell', expanded: false }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Usou 1 Editar', expanded: false }),
+    ).toBeTruthy();
+    // Nada de bloco único "Trabalhou por …" neste modo.
+    expect(screen.queryByRole('button', { name: /Trabalhou por/ })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Usou 1 Shell' }));
+    expect(screen.getByRole('listitem', { name: 'Executou pnpm test' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Raciocínio 6s' })).toBeTruthy();
+  });
+
+  it('expõe a duração do raciocínio em cada linha do bloco', async () => {
+    const user = userEvent.setup();
+    useUiStore.setState({ layoutMode: 'code' });
+
+    render(<AgentSteps streaming={false} phase={null} message={segmentedMessage()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Raciocínio' }));
+    expect(screen.getByRole('button', { name: 'Raciocínio 2s' })).toBeTruthy();
+  });
+
+  it('mantém o bloco único no layout Chat, sem separar a execução', () => {
+    useUiStore.setState({ layoutMode: 'chat' });
+
+    render(<AgentSteps streaming={false} phase={null} message={segmentedMessage()} />);
+
+    expect(screen.getByRole('button', { name: /Pensou por 10s/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Usou / })).toBeNull();
+    expect(screen.queryByText('Ambos rejeitados (exit 65).')).toBeNull();
+  });
+
+  it('começa fechado no layout Agentes mesmo com o turno em streaming', () => {
+    useUiStore.setState({ layoutMode: 'agent' });
+
+    render(
+      <AgentSteps
+        streaming
+        phase="tool"
+        startedAt={Date.now() - 1_000}
+        message={segmentedMessage({
+          status: 'streaming',
+          toolCalls: [
+            tool({
+              id: 'tool-shell',
+              name: 'run_command',
+              status: 'running',
+              arguments: '{"command":"pnpm test"}',
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Usou 1 Shell', expanded: false }),
+    ).toBeTruthy();
+  });
+
+  it('mantém aberto o bloco da execução corrente no layout Code', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+
+    render(
+      <AgentSteps
+        streaming
+        phase="tool"
+        startedAt={Date.now() - 1_000}
+        message={segmentedMessage({
+          status: 'streaming',
+          toolCalls: [
+            tool({
+              id: 'tool-shell',
+              name: 'run_command',
+              status: 'running',
+              arguments: '{"command":"pnpm test"}',
+            }),
+          ],
+          trace: [
+            {
+              reasoning: 'Vou checar o fixture.',
+              text: 'Ambos rejeitados (exit 65).',
+              durationMs: 2_000,
+              toolCalls: 1,
+            },
+          ],
+        })}
+      />,
+    );
+
+    // The last execution group follows the streamed narration and auto-opens.
+    expect(screen.getByText('Ambos rejeitados (exit 65).')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Usou 1 Shell', expanded: true }),
+    ).toBeTruthy();
+    expect(screen.getByRole('listitem', { name: 'Executou pnpm test' })).toBeTruthy();
+  });
+});

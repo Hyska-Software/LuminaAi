@@ -721,6 +721,14 @@ export interface AttachmentContent {
 export interface TraceStep {
   /** Visible reasoning of this step (`null` when the model emitted none). */
   reasoning?: string | null;
+  /**
+   * Visible narration emitted by this step before it requested tools. It is
+   * absent on the final-answer step: that text lives in `ChatMessage.content`,
+   * so the trace never duplicates the answer.
+   */
+  text?: string | null;
+  /** Duration of this step's provider request, in milliseconds. */
+  durationMs?: number | null;
   /** Number of tool calls produced by this step. */
   toolCalls: number;
 }

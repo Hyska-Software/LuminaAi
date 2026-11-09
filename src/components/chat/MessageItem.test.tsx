@@ -233,3 +233,56 @@ describe('MessageItem — diferenças do layout Code', () => {
     expect(screen.getByText('tauri.app')).toBeTruthy();
   });
 });
+
+describe('MessageItem — execução separada por resposta', () => {
+  function segmentedAssistant(overrides: Partial<ChatMessage> = {}): ChatMessage {
+    return message({
+      id: 'a-segmented',
+      role: 'assistant',
+      content: 'Agora a verificação final completa desta rodada.',
+      toolCalls: [
+        {
+          id: 'tool-read',
+          name: 'read_file',
+          arguments: '{"path":"tests/validation/834.spec"}',
+          status: 'done',
+          result: 'ok',
+        },
+      ],
+      trace: [
+        {
+          reasoning: 'Vou checar o fixture.',
+          text: 'Ambos rejeitados (exit 65).',
+          durationMs: 2_000,
+          toolCalls: 1,
+        },
+        { reasoning: 'Verificação final.', durationMs: 4_000, toolCalls: 0 },
+      ],
+      ...overrides,
+    });
+  }
+
+  it('mostra a narração intermediária e a resposta final no layout Code', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+
+    renderMessage(segmentedAssistant());
+
+    expect(screen.getByText('Ambos rejeitados (exit 65).')).toBeTruthy();
+    expect(
+      screen.getByText('Agora a verificação final completa desta rodada.'),
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Usou 1 Leitura' })).toBeTruthy();
+  });
+
+  it('não renderiza a narração intermediária no layout Chat', () => {
+    useUiStore.setState({ layoutMode: 'chat' });
+
+    renderMessage(segmentedAssistant());
+
+    expect(screen.queryByText('Ambos rejeitados (exit 65).')).toBeNull();
+    expect(
+      screen.getByText('Agora a verificação final completa desta rodada.'),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Usou / })).toBeNull();
+  });
+});

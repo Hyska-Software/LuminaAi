@@ -457,6 +457,27 @@ function appendTraceReasoning(trace: TraceStep[], delta: string): TraceStep[] {
   return [...steps.slice(0, -1), { ...last, reasoning: `${last.reasoning ?? ''}${delta}` }];
 }
 
+/**
+ * Appends the narration that just finished streaming to the last trace step.
+ * Used by the Code/Agents transcript, where intermediate narration belongs to
+ * the step that produced it instead of the message body.
+ */
+function appendTraceText(trace: TraceStep[], delta: string): TraceStep[] {
+  const steps = trace.length > 0 ? trace : [{ toolCalls: 0 }];
+  const last = steps[steps.length - 1];
+  return [...steps.slice(0, -1), { ...last, text: `${last.text ?? ''}${delta}` }];
+}
+
+/**
+ * Moves the streamed narration of the current step into its trace entry once
+ * the step starts requesting tools. The Chat layout keeps the single thinking
+ * block, so there the text stays in `content` and is reconciled at turn end by
+ * the persisted message.
+ */
+function shouldMoveNarrationToTrace(): boolean {
+  return useUiStore.getState().layoutMode !== 'chat';
+}
+
 /** Accounts one started tool call in the current trace step. */
 function addTraceToolCall(trace: TraceStep[]): TraceStep[] {
   const steps = trace.length > 0 ? trace : [{ toolCalls: 0 }];
@@ -862,15 +883,27 @@ export const useChatStore = create<ChatState>()((set, get) => {
           patchStream(context.conversationId, (stream) => ({ ...stream, phase: 'text' }));
           schedule();
           break;
-        case 'tool_call_started':
+        case 'tool_call_started': {
           flush();
+          const moveNarration = shouldMoveNarrationToTrace();
           patchStream(context.conversationId, (stream) => ({ ...stream, phase: 'tool' }));
-          patchMessage(context.conversationId, context.assistantId, (message) => ({
-            ...message,
-            toolCalls: [...message.toolCalls.filter((t) => t.id !== event.toolCall.id), event.toolCall],
-            trace: addTraceToolCall(message.trace ?? []),
-          }));
+          patchMessage(context.conversationId, context.assistantId, (message) => {
+            const narration = message.content;
+            const moved = moveNarration && narration.trim().length > 0;
+            return {
+              ...message,
+              content: moved ? '' : message.content,
+              toolCalls: [
+                ...message.toolCalls.filter((t) => t.id !== event.toolCall.id),
+                event.toolCall,
+              ],
+              trace: addTraceToolCall(
+                moved ? appendTraceText(message.trace ?? [], narration) : (message.trace ?? []),
+              ),
+            };
+          });
           break;
+        }
         case 'tool_call_args':
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
@@ -1098,21 +1131,30 @@ export const useChatStore = create<ChatState>()((set, get) => {
               text: current.text + nested.delta,
             }));
           } else if (nested.type === 'tool_call_started') {
-            patchSubagent(event.taskCallId, (current) => ({
-              ...current,
-              trace:
-                current.trace.length === 0
-                  ? [{ toolCalls: 1 }]
-                  : current.trace.map((step, index) =>
-                      index === current.trace.length - 1
-                        ? { ...step, toolCalls: step.toolCalls + 1 }
-                        : step,
-                    ),
-              toolCalls: [
-                ...current.toolCalls.filter((tool) => tool.id !== nested.toolCall.id),
-                nested.toolCall,
-              ],
-            }));
+            const moveNarration = shouldMoveNarrationToTrace();
+            patchSubagent(event.taskCallId, (current) => {
+              const narration = current.text;
+              const moved = moveNarration && narration.trim().length > 0;
+              const trace = moved
+                ? appendTraceText(current.trace, narration)
+                : current.trace;
+              return {
+                ...current,
+                text: moved ? '' : current.text,
+                trace:
+                  trace.length === 0
+                    ? [{ toolCalls: 1 }]
+                    : trace.map((step, index) =>
+                        index === trace.length - 1
+                          ? { ...step, toolCalls: step.toolCalls + 1 }
+                          : step,
+                      ),
+                toolCalls: [
+                  ...current.toolCalls.filter((tool) => tool.id !== nested.toolCall.id),
+                  nested.toolCall,
+                ],
+              };
+            });
           } else if (nested.type === 'tool_call_args') {
             patchSubagent(event.taskCallId, (current) => ({
               ...current,

@@ -9601,10 +9601,14 @@ mod tests {
         assistant.trace = vec![
             TraceStep {
                 reasoning: Some("vou pesquisar".to_string()),
+                text: Some("narração intermediária".to_string()),
+                duration_ms: Some(2_000),
                 tool_calls: 1,
             },
             TraceStep {
                 reasoning: Some("resumo final".to_string()),
+                text: None,
+                duration_ms: None,
                 tool_calls: 0,
             },
         ];

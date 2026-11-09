@@ -15,7 +15,7 @@
  * `variant="thinking"` (docs/MARKDOWN.md §4), so splitting paragraphs or
  * stripping list markers here would corrupt lists, fences, tables and math.
  */
-import type { ChatMessage, ToolCallRecord } from './types';
+import type { ChatMessage, ToolCallRecord, TraceStep } from './types';
 import { hostnameOf, safeJsonParse, truncate } from './utils';
 
 export interface PageLink {
@@ -45,7 +45,7 @@ export interface ToolGroup {
 }
 
 export type AgentTraceEntry =
-  | { kind: 'reasoning'; text: string }
+  | { kind: 'reasoning'; text: string; durationMs?: number | null }
   | { kind: 'tools'; group: ToolGroup };
 
 const MAX_ERROR_CHARS = 220;
@@ -70,7 +70,13 @@ export function buildAgentTrace(
   if (steps.length > 0) {
     for (const step of steps) {
       const reasoning = step.reasoning?.trim() ?? '';
-      if (reasoning) entries.push({ kind: 'reasoning', text: reasoning });
+      if (reasoning) {
+        entries.push({
+          kind: 'reasoning',
+          text: reasoning,
+          durationMs: step.durationMs ?? null,
+        });
+      }
       const count = Math.max(0, Math.floor(step.toolCalls ?? 0));
       const stepTools = tools.slice(cursor, cursor + count);
       cursor += count;
@@ -102,6 +108,139 @@ export function countTraceTools(entries: AgentTraceEntry[]): number {
 /** True when the timeline has at least one reasoning block. */
 export function hasTraceReasoning(entries: AgentTraceEntry[]): boolean {
   return entries.some((entry) => entry.kind === 'reasoning');
+}
+
+/** True when the trace carries narration from intermediate steps. */
+export function hasTraceText(trace?: TraceStep[] | null): boolean {
+  return (trace ?? []).some((step) => (step.text?.trim() ?? '').length > 0);
+}
+
+/**
+ * One block of the per-response transcript (layouts Code and Agentes): either
+ * the model's narration, rendered as normal Markdown in the message body, or
+ * the execution that happened after it (reasoning + tool calls), rendered as a
+ * collapsed "Usou N …" group.
+ */
+export type AgentResponseBlock =
+  | { kind: 'text'; text: string }
+  | { kind: 'execution'; entries: AgentTraceEntry[] };
+
+/**
+ * Builds the chronological blocks of an assistant turn, splitting the trace at
+ * every intermediate narration. Entries accumulate until a narration arrives,
+ * so each text is followed by the work done before the next one (the image's
+ * "Usou N Shell e Editar" grouping). The final answer text is not part of the
+ * trace and stays in `ChatMessage.content`.
+ */
+export function buildAgentResponseBlocks(
+  message: Pick<ChatMessage, 'reasoning' | 'toolCalls' | 'trace'>,
+): AgentResponseBlock[] {
+  const tools = message.toolCalls ?? [];
+  const steps = message.trace ?? [];
+  const blocks: AgentResponseBlock[] = [];
+  let pending: AgentTraceEntry[] = [];
+  let cursor = 0;
+
+  const flush = () => {
+    if (pending.length > 0) blocks.push({ kind: 'execution', entries: pending });
+    pending = [];
+  };
+
+  for (const step of steps) {
+    const reasoning = step.reasoning?.trim() ?? '';
+    if (reasoning) {
+      pending.push({
+        kind: 'reasoning',
+        text: reasoning,
+        durationMs: step.durationMs ?? null,
+      });
+    }
+    const text = step.text?.trim() ?? '';
+    if (text) {
+      flush();
+      blocks.push({ kind: 'text', text });
+    }
+    const count = Math.max(0, Math.floor(step.toolCalls ?? 0));
+    const stepTools = tools.slice(cursor, cursor + count);
+    cursor += count;
+    for (const group of groupTools(stepTools)) {
+      pending.push({ kind: 'tools', group });
+    }
+  }
+
+  // Defensive: calls the trace did not account for must never disappear.
+  for (const group of groupTools(tools.slice(cursor))) {
+    pending.push({ kind: 'tools', group });
+  }
+  flush();
+
+  return blocks;
+}
+
+/** Short tool family names used by the "Usou N …" execution header. */
+const TOOL_FAMILY_LABELS: Record<string, string> = {
+  run_command: 'Shell',
+  run_checks: 'Verificações',
+  read_file: 'Leitura',
+  read_tool_output: 'Leitura',
+  list_dir: 'Listagem',
+  search_files: 'Busca',
+  search_text: 'Busca',
+  write_file: 'Editar',
+  edit_file: 'Editar',
+  todo_write: 'Tarefas',
+  submit_plan: 'Plano',
+  ask_user: 'Pergunta',
+  task: 'Subagente',
+  job_list: 'Jobs',
+  job_output: 'Jobs',
+  job_kill: 'Jobs',
+  git_status: 'Git',
+  git_diff: 'Git',
+  git_log: 'Git',
+  goal: 'Objetivo',
+  validate_ui: 'Interface',
+  web_search: 'Busca web',
+  fetch_url: 'Páginas',
+  create_file: 'Arquivos',
+  run_code: 'Código',
+  list_skills: 'Skills',
+  read_skill: 'Skills',
+  list_artifacts: 'Artefatos',
+  read_artifact: 'Artefatos',
+};
+
+/** Human family of a tool (e.g. `run_command` → "Shell"). */
+export function toolFamilyLabel(name: string): string {
+  return TOOL_FAMILY_LABELS[name] ?? name.replace(/_/g, ' ');
+}
+
+export interface ExecutionGroupSummary {
+  /** Header label: "Usou 3 Shell e Editar", or "Raciocínio" without tools. */
+  label: string;
+  /** Total number of tool calls in the group. */
+  count: number;
+}
+
+/** Summarizes one execution block for its collapsed header. */
+export function describeExecutionGroup(entries: AgentTraceEntry[]): ExecutionGroupSummary {
+  const families: string[] = [];
+  let count = 0;
+  for (const entry of entries) {
+    if (entry.kind !== 'tools') continue;
+    for (const tool of entry.group.tools) {
+      count += 1;
+      const family = toolFamilyLabel(tool.name);
+      if (!families.includes(family)) families.push(family);
+    }
+  }
+  if (count === 0) return { label: 'Raciocínio', count };
+  return { label: `Usou ${count} ${joinFamilies(families)}`, count };
+}
+
+function joinFamilies(families: string[]): string {
+  if (families.length <= 1) return families[0] ?? '';
+  return `${families.slice(0, -1).join(', ')} e ${families[families.length - 1]}`;
 }
 
 function pushToolGroups(entries: AgentTraceEntry[], tools: ToolCallRecord[]): void {

@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildAgentResponseBlocks,
   buildAgentTrace,
   countTraceTools,
   describeCodeTool,
+  describeExecutionGroup,
   hasTraceReasoning,
+  hasTraceText,
+  toolFamilyLabel,
+  type AgentResponseBlock,
   type AgentTraceEntry,
   type ToolGroup,
 } from '@/lib/agentTrace';
@@ -753,5 +758,142 @@ describe('buildAgentTrace — objetivo (Goal)', () => {
       }),
     )[0];
     expect(failed.label).toBe('Falha ao atualizar o objetivo');
+  });
+});
+
+function blockKinds(blocks: AgentResponseBlock[]): string[] {
+  return blocks.map((block) => block.kind);
+}
+
+function executionBlocks(blocks: AgentResponseBlock[]): AgentTraceEntry[][] {
+  return blocks.flatMap((block) => (block.kind === 'execution' ? [block.entries] : []));
+}
+
+function textBlocks(blocks: AgentResponseBlock[]): string[] {
+  return blocks.flatMap((block) => (block.kind === 'text' ? [block.text] : []));
+}
+
+describe('buildAgentResponseBlocks', () => {
+  const SHELL = tool({
+    name: 'run_command',
+    arguments: '{"command":"pnpm test"}',
+    result: 'ok',
+  });
+  const EDIT = tool({
+    name: 'edit_file',
+    arguments: '{"path":"src/app.ts"}',
+    presentation: { kind: 'file_change', path: 'src/app.ts', change: 'modified', diff: 'x', added: 1, removed: 1 },
+  });
+
+  const trace: TraceStep[] = [
+    {
+      reasoning: 'Vou checar o fixture.',
+      text: 'Ambos rejeitados (exit 65).',
+      durationMs: 2_000,
+      toolCalls: 1,
+    },
+    {
+      reasoning: 'Localizando o duplicado.',
+      text: 'Duplicado no 834. Localizando e corrigindo:',
+      durationMs: 6_000,
+      toolCalls: 1,
+    },
+    {
+      reasoning: 'Verificação final.',
+      durationMs: 4_000,
+      toolCalls: 0,
+    },
+  ];
+
+  it('separa a narração e agrupa a execução que veio depois de cada resposta', () => {
+    const blocks = buildAgentResponseBlocks({
+      reasoning: null,
+      toolCalls: [SHELL, EDIT],
+      trace,
+    });
+
+    expect(blockKinds(blocks)).toEqual([
+      'execution',
+      'text',
+      'execution',
+      'text',
+      'execution',
+    ]);
+    expect(textBlocks(blocks)).toEqual([
+      'Ambos rejeitados (exit 65).',
+      'Duplicado no 834. Localizando e corrigindo:',
+    ]);
+
+    const executions = executionBlocks(blocks);
+    expect(executions[0].map((entry) => entry.kind)).toEqual(['reasoning']);
+    expect(executions[0][0]).toMatchObject({
+      kind: 'reasoning',
+      text: 'Vou checar o fixture.',
+      durationMs: 2_000,
+    });
+    expect(describeExecutionGroup(executions[0]).label).toBe('Raciocínio');
+
+    const firstWork = executions[1];
+    expect(firstWork.map((entry) => entry.kind)).toEqual(['tools', 'reasoning']);
+    expect(describeExecutionGroup(firstWork)).toEqual({
+      label: 'Usou 1 Shell',
+      count: 1,
+    });
+
+    const lastWork = executions[2];
+    expect(lastWork.map((entry) => entry.kind)).toEqual(['tools', 'reasoning']);
+    expect(describeExecutionGroup(lastWork).label).toBe('Usou 1 Editar');
+  });
+
+  it('nunca perde tool calls fora do trace e ignora passos vazios', () => {
+    const blocks = buildAgentResponseBlocks({
+      reasoning: null,
+      toolCalls: [SHELL, EDIT],
+      trace: [
+        { reasoning: null, text: 'Vou rodar tudo.', toolCalls: 0 },
+        { reasoning: null, toolCalls: 0 },
+      ],
+    });
+
+    expect(blockKinds(blocks)).toEqual(['text', 'execution']);
+    expect(describeExecutionGroup(executionBlocks(blocks)[0])).toEqual({
+      label: 'Usou 2 Shell e Editar',
+      count: 2,
+    });
+  });
+
+  it('mantém as famílias de tool distintas na ordem de primeira aparição', () => {
+    const blocks = buildAgentResponseBlocks({
+      reasoning: null,
+      toolCalls: [SHELL, EDIT, SHELL],
+      trace: [{ reasoning: null, text: 'Feito.', toolCalls: 3 }],
+    });
+    expect(describeExecutionGroup(executionBlocks(blocks)[0])).toEqual({
+      label: 'Usou 3 Shell e Editar',
+      count: 3,
+    });
+  });
+
+  it('cai no resumo de raciocínio quando o bloco não tem tools', () => {
+    expect(describeExecutionGroup([{ kind: 'reasoning', text: 'Só pensei.' }])).toEqual({
+      label: 'Raciocínio',
+      count: 0,
+    });
+  });
+});
+
+describe('hasTraceText / toolFamilyLabel', () => {
+  it('detecta narração intermediária apenas quando há texto', () => {
+    expect(hasTraceText(null)).toBe(false);
+    expect(hasTraceText([])).toBe(false);
+    expect(hasTraceText([{ reasoning: 'x', toolCalls: 1 }])).toBe(false);
+    expect(hasTraceText([{ text: '   ', toolCalls: 1 }])).toBe(false);
+    expect(hasTraceText([{ text: 'Narração', toolCalls: 1 }])).toBe(true);
+  });
+
+  it('traduz famílias de tool e mantém fallback legível', () => {
+    expect(toolFamilyLabel('run_command')).toBe('Shell');
+    expect(toolFamilyLabel('edit_file')).toBe('Editar');
+    expect(toolFamilyLabel('minha_tool_nova')).toBe('minha tool nova');
   });
 });

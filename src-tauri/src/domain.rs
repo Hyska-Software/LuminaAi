@@ -519,6 +519,15 @@ pub struct TraceStep {
     /// Visible reasoning emitted by the model in this step.
     #[serde(default)]
     pub reasoning: Option<String>,
+    /// Visible narration emitted before this step requested tools. It stays
+    /// empty on the final-answer step: that text lives in
+    /// `ChatMessage.content`, so the trace never duplicates the answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Duration of this step's provider request (model time; tool execution is
+    /// not included).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
     /// Tool calls requested by this step; they are stored in `ChatMessage.tool_calls`
     /// in chronological order, so the count is enough to slice them back.
     #[serde(default)]

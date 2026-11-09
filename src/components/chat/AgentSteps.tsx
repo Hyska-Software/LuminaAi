@@ -1,4 +1,12 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import * as Collapsible from '@radix-ui/react-collapsible';
 import {
   ArrowUpRight,
@@ -29,9 +37,13 @@ import {
 import { useReduceMotion } from '@/components/layout/hooks';
 import { Spinner } from '@/components/ui';
 import {
+  buildAgentResponseBlocks,
   buildAgentTrace,
   countTraceTools,
+  describeExecutionGroup,
   hasTraceReasoning,
+  type AgentResponseBlock,
+  type AgentTraceEntry,
   type PageLink,
   type ToolGroup,
 } from '@/lib/agentTrace';
@@ -139,6 +151,10 @@ function useLiveElapsed(active: boolean, startedAt?: number | null): number | nu
 interface ReasoningRowProps {
   text: string;
   streaming: boolean;
+  /** Row label; the per-response transcript uses "Raciocínio". */
+  label?: string;
+  /** Model time of the step, shown next to the label when known. */
+  durationMs?: number | null;
 }
 
 /**
@@ -146,8 +162,15 @@ interface ReasoningRowProps {
  * reasoning is a detail: it starts collapsed and expands on demand, so long
  * chain-of-thought blocks never dominate the transcript.
  */
-function ReasoningRow({ text, streaming }: ReasoningRowProps) {
+function ReasoningRow({
+  text,
+  streaming,
+  label = 'Pensou',
+  durationMs = null,
+}: ReasoningRowProps) {
   const [open, setOpen] = useState(false);
+  const duration =
+    durationMs != null && durationMs >= 1000 ? formatThinkingDuration(durationMs) : null;
   return (
     <li className="min-w-0">
       <Collapsible.Root open={open} onOpenChange={setOpen}>
@@ -161,7 +184,9 @@ function ReasoningRow({ text, streaming }: ReasoningRowProps) {
               type="button"
               className="flex min-w-0 flex-1 items-center gap-x-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
-              <span className="text-[12px] font-semibold text-foreground">Pensou</span>
+              <span className="text-[12px] font-semibold text-foreground">
+                {duration ? `${label} ${duration}` : label}
+              </span>
               {streaming ? <Spinner size="xs" className="text-foreground-subtle" /> : null}
               <ChevronDown
                 aria-hidden
@@ -184,6 +209,80 @@ function ReasoningRow({ text, streaming }: ReasoningRowProps) {
 }
 
 /**
+ * Rows of a trace block: reasoning lines (collapsed Markdown) interleaved with
+ * one row per harness tool call or an aggregated row for Chat tools.
+ */
+function TraceEntryRows({
+  entries,
+  streaming,
+  phase,
+  showReasoningDuration = false,
+}: {
+  entries: AgentTraceEntry[];
+  streaming: boolean;
+  phase: AgentStepsPhase | null;
+  /** Per-response groups label the step time ("Raciocínio 2s"); Chat doesn't. */
+  showReasoningDuration?: boolean;
+}) {
+  const lastReasoningIndex = useMemo(() => {
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      if (entries[index].kind === 'reasoning') return index;
+    }
+    return -1;
+  }, [entries]);
+
+  return (
+    <ol className="flex flex-col gap-1">
+      {entries.map((entry, index) => {
+        if (entry.kind === 'reasoning') {
+          // Reasoning is Markdown (docs/MARKDOWN.md §4) rendered by the
+          // compact/muted `Markdown` variant. The streaming caret belongs
+          // only to the last block while the model is thinking; the row
+          // itself starts collapsed like a tool row.
+          return (
+            <ReasoningRow
+              key={`reasoning-${index}`}
+              text={entry.text}
+              label={showReasoningDuration ? 'Raciocínio' : undefined}
+              durationMs={showReasoningDuration ? (entry.durationMs ?? null) : null}
+              streaming={streaming && phase === 'reasoning' && index === lastReasoningIndex}
+            />
+          );
+        }
+
+        // Tools do harness: detalhe por chamada (verbo + alvo + status +
+        // diff/saída sob demanda), como o "Think/Edit/Pwsh" do DSH.
+        if (CODE_TOOL_NAMES.has(entry.group.name)) {
+          return (
+            <Fragment key={`tools-${index}`}>
+              {entry.group.tools.map((tool) => (
+                <ToolCallRow
+                  key={tool.id}
+                  tool={tool}
+                  icon={TOOL_ICONS[tool.name] ?? Wrench}
+                />
+              ))}
+            </Fragment>
+          );
+        }
+
+        return (
+          <li
+            key={`tools-${index}`}
+            className="flex min-w-0 items-start gap-2.5 rounded-lg px-1.5 py-1"
+          >
+            <span className="mt-0.5 flex size-3.5 shrink-0 items-center justify-center">
+              <ToolMarker group={entry.group} />
+            </span>
+            <ToolActivity group={entry.group} />
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/**
  * The "thinking space" of an assistant turn (DESIGN §6.3): a single
  * collapsible timeline that interleaves the model's reasoning with the steps
  * it took (web searches, pages read, files created), replacing the old
@@ -197,13 +296,6 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
   );
   const hasReasoning = hasTraceReasoning(entries);
   const toolCount = countTraceTools(entries);
-  /** Last reasoning block: the only one that shows the streaming caret. */
-  const lastReasoningIndex = useMemo(() => {
-    for (let index = entries.length - 1; index >= 0; index -= 1) {
-      if (entries[index].kind === 'reasoning') return index;
-    }
-    return -1;
-  }, [entries]);
   const running = entries.some(
     (entry) => entry.kind === 'tools' && entry.group.status === 'running',
   );
@@ -242,6 +334,28 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
     if (streaming) setOpen(true);
     else if (was) setOpen(false);
   }, [streaming, collapsedByDefault]);
+
+  // Per-response transcript (Code and Agentes): intermediate narration from
+  // the trace becomes normal body text and the work after it is collapsed
+  // into "Usou N …" groups. Chat keeps the single thinking block above the
+  // answer; legacy messages without `trace[].text` fall back to it too.
+  const blocks = useMemo(
+    () => buildAgentResponseBlocks(message),
+    [message.toolCalls, message.trace],
+  );
+  const segmented =
+    layoutMode !== 'chat' && blocks.some((block) => block.kind === 'text');
+  if (segmented) {
+    return (
+      <SegmentedTimeline
+        blocks={blocks}
+        streaming={streaming}
+        phase={phase}
+        collapsedByDefault={collapsedByDefault}
+        className={className}
+      />
+    );
+  }
 
   const visible = entries.length > 0 || (streaming && phase !== 'text');
   if (!visible) return null;
@@ -312,55 +426,159 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
             !streaming && 'max-h-80 overflow-y-auto overscroll-contain pr-1',
           )}
         >
-          <ol className="flex flex-col gap-1">
-            {entries.map((entry, index) => {
-              if (entry.kind === 'reasoning') {
-                // Reasoning is Markdown (docs/MARKDOWN.md §4) rendered by the
-                // compact/muted `Markdown` variant. The streaming caret belongs
-                // only to the last block while the model is thinking; the row
-                // itself starts collapsed like a tool row.
-                return (
-                  <ReasoningRow
-                    key={`reasoning-${index}`}
-                    text={entry.text}
-                    streaming={
-                      streaming && phase === 'reasoning' && index === lastReasoningIndex
-                    }
-                  />
-                );
-              }
-
-              // Tools do harness: detalhe por chamada (verbo + alvo + status +
-              // diff/saída sob demanda), como o "Think/Edit/Pwsh" do DSH.
-              if (CODE_TOOL_NAMES.has(entry.group.name)) {
-                return (
-                  <Fragment key={`tools-${index}`}>
-                    {entry.group.tools.map((tool) => (
-                      <ToolCallRow
-                        key={tool.id}
-                        tool={tool}
-                        icon={TOOL_ICONS[tool.name] ?? Wrench}
-                      />
-                    ))}
-                  </Fragment>
-                );
-              }
-
-              return (
-                <li
-                  key={`tools-${index}`}
-                  className="flex min-w-0 items-start gap-2.5 rounded-lg px-1.5 py-1"
-                >
-                  <span className="mt-0.5 flex size-3.5 shrink-0 items-center justify-center">
-                    <ToolMarker group={entry.group} />
-                  </span>
-                  <ToolActivity group={entry.group} />
-                </li>
-              );
-            })}
-          </ol>
+          <TraceEntryRows entries={entries} streaming={streaming} phase={phase} />
         </div>
       </Collapsible.Content>
+      </Collapsible.Root>
+    </div>
+  );
+}
+
+/**
+ * Per-response transcript (layouts Code and Agentes): the model's narration as
+ * body Markdown, each followed by a collapsed group with the execution that
+ * happened until the next narration (DESIGN §6.3).
+ */
+function SegmentedTimeline({
+  blocks,
+  streaming,
+  phase,
+  collapsedByDefault,
+  className,
+}: {
+  blocks: AgentResponseBlock[];
+  streaming: boolean;
+  phase: AgentStepsPhase | null;
+  collapsedByDefault: boolean;
+  className?: string;
+}) {
+  let lastExecution = -1;
+  blocks.forEach((block, index) => {
+    if (block.kind === 'execution') lastExecution = index;
+  });
+
+  return (
+    <div className={className}>
+      {blocks.map((block, index) =>
+        block.kind === 'text' ? (
+          <div key={`text-${index}`} className="mb-3">
+            <Markdown content={block.text} />
+          </div>
+        ) : (
+          <ExecutionGroup
+            key={`exec-${index}`}
+            entries={block.entries}
+            streaming={streaming}
+            phase={phase}
+            live={streaming && index === lastExecution}
+            collapsedByDefault={collapsedByDefault}
+          />
+        ),
+      )}
+    </div>
+  );
+}
+
+interface ExecutionGroupProps {
+  entries: AgentTraceEntry[];
+  streaming: boolean;
+  phase: AgentStepsPhase | null;
+  /** Current (last) execution group of a streaming turn. */
+  live: boolean;
+  collapsedByDefault: boolean;
+}
+
+/**
+ * One collapsed "Usou N Shell e Editar" block of the per-response transcript.
+ * Its rows are the reasoning/tool entries in chronological order; the group
+ * auto-opens while it is the live one and closes when the turn ends.
+ */
+function ExecutionGroup({
+  entries,
+  streaming,
+  phase,
+  live,
+  collapsedByDefault,
+}: ExecutionGroupProps) {
+  const summary = useMemo(() => describeExecutionGroup(entries), [entries]);
+  const running = entries.some(
+    (entry) => entry.kind === 'tools' && entry.group.status === 'running',
+  );
+  const detailsId = useId();
+  const [open, setOpen] = useState(() => !collapsedByDefault && live);
+  const wasLive = useRef(live);
+  useEffect(() => {
+    const was = wasLive.current;
+    wasLive.current = live;
+    if (collapsedByDefault) {
+      if (!live && was) setOpen(false);
+      return;
+    }
+    if (live) setOpen(true);
+    else if (was) setOpen(false);
+  }, [live, collapsedByDefault]);
+
+  const label =
+    summary.count > 0
+      ? summary.label
+      : streaming && live
+        ? 'Raciocinando…'
+        : 'Raciocínio';
+
+  return (
+    <div className="mb-3">
+      <Collapsible.Root open={open} onOpenChange={setOpen}>
+        <Collapsible.Trigger asChild>
+          <button
+            type="button"
+            aria-controls={detailsId}
+            className={cn(
+              'group/execution flex items-center gap-1.5 rounded-md py-0.5 text-left text-[13px] font-medium text-foreground-muted',
+              'transition-colors duration-150 hover:text-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+            )}
+          >
+            {summary.count > 0 ? (
+              <Wrench aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
+            ) : (
+              <Brain
+                aria-hidden
+                className={cn(
+                  'size-3.5 shrink-0',
+                  streaming && live ? 'text-accent' : 'text-foreground-subtle',
+                )}
+              />
+            )}
+            <span>{label}</span>
+            {running || (streaming && live && summary.count === 0) ? (
+              <Spinner size="xs" className="text-foreground-subtle" />
+            ) : null}
+            <ChevronDown
+              aria-hidden
+              className={cn(
+                'size-3.5 shrink-0 text-foreground-subtle transition-transform duration-150',
+                open && 'rotate-180',
+              )}
+            />
+          </button>
+        </Collapsible.Trigger>
+
+        <Collapsible.Content>
+          <div
+            id={detailsId}
+            className={cn(
+              'mt-2.5 pl-0.5',
+              !streaming && 'max-h-80 overflow-y-auto overscroll-contain pr-1',
+            )}
+          >
+            <TraceEntryRows
+              entries={entries}
+              streaming={streaming && live}
+              phase={phase}
+              showReasoningDuration
+            />
+          </div>
+        </Collapsible.Content>
       </Collapsible.Root>
     </div>
   );

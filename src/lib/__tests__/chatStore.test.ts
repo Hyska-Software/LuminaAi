@@ -2448,3 +2448,185 @@ describe('chatStore — clipboard attachments', () => {
     );
   });
 });
+
+describe('chatStore — narração separada por resposta (Code e Agentes)', () => {
+  function toolCallStarted(): TurnEvent {
+    return {
+      type: 'tool_call_started',
+      toolCall: {
+        id: 'tool-1',
+        name: 'edit_file',
+        arguments: '{"path":"src/app.ts"}',
+        status: 'running',
+        result: null,
+      },
+    };
+  }
+
+  function narrationEvents(): TurnEvent[] {
+    return [
+      { type: 'step_started', step: 1 },
+      { type: 'reasoning_delta', delta: 'Vou editar.' },
+      { type: 'text_delta', delta: 'Vou alterar o arquivo.' },
+      toolCallStarted(),
+    ];
+  }
+
+  it('move a narração do passo para o trace ao iniciar a tool no layout Code', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    // The mock releases through this holder, so the turn stays gated while the
+    // assertions run against the streamed (not yet persisted) message.
+    const holder: { release?: () => void } = {};
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        for (const event of narrationEvents()) onEvent(event);
+        await new Promise<void>((resolve) => {
+          holder.release = resolve;
+        });
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage({ content: 'Final.' }),
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 2 }),
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    const sending = useChatStore.getState().send('Oi');
+    await vi.waitFor(() => {
+      const assistant = useChatStore.getState().messagesByConversation['conv-1']?.[1];
+      expect(assistant?.trace?.[0]?.text).toBe('Vou alterar o arquivo.');
+    });
+    const assistant = useChatStore.getState().messagesByConversation['conv-1'][1];
+    expect(assistant.content).toBe('');
+    expect(assistant.trace?.[0]).toMatchObject({
+      reasoning: 'Vou editar.',
+      text: 'Vou alterar o arquivo.',
+      toolCalls: 1,
+    });
+
+    holder.release?.();
+    await sending;
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+    expect(
+      useChatStore.getState().messagesByConversation['conv-1'][1].content,
+    ).toBe('Final.');
+  });
+
+  it('mantém a narração em content no layout Chat', async () => {
+    useUiStore.setState({ layoutMode: 'chat' });
+    const holder: { release?: () => void } = {};
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        for (const event of narrationEvents()) onEvent(event);
+        await new Promise<void>((resolve) => {
+          holder.release = resolve;
+        });
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage({ content: 'Final.' }),
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 2 }),
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    const sending = useChatStore.getState().send('Oi');
+    await vi.waitFor(() => {
+      const assistant = useChatStore.getState().messagesByConversation['conv-1']?.[1];
+      expect(assistant?.content).toBe('Vou alterar o arquivo.');
+    });
+    const assistant = useChatStore.getState().messagesByConversation['conv-1'][1];
+    expect(assistant.trace?.[0]?.text ?? null).toBeNull();
+
+    holder.release?.();
+    await sending;
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+  });
+
+  it('move a narração do subagente para o trace no layout Code', async () => {
+    useUiStore.setState({ layoutMode: 'code' });
+    let live: SubagentLiveState | undefined;
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent({
+          type: 'subagent_started',
+          taskCallId: 'task-1',
+          conversationId: 'child-1',
+          subagentType: 'explore',
+          description: 'Mapear src',
+          prompt: 'Mapeie src e responda',
+          providerId: 'opencode-go',
+          modelId: 'deepseek-v4.1-flash',
+          effort: 'high',
+        });
+        onEvent({
+          type: 'subagent_event',
+          taskCallId: 'task-1',
+          event: { type: 'step_started', step: 1 },
+        });
+        onEvent({
+          type: 'subagent_event',
+          taskCallId: 'task-1',
+          event: { type: 'text_delta', delta: 'Achei src/app.ts' },
+        });
+        onEvent({
+          type: 'subagent_event',
+          taskCallId: 'task-1',
+          event: {
+            type: 'tool_call_started',
+            toolCall: {
+              id: 'child-tool-1',
+              name: 'read_file',
+              arguments: '{"path":"src/app.ts"}',
+              status: 'running',
+              result: null,
+            },
+          },
+        });
+        live = useChatStore.getState().streaming?.subagents?.['task-1'];
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage({ content: 'Concluído' }),
+          usage: null,
+          error: null,
+          conversation: conversation(),
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    await useChatStore.getState().send('Delegue a exploração');
+
+    expect(live?.text).toBe('');
+    expect(live?.trace[0]).toMatchObject({
+      text: 'Achei src/app.ts',
+      toolCalls: 1,
+    });
+  });
+});
