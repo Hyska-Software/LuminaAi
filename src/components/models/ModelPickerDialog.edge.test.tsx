@@ -3,7 +3,7 @@
  * Verificação independente (task-5) — casos adversariais do `ModelPickerDialog`.
  *
  * Complementa `ModelPickerDialog.test.tsx` (dono: ui-dialog) sem repetir seus
- * cenários: catálogo Zen completo (82), busca de 1 letra com contagem coerente,
+ * cenários: catálogo Zen completo, busca de 1 letra com contagem coerente,
  * query gigante/emoji/espaços, acentos com provedor injetado, modelos
  * indisponível/sem raciocínio/só-orçamento/esforço+orçamento, seleção e provedor
  * degenerados (fantasma/vazio), Home/End, setas entre abas e reancoragem do
@@ -15,6 +15,7 @@ import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@/components/ui';
 import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
 import { catalog } from '@/lib/catalog';
+import { modelMatchesQuery } from '@/lib/modelMenu';
 import type { ModelInfo, ProviderInfo } from '@/lib/types';
 import { useAppStore, useUiStore } from '@/lib/store';
 
@@ -23,6 +24,21 @@ afterEach(() => cleanup());
 const CURRENT_PROVIDER = 'opencode-go';
 const CURRENT_MODEL = 'deepseek-v4.1-flash';
 const FAVORITES = ['glm-5.3-flash', 'deepseek-v4.1-flash', 'claude-haiku-5-5', 'gpt-6-luna'];
+
+const GO_MODELS = catalog.providers.find((provider) => provider.id === CURRENT_PROVIDER)?.models ?? [];
+const ZEN_MODELS = catalog.providers.find((provider) => provider.id === 'opencode-zen')?.models ?? [];
+const GO_COUNT = GO_MODELS.length;
+const ZEN_COUNT = ZEN_MODELS.length;
+/** Every model whose provider/name/id/etc. contains the single letter "o". */
+const TOTAL_MATCHING_O = catalog.providers.reduce(
+  (total, provider) =>
+    total + provider.models.filter((model) => modelMatchesQuery(model, provider, 'o')).length,
+  0,
+);
+
+function countLabel(count: number): string {
+  return `${count} ${count === 1 ? 'modelo' : 'modelos'}`;
+}
 
 beforeEach(() => {
   useUiStore.setState({ modelPickerOpen: true, settingsOpen: false });
@@ -104,15 +120,23 @@ describe('ModelPickerDialog (edge) — reancoragem do destaque', () => {
     await waitFor(() => {
       const highlighted = activeOption();
       expect(highlighted).toBeTruthy();
-      expect(highlighted?.textContent).toContain('LongCat 2.5 Preview Free');
+      expect(highlighted?.getAttribute('aria-disabled')).toBeNull();
     });
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 3 }).textContent).not.toBe('DeepSeek V4.1 Flash'),
+    );
+    const previewName = screen.getByRole('heading', { level: 3 }).textContent;
 
     // Devolve o foco à busca antes de confirmar pelo teclado.
     await user.click(searchField());
     await user.keyboard('{Enter}');
 
     await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
-    expect(useAppStore.getState().selection.modelId).toBe('longcat-2.5-preview-free');
+    const selection = useAppStore.getState().selection;
+    const selected = catalog.providers
+      .find((provider) => provider.id === selection.providerId)
+      ?.models.find((model) => model.id === selection.modelId);
+    expect(selected?.name).toBe(previewName);
   });
 
   it('filtros sem nenhum resultado mostram o estado vazio e "Limpar busca e filtros" restaura', async () => {
@@ -130,8 +154,8 @@ describe('ModelPickerDialog (edge) — reancoragem do destaque', () => {
 
     await user.click(screen.getByRole('button', { name: 'Limpar busca e filtros' }));
 
-    expect(screen.getAllByRole('option')).toHaveLength(38);
-    expect(modelCount()).toBe('38 modelos');
+    expect(screen.getAllByRole('option')).toHaveLength(GO_COUNT);
+    expect(modelCount()).toBe(countLabel(GO_COUNT));
     expect(screen.getByRole('button', { name: 'Favoritos' }).getAttribute('aria-pressed')).toBe(
       'false',
     );
@@ -139,25 +163,27 @@ describe('ModelPickerDialog (edge) — reancoragem do destaque', () => {
 });
 
 describe('ModelPickerDialog (edge) — catálogo grande e busca hostil', () => {
-  it('catálogo Zen completo: 82 modelos e busca de 1 letra com contagem/ids coerentes', async () => {
+  it('catálogo Zen completo e busca de 1 letra com contagem/ids coerentes', async () => {
     await renderOpenDialog();
     const user = userEvent.setup();
 
     await user.click(screen.getByRole('tab', { name: 'Zen' }));
 
     const zenOptions = screen.getAllByRole('option');
-    expect(zenOptions).toHaveLength(82);
-    expect(modelCount()).toBe('82 modelos');
-    expect(new Set(zenOptions.map((option) => option.id)).size).toBe(82);
+    expect(zenOptions).toHaveLength(ZEN_COUNT);
+    expect(modelCount()).toBe(countLabel(ZEN_COUNT));
+    expect(new Set(zenOptions.map((option) => option.id)).size).toBe(ZEN_COUNT);
 
     await user.type(searchField(), 'o');
 
-    // 1 letra casa nos quatro provedores: 38 Go + 82 Zen + 27 OpenAI + 14 Anthropic.
-    expect(screen.getAllByRole('option')).toHaveLength(161);
-    expect(modelCount()).toBe('161 modelos');
+    // 1 letra casa nos quatro provedores enquanto todos tiverem "o" no nome.
+    expect(screen.getAllByRole('option')).toHaveLength(TOTAL_MATCHING_O);
+    expect(modelCount()).toBe(countLabel(TOTAL_MATCHING_O));
     // A busca global repete slugs (Zen × Anthropic), mas o id qualificado do
     // option (providerId:modelId) continua único.
-    expect(new Set(screen.getAllByRole('option').map((option) => option.id)).size).toBe(161);
+    expect(new Set(screen.getAllByRole('option').map((option) => option.id)).size).toBe(
+      TOTAL_MATCHING_O,
+    );
     expect(screen.getByText('Todos os provedores')).toBeTruthy();
     expect(screen.queryAllByRole('tab')).toHaveLength(0);
     // O destaque é reancorado no primeiro resultado e aponta para um id real.
@@ -177,11 +203,11 @@ describe('ModelPickerDialog (edge) — catálogo grande e busca hostil', () => {
     expect(screen.queryAllByRole('option')).toHaveLength(0);
 
     await user.click(screen.getByRole('button', { name: 'Limpar busca e filtros' }));
-    expect(screen.getAllByRole('option')).toHaveLength(38);
+    expect(screen.getAllByRole('option')).toHaveLength(GO_COUNT);
 
     await user.type(searchField(), '    ');
     expect(screen.queryAllByRole('tab')).toHaveLength(4);
-    expect(modelCount()).toBe('38 modelos');
+    expect(modelCount()).toBe(countLabel(GO_COUNT));
     expect(screen.queryByText('Todos os provedores')).toBeNull();
 
     await user.clear(searchField());
@@ -351,7 +377,7 @@ describe('ModelPickerDialog (edge) — estados de modelo e provedor', () => {
 
     expect(screen.getByRole('heading', { name: 'DeepSeek V4.1 Flash' })).toBeTruthy();
     expect(screen.queryByText('Em uso')).toBeNull();
-    expect(screen.getAllByRole('option')).toHaveLength(38);
+    expect(screen.getAllByRole('option')).toHaveLength(GO_COUNT);
     expect(
       (screen.getByRole('button', { name: 'Usar este modelo' }) as HTMLButtonElement).disabled,
     ).toBe(false);
@@ -383,14 +409,15 @@ describe('ModelPickerDialog (edge) — teclado', () => {
   it('Home/End navegam a lista e atualizam a prévia sem perder o aria-activedescendant', async () => {
     await renderOpenDialog();
     const user = userEvent.setup();
+    const options = screen.getAllByRole('option');
 
     await user.keyboard('{End}');
     expect(activeOption()).toBeTruthy();
-    expect(screen.getByRole('heading', { level: 3 }).textContent).toBe('Omen Alpha');
+    expect(activeOption()?.id).toBe(options[options.length - 1].id);
 
     await user.keyboard('{Home}');
     expect(activeOption()).toBeTruthy();
-    expect(screen.getByRole('heading', { level: 3 }).textContent).toBe('Claude Haiku 5.5');
+    expect(activeOption()?.id).toBe(options[0].id);
   });
 
   it('setas nas abas de provedor trocam o provedor e a contagem acompanha', async () => {
@@ -402,11 +429,11 @@ describe('ModelPickerDialog (edge) — teclado', () => {
 
     await user.keyboard('{ArrowRight}');
     expect(screen.getByRole('tab', { name: 'Zen' }).getAttribute('aria-selected')).toBe('true');
-    expect(modelCount()).toBe('82 modelos');
+    expect(modelCount()).toBe(countLabel(ZEN_COUNT));
 
     await user.keyboard('{ArrowLeft}');
     expect(screen.getByRole('tab', { name: 'Go' }).getAttribute('aria-selected')).toBe('true');
-    expect(modelCount()).toBe('38 modelos');
+    expect(modelCount()).toBe(countLabel(GO_COUNT));
   });
 });
 

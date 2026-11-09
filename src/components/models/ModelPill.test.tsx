@@ -42,6 +42,16 @@ const GO = 'opencode-go';
 const ZEN = 'opencode-zen';
 const CURRENT_MODEL = 'deepseek-v4.1-flash';
 
+const GO_MODELS = catalog.providers.find((provider) => provider.id === GO)?.models ?? [];
+const ZEN_MODELS = catalog.providers.find((provider) => provider.id === ZEN)?.models ?? [];
+/** The compact pill hides models the gateway reports as unavailable. */
+const GO_AVAILABLE_COUNT = GO_MODELS.filter((model) => model.status !== 'unavailable').length;
+const ZEN_COUNT = ZEN_MODELS.filter((model) => model.status !== 'unavailable').length;
+
+function countLabel(count: number): string {
+  return `${count} ${count === 1 ? 'modelo' : 'modelos'}`;
+}
+
 function closedMarkup(element: ReactElement): string {
   return renderToStaticMarkup(<TooltipProvider>{element}</TooltipProvider>);
 }
@@ -267,7 +277,7 @@ describe('ModelPill (model step)', () => {
       (within(dialog).getByRole('radio', { name: 'Go' }) as HTMLElement).getAttribute('aria-checked'),
     ).toBe('true');
     expect(within(dialog).getByRole('radio', { name: 'Zen' })).toBeTruthy();
-    expect(within(dialog).getByText('37 modelos')).toBeTruthy();
+    expect(within(dialog).getByText(countLabel(GO_AVAILABLE_COUNT))).toBeTruthy();
 
     // Groups: favorites first, then the families.
     expect(within(dialog).getByText('Favoritos')).toBeTruthy();
@@ -338,7 +348,7 @@ describe('ModelPill (model step)', () => {
         'aria-checked',
       ),
     ).toBe('true');
-    expect(within(dialog).getByText('82 modelos')).toBeTruthy();
+    expect(within(dialog).getByText(countLabel(ZEN_COUNT))).toBeTruthy();
   });
 
   it('shows the floating details bubble when a model row is hovered', async () => {
@@ -374,11 +384,11 @@ describe('ModelPill (model step)', () => {
 
     await user.keyboard('{ArrowDown}');
     const details = await within(dialog).findByRole('group', { name: 'Detalhes do modelo' });
-    expect(within(details).getByText(/OpenCode Go · gemini-4-argon-contributor/)).toBeTruthy();
+    const firstRow = within(details).getByText(/OpenCode Go · /).textContent;
 
     await user.keyboard('{ArrowDown}');
     await waitFor(() => {
-      expect(within(details).getByText(/OpenCode Go · glm-5\.1/)).toBeTruthy();
+      expect(within(details).getByText(/OpenCode Go · /).textContent).not.toBe(firstRow);
     });
 
     await user.hover(within(dialog).getByRole('option', { name: 'Claude Haiku 5.5' }));

@@ -6,8 +6,8 @@
   "description": "Lumina — chat desktop com harness de agentes, provedores OpenCode Go e Zen",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "build:fast": "vite build",
+    "build": "node scripts/sync-catalog.mjs && tsc --noEmit && vite build",
+    "build:fast": "node scripts/sync-catalog.mjs && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
@@ -17,9 +17,11 @@
     "installer:dry": "node scripts/build-installer.mjs --dry-run",
     "version:set": "node scripts/set-version.mjs",
     "catalog": "node scripts/build-catalog.mjs",
+    "catalog:sync": "node scripts/sync-catalog.mjs",
     "brand": "node scripts/build-brand.mjs",
     "verify:models": "node scripts/verify-models.mjs",
     "test": "vitest run",
+    "test:scripts": "node --test scripts/__tests__/catalog-sources.test.mjs",
     "test:installer": "node --test scripts/installer/__tests__/shared.test.mjs scripts/installer/__tests__/config.test.mjs scripts/installer/__tests__/release.test.mjs scripts/installer/__tests__/version.test.mjs",
     "test:watch": "vitest"
   },

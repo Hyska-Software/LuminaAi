@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 /**
- * Downloads the research inputs used by `build-catalog.mjs`:
- *  - official OpenCode Go + Zen docs (model tables)
+ * Research helper: downloads the public gateway inputs into `.research/`:
+ *  - official OpenCode Go + Zen docs HTML (model tables)
  *  - models.dev catalog (capabilities, reasoning options, pricing)
+ *  - live model lists from both gateways (for inspection)
+ *
+ * Builds use `scripts/sync-catalog.mjs`, which parses the docs and regenerates
+ * `data/catalog.json`. Keep this script for live-list research only.
  *
  * Usage: node scripts/collect-research.mjs
  */

@@ -18,6 +18,7 @@ cd src-tauri && cargo check  # backend
 cd src-tauri && cargo test --lib   # testes Rust (TDD)
 cd src-tauri && cargo build  # binário de debug
 node scripts/build-catalog.mjs
+pnpm catalog:sync            # baixa docs Go/Zen + models.dev e regenera todos os provedores
 ```
 
 Observação: `cargo` usa um target dir compartilhado. Se aparecer `Blocking waiting for file lock`, aguarde a outra compilação terminar — **não** delete `src-tauri/target`.

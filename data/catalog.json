@@ -1,6 +1,6 @@
 {
  "version": 1,
- "generatedAt": "2026-10-26T20:29:51.869Z",
+ "generatedAt": "2026-11-09T18:57:44.961Z",
  "sources": {
   "docs": [
    "https://opencode.ai/v2/docs/console/go/",
@@ -240,6 +240,91 @@
      "status": "free"
     },
     {
+     "id": "crouton-alpha-free",
+     "name": "Crouton Alpha Free",
+     "family": "default",
+     "protocols": [
+      "openai-responses"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "effort",
+       "values": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ]
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image",
+       "video",
+       "pdf"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1048576,
+     "maxOutput": 270000,
+     "cost": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+     },
+     "releaseDate": "2026-11-03",
+     "knowledge": null,
+     "openWeights": false,
+     "description": "Stealth reasoning model with text, image, video and PDF input and tool use",
+     "tags": [
+      "free",
+      "reasoning",
+      "vision"
+     ],
+     "status": "free"
+    },
+    {
+     "id": "iceman-contributor-free",
+     "name": "Iceman Contributor Free",
+     "family": "default",
+     "protocols": [
+      "openai-chat"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [],
+     "attachment": false,
+     "modalities": {
+      "input": [
+       "text"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 262144,
+     "maxOutput": 131072,
+     "cost": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+     },
+     "releaseDate": "2026-10-24",
+     "knowledge": null,
+     "openWeights": false,
+     "description": "Stealth model, free for a limited time",
+     "tags": [
+      "free"
+     ],
+     "status": "free"
+    },
+    {
      "id": "omen-alpha",
      "name": "Omen Alpha",
      "family": "default",
@@ -266,6 +351,56 @@
      "description": null,
      "tags": [],
      "status": "beta"
+    },
+    {
+     "id": "gemini-4-argon",
+     "name": "Gemini 4 Argon",
+     "family": "gemini",
+     "protocols": [
+      "google"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "effort",
+       "values": [
+        "low",
+        "medium",
+        "high"
+       ]
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image",
+       "video",
+       "audio",
+       "pdf"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1048576,
+     "maxOutput": 65536,
+     "cost": {
+      "input": 2,
+      "output": 10,
+      "cache_read": 0.1,
+      "input_audio": 2
+     },
+     "releaseDate": "2026-10-13",
+     "knowledge": "2026-03",
+     "openWeights": false,
+     "description": "Google's flagship reasoning model for complex software engineering, deep math and science, and long-horizon autonomous agents",
+     "tags": [
+      "fast",
+      "reasoning",
+      "vision"
+     ],
+     "status": "stable"
     },
     {
      "id": "gemini-4-argon-contributor",
@@ -466,8 +601,7 @@
       "input": [
        "text",
        "image",
-       "video",
-       "pdf"
+       "video"
       ],
       "output": [
        "text"
@@ -799,6 +933,50 @@
      "status": "stable"
     },
     {
+     "id": "hy4",
+     "name": "Hy4",
+     "family": "hy",
+     "protocols": [
+      "openai-chat"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "effort",
+       "values": [
+        "none",
+        "high"
+       ]
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1048576,
+     "maxOutput": 65536,
+     "cost": {
+      "input": 0.834,
+      "output": 2.501,
+      "cache_read": 0.042
+     },
+     "releaseDate": "2026-11-04",
+     "knowledge": null,
+     "openWeights": false,
+     "description": "A next-generation multimodal productivity model with significantly enhanced Agent and complex task execution capabilities.",
+     "tags": [
+      "reasoning",
+      "vision"
+     ],
+     "status": "stable"
+    },
+    {
      "id": "hy4-preview",
      "name": "Hy4 preview",
      "family": "hy",
@@ -1011,7 +1189,7 @@
      },
      "releaseDate": "2026-10-23",
      "knowledge": null,
-     "openWeights": false,
+     "openWeights": true,
      "description": "Multimodal Kimi model with 1M context and always-on reasoning for coding, 3D creation, financial research, and agentic work",
      "tags": [
       "open-weights",
@@ -1019,6 +1197,47 @@
       "vision"
      ],
      "status": "stable"
+    },
+    {
+     "id": "longcat-2.5-free",
+     "name": "LongCat 2.5 Free",
+     "family": "longcat",
+     "protocols": [
+      "openai-chat"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "toggle"
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1000000,
+     "maxOutput": 262144,
+     "cost": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+     },
+     "releaseDate": "2026-11-02",
+     "knowledge": null,
+     "openWeights": false,
+     "description": "Meituan's multimodal reasoning model for long-horizon coding and agent tasks, with visual understanding and a 1M-token context window",
+     "tags": [
+      "free",
+      "reasoning",
+      "vision"
+     ],
+     "status": "free"
     },
     {
      "id": "longcat-2.5-preview-free",
@@ -1332,7 +1551,7 @@
      },
      "releaseDate": "2026-10-19",
      "knowledge": null,
-     "openWeights": false,
+     "openWeights": true,
      "description": "Frontier multimodal coding model with 1M context window and tunable thinking depth",
      "tags": [
       "fast",
@@ -1832,9 +2051,9 @@
     "supportsKey": true,
     "supportsRetention": false,
     "supportsExplicitBreakpoints": true,
-    "source": "probe",
     "reportsRead": true,
-    "reportsWrite": true
+    "reportsWrite": true,
+    "source": "probe"
    }
   },
   {
@@ -2555,7 +2774,7 @@
      "cost": {
       "input": 2,
       "output": 10,
-      "cache_read": 0.2,
+      "cache_read": 0.1,
       "cache_write": 2.5
      },
      "releaseDate": "2026-09-28",
@@ -2795,6 +3014,57 @@
      "status": "stable"
     },
     {
+     "id": "crouton-alpha-free",
+     "name": "Crouton Alpha Free",
+     "family": "default",
+     "protocols": [
+      "openai-responses"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "effort",
+       "values": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ]
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image",
+       "video",
+       "pdf"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1048576,
+     "maxOutput": 270000,
+     "cost": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+     },
+     "releaseDate": "2026-11-03",
+     "knowledge": null,
+     "openWeights": false,
+     "description": "Stealth reasoning model with text, image, video and PDF input and tool use",
+     "tags": [
+      "free",
+      "reasoning",
+      "vision"
+     ],
+     "status": "free"
+    },
+    {
      "id": "flint-40b-free",
      "name": "Flint 40B Free",
      "family": "default",
@@ -2837,6 +3107,90 @@
      "tags": [
       "free",
       "reasoning"
+     ],
+     "status": "free"
+    },
+    {
+     "id": "iceman-free",
+     "name": "Iceman Free",
+     "family": "default",
+     "protocols": [
+      "openai-chat"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [],
+     "attachment": false,
+     "modalities": {
+      "input": [
+       "text"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 262144,
+     "maxOutput": 131072,
+     "cost": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+     },
+     "releaseDate": "2026-11-06",
+     "knowledge": null,
+     "openWeights": false,
+     "description": "Stealth model, free for a limited time",
+     "tags": [
+      "free"
+     ],
+     "status": "free"
+    },
+    {
+     "id": "inkling-2-small-free",
+     "name": "Inkling 2 Small Free",
+     "family": "default",
+     "protocols": [
+      "openai-chat"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "effort",
+       "values": [
+        "none",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "max"
+       ]
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1048576,
+     "maxOutput": 131072,
+     "cost": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+     },
+     "releaseDate": "2026-11-05",
+     "knowledge": null,
+     "openWeights": false,
+     "description": "Inkling 2 Small, free for a limited time",
+     "tags": [
+      "free",
+      "reasoning",
+      "vision"
      ],
      "status": "free"
     },
@@ -3445,8 +3799,7 @@
       "input": [
        "text",
        "image",
-       "video",
-       "pdf"
+       "video"
       ],
       "output": [
        "text"
@@ -3494,8 +3847,7 @@
       "input": [
        "text",
        "image",
-       "video",
-       "pdf"
+       "video"
       ],
       "output": [
        "text"
@@ -5218,6 +5570,47 @@
      "status": "stable"
     },
     {
+     "id": "longcat-2.5-free",
+     "name": "LongCat 2.5 Free",
+     "family": "longcat",
+     "protocols": [
+      "openai-chat"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "toggle"
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1000000,
+     "maxOutput": 262144,
+     "cost": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+     },
+     "releaseDate": "2026-11-02",
+     "knowledge": null,
+     "openWeights": false,
+     "description": "Meituan's multimodal reasoning model for long-horizon coding and agent tasks, with visual understanding and a 1M-token context window",
+     "tags": [
+      "free",
+      "reasoning",
+      "vision"
+     ],
+     "status": "free"
+    },
+    {
      "id": "longcat-2.5-preview-free",
      "name": "LongCat 2.5 Preview Free",
      "family": "longcat",
@@ -5942,9 +6335,9 @@
     "supportsKey": true,
     "supportsRetention": false,
     "supportsExplicitBreakpoints": true,
-    "source": "probe",
     "reportsRead": true,
-    "reportsWrite": true
+    "reportsWrite": true,
+    "source": "probe"
    }
   },
   {
@@ -7285,6 +7678,74 @@
      "status": "stable"
     },
     {
+     "id": "gpt-6.1-terra",
+     "name": "GPT-6.1 Terra",
+     "family": "gpt",
+     "protocols": [
+      "openai-responses"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "effort",
+       "values": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ]
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image",
+       "pdf"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1050000,
+     "maxOutput": 128000,
+     "cost": {
+      "input": 1,
+      "output": 5,
+      "cache_read": 0.05,
+      "cache_write": 1.25,
+      "tiers": [
+       {
+        "input": 2,
+        "output": 7.5,
+        "cache_read": 0.1,
+        "cache_write": 2.5,
+        "tier": {
+         "type": "context",
+         "size": 272000
+        }
+       }
+      ],
+      "context_over_200k": {
+       "input": 2,
+       "output": 7.5,
+       "cache_read": 0.1,
+       "cache_write": 2.5
+      }
+     },
+     "releaseDate": "2026-10-26",
+     "knowledge": "2026-06-01",
+     "openWeights": false,
+     "description": "Fast, efficient model for visual reasoning, precise computer use, and clear, natural writing.",
+     "tags": [
+      "reasoning",
+      "vision"
+     ],
+     "status": "stable"
+    },
+    {
      "id": "o3",
      "name": "o3",
      "family": "gpt",
@@ -7465,11 +7926,6 @@
      "status": "stable"
     }
    ],
-   "notes": [
-    "O uso consome o limite do seu plano ChatGPT (o mesmo pool compartilhado por apps, Codex e ChatGPT Work).",
-    "Contas Plus têm a janela de 5 h compartilhada; Pro não tem esse limite. Limites específicos deste app também podem valer.",
-    "A lista de modelos é específica da conta: use \"Atualizar modelos\" após entrar."
-   ],
    "cache": {
     "mode": "auto",
     "minTokens": 1024,
@@ -7481,10 +7937,15 @@
     "supportsKey": true,
     "supportsRetention": true,
     "supportsExplicitBreakpoints": true,
-    "source": "family-default",
     "reportsRead": true,
-    "reportsWrite": true
-   }
+    "reportsWrite": true,
+    "source": "family-default"
+   },
+   "notes": [
+    "O uso consome o limite do seu plano ChatGPT (o mesmo pool compartilhado por apps, Codex e ChatGPT Work).",
+    "Contas Plus têm a janela de 5 h compartilhada; Pro não tem esse limite. Limites específicos deste app também podem valer.",
+    "A lista de modelos é específica da conta: use \"Atualizar modelos\" após entrar."
+   ]
   },
   {
    "id": "anthropic",
@@ -8204,12 +8665,6 @@
      "status": "stable"
     }
    ],
-   "notes": [
-    "Cobrança por token na sua conta Anthropic (pay-as-you-go) — este provedor não usa assinatura/plano.",
-    "Crie ou revise a API key em https://platform.claude.com/settings/keys.",
-    "A lista da conta é buscada em GET /v1/models; use \"Atualizar modelos\" para mesclar novidades.",
-    "Versão da API fixada em anthropic-version: 2026-10-21 (sem headers beta)."
-   ],
    "cache": {
     "mode": "explicit",
     "minTokens": null,
@@ -8221,10 +8676,16 @@
     "supportsKey": false,
     "supportsRetention": false,
     "supportsExplicitBreakpoints": true,
-    "source": "family-default",
     "reportsRead": true,
-    "reportsWrite": true
-   }
+    "reportsWrite": true,
+    "source": "family-default"
+   },
+   "notes": [
+    "Cobrança por token na sua conta Anthropic (pay-as-you-go) — este provedor não usa assinatura/plano.",
+    "Crie ou revise a API key em https://platform.claude.com/settings/keys.",
+    "A lista da conta é buscada em GET /v1/models; use \"Atualizar modelos\" para mesclar novidades.",
+    "Versão da API fixada em anthropic-version: 2026-10-21 (sem headers beta)."
+   ]
   }
  ]
 }

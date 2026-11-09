@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@/components/ui';
 import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
 import { providers } from '@/lib/catalog';
+import { modelSupportsVision } from '@/lib/modelMenu';
 import type { ChatMessage, Conversation } from '@/lib/types';
 import {
   MODEL_LOCKED_DESCRIPTION,
@@ -38,6 +39,17 @@ afterEach(() => cleanup());
 const CURRENT_PROVIDER = 'opencode-go';
 const CURRENT_MODEL = 'deepseek-v4.1-flash';
 const FAVORITES = ['glm-5.3-flash', 'deepseek-v4.1-flash', 'claude-haiku-5-5', 'gpt-6-luna'];
+
+const CATALOG_PROVIDERS = providers();
+const GO_MODELS = CATALOG_PROVIDERS.find((provider) => provider.id === CURRENT_PROVIDER)?.models ?? [];
+const ZEN_MODELS = CATALOG_PROVIDERS.find((provider) => provider.id === 'opencode-zen')?.models ?? [];
+const GO_COUNT = GO_MODELS.length;
+const ZEN_COUNT = ZEN_MODELS.length;
+const GO_VISION_COUNT = GO_MODELS.filter(modelSupportsVision).length;
+const GO_FREE_COUNT = GO_MODELS.filter((model) => model.status === 'free').length;
+const GO_VISION_FREE_COUNT = GO_MODELS.filter(
+  (model) => model.status === 'free' && modelSupportsVision(model),
+).length;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -212,12 +224,12 @@ describe('ModelPickerDialog', () => {
     // Sem trilho próprio, a aba ativa usa preenchimento em vez de sombra.
     expect(goTab.className).toContain('data-[state=active]:bg-surface-active');
     expect(goTab.className).not.toContain('shadow-sm');
-    expect(modelCount()).toBe(38);
+    expect(modelCount()).toBe(GO_COUNT);
 
     await user.click(screen.getByRole('tab', { name: 'Zen' }));
 
     expect(screen.getByRole('tab', { name: 'Zen' }).getAttribute('aria-selected')).toBe('true');
-    expect(modelCount()).toBe(82);
+    expect(modelCount()).toBe(ZEN_COUNT);
     // O Zen não tem Omen Alpha (exclusivo do Go).
     expect(screen.queryByRole('option', { name: /Omen Alpha/ })).toBeNull();
     // A prévia passa para o modelo padrão do provedor.
@@ -228,26 +240,25 @@ describe('ModelPickerDialog', () => {
     await renderOpenDialog();
     const user = userEvent.setup();
 
-    expect(modelCount()).toBe(38);
+    expect(modelCount()).toBe(GO_COUNT);
 
     const vision = screen.getByRole('button', { name: 'Visão' });
     await user.click(vision);
     expect(vision.getAttribute('aria-pressed')).toBe('true');
-    expect(modelCount()).toBe(26);
+    expect(modelCount()).toBe(GO_VISION_COUNT);
 
     const free = screen.getByRole('button', { name: 'Grátis' });
     await user.click(free);
     expect(free.getAttribute('aria-pressed')).toBe('true');
-    // Visão + Grátis: só o LongCat 2.5 Preview Free.
-    expect(modelCount()).toBe(1);
-    expect(screen.getByText('1 modelo')).toBeTruthy();
+    // Visão + Grátis: apenas os modelos gratuitos com suporte a imagem.
+    expect(modelCount()).toBe(GO_VISION_FREE_COUNT);
     expect(screen.getByRole('option', { name: /LongCat 2\.5 Preview Free/ })).toBeTruthy();
     expect(screen.queryByRole('option', { name: /Beam Free/ })).toBeNull();
 
     // Desligando "Visão", "Grátis" sozinho mostra o Beam Free.
     await user.click(vision);
     expect(vision.getAttribute('aria-pressed')).toBe('false');
-    expect(modelCount()).toBe(2);
+    expect(modelCount()).toBe(GO_FREE_COUNT);
     expect(screen.getByRole('option', { name: /Beam Free/ })).toBeTruthy();
   });
 
@@ -266,7 +277,7 @@ describe('ModelPickerDialog', () => {
 
     expect(searchField().value).toBe('');
     expect(screen.getByRole('button', { name: 'Grátis' }).getAttribute('aria-pressed')).toBe('false');
-    expect(modelCount()).toBe(38);
+    expect(modelCount()).toBe(GO_COUNT);
   });
 
   it('clique na linha atualiza a prévia e "Usar este modelo" confirma e fecha', async () => {
@@ -385,7 +396,7 @@ describe('ModelPickerDialog', () => {
     await waitFor(() => expect(search.value).toBe(''));
     expect(screen.queryByRole('dialog')).toBeTruthy();
     expect(useUiStore.getState().modelPickerOpen).toBe(true);
-    expect(modelCount()).toBe(38);
+    expect(modelCount()).toBe(GO_COUNT);
 
     await user.keyboard('{Escape}');
     await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(false));
@@ -415,7 +426,7 @@ describe('ModelPickerDialog', () => {
     expect(screen.getByRole('button', { name: 'Visão' }).getAttribute('aria-pressed')).toBe('false');
     expect(screen.getByRole('heading', { name: 'DeepSeek V4.1 Flash' })).toBeTruthy();
     expect(screen.getByText('Em uso')).toBeTruthy();
-    expect(modelCount()).toBe(38);
+    expect(modelCount()).toBe(GO_COUNT);
   });
 
   it('mudar o modo de pensamento altera a prévia e o commit aplica o reasoning', async () => {

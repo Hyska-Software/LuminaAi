@@ -237,14 +237,38 @@ O gateway não expõe thought parts separados para o Gemini 4 Argon; o raciocín
 
 ## Regenerar o catálogo
 
+O catálogo é atualizado automaticamente antes de cada build:
+
 ```bash
-node scripts/collect-research.mjs   # baixa docs + models.dev (opcional)
-node scripts/probe-models.mjs       # sonda protocolos com a chave local (opcional)
-node scripts/build-catalog.mjs      # gera data/catalog.json
-node scripts/build-catalog.mjs --provider anthropic   # atualiza só o provedor Anthropic
+pnpm build        # renderer (tsc + vite)
+pnpm build:fast   # usado pelo beforeBuildCommand do `tauri build`
+pnpm app:build    # instalador; sincroniza antes de typecheck/testes
 ```
 
-Sempre que o gateway/provedor adicionar modelos, o app continua funcionando: a UI
-mostra os modelos do catálogo embutido e `refresh_catalog`/`refresh_provider_models`
-consultam a lista viva (`/v1/models`) para sinalizar novidades e mesclar a lista
-da conta.
+`scripts/sync-catalog.mjs` baixa as fontes públicas que não exigem credencial —
+as tabelas oficiais de Go/Zen e o catálogo do models.dev (OpenAI/Anthropic) —,
+regrava os inputs em `.research/` e chama `scripts/build-catalog.mjs`, que
+reconstrói **todos os provedores possíveis**. Sem rede, ou se o parse falhar, o
+script mantém os inputs e o `data/catalog.json` existentes e o build continua;
+`--strict` transforma a falha em erro.
+
+Para atualizar manualmente (ou regenerar sem rede):
+
+```bash
+pnpm catalog:sync                         # baixa + regenera
+node scripts/sync-catalog.mjs --offline   # regenera com os inputs locais
+pnpm catalog                              # só build-catalog.mjs
+node scripts/probe-models.mjs             # opcional: valida protocolos com a chave local
+node scripts/build-catalog.mjs --provider anthropic
+```
+
+O `data/catalog.json` gerado é commitado porque também é o fallback offline. O
+script não reescreve o arquivo quando só `generatedAt` mudaria, então builds
+repetidos não sujam a árvore.
+
+O catálogo é monotônico para os gateways: modelos de Go/Zen que já estavam no
+catálogo são preservados mesmo quando saem das tabelas oficiais, porque esses
+provedores não têm refresh da lista viva em runtime. Modelos novos entram pelo
+build; OpenAI e Anthropic seguem o models.dev no seed e continuam mesclando a
+lista da conta (`GET /v1/models`) em runtime, porque ela depende da credencial
+do usuário.

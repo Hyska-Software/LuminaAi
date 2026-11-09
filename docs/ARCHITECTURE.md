@@ -5,7 +5,7 @@ Lumina é um aplicativo desktop de conversação com LLMs, construído em **Taur
 ## 1. Princípios
 
 1. **Local-first**: conversas, anexos e artefatos ficam no disco do usuário (SQLite + arquivos no app-data). Nenhum servidor próprio.
-2. **Um único ponto de verdade para modelos**: o catálogo embutido (`data/catalog.json`) descreve protocolo de wire, capacidades de raciocínio, visão, limites e preço de cada modelo. É gerado a partir da documentação oficial + models.dev + sondagens reais contra o gateway.
+2. **Um único ponto de verdade para modelos**: o catálogo embutido (`data/catalog.json`) descreve protocolo de wire, capacidades de raciocínio, visão, limites e preço de cada modelo. É gerado/atualizado no build a partir da documentação oficial + models.dev, com sondagens reais contra o gateway quando disponíveis.
 3. **Protocolo neutro**: o harness não conhece OpenAI/Anthropic/Google; ele fala com uma camada de provedores que traduz um modelo neutro de conversa para 4 protocolos de wire.
 4. **Segurança por construção**: a UI generativa é declarativa (JSON com whitelist de componentes), nunca `eval`. HTML/SVG do agente roda em `<iframe sandbox>`.
 5. **Degradação graciosa**: se um protocolo não é suportado pelo modelo, tenta o próximo; se um parâmetro de raciocínio falha, reenvia sem ele; se a rede cai, a mensagem parcial é preservada.
@@ -220,8 +220,9 @@ capturas por turno (hash antes/depois) que dão o diff e o "reverter turno/arqui
 1. **Tabelas oficiais** de [OpenCode Go](https://opencode.ai/v2/docs/console/go) e [Zen](https://opencode.ai/v2/docs/console/models/) — ids, nomes e protocolo de wire por modelo;
 2. **models.dev** — `reasoning_options`, visão/anexos, limites de contexto, preço, família (Go/Zen/OpenAI/**Anthropic**);
 3. **Docs oficiais da Anthropic** ([platform.claude.com](https://platform.claude.com/docs/en/api/overview)) — modelo Claude do provedor direto (IDs dateless, limites, preços) e o header obrigatório `anthropic-version`, que entra no catálogo como header estático;
-4. **Sondagens reais** (`scripts/probe-models.mjs`) — quais protocolos o gateway aceita para cada modelo (há modelos multi-protocolo);
-5. **Heurísticas por família** para modelos novos que ainda não estão no models.dev.
+4. **Sondagens reais** (`scripts/probe-models.mjs`) — quais protocolos o gateway aceita para cada modelo (há modelos multi-protocolo); artefato local opcional, ausente em CI;
+5. **Heurísticas por família** para modelos novos que ainda não estão no models.dev;
+6. **Atualização no build** — `scripts/sync-catalog.mjs` roda antes de `pnpm build`, `pnpm build:fast` (usado pelo `beforeBuildCommand` do Tauri) e `pnpm app:build`: baixa as fontes públicas (docs Go/Zen + models.dev), regrava `.research/` e regenera todos os provedores possíveis. Falhas de rede mantêm o catálogo commitado; `--strict` falha o build. Entradas de Go/Zen já presentes são preservadas (esses provedores não têm refresh da lista viva em runtime); OpenAI/Anthropic também mesclam `GET /v1/models` da conta em runtime.
 
 Formato (resumo):
 
@@ -942,7 +943,7 @@ estável), a tool `goal` (limites, presentation, ausência em subagente), os com
 | --- | --- | --- | --- |
 | 1 | Harness em Rust | Loop no renderer | streaming robusto, cancelamento, persistência atômica, sem round-trips JS |
 | 2 | SQLite | arquivos JSON por conversa | consultas, integridade, busca |
-| 3 | Catálogo gerado offline | hardcode manual | 120+ modelos, dados voláteis |
+| 3 | Catálogo gerado no build (fallback offline commitado) | hardcode manual | 120+ modelos, dados voláteis |
 | 4 | UI generativa declarativa | React dinâmico via eval | segurança e determinismo |
 | 5 | Protocolo neutro + adaptadores | SDK único (ai-sdk) | controle de SSE, headers e reasoning por protocolo |
 | 6 | Zustand | Redux/Context | leveza e atualizações granulares em streaming |

@@ -37,6 +37,18 @@ afterEach(() => {
 const GO = 'opencode-go';
 const ZEN = 'opencode-zen';
 const CURRENT_MODEL = 'deepseek-v4.1-flash';
+
+const GO_MODELS = catalog.providers.find((provider) => provider.id === GO)?.models ?? [];
+const ZEN_MODELS = catalog.providers.find((provider) => provider.id === ZEN)?.models ?? [];
+/** The compact pill hides models the gateway reports as unavailable. */
+const GO_AVAILABLE_COUNT = GO_MODELS.filter((model) => model.status !== 'unavailable').length;
+const ZEN_AVAILABLE_COUNT = ZEN_MODELS.filter((model) => model.status !== 'unavailable').length;
+/** "opencode" matches the provider names of both gateway providers. */
+const OPENCODE_SEARCH_COUNT = GO_AVAILABLE_COUNT + ZEN_AVAILABLE_COUNT;
+
+function countLabel(count: number): string {
+  return `${count} ${count === 1 ? 'modelo' : 'modelos'}`;
+}
 const LONG_NAME = 'Gemini 4 Argon Contributor';
 const THINKING_ONLY_MODEL = 'gemini-4-argon-contributor';
 const BUDGET_ONLY_MODEL = 'claude-haiku-4-5';
@@ -254,7 +266,7 @@ describe('ModelPill (edge) — busca hostil', () => {
     // Só espaços não é uma busca: o seletor de provedor continua visível.
     expect(within(dialog).getByRole('radio', { name: 'Go' })).toBeTruthy();
     expect(within(dialog).queryByText('Go + Zen + ChatGPT + Anthropic')).toBeNull();
-    expect(within(dialog).getByText('37 modelos')).toBeTruthy();
+    expect(within(dialog).getByText(countLabel(GO_AVAILABLE_COUNT))).toBeTruthy();
   });
 
   it('normaliza maiúsculas e acentos (provedor injetado com "Céu Profundo Ômega")', async () => {
@@ -292,7 +304,7 @@ describe('ModelPill (edge) — busca hostil', () => {
     expect(within(dialog).getByText('Nenhum modelo encontrado')).toBeTruthy();
   });
 
-  it('busca global no catálogo inteiro: 119 modelos, ids únicos e destaque válido', async () => {
+  it('busca global no catálogo inteiro: contagem, ids únicos e destaque válido', async () => {
     const user = userEvent.setup();
     renderPill();
 
@@ -302,11 +314,11 @@ describe('ModelPill (edge) — busca hostil', () => {
 
     await user.type(search, 'opencode');
 
-    // 37 disponíveis no Go + 82 no Zen (o pill esconde indisponíveis).
-    expect(within(dialog).getByText('119 modelos')).toBeTruthy();
+    // Go disponível + Zen inteiro (o pill esconde indisponíveis).
+    expect(within(dialog).getByText(countLabel(OPENCODE_SEARCH_COUNT))).toBeTruthy();
     const options = within(dialog).getAllByRole('option');
-    expect(options).toHaveLength(119);
-    expect(new Set(options.map((option) => option.id)).size).toBe(119);
+    expect(options).toHaveLength(OPENCODE_SEARCH_COUNT);
+    expect(new Set(options.map((option) => option.id)).size).toBe(OPENCODE_SEARCH_COUNT);
     expect(within(dialog).getByText('Go + Zen + ChatGPT + Anthropic')).toBeTruthy();
 
     const activeId = search.getAttribute('aria-activedescendant');

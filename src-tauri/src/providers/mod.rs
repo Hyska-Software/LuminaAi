@@ -2129,18 +2129,26 @@ mod tests {
     }
 
     /// Regression for the Google cutover: the catalog endpoint is
-    /// `/google/v1beta/models/{model}` and must keep the SSE suffix. The
-    /// bundled catalog declares 9 Google-protocol models (1 in Go + 8 in Zen).
+    /// `/google/v1beta/models/{model}` and must keep the SSE suffix. Every
+    /// Google-protocol model in the bundled catalog must build the same URL,
+    /// and both gateway providers must expose at least one.
     #[test]
     fn google_endpoint_substitutes_model_and_keeps_sse_suffix() {
         let catalog = catalog();
         let mut checked = 0usize;
+        let mut has_go_google = false;
+        let mut has_zen_google = false;
         for provider in &catalog.providers {
             for model in &provider.models {
                 if !model.protocols.iter().any(|protocol| protocol == "google") {
                     continue;
                 }
                 checked += 1;
+                match provider.id.as_str() {
+                    "opencode-go" => has_go_google = true,
+                    "opencode-zen" => has_zen_google = true,
+                    _ => {}
+                }
                 let mut config = ProviderConfig {
                     provider_id: provider.id.clone(),
                     provider_name: provider.name.clone(),
@@ -2173,9 +2181,10 @@ mod tests {
                 );
             }
         }
-        assert_eq!(
-            checked, 9,
-            "catálogo deve declarar 9 modelos google (Go+Zen)"
+        assert!(checked > 0, "catálogo deve declarar modelos google (Go+Zen)");
+        assert!(
+            has_go_google && has_zen_google,
+            "Go e Zen devem expor ao menos um modelo google"
         );
     }
 

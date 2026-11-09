@@ -2,7 +2,7 @@
 /**
  * Builds the bundled model catalog used by both the Rust backend and the React UI.
  *
- * Data sources (regenerate with `node scripts/collect-research.mjs` when models change):
+ * Data sources (regenerate with `pnpm catalog:sync`, which downloads them):
  *  - OpenCode Go / Zen official docs tables      -> model ids, display names, wire protocol
  *  - models.dev catalog (providers opencode/...) -> capabilities, reasoning options, limits, cost
  *  - live protocol verification (probe scripts)  -> which wire protocols each model accepts
@@ -15,11 +15,41 @@ import path from 'node:path';
 const ROOT = path.resolve(import.meta.dirname, '..');
 const RESEARCH = path.join(ROOT, '.research');
 
-const readJson = (p) => JSON.parse(fs.readFileSync(path.join(RESEARCH, p), 'utf8'));
+function readJson(p) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(RESEARCH, p), 'utf8'));
+  } catch (error) {
+    throw new Error(`input ausente em .research/${p}: rode "pnpm catalog:sync" (${error.message})`);
+  }
+}
+
 const docsGo = readJson('docs-go.json');
 const docsZen = readJson('docs-zen.json');
 const modelsDev = readJson('models-dev.json');
-const goProtocols = readJson('go-protocols.json');
+// Protocol probes are an optional local verification artifact: without them the
+// docs tables still define availability and wire protocol.
+const goProtocols = (() => {
+  try {
+    return readJson('go-protocols.json');
+  } catch {
+    return [];
+  }
+})();
+
+const outDir = path.join(ROOT, 'data');
+const outFile = path.join(outDir, 'catalog.json');
+
+function previousModels(providerId) {
+  try {
+    const existing = JSON.parse(fs.readFileSync(outFile, 'utf8'));
+    return existing.providers?.find((provider) => provider.id === providerId)?.models ?? [];
+  } catch {
+    return [];
+  }
+}
+
+const previousGoModels = previousModels('opencode-go');
+const previousZenModels = previousModels('opencode-zen');
 
 const mdModels = (providerId) => modelsDev[providerId]?.models ?? {};
 const mdOpencode = mdModels('opencode');
@@ -314,23 +344,31 @@ function cacheDefaults(kind) {
   return undefined;
 }
 
-function buildProvider({ id, name, shortName, description, baseUrl, defaultModelId, docsById, mdSource, kind, notes }) {
+function buildProvider({ id, name, shortName, description, baseUrl, defaultModelId, docsById, mdSource, kind, notes, keepModels = [] }) {
   const ids = new Set(Object.keys(docsById));
   if (kind === 'go') for (const id of Object.keys(verifiedById)) ids.add(id);
-  const models = [...ids]
-    .map((modelId) =>
-      buildModel(modelId, {
-        docsEntry: docsById[modelId],
-        verified: verifiedById[modelId],
-        md: mdSource[modelId],
-        providerKind: kind,
-      }),
-    )
-    .sort((a, b) => {
-      // keep models.dev order-ish: by family then name
-      if (a.family !== b.family) return a.family.localeCompare(b.family);
-      return a.name.localeCompare(b.name);
-    });
+  const models = [...ids].map((modelId) =>
+    buildModel(modelId, {
+      docsEntry: docsById[modelId],
+      verified: verifiedById[modelId],
+      md: mdSource[modelId],
+      providerKind: kind,
+    }),
+  );
+  // Keep entries that were already bundled but are absent from this build's
+  // sources: docs tables rotate models and protocol probes are local-only, so a
+  // build must not silently drop a gateway model that still works.
+  for (const model of keepModels) {
+    if (!ids.has(model.id)) {
+      ids.add(model.id);
+      models.push(model);
+    }
+  }
+  models.sort((a, b) => {
+    // keep models.dev order-ish: by family then name
+    if (a.family !== b.family) return a.family.localeCompare(b.family);
+    return a.name.localeCompare(b.name);
+  });
 
   return {
     id,
@@ -543,6 +581,7 @@ const catalog = {
       docsById: docsGoById,
       mdSource: { ...mdGo, ...mdOpencode },
       kind: 'go',
+      keepModels: previousGoModels,
       notes: [
         'Envie o header x-opencode-session para melhor roteamento e prompt caching.',
         'Modelos marcados como "contributor" podem usar seus dados para treino.',
@@ -558,6 +597,7 @@ const catalog = {
       docsById: docsZenById,
       mdSource: mdOpencode,
       kind: 'zen',
+      keepModels: previousZenModels,
       notes: ['Funciona com créditos do OpenCode Console.', 'Modelos gratuitos exigem o cliente OpenCode.'],
     }),
     buildOpenAiProvider(),
@@ -565,9 +605,7 @@ const catalog = {
   ],
 };
 
-const outDir = path.join(ROOT, 'data');
 fs.mkdirSync(outDir, { recursive: true });
-const outFile = path.join(outDir, 'catalog.json');
 
 // `--provider <id>` updates only that provider while leaving the others
 // byte-identical (the catalog tasks require a surgical diff). Unknown ids fall
@@ -596,7 +634,29 @@ if (surgical) {
   };
 }
 
-fs.writeFileSync(outFile, JSON.stringify(output, null, 1));
+// Do not rewrite the tracked file when only `generatedAt` would change: builds
+// run this script automatically, and a timestamp-only diff would dirty the
+// working tree on every build.
+function withoutTimestamp(value) {
+  const { generatedAt, ...rest } = value;
+  return JSON.stringify(rest);
+}
+
+let unchanged = false;
+try {
+  unchanged = withoutTimestamp(JSON.parse(fs.readFileSync(outFile, 'utf8'))) === withoutTimestamp(output);
+} catch {
+  unchanged = false;
+}
+
+if (unchanged) {
+  console.log('catalog unchanged; keeping generatedAt');
+} else {
+  const tmp = `${outFile}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(output, null, 1));
+  fs.renameSync(tmp, outFile);
+  console.log(`wrote ${outFile} (${(fs.statSync(outFile).size / 1024).toFixed(1)} KiB)`);
+}
 
 for (const p of output.providers) {
   const byProtocol = p.models.reduce((acc, m) => {
@@ -610,4 +670,3 @@ for (const p of output.providers) {
   const noMeta = p.models.filter((m) => !m.cost).length;
   console.log(`  without pricing metadata: ${noMeta}`);
 }
-console.log(`wrote ${outFile} (${(fs.statSync(outFile).size / 1024).toFixed(1)} KiB)`);
