@@ -27,7 +27,7 @@ pub static TODO_WRITE_SPEC: ToolSpec = ToolSpec {
 
 pub static SUBMIT_PLAN_SPEC: ToolSpec = ToolSpec {
     name: "submit_plan",
-    description: "Submit an implementation-ready plan for human review while Plan mode is active. The plan must let another engineer execute it without re-deciding the design. The turn pauses until the user approves or asks for changes.",
+    description: "Submit an implementation-ready plan for human review while Plan mode is active. The plan must let another engineer execute it without re-deciding the design. The turn pauses until the user approves, rejects or cancels; the review has no deadline.",
     schema: submit_plan_schema,
     parallel: ParallelClass::Exclusive,
     risk: RiskClass::Ask,

@@ -73,7 +73,7 @@ multi-usuário com papéis.
 
 - [x] Capabilities `computerUse`/`screenCapture`/`browserUse`/`delegation`.
 - [x] Screenshot, clique, teclado, janelas, foco e árvore de acessibilidade.
-- [x] Aprovação por ação (`RiskClass::Computer` sempre Ask).
+- [x] Aprovação por ação fora do Autônomo (`RiskClass::Computer` Ask; no Autônomo executa direto).
 - [x] Docker gráfico (`docker/computer/`: Xvfb + noVNC + xdotool/scrot),
       validado com container real (1440×900, screenshot, clique, Chromium).
 - [x] `browser_open` (navegador real local/Docker, operado pelas tools de

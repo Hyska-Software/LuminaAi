@@ -38,9 +38,9 @@ fn default_timeout_ms(name: &str) -> Option<u64> {
         "write_file" | "edit_file" => Some(30_000),
         "validate_ui" => Some(10_000),
         "todo_write" => Some(60_000),
-        // `submit_plan` e `ask_user` pausam para revisão humana: o timeout é o do
-        // broker (`settings.approval_timeout_secs`), nunca um teto curto do
-        // runtime (B-03; `TOOLS.md` §4 — 10 min por aprovação).
+        // `submit_plan` waits for the plan review without a deadline (only turn
+        // cancellation); `ask_user` uses `settings.approval_timeout_secs`,
+        // never a short runtime cap (B-03; `TOOLS.md` §4).
         // `run_command` aplica o `timeout_ms` dos argumentos dentro da tool.
         _ => None,
     }

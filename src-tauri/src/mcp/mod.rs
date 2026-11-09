@@ -11,7 +11,8 @@
 //! mensagem por linha no stdin/stdout do processo filho). O Lumina faz
 //! `initialize` → `notifications/initialized` → `tools/list`, expõe as tools
 //! como `mcp__<servidor>__<tool>` no perfil Code e executa `tools/call` sob
-//! aprovação explícita do usuário (a tool roda fora do processo do agente).
+//! aprovação explícita do usuário nos modos interativos (o Autônomo executa
+//! direto; a tool roda fora do processo do agente).
 //!
 //! Contrato: `docs/goals/code-harness/PLAN.md` F8 e `TOOLS.md` §2.6.
 

@@ -1228,8 +1228,9 @@ fn mcp_tools_prompt_section(
     }
     let mut section = String::from("\n# MCP server tools\n\n");
     section.push_str(
-        "These tools run on MCP servers configured by the user and require their approval on \
-         every call. Use them when appropriate; errors come back as `MCP_*`.\n\n",
+        "These tools run on MCP servers configured by the user. Calls may ask for the user's \
+         approval depending on the permission mode (Autonomous runs without approval); errors \
+         come back as `MCP_*`.\n\n",
     );
     for tool in mcp_tools {
         section.push_str(&format!(
@@ -1390,7 +1391,7 @@ fn permission_mode_label(mode: crate::domain::PermissionMode) -> &'static str {
         crate::domain::PermissionMode::ReadOnly => "Read-only",
         crate::domain::PermissionMode::Edit => "Edit",
         crate::domain::PermissionMode::Review => "Review (every write requires approval)",
-        crate::domain::PermissionMode::Autonomous => "Autonomous",
+        crate::domain::PermissionMode::Autonomous => "Autonomous (no confirmation prompts)",
     }
 }
 
@@ -2255,8 +2256,9 @@ pub async fn run_turn(
         code_tool_prompts_list.push(code::prompt::ToolPrompt {
             name: "computer_screenshot",
             guidance: "Observe before acting: take a screenshot and list windows, then request \
-                       one input action at a time. Every click/type/key asks for the user's \
-                       approval; never assume approval was granted.",
+                       one input action at a time. Approval prompts depend on the permission \
+                       mode (Autonomous runs without them); never assume consent the active \
+                       mode does not grant.",
         });
     }
     // Seção MCP do system prompt (faz parte do snapshot congelado).

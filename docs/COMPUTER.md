@@ -23,13 +23,14 @@ turno quando a capability correspondente está ligada.
 | `computer_screenshot` | não (leitura) | PNG em `<app-data>/computer/<conversa>/`, dimensões e imagem para modelos com visão |
 | `computer_windows` | não (leitura) | lista id/título/app das janelas |
 | `computer_ui_tree` | não (leitura) | árvore de acessibilidade (nome/tipo/bounds/id) |
-| `computer_click` | **sempre** | move + clique esquerdo/direito/meio |
-| `computer_type` | **sempre** | digita no foco; aprovação mostra só o tamanho |
-| `computer_key` | **sempre** | combinação de teclas |
-| `computer_focus` | **sempre** | foca uma janela por id |
-| `browser_open` | **sempre** | abre http(s) no navegador padrão (local) ou Chromium (Docker); a página é operada pelas tools acima |
+| `computer_click` | fora do Autônomo | move + clique esquerdo/direito/meio |
+| `computer_type` | fora do Autônomo | digita no foco; aprovação mostra só o tamanho |
+| `computer_key` | fora do Autônomo | combinação de teclas |
+| `computer_focus` | fora do Autônomo | foca uma janela por id |
+| `browser_open` | fora do Autônomo | abre http(s) no navegador padrão (local) ou Chromium (Docker); a página é operada pelas tools acima |
 
-`RiskClass::Computer` sempre gera `Ask`, inclusive no modo Autônomo. O card usa
+`RiskClass::Computer` gera `Ask` fora do modo Autônomo; no Autônomo a ação roda
+direto. O card usa
 `ApprovalDetail::ComputerAction` com ação, alvo, coordenadas/URL, tamanho do
 texto (nunca o texto) e screenshot do alvo via
 `computer_screenshot_preview`. As opções são **Permitir uma vez** e **Negar**;
@@ -104,13 +105,13 @@ endereço e o controle humano. As tools de página são:
 
 | Tool | Aprovação | Efeito |
 | --- | --- | --- |
-| `browser_open` / `browser_navigate` | **sempre** | navega no navegador controlado |
+| `browser_open` / `browser_navigate` | fora do Autônomo | navega no navegador controlado |
 | `browser_snapshot` | não | URL/título, árvore de acessibilidade com refs `e1…` e screenshot |
-| `browser_click` / `browser_type` / `browser_press` | **sempre** | interage por ref/tecla; o card de `type` mostra só o tamanho |
+| `browser_click` / `browser_type` / `browser_press` | fora do Autônomo | interage por ref/tecla; o card de `type` mostra só o tamanho |
 | `browser_extract` | não | texto visível da página (script fixo, limite de 30k chars) |
 | `browser_tabs` | não | lista abas |
 | `browser_wait` | não | espera 50–5000 ms |
-| `browser_download` | **sempre** | clica no ref e espera o arquivo na pasta de downloads |
+| `browser_download` | fora do Autônomo | clica no ref e espera o arquivo na pasta de downloads |
 
 Segurança do navegador:
 
@@ -269,7 +270,7 @@ registrar teclas, texto, clipboard ou frames.
 ## Testes
 
 - `computer::tests` (backend por settings, escape de SendKeys).
-- `policy::tests::computer_control_always_asks_even_in_autonomous_mode`.
+- `policy::tests::computer_control_asks_outside_autonomous_and_is_allowed_inside_it`.
 - `db::tests::computer_audit_records_actions_without_text_and_counts_limits`.
 - `harness::tests::tool_screenshots_are_persisted_as_paths_and_replayed_only_for_vision_models`.
 - `providers::*::tests` (blocos de imagem por protocolo).

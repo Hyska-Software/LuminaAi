@@ -17,11 +17,13 @@ vi.mock('sonner', () => ({
     error: vi.fn(),
     info: vi.fn(),
     success: vi.fn(),
+    warning: vi.fn(),
   },
 }));
 
 // Imported after the mocks above.
 import { toast } from 'sonner';
+import { AUTONOMOUS_MODE_WARNING, AUTONOMOUS_MODE_WARNING_TITLE } from '@/lib/permissionModes';
 import { emptyCodeSession, useChatStore, useCodeStore, useUiStore, type CodeSessionUi } from '@/lib/store';
 import { CodeSessionControls } from './CodeSessionControls';
 
@@ -195,6 +197,11 @@ describe('CodeSessionControls — troca de permissão', () => {
     // Otimista: o rótulo muda antes da resposta do backend.
     expect(screen.getByRole('button', { name: 'Modo de permissão: Autônomo' })).toBeTruthy();
     await waitFor(() => expect(mocks.setPermissionMode).toHaveBeenCalledWith('c-1', 'autonomous'));
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(AUTONOMOUS_MODE_WARNING_TITLE, {
+        description: AUTONOMOUS_MODE_WARNING,
+      }),
+    );
   });
 
   it('reverte o modo e mantém o toast de erro quando o backend falha', async () => {

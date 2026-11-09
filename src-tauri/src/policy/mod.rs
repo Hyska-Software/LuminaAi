@@ -1,13 +1,15 @@
-//! Política de permissões do harness de código.
+//! Permission policy for the code harness.
 //!
-//! Regras (docs/goals/code-harness/HARNESS.md §6):
-//! 1. modo Plano ativo + mutação → nega;
-//! 2. comando destrutivo → pergunta **sempre** (mesmo no modo Autônomo);
-//! 3. arquivo de segredo → pergunta;
-//! 4. alvo fora do workspace → pergunta (nega no modo Leitura);
-//! 5. regras persistidas (`approval_rules`) decidem antes do padrão do modo;
-//! 6. padrão do modo;
-//! 7. fallback: pergunta para qualquer mutação.
+//! Rules (docs/goals/code-harness/HARNESS.md §6):
+//! 1. Plan mode active + mutation → deny;
+//! 2. Autonomous → allow, except persisted deny rules;
+//! 3. destructive command → ask (interactive modes only);
+//! 4. computer use → ask (interactive modes only);
+//! 5. secret file → ask (interactive modes only);
+//! 6. outside the workspace → ask (deny in ReadOnly; interactive modes only);
+//! 7. persisted approval rules decide before the mode default;
+//! 8. mode default;
+//! 9. fallback: ask for any mutation.
 //!
 //! A decisão é **pura** e determinística — a UI e os testes dependem disso. Quem
 //! executa a conversa com o usuário é o [`approval::ApprovalRegistry`].
@@ -70,7 +72,18 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
         };
     }
 
-    // 2. Destrutivo pede aprovação em QUALQUER modo.
+    // 2. Autonomous never asks the user. Explicit deny rules still win: they
+    //    are the user's own instructions, not confirmation prompts.
+    if ctx.mode == PermissionMode::Autonomous {
+        return match match_rule(ctx, facts) {
+            Some(PolicyDecision::Deny { code, reason }) => {
+                PolicyDecision::Deny { code, reason }
+            }
+            _ => PolicyDecision::Allow,
+        };
+    }
+
+    // 3. Destructive commands ask in every interactive mode.
     if let Some(reason) = facts.destructive_reason {
         return PolicyDecision::Ask {
             risk: RiskClass::Destroy,
@@ -78,8 +91,8 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
         };
     }
 
-    // 2.1 Computer use sempre pede aprovação, inclusive no modo Autônomo: a
-    // tela pode conter segredos e a ação pode ser induzida por conteúdo hostil.
+    // 4. Computer use asks in interactive modes: the screen may contain
+    //    secrets and the action may be induced by hostile content.
     if facts.risk == RiskClass::Computer {
         return PolicyDecision::Ask {
             risk: RiskClass::Computer,
@@ -87,7 +100,7 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
         };
     }
 
-    // 3. Arquivos de segredo exigem consentimento explícito.
+    // 5. Secret files require explicit consent in interactive modes.
     if facts.secret {
         return PolicyDecision::Ask {
             risk: RiskClass::Secret,
@@ -95,7 +108,7 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
         };
     }
 
-    // 4. Fora do workspace: leitura livre? não — sempre pergunta; Leitura nega.
+    // 6. Outside the workspace: interactive modes ask; ReadOnly denies.
     if !facts.inside_workspace {
         return match ctx.mode {
             PermissionMode::ReadOnly => PolicyDecision::Deny {
@@ -109,12 +122,12 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
         };
     }
 
-    // 5. Regras persistidas (sessão > workspace > global) vencem o padrão.
+    // 7. Persisted rules (session > workspace > global) override the default.
     if let Some(decision) = match_rule(ctx, facts) {
         return decision;
     }
 
-    // 6. Padrão do modo.
+    // 8. Mode default.
     match ctx.mode {
         PermissionMode::ReadOnly => {
             if facts.mutating {
@@ -147,20 +160,17 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
                 reason: "o modo Revisar pede aprovação para cada alteração".to_string(),
             },
         },
-        PermissionMode::Autonomous => match facts.risk {
-            RiskClass::Ask => PolicyDecision::Ask {
-                risk: facts.risk,
-                reason: "o agente precisa de uma decisão sua".to_string(),
-            },
-            _ => PolicyDecision::Allow,
-        },
+        // Unreachable: Autonomous returns above before the mode default.
+        PermissionMode::Autonomous => PolicyDecision::Allow,
     }
     .normalize(ctx.trusted)
 }
 
 impl PolicyDecision {
-    /// Workspace não confiável nunca executa mutações: vira `Ask` explícito
-    /// ("confie na pasta"), nunca erro silencioso.
+    /// Non-autonomous untrusted workspaces turn `Allow` into an explicit `Ask`
+    /// ("trust the folder"), never a silent error. Autonomous bypasses this
+    /// through the early return in `decide`; the tool-level trust gate still
+    /// refuses writes.
     fn normalize(self, trusted: bool) -> Self {
         match self {
             PolicyDecision::Allow if !trusted => PolicyDecision::Ask {
@@ -312,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn computer_control_always_asks_even_in_autonomous_mode() {
+    fn computer_control_asks_outside_autonomous_and_is_allowed_inside_it() {
         let facts = CallFacts {
             tool: "computer_click",
             risk: RiskClass::Computer,
@@ -326,7 +336,6 @@ mod tests {
             PermissionMode::ReadOnly,
             PermissionMode::Edit,
             PermissionMode::Review,
-            PermissionMode::Autonomous,
         ] {
             assert!(
                 matches!(
@@ -339,6 +348,7 @@ mod tests {
                 "mode {mode:?} must ask for computer control"
             );
         }
+        assert_eq!(decide(&ctx(PermissionMode::Autonomous), &facts), PolicyDecision::Allow);
     }
 
     #[test]
@@ -376,13 +386,13 @@ mod tests {
     }
 
     #[test]
-    fn autonomous_allows_shell_but_still_asks_for_destructive() {
+    fn autonomous_allows_any_command_including_destructive() {
         let c = ctx(PermissionMode::Autonomous);
         assert_eq!(decide(&c, &shell("npm test", None)), PolicyDecision::Allow);
-        assert!(matches!(
+        assert_eq!(
             decide(&c, &shell("rm -rf build", Some("rm -rf"))),
-            PolicyDecision::Ask { risk: RiskClass::Destroy, .. }
-        ));
+            PolicyDecision::Allow
+        );
     }
 
     #[test]
@@ -398,11 +408,17 @@ mod tests {
     }
 
     #[test]
-    fn secret_files_always_ask() {
-        let c = ctx(PermissionMode::Autonomous);
+    fn secret_files_ask_outside_autonomous() {
         let mut facts = read();
         facts.secret = true;
-        assert!(matches!(decide(&c, &facts), PolicyDecision::Ask { risk: RiskClass::Secret, .. }));
+        assert!(matches!(
+            decide(&ctx(PermissionMode::Edit), &facts),
+            PolicyDecision::Ask { risk: RiskClass::Secret, .. }
+        ));
+        assert_eq!(
+            decide(&ctx(PermissionMode::Autonomous), &facts),
+            PolicyDecision::Allow
+        );
     }
 
     #[test]
@@ -418,13 +434,62 @@ mod tests {
             decide(&ctx(PermissionMode::ReadOnly), &facts),
             PolicyDecision::Deny { code: "FS_OUTSIDE_WORKSPACE", .. }
         ));
+        assert_eq!(
+            decide(&ctx(PermissionMode::Autonomous), &facts),
+            PolicyDecision::Allow
+        );
     }
 
     #[test]
-    fn untrusted_workspace_turns_allow_into_ask() {
-        let mut c = ctx(PermissionMode::Edit);
-        c.trusted = false;
-        assert!(matches!(decide(&c, &write()), PolicyDecision::Ask { .. }));
+    fn untrusted_workspace_turns_allow_into_ask_outside_autonomous() {
+        let mut edit = ctx(PermissionMode::Edit);
+        edit.trusted = false;
+        assert!(matches!(decide(&edit, &write()), PolicyDecision::Ask { .. }));
+
+        let mut autonomous = ctx(PermissionMode::Autonomous);
+        autonomous.trusted = false;
+        assert_eq!(decide(&autonomous, &write()), PolicyDecision::Allow);
+    }
+
+    #[test]
+    fn autonomous_allows_ask_risk() {
+        let facts = CallFacts {
+            tool: "ask_user",
+            risk: RiskClass::Ask,
+            mutating: false,
+            target: None,
+            inside_workspace: true,
+            secret: false,
+            destructive_reason: None,
+        };
+        assert_eq!(decide(&ctx(PermissionMode::Autonomous), &facts), PolicyDecision::Allow);
+    }
+
+    #[test]
+    fn autonomous_still_honors_explicit_deny_rules() {
+        let deny = ApprovalRule {
+            id: "r1".into(),
+            scope: ApprovalScope::Global,
+            scope_id: None,
+            tool: "run_command".into(),
+            matcher: "prefix".into(),
+            pattern: "rm".into(),
+            decision: ApprovalDecision::Denied,
+            created_at: 0,
+        };
+        let rules = vec![deny];
+        let c = PolicyContext {
+            mode: PermissionMode::Autonomous,
+            plan_mode: false,
+            trusted: true,
+            session_id: "sess-1",
+            workspace_id: Some("ws-1"),
+            rules: &rules,
+        };
+        assert!(matches!(
+            decide(&c, &shell("rm -rf build", None)),
+            PolicyDecision::Deny { code: "POLICY_DENIED", .. }
+        ));
     }
 
     #[test]

@@ -20,6 +20,7 @@ vi.mock('@/lib/api', () => ({
 }));
 
 // Imported after the mock above.
+import { AUTONOMOUS_MODE_WARNING } from '@/lib/permissionModes';
 import { ToolsTab } from '@/components/settings/ToolsTab';
 import { useAppStore, useUiStore } from '@/lib/store';
 
@@ -380,6 +381,19 @@ describe('ToolsTab — sessões de código', () => {
     render(<ToolsTab />);
 
     expect(permissionSelect().value).toBe('review');
+  });
+
+  it('avisa que o padrão Autônomo não pede confirmação e esconde o aviso fora dele', async () => {
+    render(<ToolsTab />);
+
+    expect(screen.getByText(AUTONOMOUS_MODE_WARNING)).toBeTruthy();
+
+    fireEvent.change(permissionSelect(), { target: { value: 'read_only' } });
+
+    await waitFor(() => {
+      expect(useAppStore.getState().settings.codeDefaultPermissionMode).toBe('read_only');
+    });
+    expect(screen.queryByText(AUTONOMOUS_MODE_WARNING)).toBeNull();
   });
 
   it('salva o modo escolhido para as próximas sessões do Code', async () => {

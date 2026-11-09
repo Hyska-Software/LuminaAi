@@ -208,9 +208,11 @@ fn permission_mode_label(mode: PermissionMode) -> &'static str {
              to make review easier."
         }
         PermissionMode::Autonomous => {
-            "Autonomous: you can edit files and run commands inside the workspace. Destructive \
-             commands (bulk deletes, git reset/clean, force-push, publishing a package) still \
-             require explicit approval."
+            "Autonomous (no confirmation prompts): outside Plan mode, you can edit files, run \
+             any command (including destructive ones), read secret-like files and use \
+             computer/MCP tools without asking; no tool approval card reaches the user. Plan \
+             mode still requires plan approval. `ask_user` still works for a real decision that \
+             blocks the work. Act carefully."
         }
     }
 }

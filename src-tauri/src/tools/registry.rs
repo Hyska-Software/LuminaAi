@@ -189,6 +189,25 @@ impl ToolCtx {
         .await
     }
 
+    /// Asks for approval with no deadline (plan review). The card stays pending
+    /// until the user decides or the turn is cancelled; the approval timeout
+    /// does not apply. Without a channel it fails closed as `expired`.
+    pub async fn request_approval_until_decided(
+        &self,
+        request: crate::domain::ApprovalRequest,
+    ) -> crate::policy::approval::ApprovalOutcome {
+        let Some(registry) = &self.approval else {
+            return crate::policy::approval::ApprovalOutcome::expired();
+        };
+        crate::policy::approval::request_interactive_until_decided(
+            registry,
+            self.emit.clone(),
+            request,
+            &self.cancel,
+        )
+        .await
+    }
+
     /// Matcher/consulta de regras para a política.
     pub fn policy_rules(&self) -> &[crate::domain::ApprovalRule] {
         &self.rules

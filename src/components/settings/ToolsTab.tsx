@@ -8,6 +8,7 @@ import type {
   InterpreterInfo,
   PermissionMode,
 } from '@/lib/types';
+import { AUTONOMOUS_MODE_WARNING } from '@/lib/permissionModes';
 import { MAX_STEPS_LIMIT, useAppStore, useUiStore } from '@/lib/store';
 import { cn, copyText } from '@/lib/utils';
 import { Badge, Button, IconButton, Input, NativeSelect, Slider, Spinner, Switch } from '@/components/ui';
@@ -535,6 +536,15 @@ export function ToolsTab() {
             ))}
           </NativeSelect>
         </SettingRow>
+
+        {codeDefaultPermissionMode === 'autonomous' ? (
+          <p
+            role="status"
+            className="mb-3 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-[11.5px] leading-relaxed text-warning"
+          >
+            {AUTONOMOUS_MODE_WARNING}
+          </p>
+        ) : null}
 
         <SettingRow
           label="Abrir diff dos arquivos"

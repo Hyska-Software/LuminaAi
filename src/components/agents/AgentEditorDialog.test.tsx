@@ -13,6 +13,7 @@ vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }),
 }));
 
+import { AUTONOMOUS_MODE_WARNING } from '@/lib/permissionModes';
 import { useAppStore, useUiStore } from '@/lib/store';
 import { AgentEditorDialog } from './AgentEditorDialog';
 
@@ -70,5 +71,16 @@ describe('AgentEditorDialog — criação', () => {
     expect(image.value).toBe('');
     expect(image.placeholder).toBe('python:3.12');
     expect(screen.getByText(/Sem imagem, usa a configuração global \(python:3\.12\)/)).toBeTruthy();
+  });
+
+  it('avisa que o modo Autônomo não pede confirmação e esconde o aviso fora dele', () => {
+    render(<AgentEditorDialog />);
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Capacidades' }));
+
+    expect(screen.getByText(AUTONOMOUS_MODE_WARNING)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Permissões'), { target: { value: 'edit' } });
+
+    expect(screen.queryByText(AUTONOMOUS_MODE_WARNING)).toBeNull();
   });
 });

@@ -1,8 +1,8 @@
 //! Computer-use tools (Code profile).
 //!
 //! Read-only observation (screenshot/window list) is capability-gated. Every
-//! input action goes through `policy_check` with `RiskClass::Computer`, so it
-//! always requires an explicit approval, including in Autonomous mode.
+//! input action goes through `policy_check` with `RiskClass::Computer`: modes
+//! other than Autonomous require explicit approval; Autonomous runs it directly.
 
 use base64::Engine;
 use serde_json::{json, Value};
@@ -58,11 +58,12 @@ pub fn definitions() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "computer_screenshot".to_string(),
             description: "Capture the local screen (or the Docker graphical session) to a PNG. \
-                          Returns the absolute path and dimensions. Observe again after the user \
-                          returns control. For login, CAPTCHA or other sensitive steps, ask the \
+                          Returns the absolute path and dimensions. Observe again after any \
+                          manual takeover. For login, CAPTCHA or other sensitive steps, ask the \
                           user to take control using `ask_user` with header `computer_desktop` \
-                          when available; never request passwords or one-time codes in chat. \
-                          Use `computer_windows` for window targets."
+                          when available (interactive modes); in Autonomous mode, report the \
+                          blocker and continue with the rest. Never request passwords or one-time \
+                          codes in chat. Use `computer_windows` for window targets."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -90,7 +91,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "computer_click".to_string(),
-            description: "Move the mouse to (x, y) and click. Requires explicit approval."
+            description: "Move the mouse to (x, y) and click. Requires approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -106,7 +107,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "computer_drag".to_string(),
-            description: "Drag from one screen coordinate to another. Requires explicit approval."
+            description: "Drag from one screen coordinate to another. Requires approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -123,7 +124,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "computer_scroll".to_string(),
-            description: "Scroll at a screen coordinate. Positive delta scrolls up, negative down. Requires explicit approval."
+            description: "Scroll at a screen coordinate. Positive delta scrolls up, negative down. Requires approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -138,7 +139,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "computer_move".to_string(),
-            description: "Move the pointer without clicking. Requires explicit approval."
+            description: "Move the pointer without clicking. Requires approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -159,7 +160,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "computer_clipboard".to_string(),
-            description: "Read or write the clipboard. Requires explicit approval; write shows only the length, read returns the text to the model."
+            description: "Read or write the clipboard. Requires approval outside Autonomous mode; write shows only the length, read returns the text to the model."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -173,8 +174,8 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "computer_type".to_string(),
-            description: "Type text into the focused window. Requires explicit approval; the \
-                          approval shows only the length, never the text."
+            description: "Type text into the focused window. Requires approval outside Autonomous mode; the \
+                          card shows only the length, never the text."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -186,7 +187,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "computer_key".to_string(),
             description: "Press a key combination in the focused window (e.g. CTRL+S, ENTER). \
-                          Requires explicit approval."
+                          Requires approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -197,7 +198,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "computer_focus".to_string(),
-            description: "Focus a visible window by id. Requires explicit approval."
+            description: "Focus a visible window by id. Requires approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -209,8 +210,8 @@ pub fn definitions() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "browser_open".to_string(),
             description: "Open an http(s) URL in the controlled local Chromium/Edge session. The \
-                          session uses an isolated profile and a loopback CDP port. Requires explicit \
-                          approval."
+                          session uses an isolated profile and a loopback CDP port. Requires \
+                          approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -221,7 +222,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "browser_navigate".to_string(),
-            description: "Navigate the controlled browser to an http(s) URL. Requires explicit approval."
+            description: "Navigate the controlled browser to an http(s) URL. Requires approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -238,8 +239,9 @@ pub fn definitions() -> Vec<ToolDefinition> {
             description: "Read the active page: URL, title, accessibility elements with stable refs \
                           (e1, e2, …) and a screenshot. Use a ref with browser_click/browser_type. \
                           For login, CAPTCHA, or other sensitive intervention, ask the user to take \
-                          control using `ask_user` with header `computer_browser` when available; \
-                          never request credentials or one-time codes in chat."
+                          control using `ask_user` with header `computer_browser` when available \
+                          (interactive modes); in Autonomous mode, report the blocker and continue \
+                          with the rest. Never request credentials or one-time codes in chat."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -249,7 +251,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "browser_click".to_string(),
-            description: "Click an element by ref from the latest browser_snapshot. Requires explicit approval."
+            description: "Click an element by ref from the latest browser_snapshot. Requires approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -263,8 +265,8 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "browser_type".to_string(),
-            description: "Type text into an element by ref. Requires explicit approval; the card \
-                          shows only the text length."
+            description: "Type text into an element by ref. Requires approval outside Autonomous mode; the \
+                          card shows only the text length."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -280,7 +282,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "browser_press".to_string(),
             description: "Press Enter/Tab/Escape/Backspace/arrow/Space in the controlled browser. \
-                          Requires explicit approval."
+                          Requires approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -322,7 +324,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "browser_select".to_string(),
-            description: "Set the value of a select/input by ref. Requires explicit approval."
+            description: "Set the value of a select/input by ref. Requires approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -337,7 +339,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "browser_upload".to_string(),
-            description: "Attach a workspace file to a file input by ref. Requires explicit approval."
+            description: "Attach a workspace file to a file input by ref. Requires approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -379,7 +381,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "browser_download".to_string(),
             description: "Click an element that starts a download and wait for the file in the \
-                          session download folder. Requires explicit approval."
+                          session download folder. Requires approval outside Autonomous mode."
                 .to_string(),
             parameters: json!({
                 "type": "object",

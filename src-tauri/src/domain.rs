@@ -1566,7 +1566,8 @@ pub enum PermissionMode {
     /// Padrão: edita dentro do workspace; shell pede aprovação.
     #[default]
     Edit,
-    /// Escritas e comandos liberados, exceto comandos destrutivos.
+    /// No confirmation prompts: edits, commands and computer use run directly;
+    /// explicit deny rules and Plan mode still apply.
     Autonomous,
     /// Saída do modo Plano: edita o workspace, mas **cada escrita pede
     /// aprovação** (`WORKBENCH.md` §5.4, "Aprovar e revisar cada edição").

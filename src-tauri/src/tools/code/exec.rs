@@ -399,11 +399,11 @@ fn approval_options() -> Vec<ApprovalOption> {
 }
 
 
-/// Executa uma tool dinâmica de servidor MCP (`mcp__servidor__tool`).
+/// Runs a dynamic MCP server tool (`mcp__server__tool`).
 ///
-/// Aprovação **explícita** (o código roda fora do processo do agente): regras
-/// "sempre permitir" do usuário vencem; sem regra, o card pergunta sempre,
-/// inclusive em modo Autônomo. Timeout de 120 s; cancelamento do turno aborta.
+/// User "always allow/deny" rules win. In interactive modes, without a rule,
+/// every call asks for approval; in Autonomous mode it runs directly (explicit
+/// deny rules still apply). Turn cancellation aborts; the call times out at 120 s.
 pub async fn run_mcp(ctx: &ToolCtx, wire: &str, args: Value) -> ToolOutcome {
     let Some(manager) = ctx.mcp.clone() else {
         return err(
@@ -424,6 +424,7 @@ pub async fn run_mcp(ctx: &ToolCtx, wire: &str, args: Value) -> ToolOutcome {
             )
         }
         Some(crate::domain::ApprovalDecision::Approved) => {}
+        _ if conversation_permission_mode(ctx) == PermissionMode::Autonomous => {}
         _ => {
             if ctx.approval.is_none() {
                 return err(
@@ -2907,7 +2908,7 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         &json!({ "approvalId": request.id, "tool": "submit_plan", "risk": RiskClass::Ask }),
     );
     let approval_id = request.id.clone();
-    let outcome = ctx.request_approval(request).await;
+    let outcome = ctx.request_approval_until_decided(request).await;
     audit_append(
         ctx,
         EV_APPROVAL_DECIDED,
@@ -3103,7 +3104,8 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             )
         }
         crate::domain::ApprovalDecision::Expired => {
-            let feedback = "o usuário não revisou o plano a tempo; reenvie o plano".to_string();
+            let feedback =
+                "a revisão do plano foi encerrada sem decisão; reenvie o plano".to_string();
             if let Err(error) =
                 session::plan_feedback(&ctx.db, &ctx.conversation_id, &ctx.turn_id, &feedback)
             {
@@ -3116,7 +3118,7 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             let planning = emit_plan_updated(ctx);
             plan_error(
                 "APPROVAL_TIMEOUT",
-                "o usuário não revisou o plano a tempo; falhando fechado",
+                "a revisão do plano terminou sem decisão; reenvie o plano",
                 planning.as_ref().or(Some(&reviewing)),
             )
         }
@@ -3888,6 +3890,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn plan_review_waits_until_the_user_decides() {
+        let fixture = Fixture::new();
+        fixture.set_plan_mode(true);
+        let ctx = fixture.ctx();
+        let submit_ctx = ctx.clone();
+        let submit = tokio::spawn(async move {
+            call(
+                &submit_ctx,
+                "submit_plan",
+                json!({ "plan": implementation_plan() }),
+            )
+            .await
+        });
+
+        let request_id = loop {
+            if let Some(request) = fixture
+                .approvals
+                .pending_requests()
+                .into_iter()
+                .find(|request| request.tool == "submit_plan")
+            {
+                break request.id;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        };
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(fixture.approvals.has_pending(&request_id));
+        assert_eq!(
+            session::plan_view(&fixture.db, fixture.conv())
+                .expect("projeção")
+                .expect("plano")
+                .state,
+            crate::domain::PlanState::Reviewing
+        );
+
+        assert!(fixture.approvals.resolve(
+            &request_id,
+            ApprovalOutcome::approved_plan(Some("approve_run".to_string()), None),
+        ));
+        let outcome = submit.await.expect("submit_plan task");
+        assert!(!outcome.is_error, "{}", outcome.content);
+    }
+
+    #[tokio::test]
     async fn approved_plan_unlocks_mutations_in_the_same_turn_and_is_flat_in_the_card() {
         let fixture = Fixture::new();
         fixture.set_plan_mode(true);
@@ -4245,6 +4292,83 @@ mod tests {
         }
         assert_ne!(error_code(&outcome), "APPROVAL_UNAVAILABLE", "{}", outcome.content);
         assert_ne!(error_code(&outcome), "APPROVAL_DENIED", "{}", outcome.content);
+    }
+
+    #[tokio::test]
+    async fn autonomous_runs_commands_without_an_approval_channel() {
+        let fixture = Fixture::new();
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let mut ctx = fixture.ctx();
+        ctx.approval = None;
+        let outcome = call(
+            &ctx,
+            "run_command",
+            json!({ "command": "echo autonomous-ok", "description": "teste autônomo" }),
+        )
+        .await;
+        if error_code(&outcome) == "EXEC_SPAWN" || error_code(&outcome) == "EXEC_FAILED" {
+            eprintln!("shell indisponível neste ambiente: teste pulado");
+            return;
+        }
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("autonomous-ok"), "{}", outcome.content);
+        assert!(
+            !event_types(&fixture.recorder).contains(&"approval_requested".to_string()),
+            "approval_requested não pode existir no modo Autônomo"
+        );
+    }
+
+    #[tokio::test]
+    async fn autonomous_runs_destructive_commands_without_an_approval_channel() {
+        let fixture = Fixture::new();
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let mut ctx = fixture.ctx();
+        ctx.approval = None;
+        let outcome = call(
+            &ctx,
+            "run_command",
+            json!({ "command": "rm -rf build", "description": "limpar build" }),
+        )
+        .await;
+        assert_ne!(error_code(&outcome), "APPROVAL_UNAVAILABLE", "{}", outcome.content);
+        assert_ne!(error_code(&outcome), "APPROVAL_DENIED", "{}", outcome.content);
+        assert!(
+            !event_types(&fixture.recorder).contains(&"approval_requested".to_string()),
+            "approval_requested não pode existir no modo Autônomo"
+        );
+    }
+
+    #[tokio::test]
+    async fn autonomous_reads_secret_files_without_an_approval_channel() {
+        let fixture = Fixture::new();
+        fixture.write(".env", "TOKEN=secret\n");
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let mut ctx = fixture.ctx();
+        ctx.approval = None;
+
+        let outcome = call(&ctx, "read_file", json!({ "path": ".env" })).await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("TOKEN=secret"), "{}", outcome.content);
+
+        fixture.set_permission_mode(PermissionMode::Edit);
+        let edit = call(&ctx, "read_file", json!({ "path": ".env" })).await;
+        assert_eq!(error_code(&edit), "APPROVAL_UNAVAILABLE");
+    }
+
+    #[tokio::test]
+    async fn mcp_call_in_autonomous_mode_skips_approval() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.ctx();
+        ctx.approval = None;
+        ctx.mcp = Some(Arc::new(crate::mcp::McpManager::empty()));
+
+        let edit = call(&ctx, "mcp__fs__read", json!({ "path": "x" })).await;
+        assert_eq!(error_code(&edit), "APPROVAL_UNAVAILABLE");
+
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let auto = call(&ctx, "mcp__fs__read", json!({ "path": "x" })).await;
+        assert_eq!(error_code(&auto), "MCP_FAILED");
+        assert!(auto.content.contains("MCP_UNKNOWN_SERVER"), "{}", auto.content);
     }
 
     #[tokio::test]
@@ -4618,9 +4742,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ask_user_waits_for_the_user_card_and_returns_the_answers() {
+    async fn ask_user_waits_for_the_user_card_even_in_autonomous_mode() {
         use crate::harness::code::questions::QuestionRegistry;
         let fixture = Fixture::new();
+        fixture.set_permission_mode(PermissionMode::Autonomous);
         let registry = std::sync::Arc::new(QuestionRegistry::new());
         let mut ctx = fixture.ctx();
         ctx.questions = Some(registry.clone());

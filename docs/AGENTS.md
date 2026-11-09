@@ -210,7 +210,7 @@ o renderer envia o perfil Chat e a conversa não tem pasta selecionada:
 
 **Computer use local**: o agente pode usar o computador do usuário quando a
 capability `computerUse`/`screenCapture` está ligada: screenshot, clique,
-teclado, janelas, foco e UI tree, com aprovação por ação e auditoria. O
+teclado, janelas, foco e UI tree, com aprovação por ação fora do Autônomo e auditoria. O
 detalhamento (backend Windows/Docker, denylist, rate limit e imagens para
 modelos com visão) está em `docs/COMPUTER.md`.
 
@@ -223,7 +223,9 @@ desligada por padrão (`--network none`) e a imagem vem de `dockerImage`
 configuráveis. O detalhamento está em `docs/DOCKER.md`.
 
 Permissões: `read_only`, `review`, `edit`, `autonomous`. O chip do composer
-troca o modo da sessão; toda mutação passa por `policy::decide`.
+troca o modo da sessão; toda mutação passa por `policy::decide`. No Autônomo não
+há confirmação de comandos/edições/segredos/computador/MCP; regras explícitas de
+negação e o modo Plano continuam valendo.
 
 **Modelo de reserva** (opcional): quando a rota principal não resolve
 (provedor/modelo indisponível) ou não tem credencial utilizável, o harness tenta
@@ -415,7 +417,7 @@ Contrato completo: `docs/COMPUTER.md`.
   snapshot com refs, click/type, wait, extract e download) em um perfil isolado
   por conversa; apenas http/https. O Chromium/Edge roda headless e a página é
   exibida dentro do painel Navegador, sem janela externa do sistema.
-- `RiskClass::Computer` sempre pede aprovação, inclusive em Autônomo; o card
+- `RiskClass::Computer` pede aprovação fora do Autônomo; o card
   mostra screenshot/alvo e só oferece permitir uma vez/negar; sem canal de
   aprovação a tool falha fechada.
 - Toda ação tem sessão/registro em `computer_sessions`/`computer_actions`, sem

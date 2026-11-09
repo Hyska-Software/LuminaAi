@@ -235,7 +235,7 @@ ripgrep 13.0.0
   - integração `#[ignore]` real: container Xvfb 1440×900, screenshot PNG,
     clique e Chromium visível via wmctrl.
 - `src-tauri/src/policy/mod.rs`
-  - `RiskClass::Computer` sempre pede aprovação, inclusive em Autônomo.
+  - `RiskClass::Computer` pede aprovação fora do Autônomo; no Autônomo roda direto.
 - `src-tauri/src/concurrency.rs`
   - limite global, limite por agente, espera/cancelamento e liberação do slot.
 - `src/lib/__tests__/conversations.test.ts`

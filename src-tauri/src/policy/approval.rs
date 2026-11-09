@@ -1,10 +1,11 @@
-//! Seam de aprovação interativa: pedido → evento no renderer → decisão.
+//! Perfil de aprovação interativa: pedido → evento no renderer → decisão.
 //!
 //! O `ApprovalRegistry` guarda o pedido (para a UI/snapshot) e um
 //! `oneshot::Sender` por aprovação pendente. Quem executa a tool aguarda o
 //! `oneshot::Receiver`; o comando Tauri `respond_approval` resolve o canal.
 //! Timeout/cancelamento resolvem como `Cancelled`/`Expired` (falha fechada) —
-//! nunca como aprovação.
+//! nunca como aprovação. A revisão do plano usa a variante sem prazo; os
+//! demais cards mantêm `approval_timeout_secs`.
 //!
 //! Contrato: `docs/goals/code-harness/HARNESS.md` §6.3.
 
@@ -208,6 +209,29 @@ pub async fn request_interactive(
     timeout: std::time::Duration,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> ApprovalOutcome {
+    request_interactive_inner(registry, emit, request, Some(timeout), cancel).await
+}
+
+/// Same handshake as [`request_interactive`], but with no deadline. The plan
+/// review uses this variant: the card stays pending until the user approves,
+/// rejects, or the turn is cancelled. `Expired` only happens if the sender
+/// disappears.
+pub async fn request_interactive_until_decided(
+    registry: &ApprovalRegistry,
+    emit: Option<std::sync::Arc<dyn crate::harness::EventEmitter>>,
+    request: ApprovalRequest,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> ApprovalOutcome {
+    request_interactive_inner(registry, emit, request, None, cancel).await
+}
+
+async fn request_interactive_inner(
+    registry: &ApprovalRegistry,
+    emit: Option<std::sync::Arc<dyn crate::harness::EventEmitter>>,
+    request: ApprovalRequest,
+    timeout: Option<std::time::Duration>,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> ApprovalOutcome {
     let id = request.id.clone();
     let receiver = registry.register_request(request.clone());
     if let Some(emit) = &emit {
@@ -215,20 +239,33 @@ pub async fn request_interactive(
             approval: request,
         });
     }
-    let outcome = tokio::select! {
-        biased;
-        _ = cancel.cancelled() => {
-            registry.resolve(&id, ApprovalOutcome::cancelled());
-            ApprovalOutcome::cancelled()
+    let outcome = match timeout {
+        Some(timeout) => tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                registry.resolve(&id, ApprovalOutcome::cancelled());
+                ApprovalOutcome::cancelled()
+            },
+            result = tokio::time::timeout(timeout, receiver) => match result {
+                Ok(Ok(outcome)) => outcome,
+                Ok(Err(_)) => ApprovalOutcome::expired(),
+                Err(_) => {
+                    // Timeout: remove the request so the UI does not show a dead card.
+                    registry.resolve(&id, ApprovalOutcome::expired());
+                    ApprovalOutcome::expired()
+                }
+            },
         },
-        result = tokio::time::timeout(timeout, receiver) => match result {
-            Ok(Ok(outcome)) => outcome,
-            Ok(Err(_)) => ApprovalOutcome::expired(),
-            Err(_) => {
-                // Timeout: remove o pedido para a UI não mostrar um card morto.
-                registry.resolve(&id, ApprovalOutcome::expired());
-                ApprovalOutcome::expired()
-            }
+        None => tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                registry.resolve(&id, ApprovalOutcome::cancelled());
+                ApprovalOutcome::cancelled()
+            },
+            result = receiver => match result {
+                Ok(outcome) => outcome,
+                Err(_) => ApprovalOutcome::expired(),
+            },
         },
     };
     if let Some(emit) = &emit {
@@ -284,6 +321,44 @@ mod tests {
         let outcome = request_interactive(&registry, None, request("cancelled"), std::time::Duration::from_secs(1), &cancel).await;
         assert!(!outcome.is_approved());
         assert!(!registry.has_pending("cancelled"));
+    }
+
+    #[tokio::test]
+    async fn plan_approval_has_no_deadline() {
+        let registry = std::sync::Arc::new(ApprovalRegistry::new());
+        let task_registry = registry.clone();
+        let handle = tokio::spawn(async move {
+            let cancel = tokio_util::sync::CancellationToken::new();
+            request_interactive_until_decided(&task_registry, None, request("apr-plan"), &cancel)
+                .await
+        });
+
+        for _ in 0..100 {
+            if registry.has_pending("apr-plan") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+        assert!(registry.has_pending("apr-plan"));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            registry.has_pending("apr-plan"),
+            "the plan review must not expire on its own"
+        );
+
+        let timed = request_interactive(
+            registry.as_ref(),
+            None,
+            request("apr-timed"),
+            std::time::Duration::from_millis(1),
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(timed.decision, ApprovalDecision::Expired);
+
+        assert!(registry.resolve("apr-plan", ApprovalOutcome::approved(None)));
+        let outcome = handle.await.expect("approval task");
+        assert!(outcome.is_approved());
     }
 
     #[tokio::test]

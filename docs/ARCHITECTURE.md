@@ -416,14 +416,17 @@ estruturadas com opções e texto livre, respondidas pelo card da timeline via
 fronteira de execução, transcript filho retido/oculto com cascata no pai, eventos ao vivo,
 modelo/effort por delegação, paralelismo limitado, limpeza RAII e session id do pai para cache),
 `validate_ui` (validação local de blocos `ui`; sempre disponível, exceto no subagente)
-e tools dinâmicas de servidores **MCP** (mcp__servidor__tool, stdio JSON-RPC, aprovação sempre
-explícita; config <app-data>/mcp.json; indisponíveis em subagentes).
+e tools dinâmicas de servidores **MCP** (mcp__servidor__tool, stdio JSON-RPC, aprovação
+explícita nos modos interativos; o Autônomo executa direto; config <app-data>/mcp.json;
+indisponíveis em subagentes).
    O modelo **não** recebe commit/push.
 4. **Política e aprovação** (`policy/`): modos `read_only`/`review`/`edit`/`autonomous` + overlay Plano
-   + regras persistidas. Novas sessões nascem no modo padrão configurado (Autônomo de fábrica). Toda
-   mutação passa por `policy::decide` → `ApprovalRegistry`
-   (evento `approval_requested`, card na timeline, `respond_approval`) ou negação com código
-   estável. Timeout/cancelamento resolvem como falha fechada.
+   + regras persistidas. Novas sessões nascem no modo padrão configurado (Autônomo de fábrica).
+   No Autônomo nenhuma confirmação de comando/edição/segredo/computador/MCP é pedida (regras
+   explícitas de negação e o modo Plano continuam valendo); nos demais modos toda mutação passa
+   por `policy::decide` → `ApprovalRegistry` (evento `approval_requested`, card na timeline,
+   `respond_approval`) ou negação com código estável. Timeout/cancelamento resolvem como falha
+   fechada; a revisão do plano é a exceção e aguarda a decisão sem prazo.
 5. **Confinamento e journal** (`workspace/`): todo path resolve contra a raiz do workspace
    (`safe_path`: `..`, symlink/junction, UNC, device paths); leitura antes da escrita por hash
    (`FS_NOT_OBSERVED`/`FS_STALE_VERSION`); escrita atômica com EOL/BOM preservados; journal
@@ -508,7 +511,7 @@ Contrato completo: **`docs/AGENTS.md`**. Resumo:
   handoff imediato e resultado entregue como mensagem `system` na origem;
   runner Rust a cada 5 s em paralelo sob o governador (`docs/TASKS.md`).
 - **Computer use**: screenshot/clique/teclado/janelas/UI tree local no Windows e
-  Docker gráfico (Xvfb + noVNC); input sempre com aprovação
+  Docker gráfico (Xvfb + noVNC); input com aprovação fora do Autônomo
   (`RiskClass::Computer`), contrato em `docs/COMPUTER.md`.
 - **Docker**: `run_command`/jobs com hardening (non-root, cap-drop, read-only,
   limites, workspace único, rede off), validação de imagem e cleanup
@@ -863,7 +866,7 @@ encerra. `refresh_provider_models` devolve o `CatalogView` mesclado
   (redigida em diagnósticos).
 - **Harness de código**: confinamento de path ao workspace (`safe_path`), leitura antes da
   escrita com CAS por hash, aprovação interativa para mutações/comandos/segredos, classificação
-  de comandos destrutivos (pedem aprovação até no modo Autônomo), env higienizado
+  de comandos destrutivos (pedem aprovação fora do modo Autônomo), env higienizado
   (`*API_KEY*`/`*TOKEN*`/`*SECRET*` removidos), timeout e kill de árvore, auditoria em
   `code_events`, journal reversível e commit apenas pelo usuário. **Não é sandbox de SO**: no
   Windows não prometemos isolamento de processo/arquivo fora do workspace — a barreira é

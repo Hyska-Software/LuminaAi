@@ -61,7 +61,7 @@ pub enum ToolPresentation {
 | `MutateGit` | staging/commit/branch/discard | UI de git (não é tool do modelo na v1) |
 | `Network` | tráfego externo | `web_search`, `fetch_url` |
 | `Ask` | pausa explícita para o usuário | `ask_user`, `submit_plan` |
-| `Destroy` | destrutivo, exige aprovação **sempre** (mesmo Autônomo) | `rm -rf`, `git reset --hard`, `git clean`, force-push, `format`, `DROP TABLE` |
+| `Destroy` | destrutivo, exige aprovação fora do Autônomo (no Autônomo executa direto) | `rm -rf`, `git reset --hard`, `git clean`, force-push, `format`, `DROP TABLE` |
 
 > O modelo **não** recebe tools de git que mutam (stage/commit/push) na v1: commit é ação do
 > usuário no painel (WORKBENCH §5). O agente pode sugerir mensagem e rodar `git` via shell quando
@@ -219,9 +219,10 @@ Leitura paginada com números de linha. **Nunca** lê binário como texto.
   comportamento DSH, evita perder `npm install`/suite longa.
 - **Não é erro**: exit ≠ 0 é resultado normal (`[exit code: 1]`) — o modelo interpreta.
 - **Política**: `ExecuteCommand`. Modo Editar → `Ask` (com opções "aprovar", "negar com feedback",
-  "sempre permitir este comando/prefiro"). Modo Autônomo → `Allow` **exceto** `Destroy`
+  "sempre permitir este comando/prefiro"). Modo Autônomo → `Allow`, inclusive `Destroy`
   (`rm -rf`, `Remove-Item -Recurse -Force`, `git reset --hard`, `git clean -fdx`, `git push --force`,
-  `format`, `shutdown`, `npm publish`, `DROP TABLE`, `> /dev/sd*`, `curl … | sh`, `iwr … | iex`).
+  `format`, `shutdown`, `npm publish`, `DROP TABLE`, `> /dev/sd*`, `curl … | sh`, `iwr … | iex`);
+  regras explícitas de negação continuam valendo.
   Comandos de leitura conhecidos (`git status|diff|log|show|branch`, `ls|dir|Get-ChildItem`,
   `type|cat|Get-Content`, `rg`, `findstr`) podem ser auto-aprovados por regra explícita.
 - **Testes**: exit 0/≠0, stderr, timeout, cancelamento (morte de árvore), cap/spill, env scrub,
@@ -328,11 +329,11 @@ M  src/app.ts           (staged)
   completo/diff; código só para interfaces ambíguas (≤10 linhas). Plano com menos de **300
   caracteres** é recusado com `PLAN_TOO_BRIEF` antes de persistir ou pedir aprovação. No feedback,
   responda a todos os pontos, preserve decisões aceitas e reenvie.
-- **Política**: `Ask` (revisão humana obrigatória, **sem** "sempre permitir"); o timeout da tool é
-  o do broker de aprovação (10 min default), não o timeout curto do runtime. **Testes**: fora do
+- **Política**: `Ask` (revisão humana obrigatória, **sem** "sempre permitir"); a revisão não tem
+  prazo e só termina quando o usuário aprova/nega ou o turno é cancelado. **Testes**: fora do
   modo → erro; aprovação → transição + mensagem + mutação liberada no mesmo turno; revisar cada
   edição → `ASK` na escrita seguinte; feedback → mensagem/persistência; executar como objetivo →
-  plano aprovado + Goal criado sem trocar o modo; timeout/cancelamento.
+  plano aprovado + Goal criado sem trocar o modo; cancelamento.
 
 #### `ask_user`
 
@@ -420,10 +421,10 @@ M  src/app.ts           (staged)
   `notifications/initialized` → `tools/list` e cacheia as tools descobertas.
 - As tools entram no wire do perfil Code depois das 25 estáticas (`mcp__servidor__tool`, nomes
   sanitizados) com o `inputSchema` do servidor; o prompt lista nome/servidor/descrição.
-- **Aprovação sempre explícita** (inclusive em Autônomo; regras "sempre permitir/negar" do usuário
-  com matcher exact/prefix/glob vencem); o card mostra servidor/ferramenta/argumentos. Timeout de
-  120 s; cancelamento do turno aborta; resultado extrai `content[].text` (ou JSON) e marca
-  `MCP_ERROR` quando `isError`.
+- **Aprovação explícita nos modos interativos** (o Autônomo executa direto; regras
+  "sempre permitir/negar" do usuário com matcher exact/prefix/glob vencem); o card mostra
+  servidor/ferramenta/argumentos. Timeout de 120 s; cancelamento do turno aborta; resultado extrai
+  `content[].text` (ou JSON) e marca `MCP_ERROR` quando `isError`.
 - Falhas por servidor não derrubam os demais (`MCP_SPAWN`/`MCP_INIT`/`MCP_TIMEOUT`/`MCP_PROTOCOL`,
   logadas no stderr do app); `mcp_status` devolve servidores + tools para inspeção.
 - **Testes**: sanitização/config tolerante, manager vazio degradando honesto e handshake +
@@ -504,7 +505,7 @@ pub struct ToolSpec {
 | Arquivo escrito | 2 MB | acima → erro orientando gerar via script |
 | Leitura antes de escrita | obrigatória | stale → re-ler |
 | Jobs concorrentes | 8 por sessão | + fila |
-| Aprovações por turno | ilimitadas | timeout individual 10 min (config.); `submit_plan`/`ask_user` são limitados pelo broker, não pelo wrapper de timeout da tool |
+| Aprovações por turno | ilimitadas | timeout individual 10 min (config.); `submit_plan` não expira (só cancelamento); `ask_user` usa o broker, não o wrapper da tool |
 | Validação de UI | — | `validate_ui` sempre disponível (exceto no subagente); não conta no orçamento; resultado >24k vai para spill |
 | Tentativas de tool repetida | aviso após 3x iguais | injeção de lembrete no próximo passo |
 

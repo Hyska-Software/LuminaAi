@@ -1168,7 +1168,8 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
     shell (`run_command` + jobs `job_*`), git somente leitura, `todo_write`,
     `submit_plan` (revisão bloqueante) e confinamento de path com leitura antes da
     escrita (CAS por hash); política de permissões (`read_only`/`edit`/
-    `autonomous` + Plano) com aprovação interativa e regras persistidas; journal
+    `autonomous` + Plano) com aprovação interativa nos modos não autônomos, revisão
+    de plano sem prazo e regras persistidas; journal
     de arquivos por turno (`checkpoints/objects/<sha256>`) com reverter
     arquivo/turno; medidor e compactação de contexto (resumo em 8 seções);
     painel Arquivos/Alterações real (árvore, diff, stage/unstage, commit com
@@ -1195,7 +1196,8 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
   ao entrar no layout.
 - Confinamento: `workspace/safe_path.rs` resolve todo path contra a raiz, rejeita `..`,
   symlink/junction para fora, device paths e caminhos relativos de drive; leitura fora do
-  workspace exige aprovação; escrita fora é negada no modo Leitura.
+  workspace exige aprovação fora do Autônomo (no Autônomo roda direto); escrita fora é
+  negada no modo Leitura.
 - Primeira abertura pede "Confiar nesta pasta?" (workspace não confiável não recebe escrita).
 
 ### 16.2 Tools do perfil Code (23)
@@ -1210,22 +1212,23 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
 | `read_tool_output` | página de spill de saída longa (≤20k/caracteres) | leitura livre |
 | `write_file` | cria/substitui com escrita atômica e EOL/BOM preservados | MutateWorkspace (Ask no Leitura/Plano) |
 | `edit_file` | substituição literal única (`replace_all`) | MutateWorkspace |
-| `run_command` | shell da plataforma, env higienizado, timeout 120 s–10 min, streaming, background/promoção | ExecuteCommand (Ask no Editar; destrutivo sempre Ask) |
+| `run_command` | shell da plataforma, env higienizado, timeout 120 s–10 min, streaming, background/promoção | ExecuteCommand (Ask no Editar; destrutivo Ask fora do Autônomo) |
 | `job_list`/`job_output`/`job_kill` | jobs em background (ring 256 KB, cursor, limite 8/sessão) | leitura livre; kill = Shell |
 | `git_status`/`git_diff`/`git_log` | git CLI (porcelain v2) somente leitura | leitura livre |
 | `todo_write` | lista de tarefas da sessão (projeção em `code_events`) | Exclusive |
-| `submit_plan` | plano do modo Plano com revisão bloqueante | Ask |
+| `submit_plan` | plano do modo Plano com revisão bloqueante e sem prazo | Ask |
 | `ask_user` | perguntas com opções (single/multi + texto livre); o card da timeline responde via `respond_question` (timeout/cancelamento = pulada) | Ask |
 | `run_checks` | roda a verificação detectada do projeto (test/lint/build) pelo pipeline do shell | ExecuteCommand |
 | `task` | subagente somente leitura (explore/review/general; profundidade 1; transcript filho retido/oculto com cascata; uma aba de chat read-only por subagente, com deduplicação; eventos ao vivo; modelo/effort opcionais; paralelismo limitado; sem MCP/escrita/shell; prompt único e session id do pai) | Read |
 | `web_search` / `fetch_url` | reaproveitadas do Chat (documentação/erros) | Network (livre) |
 | `list_skills` / `read_skill` | reaproveitadas do Chat (skills instaladas) | Read (livre) |
-| `mcp__servidor__tool` | tools dinâmicas de servidores MCP (`<app-data>/mcp.json`, stdio JSON-RPC), descobertas por `tools/list` (indisponíveis em subagentes) | Ask (sempre) |
+| `mcp__servidor__tool` | tools dinâmicas de servidores MCP (`<app-data>/mcp.json`, stdio JSON-RPC), descobertas por `tools/list` (indisponíveis em subagentes) | Ask fora do Autônomo |
 
 Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested`, comando
-`respond_approval`, timeout de 10 min, falha fechada). "Sempre permitir" cria
-`approval_rules` com escopo sessão/workspace/global e matcher exato/prefixo/glob
-(negação vence). Toda decisão é auditada em `code_events`.
+`respond_approval`, timeout de 10 min, falha fechada). No modo Autônomo não há card de
+aprovação; a revisão do plano não expira. "Sempre permitir" cria `approval_rules` com escopo
+sessão/workspace/global e matcher exato/prefixo/glob (negação vence). Toda decisão é auditada
+em `code_events`.
 
 ### 16.3 Alterações, checkpoints e git
 
@@ -1254,7 +1257,8 @@ Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested
 - Execução de processos roda com as permissões do usuário (não é sandbox de SO), com env
   sem segredos, timeout, kill de árvore e auditoria; aprovações e confinamento reduzem o
   dano, não o eliminam.
-- Arquivos de segredo (`.env`, `*.pem`, `*.key`, credenciais) exigem aprovação explícita.
+- Arquivos de segredo (`.env`, `*.pem`, `*.key`, credenciais) exigem aprovação explícita
+  fora do modo Autônomo.
 - Conteúdo de repositório/páginas é dado não confiável no prompt; instruções de projeto
   (`AGENTS.md`) valem abaixo da política e do pedido direto do usuário.
 
@@ -1280,4 +1284,4 @@ Aprovação: `policy::decide` → `ApprovalRegistry` (evento `approval_requested
 - **Allowlist de leitura**: no modo Editar, comandos comprovadamente de leitura (`git status/diff/log/
   show/branch/…`, `ls`, `cat`, `rg`, `find`, `--version`) rodam **sem aprovação**; qualquer
   metacaractere de composição (`;`, `&&`, `|`, `>`, `$(`) desqualifica — destrutivos continuam
-  pedindo aprovação sempre (a política checa isso antes).
+  pedindo aprovação fora do Autônomo (a política checa isso antes).

@@ -183,7 +183,7 @@ pub struct TurnProfileSpec {
 ```
 1. validação de argumentos (JSON Schema)      → TOOL_INVALID_ARGS
 2. política (policy.decide)                    → allow | ask | deny(reason)
-3. se ask: ApprovalBroker.request(...)         → evento → comando → decisão (timeout 10 min)
+3. se ask: ApprovalBroker.request(...)         → evento → comando → decisão (10 min; plano sem prazo)
 4. timeout do contrato (real, não decorativo)  → TOOL_TIMEOUT (abort do future + kill do processo)
 5. execução (com ToolCtx e CancellationToken filho)
 6. caps/retention → spill se estourar          → content head/tail + spill id
@@ -226,7 +226,7 @@ tratado como dado. `read_tool_output` só lê spills da própria sessão.
 | --- | --- | --- | --- | --- | --- | --- |
 | **Leitura** | ✅ | ❌ (erro de política) | ❌ | só leitura | ❌ | explorar/entender código |
 | **Editar** | ✅ | ✅ auto | **pergunta** | stage/commit manual | pergunta | dia a dia |
-| **Autônomo** | ✅ | ✅ auto | ✅ auto **exceto destrutivo** | stage/commit manual | pergunta | tarefas longas confiadas |
+| **Autônomo** | ✅ | ✅ auto | ✅ auto (inclusive destrutivo) | stage/commit manual | ✅ auto (fora do Plano) | tarefas longas confiadas |
 | **Revisar** (saída do Plano) | ✅ | ✅ **com aprovação por escrita** | pergunta | stage/commit manual | pergunta | revisar cada edição após aprovar um plano |
 | **Plano** (overlay) | ✅ | ❌ | ❌ | só leitura | ❌ | planejar antes de executar |
 
@@ -245,6 +245,9 @@ tratado como dado. `read_tool_output` só lê spills da própria sessão.
   aprovado é o persistido.
 - A aprovação destrava a execução **no mesmo turno** (não exige nova mensagem); o turno continua
   bloqueado até a decisão, com timeout individual de aprovação (default 10 min, configurável).
+  A revisão do plano é a exceção: não expira e aguarda aprovar/negar/cancelar o turno. No modo
+  **Autônomo** não há cards de aprovação (regras explícitas de negação e o overlay Plano
+  continuam valendo).
 - A UI **nunca** muda o modo de uma sessão em andamento automaticamente (o padrão configurado
   só é aplicado na criação da sessão e ao compartilhá-la com o Code). O modelo nunca muda o modo
   (pode sugerir).
@@ -253,12 +256,13 @@ tratado como dado. `read_tool_output` só lê spills da própria sessão.
 
 ```
 1. Regra dura: plano ativo + tool mutante            → DENY (PLAN_MODE_ACTIVE)
-2. Regra dura: path fora do workspace                → ASK (risk=outside) / DENY em Leitura
-3. Regra dura: arquivo de segredo                    → ASK (risk=secret) — leitura e escrita
-4. Regra dura: comando destrutivo                    → ASK (risk=destroy) SEMPRE (até em Autônomo)
-5. approval_rules (escopo sessão > workspace > global) → ALLOW/DENY explícito
-6. Padrão do modo (§6.1)
-7. Fallback para tool com risk >= write              → ASK
+2. Modo Autônomo                                     → ALLOW (exceto approval_rules DENY)
+3. Regra dura: path fora do workspace                → ASK (risk=outside) / DENY em Leitura
+4. Regra dura: arquivo de segredo                    → ASK (risk=secret) — leitura e escrita
+5. Regra dura: comando destrutivo                    → ASK (risk=destroy) nos modos interativos
+6. approval_rules (escopo sessão > workspace > global) → ALLOW/DENY explícito
+7. Padrão do modo (§6.1)
+8. Fallback para tool com risk >= write              → ASK
 ```
 
 - O gate do modo Plano vale para mutações **de workspace** (arquivo/shell/git). `todo_write` e
@@ -302,6 +306,7 @@ pub struct ApprovalRequest {
   (`approve_run`/`approve_review`) e `planMarkdown` só valem para `submit_plan`; aprovações
   genéricas rejeitam esses campos.
 - Timeout 10 min (config) → `deny` com `APPROVAL_TIMEOUT`; cancelamento do turno → `cancelled`.
+  A revisão do plano usa o broker sem deadline e só resolve em aprovação/negação/cancelamento.
 - Sem aprovador (teste/headless) → `APPROVAL_UNAVAILABLE` (fail-closed).
 - Negar com feedback: o texto vira parte do resultado da tool ("usuário negou: <feedback>") para o
   modelo aprender e se adaptar.
@@ -552,7 +557,8 @@ pub struct ContextStats { pub used: u32, pub window: u32, pub output_cap: u32, p
 - **Project profile**: detectar Node (`package.json` scripts), Rust (`Cargo.toml`), Python
   (`pyproject.toml`), Go (`go.mod`), .NET (`*.csproj`); extrair comandos de test/lint/build e
   mostrar no prompt e na UI (menu "Verificações"): `npm test`, `cargo test`, `pytest`, etc.
-- Nunca incluir segredos: filtrar `.env` do contexto automático (só via `read_file` com aprovação).
+- Nunca incluir segredos: filtrar `.env` do contexto automático (só via `read_file`, com
+  aprovação fora do modo Autônomo).
 
 ## 11. Sessão e persistência
 
@@ -708,9 +714,9 @@ com golden JSON quando o DTO é novo).
 | Ameaça | Mitigação no Lumina | Limite honesto |
 | --- | --- | --- |
 | Prompt injection em arquivo/web/issue | saída de tool como dado; prompt separa instrução × dado; aprovação para ações sensíveis; segredos fora do contexto automático | modelo ainda pode ser enganado; a política reduz o dano, não elimina |
-| Comando destrutivo | classificação + ASK sempre; kill tree; auditoria; sem auto-commit | usuário pode aprovar; não há sandbox de SO na v1 |
+| Comando destrutivo | classificação + ASK fora do Autônomo; kill tree; auditoria; sem auto-commit | usuário pode aprovar; no Autônomo roda direto; não há sandbox de SO na v1 |
 | Escrita fora do workspace | `safe_path` + política `outside` (ASK) | symlink/junction cobertos por canonicalização; TOCTOU residual documentado |
-| Vazamento de segredos para o modelo | scrub de env; padrões de arquivo de segredo com ASK; nunca injetar chaves do app no shell | arquivo de segredo lido com aprovação vai para o modelo (decisão do usuário) |
+| Vazamento de segredos para o modelo | scrub de env; padrões de arquivo de segredo com ASK fora do Autônomo; nunca injetar chaves do app no shell | arquivo de segredo lido com aprovação (ou direto no Autônomo) vai para o modelo |
 | Perda de trabalho | journal/checkpoints + revert + diff antes de aplicar + sem `git reset` automático | revert recusa se o arquivo mudou por fora |
 | Execução de código arbitrário | é o produto (shell) — confinamento é workspace + aprovação + auditoria; `run_command` é opt-in por sessão | não é sandbox de SO; documentar em Configurações |
 | IPC malicioso | apenas o webview fala com o backend; CSP (hoje `null` — **dívida a corrigir** na Fase 0/8); sem `eval` | conteúdo de arquivo sempre renderizado como texto sanitizado |

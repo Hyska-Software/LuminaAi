@@ -9,6 +9,7 @@ import {
   SquareTerminal,
   type LucideIcon,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +23,7 @@ import {
   Tooltip,
 } from '@/components/ui';
 import { JobsBar, PlanCard, SubagentList, TodoCard } from '@/components/agent';
+import { AUTONOMOUS_MODE_WARNING, AUTONOMOUS_MODE_WARNING_TITLE } from '@/lib/permissionModes';
 import { useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import type { PermissionMode } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -40,7 +42,8 @@ const PERMISSION_DESCRIPTIONS: Record<PermissionMode, string> = {
   read_only: 'O agente só pode ler arquivos e consultar o workspace.',
   review: 'O agente pode propor edições, mas cada escrita pede aprovação.',
   edit: 'O agente pode editar arquivos; comandos pedem aprovação.',
-  autonomous: 'O agente pode editar e executar comandos com menos confirmações.',
+  autonomous:
+    'O agente executa comandos, edições, acesso a segredos e controle do computador sem pedir confirmação.',
 };
 
 const PERMISSION_ICONS: Record<PermissionMode, LucideIcon> = {
@@ -129,7 +132,12 @@ export function CodeSessionControls({
     if (permissionBusy || mode === permissionMode) return;
     setPermissionBusy(true);
     try {
-      await setPermissionMode(conversationId, mode);
+      const changed = await setPermissionMode(conversationId, mode);
+      if (changed && mode === 'autonomous') {
+        toast.warning(AUTONOMOUS_MODE_WARNING_TITLE, {
+          description: AUTONOMOUS_MODE_WARNING,
+        });
+      }
     } finally {
       setPermissionBusy(false);
     }
@@ -177,7 +185,12 @@ export function CodeSessionControls({
             );
           })}
           <DropdownMenuSeparator />
-          <p className="px-2 pb-1 text-[11px] leading-relaxed text-foreground-muted">
+          <p
+            className={cn(
+              'px-2 pb-1 text-[11px] leading-relaxed',
+              permissionMode === 'autonomous' ? 'text-warning' : 'text-foreground-muted',
+            )}
+          >
             {PERMISSION_DESCRIPTIONS[permissionMode]}
           </p>
         </DropdownMenuContent>

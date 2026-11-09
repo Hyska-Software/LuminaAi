@@ -30,6 +30,7 @@ import { api } from '@/lib/api';
 import { DEFAULT_AGENT_AVATAR } from '@/lib/agentAvatar';
 import { DEFAULT_AGENT_CAPABILITIES } from '@/lib/agentDefaults';
 import { reasoningForModel } from '@/lib/modelMenu';
+import { AUTONOMOUS_MODE_WARNING } from '@/lib/permissionModes';
 import { selectAgent, useAgentStore, useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import type {
   AgentAvatar as AgentAvatarSpec,
@@ -911,6 +912,17 @@ export function AgentEditorDialog() {
               className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-[12px] text-danger"
             >
               {error}
+            </p>
+          </div>
+        ) : null}
+
+        {form.permissionMode === 'autonomous' ? (
+          <div className="shrink-0 px-6 pb-3">
+            <p
+              role="status"
+              className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-[12px] leading-relaxed text-warning"
+            >
+              {AUTONOMOUS_MODE_WARNING}
             </p>
           </div>
         ) : null}
