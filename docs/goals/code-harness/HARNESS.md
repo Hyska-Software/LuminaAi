@@ -238,11 +238,12 @@ tratado como dado. `read_tool_output` só lê spills da própria sessão.
   (`permission/mode` em `code_events`) e informada ao modelo **no mesmo turno**: a política relê
   `permission_mode`/`plan_mode` do banco a cada tool call e o loop anexa uma nota de
   "# Permission update" ao system prompt quando o estado muda entre passos.
-- Modo Plano é overlay (vale sobre qualquer modo), ativado por `/plan` ou chip, e tem **três
-  saídas** no gate do card: **Aprovar e executar** (Plano off → Editar), **Aprovar e revisar cada
-  edição** (Plano off → Revisar: cada escrita pede aprovação) e **Continuar planejando** (Plano
-  permanece, feedback persistido em `plan/feedback`). O plano é editável antes de valer e o texto
-  aprovado é o persistido.
+- Modo Plano é overlay (vale sobre qualquer modo), ativado por `/plan` ou chip, e tem **quatro
+  saídas** no gate do card: **Aprovar e executar** (Plano off, mantém o modo de permissão atual),
+  **Aprovar e revisar cada edição** (Plano off → Revisar: cada escrita pede aprovação),
+  **Continuar planejando** (Plano permanece, feedback persistido em `plan/feedback`) e
+  **Executar como Objetivo** (`approve_goal`: aprova o plano, preserva o modo e cria um Goal com
+  continuidade automática). O plano é editável antes de valer e o texto aprovado é o persistido.
 - A aprovação destrava a execução **no mesmo turno** (não exige nova mensagem); o turno continua
   bloqueado até a decisão, com timeout individual de aprovação (default 10 min, configurável).
   A revisão do plano é a exceção: não expira e aguarda aprovar/negar/cancelar o turno. No modo
@@ -295,7 +296,7 @@ pub struct ApprovalRequest {
 ```
 
 - `submit_plan` usa **options próprias do plano** (`approve_run` / `approve_review` /
-  `keep_planning`), sem "Sempre permitir"; `ApprovalOutcome`/`respond_approval` carregam
+  `approve_goal` / `keep_planning`), sem "Sempre permitir"; `ApprovalOutcome`/`respond_approval` carregam
   `choice: Option<String>` e `plan_markdown: Option<String>`. O comando resolve o pedido antes de
   criar regra/auditoria: pedido morto (timeout/cancelamento) devolve `APPROVAL_NOT_FOUND` sem
   efeito colateral.
@@ -303,7 +304,7 @@ pub struct ApprovalRequest {
 - Fluxo: tool → `broker.request()` → emite `TurnEvent::ApprovalRequested` → renderer mostra card →
   `invoke('respond_approval', { approvalId, decision, scope?, feedback?, choice?, planMarkdown? })`
   → broker resolve o `oneshot` → tool continua/aborta → emite `ApprovalResolved`. `choice`
-  (`approve_run`/`approve_review`) e `planMarkdown` só valem para `submit_plan`; aprovações
+  (`approve_run`/`approve_review`/`approve_goal`) e `planMarkdown` só valem para `submit_plan`; aprovações
   genéricas rejeitam esses campos.
 - Timeout 10 min (config) → `deny` com `APPROVAL_TIMEOUT`; cancelamento do turno → `cancelled`.
   A revisão do plano usa o broker sem deadline e só resolve em aprovação/negação/cancelamento.
@@ -685,7 +686,7 @@ ErrorCode { code: String }   // já existe Error{code}
 - `TodosUpdated` substitui a lista inteira; `todos: []` limpa (lista vazia é válida).
 - `ProfileChanged` carrega o **estado real** (`plan_mode`/`permission_mode`) no início do turno e
   de novo quando o estado muda entre passos.
-- `respond_approval` (IPC) aceita `choice` (`approve_run`/`approve_review`) e `plan_markdown`
+- `respond_approval` (IPC) aceita `choice` (`approve_run`/`approve_review`/`approve_goal`) e `plan_markdown`
   (plano revisado antes de valer) para decisões de `submit_plan`; escopos "sempre permitir" não se
   aplicam ao plano.
 

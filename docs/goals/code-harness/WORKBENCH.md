@@ -234,7 +234,8 @@ Implementação: `AgentSteps` + `ToolCallRow` (chat) + `describeCodeTool` (`src/
 - Card com Markdown renderizado do plano + metadados (arquivos que serão tocados, passos,
   verificação). O gate é acessível (`role="alertdialog"`, foco no botão primário, `Esc`, `aria-busy`
   enquanto envia) e possui quatro saídas:
-  **Aprovar e executar** (sai do Plano → **Editar**; o turno segue **no mesmo turno**) /
+  **Aprovar e executar** (sai do Plano preservando o modo de permissão atual; o turno segue
+  **no mesmo turno**) /
   **Aprovar e revisar cada edição** (sai do Plano → **Revisar**: cada escrita pede aprovação) /
   **Continuar planejando** (feedback livre persistido; o agente revisa e reenvia) /
   **Executar como Objetivo** (`approve_goal`: aprova/persiste o plano, preserva o modo de permissão,

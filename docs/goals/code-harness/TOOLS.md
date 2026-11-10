@@ -306,7 +306,7 @@ M  src/app.ts           (staged)
 
 - Só válido em **modo Plano**; publica o plano para revisão na UI (persistido em
   `plan/submitted` **antes** da decisão) e bloqueia o turno até a decisão. Quatro saídas:
-  **Aprovar e executar** (`approve_run` → modo Editar), **Aprovar e revisar cada edição**
+  **Aprovar e executar** (`approve_run` → preserva o modo de permissão atual), **Aprovar e revisar cada edição**
   (`approve_review` → modo Revisar, cada escrita pede aprovação), **Continuar planejando**
   (nega + feedback persistido em `plan/feedback`, o agente revisa e reenvia) e
   **Executar como Objetivo** (`approve_goal` → aprova/persiste o plano, preserva o modo de

@@ -327,8 +327,9 @@ pub fn plan_feedback(
 }
 
 /// Marca o plano como aprovado (a sessão sai do modo Plano). `markdown` é o
-/// texto revisado pelo usuário, quando houver; `review_each_edit` registra a
-/// escolha "Aprovar e revisar cada edição" no log da sessão.
+/// texto revisado pelo usuário, quando houver; `review_each_edit` registra se
+/// as escritas seguintes pedem aprovação (modo Revisar efetivo, seja por
+/// `approve_review` ou porque a sessão já estava em Revisar).
 pub fn approve_plan(
     db: &Db,
     conversation_id: &str,

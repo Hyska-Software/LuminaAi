@@ -2924,13 +2924,18 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     match outcome.decision {
         crate::domain::ApprovalDecision::Approved => {
             let execute_as_goal = outcome.execute_as_goal();
-            // `approve_goal` preserva o modo de permissão escolhido pelo
-            // usuário; os dois caminhos antigos o definem explicitamente.
-            let preserved_mode = execute_as_goal.then(|| conversation_permission_mode(ctx));
-            let review_each_edit = match preserved_mode {
-                Some(mode) => mode == PermissionMode::Review,
-                None => outcome.review_each_edit(),
+            // Aprovar o plano não troca o modo de permissão escolhido pelo
+            // usuário: o Plano é um overlay e só `approve_review` pede
+            // explicitamente o modo Revisar. `approve_run`/`approve_goal`
+            // mantêm o modo vivo da sessão (antes, `approve_run` forçava
+            // `Edit` e derrubava Leitura/Revisar/Autônomo).
+            let current_mode = conversation_permission_mode(ctx);
+            let mode = if outcome.review_each_edit() {
+                PermissionMode::Review
+            } else {
+                current_mode
             };
+            let review_each_edit = mode == PermissionMode::Review;
             // O markdown revisado na aprovação é o plano persistido (D3).
             let approved_markdown = outcome
                 .plan_markdown
@@ -2989,13 +2994,8 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 );
             }
             // `approve_review` → modo Revisar (cada escrita pede aprovação);
-            // `approve_run` → Editar (`PLAN.md` D2); `approve_goal` preserva.
-            let mode = preserved_mode.unwrap_or(if review_each_edit {
-                PermissionMode::Review
-            } else {
-                PermissionMode::Edit
-            });
-            if preserved_mode.is_none() {
+            // as demais escolhas preservam o modo corrente da sessão.
+            if mode != current_mode {
                 if let Err(error) = ctx
                     .db
                     .set_conversation_permission_mode(&ctx.conversation_id, mode)
@@ -3026,10 +3026,21 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                     "Plano aprovado · objetivo criado",
                 )
             } else {
-                let next_step = if review_each_edit {
-                    "Modo Revisar ativo: cada escrita será aprovada uma a uma."
-                } else {
-                    "Modo Editar ativo: você pode alterar os arquivos do workspace."
+                let next_step = match mode {
+                    PermissionMode::ReadOnly => {
+                        "Modo Leitura ativo: escritas e comandos seguem bloqueados; peça ao \
+                         usuário para mudar o modo se precisar alterar arquivos."
+                    }
+                    PermissionMode::Edit => {
+                        "Modo Editar ativo: você pode alterar os arquivos do workspace."
+                    }
+                    PermissionMode::Review => {
+                        "Modo Revisar ativo: cada escrita será aprovada uma a uma."
+                    }
+                    PermissionMode::Autonomous => {
+                        "Modo Autônomo ativo: você pode alterar arquivos e executar comandos \
+                         sem confirmação."
+                    }
                 };
                 (
                     format!(
@@ -3967,6 +3978,60 @@ mod tests {
         let write = call(&ctx, "write_file", json!({ "path": "src/a.ts", "content": "x" })).await;
         assert!(!write.is_error, "{}", write.content);
         assert!(fixture.root.join("src/a.ts").exists());
+    }
+
+    #[tokio::test]
+    async fn approve_run_preserves_the_current_permission_mode() {
+        let fixture = Fixture::new();
+        fixture.set_plan_mode(true);
+        // Autônomo é o padrão das sessões novas; aprovar o plano não pode
+        // rebaixar o usuário para Editar.
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let ctx = fixture.ctx();
+        let responder = tokio::spawn(answer_next_approval(
+            fixture.approvals.clone(),
+            ApprovalOutcome::approved_plan(Some("approve_run".to_string()), None),
+        ));
+        let approved = call(&ctx, "submit_plan", json!({ "plan": implementation_plan() })).await;
+        responder.await.expect("responder");
+        assert!(!approved.is_error, "{}", approved.content);
+        assert_eq!(fixture.permission_mode(), PermissionMode::Autonomous);
+        assert!(
+            approved.content.contains("Modo Autônomo ativo"),
+            "o modelo precisa saber o modo efetivo: {}",
+            approved.content
+        );
+
+        // O mesmo `ToolCtx` segue autônomo: a escrita não pede aprovação.
+        let write = call(&ctx, "write_file", json!({ "path": "src/a.ts", "content": "x" })).await;
+        assert!(!write.is_error, "{}", write.content);
+        assert!(fixture.root.join("src/a.ts").exists());
+    }
+
+    #[tokio::test]
+    async fn approve_run_in_review_keeps_review_and_writes_still_ask() {
+        let fixture = Fixture::new();
+        fixture.set_plan_mode(true);
+        fixture.set_permission_mode(PermissionMode::Review);
+        let ctx = fixture.ctx();
+        let responder = tokio::spawn(answer_next_approval(
+            fixture.approvals.clone(),
+            ApprovalOutcome::approved_plan(Some("approve_run".to_string()), None),
+        ));
+        let approved = call(&ctx, "submit_plan", json!({ "plan": implementation_plan() })).await;
+        responder.await.expect("responder");
+        assert!(!approved.is_error, "{}", approved.content);
+        assert_eq!(fixture.permission_mode(), PermissionMode::Review);
+        assert!(
+            approved.content.contains("Modo Revisar ativo"),
+            "{}",
+            approved.content
+        );
+
+        let mut no_channel = fixture.ctx();
+        no_channel.approval = None;
+        let write = call(&no_channel, "write_file", json!({ "path": "b.txt", "content": "x" })).await;
+        assert_eq!(error_code(&write), "APPROVAL_UNAVAILABLE");
     }
 
     #[tokio::test]

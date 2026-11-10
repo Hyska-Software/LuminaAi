@@ -8729,9 +8729,10 @@ mod agent_loop_tests {
         );
     }
 
-    /// B-02/D7 de ponta a ponta: um plano aprovado no **mesmo turno** muda o
-    /// modo (Editar); a política relê o DB e o passo seguinte consegue escrever;
-    /// o loop avisa o modelo (nota no system prompt) e a UI (`ProfileChanged`).
+    /// B-02/D7 de ponta a ponta: um plano aprovado no **mesmo turno** mantém o
+    /// modo corrente (aqui, Editar); a política relê o DB e o passo seguinte
+    /// consegue escrever; o loop avisa o modelo (nota no system prompt) e a UI
+    /// (`ProfileChanged`).
     #[tokio::test]
     async fn plan_approval_unlocks_mutations_in_the_same_code_turn() {
         let temp = TempDb::new();
