@@ -15,6 +15,7 @@ vi.mock('@/lib/api', () => ({ api: mocks }));
 import { useAppStore } from '@/lib/store/appStore';
 import { useThemeStore } from '@/lib/store/themeStore';
 import { useUiStore } from '@/lib/store/uiStore';
+import { THEME_CACHE_KEY } from '@/lib/theme/apply';
 import type { Settings, ThemeInfo } from '@/lib/types';
 
 function theme(overrides: Partial<ThemeInfo> = {}): ThemeInfo {
@@ -69,6 +70,30 @@ describe('themeStore', () => {
     expect(useThemeStore.getState().activeId).toBe('ocean');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#60a5fa');
+  });
+
+  it('preserves bundled built-ins and applies the persisted bundled theme', async () => {
+    const aurora = theme({
+      id: 'aurora',
+      name: 'Aurora',
+      author: 'Zylara',
+      builtIn: true,
+      light: { tokens: { background: '#f5fbff', accent: '#0f766e' }, wallpaper: null },
+      dark: { tokens: { background: '#07141c', accent: '#2dd4bf' }, wallpaper: null },
+    });
+    mocks.listThemes.mockResolvedValue([aurora]);
+    useAppStore.setState({ settings: settings({ themeId: 'aurora' }) });
+
+    await useThemeStore.getState().init();
+
+    expect(useThemeStore.getState().themes.map((entry) => entry.id)).toEqual([
+      'zylara',
+      'aurora',
+    ]);
+    expect(useThemeStore.getState().activeId).toBe('aurora');
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#2dd4bf');
+    const cached = JSON.parse(localStorage.getItem(THEME_CACHE_KEY) ?? 'null');
+    expect(cached.dark.accent).toBe('#2dd4bf');
   });
 
   it('falls back to Zylara and persists the fallback when the id is unknown', async () => {

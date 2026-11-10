@@ -67,6 +67,13 @@
       "name": "Zylara",
       "description": "The default Zylara look."
     },
+    "bundled": {
+      "aurora": "Cool teal and indigo over airy surfaces.",
+      "ember": "Warm amber and terracotta with a paper-like feel.",
+      "grove": "Sage greens and deep forest tones.",
+      "nebula": "Purple and mint over deep cosmic surfaces.",
+      "nocturne": "Violet, pink and mint on a nocturnal palette."
+    },
     "actions": {
       "install": "Install theme…",
       "refresh": "Reload themes",

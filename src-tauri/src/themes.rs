@@ -20,6 +20,17 @@ use crate::domain::{ThemeFontPaths, ThemeInfo, ThemeInstallResult, ThemeVariant}
 /// Built-in theme id; never installable or removable.
 pub const BUILTIN_THEME_ID: &str = "zylara";
 
+/// Additional bundled themes embedded in the binary. Their ids are reserved and
+/// they are not written to `<app-data>/themes`.
+const BUNDLED_THEME_IDS: &[&str] = &["aurora", "ember", "grove", "nebula", "nocturne"];
+const BUNDLED_MANIFESTS: &[&str] = &[
+    include_str!("../themes/aurora.json"),
+    include_str!("../themes/ember.json"),
+    include_str!("../themes/grove.json"),
+    include_str!("../themes/nebula.json"),
+    include_str!("../themes/nocturne.json"),
+];
+
 const THEMES_DIR: &str = "themes";
 const THEME_MANIFEST: &str = "theme.json";
 
@@ -174,6 +185,11 @@ pub fn is_valid_theme_id(id: &str) -> bool {
         return false;
     }
     chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '.' | '_' | '-'))
+}
+
+/// Whether `id` belongs to the built-in Zylara theme or a bundled theme.
+pub fn is_builtin_theme_id(id: &str) -> bool {
+    id == BUILTIN_THEME_ID || BUNDLED_THEME_IDS.contains(&id)
 }
 
 /// Resolves the themes directory below the app-data directory.
@@ -456,9 +472,23 @@ fn builtin_theme() -> ThemeInfo {
     }
 }
 
+/// Parses the manifests embedded with `include_str!` and marks them built-in.
+fn bundled_themes() -> Vec<ThemeInfo> {
+    BUNDLED_MANIFESTS
+        .iter()
+        .filter_map(|raw| parse_manifest(raw).ok())
+        .map(|manifest| {
+            let mut info = info_from_manifest(&manifest);
+            info.built_in = true;
+            info
+        })
+        .collect()
+}
+
 /// Lists the built-in theme followed by every valid installed theme.
 pub fn list_themes(data_dir: &Path) -> Vec<ThemeInfo> {
     let mut themes = vec![builtin_theme()];
+    themes.extend(bundled_themes());
     let Ok(entries) = fs::read_dir(themes_dir(data_dir)) else {
         return themes;
     };
@@ -474,7 +504,7 @@ pub fn list_themes(data_dir: &Path) -> Vec<ThemeInfo> {
         let Some(directory_name) = directory_name.to_str() else {
             continue;
         };
-        if directory_name.starts_with('.') || directory_name == BUILTIN_THEME_ID {
+        if directory_name.starts_with('.') || is_builtin_theme_id(directory_name) {
             continue;
         }
         let manifest_path = entry.path().join(THEME_MANIFEST);
@@ -517,7 +547,7 @@ fn remove_path(path: &Path) -> std::io::Result<()> {
 
 /// Removes an installed theme. Missing directories are idempotent.
 pub fn uninstall_theme(data_dir: &Path, id: &str) -> Result<Vec<ThemeInfo>, String> {
-    if id == BUILTIN_THEME_ID {
+    if is_builtin_theme_id(id) {
         return Err(error_key("themes.errors.reservedId"));
     }
     if !is_valid_theme_id(id) {
@@ -549,7 +579,7 @@ fn mime_for_asset(asset: &str) -> Option<(&'static str, u64)> {
 
 /// Reads one installed asset and returns a bounded `data:` URL.
 pub fn theme_asset(data_dir: &Path, id: &str, asset: &str) -> Result<String, String> {
-    if id == BUILTIN_THEME_ID {
+    if is_builtin_theme_id(id) {
         return Err(error_key("themes.errors.themeNotFound"));
     }
     if !is_valid_theme_id(id) {
@@ -827,7 +857,7 @@ pub fn install_theme(data_dir: &Path, archive_path: &Path) -> Result<ThemeInstal
         )
     })?;
     let manifest = parse_manifest(&raw)?;
-    if manifest.id == BUILTIN_THEME_ID {
+    if is_builtin_theme_id(&manifest.id) {
         return Err(error_key("themes.errors.reservedId"));
     }
 
@@ -1082,15 +1112,41 @@ mod tests {
         assert!(!result.replaced);
         assert!(dir.path().join("themes/ocean/theme.json").is_file());
         assert!(dir.path().join("themes/ocean/images/bg.png").is_file());
-        assert_eq!(list_themes(dir.path())[1].id, "ocean");
+        let listed = list_themes(dir.path());
+        assert!(listed.iter().any(|theme| theme.id == "ocean" && !theme.built_in));
     }
 
     #[test]
-    fn install_rejects_the_reserved_builtin_id() {
+    fn bundled_themes_are_complete_and_ordered() {
         let dir = temp_dir();
-        let zip_path = dir.path().join("builtin.zip");
-        write_zip(&zip_path, &[("theme.json", manifest(BUILTIN_THEME_ID).as_bytes())]);
-        assert!(install_theme(dir.path(), &zip_path).is_err());
+        let listed = list_themes(dir.path());
+        let ids: Vec<&str> = listed.iter().map(|theme| theme.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["zylara", "aurora", "ember", "grove", "nebula", "nocturne"]
+        );
+        for theme in &listed[1..] {
+            assert!(theme.built_in);
+            for variant in [&theme.light, &theme.dark] {
+                for token in REQUIRED_TOKENS {
+                    assert!(
+                        variant.tokens.contains_key(*token),
+                        "{} missing {token}",
+                        theme.id
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn install_rejects_every_reserved_builtin_id() {
+        let dir = temp_dir();
+        for id in [BUILTIN_THEME_ID, "aurora", "ember", "grove", "nebula", "nocturne"] {
+            let zip_path = dir.path().join(format!("{id}.zip"));
+            write_zip(&zip_path, &[("theme.json", manifest(id).as_bytes())]);
+            assert!(install_theme(dir.path(), &zip_path).is_err(), "{id} accepted");
+        }
     }
 
     #[test]
@@ -1157,7 +1213,13 @@ mod tests {
 
         let listed = list_themes(dir.path());
         assert_eq!(listed[0].id, BUILTIN_THEME_ID);
-        assert_eq!(listed.len(), 2);
-        assert_eq!(listed[1].id, "ocean");
+        // Zylara + Aurora + Ember + Grove + Nebula + Nocturne + the valid installed theme.
+        assert_eq!(listed.len(), 7);
+        let installed = listed
+            .iter()
+            .find(|theme| theme.id == "ocean")
+            .expect("installed theme");
+        assert!(!installed.built_in);
+        assert!(!listed.iter().any(|theme| theme.id == "bad"));
     }
 }

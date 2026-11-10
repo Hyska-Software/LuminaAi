@@ -2,7 +2,7 @@
 
 O Zylara instala temas a partir de um pacote `.zip` local. Um tema é **declarativo**: ele fornece paletas (claro/escuro), raios, fontes e papel de parede opcionais. Não há CSS nem JavaScript arbitrário no pacote.
 
-O tema embutido **Zylara** (`themeId: "zylara"`) é o padrão e não pode ser removido. O modo Claro/Escuro/Sistema é independente do tema: cada pacote fornece as duas paletas.
+O tema embutido **Zylara** (`themeId: "zylara"`) é o padrão e não pode ser removido. O app também traz cinco temas prontos, com variantes clara e escura: **Aurora** (`aurora`), **Ember** (`ember`), **Grove** (`grove`), **Nebula** (`nebula`, inspirado no Aura Theme) e **Nocturne** (`nocturne`, inspirado no Dracula/Alucard). Eles são embarcados no binário (manifestos em `src-tauri/themes/*.json`, incluídos via `include_str!`), não ficam em `<app-data>/themes` e não podem ser reinstalados/removidos. O modo Claro/Escuro/Sistema é independente do tema: cada pacote fornece as duas paletas.
 
 ## Onde os temas ficam
 
@@ -147,7 +147,7 @@ O `theme.json` pode ficar na raiz do ZIP ou dentro de uma única pasta de primei
 Copie o manifesto completo do exemplo acima. O mínimo necessário é:
 
 - `schemaVersion: 1`
-- `id` estável (minúsculo, `[a-z0-9._-]`, diferente de `zylara`)
+- `id` estável (minúsculo, `[a-z0-9._-]`, diferente de `zylara`, `aurora`, `ember`, `grove`, `nebula` e `nocturne`)
 - `name`
 - `tokens.light` e `tokens.dark` com **todos os 23 tokens obrigatórios**
 
@@ -209,7 +209,7 @@ Não há CSS, JavaScript ou HTML no pacote. Tudo que o tema consegue alterar est
 - Só arquivos referenciados são extraídos; extensões e assinaturas (magic bytes) são validadas. Imagens também têm dimensões verificadas.
 - Links simbólicos, caminhos com `..`, caminhos absolutos, separadores `\` e nomes duplicados são rejeitados.
 - Nenhum CSS, JavaScript, HTML ou expressão é executado. O renderer aplica somente tokens validados e data URLs de assets validados.
-- Reinstalar o mesmo `id` substitui o tema (atualização). Remover o tema ativo volta para o Zylara.
+- Reinstalar o mesmo `id` substitui o tema (atualização). Remover o tema ativo volta para o Zylara. Os ids `zylara`, `aurora`, `ember`, `grove`, `nebula` e `nocturne` são reservados para os temas embutidos e não podem ser instalados nem removidos.
 
 ## Instalando e testando
 

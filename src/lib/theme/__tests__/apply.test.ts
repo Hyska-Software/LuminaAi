@@ -88,6 +88,21 @@ describe('applyThemeTokens', () => {
     expect(root.dataset.themeTokens).toBeUndefined();
     expect(localStorage.getItem(THEME_CACHE_KEY)).toBeNull();
   });
+
+  it('caches tokens for bundled built-in themes that define a palette', () => {
+    const aurora = theme({
+      id: 'aurora',
+      name: 'Aurora',
+      builtIn: true,
+      light: { tokens: { background: '#f5fbff' }, wallpaper: null },
+      dark: { tokens: { background: '#07141c', accent: '#2dd4bf' }, wallpaper: null },
+    });
+
+    applyThemeTokens(aurora, true);
+
+    const cached = JSON.parse(localStorage.getItem(THEME_CACHE_KEY) ?? 'null');
+    expect(cached.dark.accent).toBe('#2dd4bf');
+  });
 });
 
 describe('applyThemeAssets', () => {

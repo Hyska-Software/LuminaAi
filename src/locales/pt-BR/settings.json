@@ -67,6 +67,13 @@
       "name": "Zylara",
       "description": "A aparência padrão do Zylara."
     },
+    "bundled": {
+      "aurora": "Verde-azulado e índigo sobre superfícies claras e frias.",
+      "ember": "Âmbar e terracota quentes, com cara de papel.",
+      "grove": "Verdes sálvia e tons profundos de floresta.",
+      "nebula": "Roxo e menta sobre superfícies cósmicas profundas.",
+      "nocturne": "Violeta, rosa e menta em uma paleta noturna."
+    },
     "actions": {
       "install": "Instalar tema…",
       "refresh": "Recarregar temas",

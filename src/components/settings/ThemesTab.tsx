@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 
 import { BrandMark } from '@/components/chat/BrandMark';
 import { Button, IconButton, SegmentedControl, Spinner } from '@/components/ui';
-import { useAppStore, useThemeStore, useUiStore } from '@/lib/store';
+import { BUILTIN_THEME_ID, useAppStore, useThemeStore, useUiStore } from '@/lib/store';
 import type { ThemeInfo, ThemeMode } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { SettingRow, SettingsSection } from './shared';
@@ -36,9 +36,27 @@ export function ThemesTab() {
   const [removingId, setRemovingId] = useState<string | null>(null);
 
   const displayName = (entry: ThemeInfo) =>
-    entry.builtIn ? t('themes.builtin.name') : entry.name;
-  const description = (entry: ThemeInfo) =>
-    entry.builtIn ? t('themes.builtin.description') : entry.description;
+    entry.id === BUILTIN_THEME_ID ? t('themes.builtin.name') : entry.name;
+  const description = (entry: ThemeInfo) => {
+    if (entry.id === BUILTIN_THEME_ID) return t('themes.builtin.description');
+    if (entry.builtIn) {
+      switch (entry.id) {
+        case 'aurora':
+          return t('themes.bundled.aurora');
+        case 'ember':
+          return t('themes.bundled.ember');
+        case 'grove':
+          return t('themes.bundled.grove');
+        case 'nebula':
+          return t('themes.bundled.nebula');
+        case 'nocturne':
+          return t('themes.bundled.nocturne');
+        default:
+          break;
+      }
+    }
+    return entry.description;
+  };
 
   const modeOptions = [
     { value: 'light', label: t('general.theme.light') },
@@ -210,7 +228,7 @@ export function ThemesTab() {
                       className="relative h-24 overflow-hidden rounded-lg border border-border bg-surface"
                       aria-hidden
                     >
-                      {entry.builtIn ? (
+                      {entry.id === BUILTIN_THEME_ID ? (
                         <div className="flex h-full items-center justify-center">
                           <BrandMark size={44} />
                         </div>

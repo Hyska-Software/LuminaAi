@@ -64,7 +64,10 @@ export function readCssToken(name: string, fallback: string): string {
 function cacheTokens(theme: ThemeInfo): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    if (theme.builtIn) {
+    const hasTokens =
+      Object.keys(theme.light.tokens ?? {}).length > 0 ||
+      Object.keys(theme.dark.tokens ?? {}).length > 0;
+    if (!hasTokens) {
       localStorage.removeItem(THEME_CACHE_KEY);
       return;
     }

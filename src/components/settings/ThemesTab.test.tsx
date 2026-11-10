@@ -86,6 +86,38 @@ const OCEAN: ThemeInfo = {
   fonts: { sans: null, mono: null },
 };
 
+const AURORA: ThemeInfo = {
+  id: 'aurora',
+  name: 'Aurora',
+  version: '1.0.0',
+  author: 'Zylara',
+  description: 'Cool teal and indigo over airy surfaces.',
+  builtIn: true,
+  light: {
+    tokens: {
+      background: '#f5fbff',
+      surface: '#eaf4fb',
+      foreground: '#0a1b2a',
+      accent: '#0f766e',
+      success: '#15803d',
+      danger: '#dc2626',
+    },
+    wallpaper: null,
+  },
+  dark: {
+    tokens: {
+      background: '#07141c',
+      surface: '#050e14',
+      foreground: '#e6f7f5',
+      accent: '#2dd4bf',
+      success: '#4ade80',
+      danger: '#f87171',
+    },
+    wallpaper: null,
+  },
+  fonts: { sans: null, mono: null },
+};
+
 function settings(overrides: Partial<Settings> = {}): Settings {
   return { ...useAppStore.getState().settings, ...overrides };
 }
@@ -119,6 +151,17 @@ describe('ThemesTab', () => {
     expect(screen.getByText('Zylara')).toBeTruthy();
     expect(screen.getByText('Ocean')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Remover o tema Zylara' })).toBeNull();
+  });
+
+  it('renders bundled built-ins with swatches and no remove action', () => {
+    useThemeStore.setState({ themes: [BUILTIN, AURORA, OCEAN] });
+    render(<ThemesTab />);
+
+    expect(screen.getByText('Aurora')).toBeTruthy();
+    expect(
+      screen.getByText('Verde-azulado e índigo sobre superfícies claras e frias.'),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Remover o tema Aurora' })).toBeNull();
   });
 
   it('activates a theme and persists its id', async () => {

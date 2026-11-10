@@ -28,11 +28,20 @@ export const BUILTIN_THEME: ThemeInfo = {
 };
 
 function withBuiltin(themes: readonly ThemeInfo[]): ThemeInfo[] {
-  const installed = themes
-    .filter((theme) => theme.id !== BUILTIN_THEME_ID && !theme.builtIn)
-    .slice()
+  const seen = new Set<string>();
+  const unique = themes.filter((theme) => {
+    if (seen.has(theme.id)) return false;
+    seen.add(theme.id);
+    return true;
+  });
+  const zylara = unique.find((theme) => theme.id === BUILTIN_THEME_ID && theme.builtIn);
+  const bundled = unique.filter(
+    (theme) => theme.builtIn && theme.id !== BUILTIN_THEME_ID,
+  );
+  const installed = unique
+    .filter((theme) => !theme.builtIn && theme.id !== BUILTIN_THEME_ID)
     .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || a.id.localeCompare(b.id));
-  return [BUILTIN_THEME, ...installed];
+  return [zylara ?? BUILTIN_THEME, ...bundled, ...installed];
 }
 
 interface ThemeState {
