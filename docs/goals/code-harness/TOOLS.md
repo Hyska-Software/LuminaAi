@@ -57,7 +57,7 @@ pub enum ToolPresentation {
 | `ReadWorkspace` | leitura dentro do workspace, sempre permitida | `read_file`, `list_dir`, `search_*`, `git_status`, `git_diff`, `git_log` |
 | `ReadOutside` | leitura fora do workspace — **exige aprovação** por padrão | arquivos de config globais, `~/.agents` |
 | `MutateWorkspace` | escrita/edição dentro do workspace | `write_file`, `edit_file` (auto-aprovada no modo Editar) |
-| `ExecuteCommand` | comando de shell dentro do workspace | `run_command` (aprovação no modo Editar; allowlist de leitura opcional) |
+| `ExecuteCommand` | comando de shell dentro do workspace | `run_command` (aprovação no modo Editar; comandos de leitura conhecidos rodam sem aprovação) |
 | `MutateGit` | staging/commit/branch/discard | UI de git (não é tool do modelo na v1) |
 | `Network` | tráfego externo | `web_search`, `fetch_url` |
 | `Ask` | pausa explícita para o usuário | `ask_user`, `submit_plan` |
@@ -122,7 +122,9 @@ Leitura paginada com números de linha. **Nunca** lê binário como texto.
 ```
 
 - Busca por glob (`globset`), respeita ignore, ordena por caminho; retorna caminhos relativos.
-- **Política**: `ReadWorkspace`. **Testes**: glob inválido, 0 resultados (dica), cap.
+  `path` aceita um diretório ou um arquivo específico (nesse caso só o arquivo é avaliado).
+- **Política**: `ReadWorkspace`. **Testes**: glob inválido, 0 resultados (dica), cap, arquivo
+  específico.
 
 #### `search_text`
 
@@ -135,8 +137,10 @@ Leitura paginada com números de linha. **Nunca** lê binário como texto.
 
 - Busca de conteúdo (crates do ripgrep: `ignore` + `grep-searcher` + `grep-regex`), agrupada por
   arquivo: `src/a.ts:42: ...` com contexto opcional; cap de 200 matches / 4 000 linhas exibidas;
-  aviso quando truncado. Regex inválida → erro com a posição.
-- **Política**: `ReadWorkspace`. **Testes**: literal, regex, case, contexto, cap, ignore, binário.
+  aviso quando truncado. Regex inválida → erro com a posição. `path` aceita um diretório ou um
+  arquivo específico (busca só nele; arquivo de segredo passa pela mesma aprovação de `read_file`).
+- **Política**: `ReadWorkspace`. **Testes**: literal, regex, case, contexto, cap, ignore, binário,
+  arquivo específico, path inexistente.
 
 #### `read_tool_output`
 
@@ -223,8 +227,14 @@ Leitura paginada com números de linha. **Nunca** lê binário como texto.
   (`rm -rf`, `Remove-Item -Recurse -Force`, `git reset --hard`, `git clean -fdx`, `git push --force`,
   `format`, `shutdown`, `npm publish`, `DROP TABLE`, `> /dev/sd*`, `curl … | sh`, `iwr … | iex`);
   regras explícitas de negação continuam valendo.
-  Comandos de leitura conhecidos (`git status|diff|log|show|branch`, `ls|dir|Get-ChildItem`,
-  `type|cat|Get-Content`, `rg`, `findstr`) podem ser auto-aprovados por regra explícita.
+  Comandos de inspeção conhecidos (`git status|diff|log|show|grep`, `ls|dir`, `type|cat|Get-Content`,
+  `head|tail`, `rg|grep|findstr`, `find` sem `-delete/-exec*`, `fd` sem `-x/-X`, versões de
+  toolchains) rodam **sem aprovação** nos modos Editar, Revisar, Plano e Leitura. O classificador é
+  conservador e recusa composição (`;`, `&`, `|`, redirecionamento), programa com caminho,
+  `rg/ag --pre*`, `file -C` e opções de git que executam comandos/escrevem (`-c/-C`,
+  `--output`, `--ext-diff`, `--textconv`, `--open-files-in-pager`, `--pager`, ...). `git branch`
+  e `git remote` não estão na allowlist. No modo Plano, qualquer comando não classificado continua
+  negado com `PLAN_MODE_ACTIVE`.
 - **Testes**: exit 0/≠0, stderr, timeout, cancelamento (morte de árvore), cap/spill, env scrub,
   workdir inválido, background, promoção, classificação de risco/destrutivo.
 

@@ -19,7 +19,7 @@ pub static RUN_COMMAND_SPEC: ToolSpec = ToolSpec {
     mutating: true,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `run_command` to compile, test, run linters and run read-only git commands. Prefer the project's verification commands; never run destructive commands without need. Long output comes back truncated with a spill id.",
+    guidance: "Use `run_command` to compile, test, run linters and run read-only inspection commands (`git status/log/diff/show`, `ls`, `cat`/`Get-Content`, `head`/`tail`, `rg`/`grep`). In Plan and Read-only modes only known read-only commands run without approval; writing or composed commands (`;`, `&`, `|`, redirection, `find -exec/-delete`, `fd -x`, `rg --pre`, `git -c/--output`) are denied. Prefer the project's verification commands in editable modes; never run destructive commands without need. Long output comes back truncated with a spill id.",
 };
 
 pub static RUN_CHECKS_SPEC: ToolSpec = ToolSpec {

@@ -1439,7 +1439,9 @@ fn mode_update_note(
         if plan_mode {
             lines.push(
                 "The user **enabled Plan mode**: do not modify files or run mutating \
-                 commands; use `submit_plan` when the plan is ready."
+                 commands; read-only inspection commands (e.g. `git status/log/diff`, `ls`, \
+                 `cat`/`Get-Content`, `rg`) are still allowed. Use `submit_plan` when the plan \
+                 is ready."
                     .to_string(),
             );
         } else {

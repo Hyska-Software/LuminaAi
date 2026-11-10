@@ -321,6 +321,18 @@ mod tests {
         }
     }
 
+    fn readonly_shell(command: &'static str) -> CallFacts<'static> {
+        CallFacts {
+            tool: "run_command",
+            risk: RiskClass::Read,
+            mutating: false,
+            target: Some(command),
+            inside_workspace: true,
+            secret: false,
+            destructive_reason: None,
+        }
+    }
+
     #[test]
     fn computer_control_asks_outside_autonomous_and_is_allowed_inside_it() {
         let facts = CallFacts {
@@ -356,6 +368,19 @@ mod tests {
         let c = ctx(PermissionMode::ReadOnly);
         assert_eq!(decide(&c, &read()), PolicyDecision::Allow);
         assert!(matches!(decide(&c, &write()), PolicyDecision::Deny { code: "POLICY_DENIED", .. }));
+    }
+
+    #[test]
+    fn read_only_mode_allows_known_read_only_commands() {
+        let c = ctx(PermissionMode::ReadOnly);
+        assert_eq!(
+            decide(&c, &readonly_shell("git status")),
+            PolicyDecision::Allow
+        );
+        assert!(matches!(
+            decide(&c, &shell("npm test", None)),
+            PolicyDecision::Deny { code: "POLICY_DENIED", .. }
+        ));
     }
 
     #[test]
@@ -405,6 +430,20 @@ mod tests {
         ));
         // leitura continua liberada no modo Plano
         assert_eq!(decide(&c, &read()), PolicyDecision::Allow);
+    }
+
+    #[test]
+    fn plan_mode_allows_known_read_only_commands() {
+        let mut c = ctx(PermissionMode::Autonomous);
+        c.plan_mode = true;
+        assert_eq!(
+            decide(&c, &readonly_shell("git status")),
+            PolicyDecision::Allow
+        );
+        assert!(matches!(
+            decide(&c, &shell("npm test", None)),
+            PolicyDecision::Deny { code: "PLAN_MODE_ACTIVE", .. }
+        ));
     }
 
     #[test]

@@ -224,11 +224,11 @@ tratado como dado. `read_tool_output` só lê spills da própria sessão.
 
 | Modo | Leitura | Escrita no workspace | Shell | Git (UI) | Fora do workspace | Uso |
 | --- | --- | --- | --- | --- | --- | --- |
-| **Leitura** | ✅ | ❌ (erro de política) | ❌ | só leitura | ❌ | explorar/entender código |
-| **Editar** | ✅ | ✅ auto | **pergunta** | stage/commit manual | pergunta | dia a dia |
+| **Leitura** | ✅ | ❌ (erro de política) | somente leitura | só leitura | ❌ | explorar/entender código |
+| **Editar** | ✅ | ✅ auto | **pergunta** (leitura livre) | stage/commit manual | pergunta | dia a dia |
 | **Autônomo** | ✅ | ✅ auto | ✅ auto (inclusive destrutivo) | stage/commit manual | ✅ auto (fora do Plano) | tarefas longas confiadas |
-| **Revisar** (saída do Plano) | ✅ | ✅ **com aprovação por escrita** | pergunta | stage/commit manual | pergunta | revisar cada edição após aprovar um plano |
-| **Plano** (overlay) | ✅ | ❌ | ❌ | só leitura | ❌ | planejar antes de executar |
+| **Revisar** (saída do Plano) | ✅ | ✅ **com aprovação por escrita** | pergunta (leitura livre) | stage/commit manual | pergunta | revisar cada edição após aprovar um plano |
+| **Plano** (overlay) | ✅ | ❌ | somente leitura | só leitura | ❌ | planejar antes de executar |
 
 - Sessões novas do Code nascem no **modo padrão configurado pelo usuário**
   (`Settings.codeDefaultPermissionMode`, padrão **Autônomo**; Configurações → Ferramentas →
@@ -269,6 +269,13 @@ tratado como dado. `read_tool_output` só lê spills da própria sessão.
 - O gate do modo Plano vale para mutações **de workspace** (arquivo/shell/git). `todo_write` e
   `submit_plan` são estado de sessão e não passam por esse gate; `todo_write` declara
   `mutating: false`/`risk: read` no registry.
+- `run_command` classifica comandos de inspeção conhecidos como **não mutantes**
+  (`is_readonly_command`, `workspace/exec.rs`): no modo Plano e no modo Leitura eles rodam sem
+  aprovação, enquanto escrita/edição/instalação/composição continuam negadas. A allowlist é
+  conservadora e recusa `;`, `&`, `|`, redirecionamento, caminhos como programa, `find
+  -delete/-exec*`, `fd -x/-X`, `rg/ag --pre*`, `file -C` e opções de git que executam comandos ou
+  escrevem (`-c/-C`, `--exec-path`, `--git-dir`, `--work-tree`, `--output`, `--ext-diff`,
+  `--textconv`, `--open-files-in-pager`, `--pager`). `branch` e `remote` ficam fora da allowlist.
 - No modo **Revisar**, toda tool `risk=write` (write/edit) e `shell` recebe `ASK`, mantendo o
   precedente de destrutivo/segredo/fora do workspace.
 
@@ -321,12 +328,16 @@ pub struct ApprovalRequest {
   `format`, `git reset --hard`, `git clean -fdx`, `git checkout -- .`, `git restore .`,
   `git push --force*`, `git branch -D`, `npm publish`, `cargo publish`, `DROP TABLE|DROP DATABASE`,
   `shutdown`, `Stop-Computer`, `> /dev/sd*`, `mkfs`, `curl … | sh`, `iwr … | iex`, `npm i -g`.
-- **Leitura conhecida (pode ser auto-aprovada por regra)**: `git status|diff|log|show|branch`,
-  `ls|dir|Get-ChildItem`, `cat|type|Get-Content`, `rg`, `findstr`, `wc`, `head|tail`.
+- **Leitura conhecida (roda sem aprovação nos modos Editar/Revisar/Plano/Leitura)**: `git
+  status|diff|log|show|grep`, `ls|dir`, `cat|type|Get-Content`, `rg|grep|findstr`, `wc`,
+  `head|tail`, `find` sem `-delete`/`-exec*`, `fd` sem `-x`/`-X`, versões de toolchain. `branch`
+  e `remote` ficam de fora (flags mutantes).
 - A classificação é **conservadora**: o que não casar como leitura conhecida e não for destrutivo
-  fica no default do modo (ASK em Editar, ALLOW em Autônomo). O parser não tenta interpretar shell
-  completo (impossível); trabalha com segmentação simples (`;`, `&&`, `||`, `|`) e regex de tokens,
-  e documenta o limite.
+  fica no default do modo (ASK em Editar, ALLOW em Autônomo; no Plano/Leitura, DENY). O parser não
+  tenta interpretar shell completo (impossível): recusa composição (`;`, `&`, `|`, redirecionamento,
+  `$(`), caminhos como programa, `rg/ag --pre*`, `file -C`, `find` com `-exec*`/`-delete`/`-fprint*`,
+  `fd -x/-X` e opções de git que executam comandos ou escrevem (`-c/-C`, `--output`, `--ext-diff`,
+  `--textconv`, `--open-files-in-pager`, `--pager`, ...).
 
 ## 7. Workspace e filesystem seguro
 

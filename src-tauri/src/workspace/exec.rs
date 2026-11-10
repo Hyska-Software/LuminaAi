@@ -367,22 +367,26 @@ pub fn shell_for(script: &str) -> (String, Vec<String>) {
 }
 
 /// Classifica comandos destrutivos (heurística de UX; nunca é a única defesa).
+///
 /// Comando de **leitura** conhecido (sem escrita/rede): o modo Editar pode
-/// rodá-lo sem aprovação (`git status/diff/log`, `ls`, `cat`, grep, testes de
-/// versão). Qualquer metacaractere de composição (`;`, `&&`, `|`, `>`, `$(`, …)
-/// invalida a classificação — nunca auto-aprovamos comandos compostos.
+/// rodá-lo sem aprovação e o gate do modo Plano/Leitura o trata como não
+/// mutante (`git status/diff/log`, `ls`, `cat`, grep, testes de versão).
+/// Qualquer metacaractere de composição (`;`, `&`, `|`, `>`, `$(`,
+/// backtick, nova linha) invalida a classificação — nunca auto-aprovamos
+/// comandos compostos. O classificador é conservador e deny-by-default para
+/// programas desconhecidos; **não** é um sandbox.
 pub fn is_readonly_command(command: &str) -> bool {
     let trimmed = command.trim();
     if trimmed.is_empty()
         || trimmed.contains(';')
-        || trimmed.contains("&&")
-        || trimmed.contains("||")
+        || trimmed.contains('&')
         || trimmed.contains('|')
         || trimmed.contains('>')
         || trimmed.contains('<')
         || trimmed.contains("$(")
         || trimmed.contains('`')
         || trimmed.contains('\n')
+        || trimmed.contains('\r')
     {
         return false;
     }
@@ -390,38 +394,42 @@ pub fn is_readonly_command(command: &str) -> bool {
     let Some(program) = parts.next() else {
         return false;
     };
+    // Never trust a path-like program: a workspace binary named `cat` must not
+    // be auto-classified as the system tool.
+    if program.contains('/') || program.contains('\\') || program.contains(':') {
+        return false;
+    }
     let program = program.to_ascii_lowercase();
-    let basename = program
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(program.as_str())
-        .trim_end_matches(".exe");
+    let basename = program.trim_end_matches(".exe");
     let rest: Vec<String> = parts.map(|part| part.to_ascii_lowercase()).collect();
     match basename {
-        "git" => rest
-            .iter()
-            .find(|part| !part.starts_with('-'))
-            .is_some_and(|sub| {
-                matches!(
-                    sub.as_str(),
-                    "status"
-                        | "diff"
-                        | "log"
-                        | "show"
-                        | "branch"
-                        | "rev-parse"
-                        | "ls-files"
-                        | "blame"
-                        | "describe"
-                        | "shortlog"
-                        | "remote"
-                )
-            }),
+        "git" => git_readonly_command(&rest),
         "ls" | "dir" | "pwd" | "whoami" | "hostname" | "wc" | "head" | "tail" | "which"
-        | "where" | "type" | "file" | "stat" | "du" | "df" => true,
+        | "where" | "type" | "stat" | "du" | "df" => true,
+        "file" => !rest.iter().any(|arg| arg == "-c" || arg == "--compile"),
         "cat" | "get-content" | "gc" => true,
-        "rg" | "grep" | "ag" | "findstr" => true,
-        "find" | "fd" => true,
+        "rg" | "grep" | "ag" | "findstr" => !rest.iter().any(|arg| {
+            arg == "--pager" || arg.starts_with("--pager=") || arg.starts_with("--pre")
+        }),
+        "find" => !rest.iter().any(|arg| {
+            matches!(
+                arg.as_str(),
+                "-delete"
+                    | "-exec"
+                    | "-execdir"
+                    | "-ok"
+                    | "-okdir"
+                    | "-fprint"
+                    | "-fprint0"
+                    | "-fprintf"
+                    | "-fls"
+            )
+        }),
+        "fd" => !rest.iter().any(|arg| {
+            matches!(arg.as_str(), "-x" | "-X" | "--exec" | "--exec-batch")
+                || arg.starts_with("--exec=")
+                || arg.starts_with("--exec-batch=")
+        }),
         "node" | "python" | "python3" | "cargo" | "npm" | "pnpm" | "yarn" | "rustc" | "go"
             if rest.iter().any(|part| part == "--version" || part == "-v" || part == "-version") =>
         {
@@ -429,6 +437,44 @@ pub fn is_readonly_command(command: &str) -> bool {
         }
         _ => false,
     }
+}
+
+/// Git read-only subset: reject global/command options that can run commands,
+/// write files or escape the workspace repository, then whitelist the
+/// subcommand. `branch`/`remote` stay out (their flags can mutate).
+fn git_readonly_command(args: &[String]) -> bool {
+    if args.iter().any(|arg| {
+        arg == "-c"
+            || arg.starts_with("--config-env")
+            || arg == "--exec-path"
+            || arg.starts_with("--exec-path=")
+            || arg == "--git-dir"
+            || arg.starts_with("--git-dir=")
+            || arg == "--work-tree"
+            || arg.starts_with("--work-tree=")
+            || arg == "--output"
+            || arg.starts_with("--output=")
+            || arg == "--ext-diff"
+            || arg == "--textconv"
+            || arg == "--open-files-in-pager"
+            || arg.starts_with("--open-files-in-pager=")
+            || arg == "--pager"
+            || arg.starts_with("--pager=")
+            || arg == "--upload-pack"
+            || arg.starts_with("--upload-pack=")
+            || arg == "--receive-pack"
+            || arg.starts_with("--receive-pack=")
+    }) {
+        return false;
+    }
+    let Some(subcommand) = args.iter().find(|arg| !arg.starts_with('-')) else {
+        return false;
+    };
+    matches!(
+        subcommand.as_str(),
+        "status" | "diff" | "log" | "show" | "rev-parse" | "ls-files" | "blame" | "describe"
+            | "shortlog" | "grep"
+    )
 }
 
 pub fn is_destructive_command(command: &str) -> Option<&'static str> {
@@ -807,19 +853,35 @@ async fn kill_process_tree(pid: u32) {
 
     #[test]
     fn readonly_command_classifier_is_conservative() {
+        assert!(is_readonly_command("Get-Content build-out.txt -TotalCount 40"));
         assert!(is_readonly_command("git status"));
         assert!(is_readonly_command("git log --oneline -5"));
         assert!(is_readonly_command("git diff --stat"));
+        assert!(is_readonly_command("git grep -n needle"));
         assert!(is_readonly_command("ls -la"));
         assert!(is_readonly_command("cat src/main.rs"));
         assert!(is_readonly_command("rg --files"));
         assert!(is_readonly_command("node --version"));
+
         assert!(!is_readonly_command("git commit -m x"));
         assert!(!is_readonly_command("git status && rm -rf build"));
+        assert!(!is_readonly_command("git status & calc"));
         assert!(!is_readonly_command("cat a.txt > b.txt"));
         assert!(!is_readonly_command("echo $(whoami)"));
         assert!(!is_readonly_command("npm run test"));
         assert!(!is_readonly_command(""));
+        assert!(!is_readonly_command("./cat src/main.rs"));
+        assert!(!is_readonly_command("find . -delete"));
+        assert!(!is_readonly_command("find . -exec rm {} +"));
+        assert!(!is_readonly_command("fd -x rm"));
+        assert!(!is_readonly_command("rg --pre calc needle"));
+        assert!(!is_readonly_command("file -C"));
+        assert!(!is_readonly_command("git -c core.pager=cat log"));
+        assert!(!is_readonly_command("git -C other log"));
+        assert!(!is_readonly_command("git log --output=out.patch"));
+        assert!(!is_readonly_command("git diff --ext-diff"));
+        assert!(!is_readonly_command("git branch -a"));
+        assert!(!is_readonly_command("git remote -v"));
     }
 
 

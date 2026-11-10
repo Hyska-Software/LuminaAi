@@ -38,26 +38,26 @@ pub static LIST_DIR_SPEC: ToolSpec = ToolSpec {
 
 pub static SEARCH_FILES_SPEC: ToolSpec = ToolSpec {
     name: "search_files",
-    description: "Find files whose paths match a glob pattern (e.g. `**/*.test.ts`), ordered by path. Absolute paths are allowed when the session has no project folder.",
+    description: "Find files whose paths match a glob pattern (e.g. `**/*.test.ts`), ordered by path. `path` accepts a directory or a specific file. Absolute paths are allowed when the session has no project folder.",
     schema: search_files_schema,
     parallel: ParallelClass::Safe,
     risk: RiskClass::Read,
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `search_files` to locate files by name/pattern and `search_text` to locate content; results are relative to the workspace, or absolute outside it.",
+    guidance: "Use `search_files` to locate files by name/pattern and `search_text` to locate content; set `path` to a directory or a specific file. Results are relative to the workspace, or absolute outside it.",
 };
 
 pub static SEARCH_TEXT_SPEC: ToolSpec = ToolSpec {
     name: "search_text",
-    description: "Search file contents (literal or regex), grouped by file, optionally filtered by glob and with context lines. Absolute paths are allowed when the session has no project folder.",
+    description: "Search file contents (literal or regex), grouped by file, optionally filtered by glob and with context lines. `path` accepts a directory or a specific file. Absolute paths are allowed when the session has no project folder.",
     schema: search_text_schema,
     parallel: ParallelClass::Safe,
     risk: RiskClass::Read,
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `search_text` with a short literal snippet or a regex to find the relevant code; narrow with `glob`/`path` instead of scanning the whole repository.",
+    guidance: "Use `search_text` with a short literal snippet or a regex to find the relevant code; set `path` to a specific file to search only it, or narrow a directory with `glob` instead of scanning the whole repository.",
 };
 
 pub static READ_TOOL_OUTPUT_SPEC: ToolSpec = ToolSpec {
@@ -148,7 +148,7 @@ fn search_files_schema() -> Value {
             },
             "path": {
                 "type": "string",
-                "description": "Directory to search under (relative to the workspace or absolute). Defaults to \".\"."
+                "description": "File or directory to search under (relative to the workspace or absolute). Defaults to \".\"."
             },
             "max_results": {
                 "type": "integer",
@@ -172,7 +172,7 @@ fn search_text_schema() -> Value {
             },
             "path": {
                 "type": "string",
-                "description": "Directory to search under (relative to the workspace or absolute). Defaults to \".\"."
+                "description": "File or directory to search under (relative to the workspace or absolute). Defaults to \".\"."
             },
             "glob": {
                 "type": "string",

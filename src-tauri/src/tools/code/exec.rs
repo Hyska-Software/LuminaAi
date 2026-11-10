@@ -252,6 +252,34 @@ fn resolve_dir(ctx: &ToolCtx, requested: &str) -> Result<PathBuf, ToolOutcome> {
     resolved.map_err(|error| err(error.code, error.message))
 }
 
+/// Base de uma busca: um diretório ou um arquivo específico. A resolução que
+/// falha por "não é arquivo" (diretório) cai para `ReadDir`; erros de path
+/// inexistente/fora do workspace continuam sendo erros.
+enum SearchRoot {
+    File(PathBuf),
+    Dir(PathBuf),
+}
+
+fn resolve_search_root(ctx: &ToolCtx, requested: &str) -> Result<SearchRoot, ToolOutcome> {
+    let workspace = workspace_handle(ctx)?;
+    let resolve = |access| {
+        if workspace.internal {
+            safe_path::resolve_unconfined(&workspace.root, requested, access)
+        } else {
+            safe_path::resolve(&workspace.root, requested, access)
+        }
+    };
+    match resolve(safe_path::Access::Read) {
+        Ok(path) => Ok(SearchRoot::File(path)),
+        Err(error) if error.code == safe_path::FS_NOT_A_FILE => {
+            resolve(safe_path::Access::ReadDir)
+                .map(SearchRoot::Dir)
+                .map_err(|error| err(error.code, error.message))
+        }
+        Err(error) => Err(err(error.code, error.message)),
+    }
+}
+
 fn dir_skip_name(name: &str) -> bool {
     matches!(
         name,
@@ -809,7 +837,7 @@ async fn read_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         return err(
             "FS_TOO_LARGE",
             format!(
-                "'{relative}' tem {} bytes (máximo {}); use search_text/grep para inspecionar partes",
+                "'{relative}' tem {} bytes (máximo {}); use `search_text` com `path` neste arquivo ou um comando de leitura (`Get-Content -TotalCount`/`head`) para inspecionar partes",
                 metadata.len(),
                 MAX_READ_BYTES
             ),
@@ -979,22 +1007,30 @@ async fn search_files(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Err(error) => return err("TOOL_INVALID_ARGS", format!("glob inválido: {error}")),
     };
     let requested = opt_str(args, "path").unwrap_or_else(|| ".".to_string());
-    let base = match resolve_dir(ctx, &requested) {
-        Ok(path) => path,
+    let root = match resolve_search_root(ctx, &requested) {
+        Ok(root) => root,
         Err(outcome) => return outcome,
     };
     let cap = opt_u32(args, "max_results").unwrap_or(200).clamp(1, 1_000) as usize;
     let basename_only = !pattern.contains('/');
+    let (paths, _file_only): (Box<dyn Iterator<Item = PathBuf>>, bool) = match root {
+        SearchRoot::File(path) => (Box::new(std::iter::once(path)), true),
+        SearchRoot::Dir(base) => (
+            Box::new(build_walker(&base, false).flatten().filter_map(|entry| {
+                if entry.depth() == 0
+                    || entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false)
+                {
+                    None
+                } else {
+                    Some(entry.path().to_path_buf())
+                }
+            })),
+            false,
+        ),
+    };
     let mut matches: Vec<String> = Vec::new();
-    for entry in build_walker(&base, false).flatten() {
-        if entry.depth() == 0 {
-            continue;
-        }
-        if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let path = entry.path();
-        let relative = relative_path(ctx, path);
+    for path in paths {
+        let relative = relative_path(ctx, &path);
         let candidate = if basename_only {
             path.file_name().map(|name| name.to_string_lossy().into_owned())
         } else {
@@ -1046,8 +1082,8 @@ async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let context_lines = opt_u32(args, "context_lines").unwrap_or(0).clamp(0, 5) as usize;
     let cap = opt_u32(args, "max_results").unwrap_or(200).clamp(1, 1_000) as usize;
     let requested = opt_str(args, "path").unwrap_or_else(|| ".".to_string());
-    let base = match resolve_dir(ctx, &requested) {
-        Ok(path) => path,
+    let root = match resolve_search_root(ctx, &requested) {
+        Ok(root) => root,
         Err(outcome) => return outcome,
     };
     let pattern = if is_regex { query.clone() } else { regex::escape(&query) };
@@ -1066,16 +1102,44 @@ async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let mut blocks: Vec<String> = Vec::new();
     let mut total_matches = 0usize;
     let mut displayed_lines = 0usize;
-    'files: for entry in build_walker(&base, false).flatten() {
-        if entry.depth() == 0 {
-            continue;
+    let (paths, file_only): (Box<dyn Iterator<Item = PathBuf>>, bool) = match root {
+        SearchRoot::File(path) => {
+            let relative = relative_path(ctx, &path);
+            if is_secret_path(&relative) {
+                if let Err(outcome) = policy_check(
+                    ctx,
+                    "search_text",
+                    RiskClass::Secret,
+                    false,
+                    Some(relative.as_str()),
+                    true,
+                    None,
+                    ApprovalDetail::Secret { path: relative.clone() },
+                    "Ler arquivo de segredo?",
+                )
+                .await
+                {
+                    return outcome;
+                }
+            }
+            (Box::new(std::iter::once(path)), true)
         }
-        if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let path = entry.path();
-        let relative = relative_path(ctx, path);
-        if is_secret_path(&relative) {
+        SearchRoot::Dir(base) => (
+            Box::new(build_walker(&base, false).flatten().filter_map(|entry| {
+                if entry.depth() == 0
+                    || entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false)
+                {
+                    None
+                } else {
+                    Some(entry.path().to_path_buf())
+                }
+            })),
+            false,
+        ),
+    };
+    'files: for path in paths {
+        let relative = relative_path(ctx, &path);
+        if is_secret_path(&relative) && !file_only {
             continue;
         }
         if resolve_path(ctx, &relative, safe_path::Access::Read).is_err() {
@@ -1086,7 +1150,7 @@ async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 continue;
             }
         }
-        let Ok(bytes) = std::fs::read(path) else { continue };
+        let Ok(bytes) = std::fs::read(&path) else { continue };
         if looks_binary(&bytes) {
             continue;
         }
@@ -1101,7 +1165,6 @@ async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             if total_matches > cap {
                 break 'files;
             }
-            let number = index + 1;
             let start = index.saturating_sub(context_lines);
             let end = (index + context_lines + 1).min(lines.len());
             if context_lines > 0 {
@@ -1927,9 +1990,11 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     };
     let workdir_relative = relative_path(ctx, &workdir);
     let destructive = exec::is_destructive_command(&command);
-    // Comandos de leitura conhecidos não pedem aprovação no modo Editar; o
-    // destrutivo continua vencendo (política checa isso antes).
-    let risk = if destructive.is_none() && exec::is_readonly_command(&command) {
+    // Known read-only commands are inspections, not mutations: Plan mode and
+    // the Read-only permission mode may run them without approval. The
+    // destructive check still wins (policy checks it before the mode default).
+    let read_only = destructive.is_none() && exec::is_readonly_command(&command);
+    let risk = if read_only {
         RiskClass::Read
     } else {
         RiskClass::Shell
@@ -1942,7 +2007,7 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         ctx,
         "run_command",
         risk,
-        true,
+        !read_only,
         Some(command.as_str()),
         false,
         destructive,
@@ -3487,6 +3552,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn search_files_accepts_a_specific_file() {
+        let fixture = Fixture::new();
+        fixture.write("src/a.ts", "needle\n");
+        fixture.write("src/b.ts", "needle\n");
+        let ctx = fixture.ctx();
+        let outcome = call(
+            &ctx,
+            "search_files",
+            json!({ "pattern": "a.ts", "path": "src/a.ts" }),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("src/a.ts"), "{}", outcome.content);
+        assert!(!outcome.content.contains("src/b.ts"), "{}", outcome.content);
+    }
+
+    #[tokio::test]
+    async fn search_text_accepts_a_specific_file() {
+        let fixture = Fixture::new();
+        fixture.write("src/a.ts", "needle\n");
+        fixture.write("src/b.ts", "needle\n");
+        let ctx = fixture.ctx();
+        let outcome = call(
+            &ctx,
+            "search_text",
+            json!({ "query": "needle", "path": "src/a.ts" }),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert!(outcome.content.contains("src/a.ts:1: needle"), "{}", outcome.content);
+        assert!(!outcome.content.contains("src/b.ts"), "{}", outcome.content);
+    }
+
+    #[tokio::test]
+    async fn search_text_missing_path_reports_not_found() {
+        let fixture = Fixture::new();
+        let ctx = fixture.ctx();
+        let outcome = call(
+            &ctx,
+            "search_text",
+            json!({ "query": "needle", "path": "nao-existe.ts" }),
+        )
+        .await;
+        assert_eq!(error_code(&outcome), "FS_NOT_FOUND");
+    }
+
+    #[tokio::test]
     async fn write_file_creates_records_journal_and_emits_event() {
         let fixture = Fixture::new();
         let ctx = fixture.ctx();
@@ -3663,6 +3775,54 @@ mod tests {
         no_approval.approval = None;
         let ask = call(&no_approval, "run_command", json!({ "command": "echo x", "description": "x" })).await;
         assert_eq!(error_code(&ask), "APPROVAL_UNAVAILABLE");
+    }
+
+    #[tokio::test]
+    async fn plan_mode_runs_read_only_commands_and_file_scoped_searches() {
+        let fixture = Fixture::new();
+        fixture.write("nota.txt", "conteudo\n");
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        fixture.set_plan_mode(true);
+        let ctx = fixture.ctx();
+
+        let read = call(&ctx, "read_file", json!({ "path": "nota.txt" })).await;
+        assert!(!read.is_error, "{}", read.content);
+        assert!(read.content.contains("conteudo"), "{}", read.content);
+
+        let search = call(
+            &ctx,
+            "search_text",
+            json!({ "query": "conteudo", "path": "nota.txt" }),
+        )
+        .await;
+        assert!(!search.is_error, "{}", search.content);
+        assert!(search.content.contains("nota.txt:1"), "{}", search.content);
+
+        let command = call(
+            &ctx,
+            "run_command",
+            json!({ "command": "cat nota.txt", "description": "ler nota" }),
+        )
+        .await;
+        if error_code(&command) == "EXEC_SPAWN" || error_code(&command) == "EXEC_FAILED" {
+            eprintln!("shell indisponível neste ambiente: comando de leitura pulado");
+        } else {
+            assert!(!command.is_error, "{}", command.content);
+            assert!(
+                !command.content.contains("PLAN_MODE_ACTIVE"),
+                "{}",
+                command.content
+            );
+            assert!(command.content.contains("conteudo"), "{}", command.content);
+        }
+
+        let write = call(
+            &ctx,
+            "write_file",
+            json!({ "path": "x.txt", "content": "x" }),
+        )
+        .await;
+        assert_eq!(error_code(&write), "PLAN_MODE_ACTIVE");
     }
 
     #[tokio::test]

@@ -194,18 +194,21 @@ fn permission_mode_name(mode: PermissionMode) -> &'static str {
 fn permission_mode_label(mode: PermissionMode) -> &'static str {
     match mode {
         PermissionMode::ReadOnly => {
-            "Read-only: you can read files, search and inspect git. Edits and commands are \
-             refused by the policy — do not try to work around it; ask the user to change the \
-             mode when you need to."
+            "Read-only: you can read files, search, inspect git and run known read-only \
+             inspection commands (git status/log/diff, ls, cat/Get-Content, rg). Edits and \
+             mutating commands are refused by the policy — do not try to work around it; ask \
+             the user to change the mode when you need to."
         }
         PermissionMode::Edit => {
-            "Edit (default): you can create and edit files inside the workspace. Shell commands \
-             ask for user approval before running."
+            "Edit (default): you can create and edit files inside the workspace. Mutating \
+             shell commands ask for user approval; known read-only inspection commands run \
+             without approval."
         }
         PermissionMode::Review => {
-            "Review: you can read and search freely, but **every write** (and shell command) \
-             asks for user approval before being applied. Explain each file change objectively \
-             to make review easier."
+            "Review: you can read and search freely, but **every write** (and mutating shell \
+             command) asks for user approval before being applied. Known read-only inspection \
+             commands run without approval. Explain each file change objectively to make review \
+             easier."
         }
         PermissionMode::Autonomous => {
             "Autonomous (no confirmation prompts): outside Plan mode, you can edit files, run \
@@ -476,12 +479,18 @@ pub fn build_runtime_context(ctx: &CodeContext, has_todo_write: bool) -> String 
     if ctx.plan_mode {
         out.push_str(
             "**Plan mode is active**: investigate and design only; do not modify files, run \
-             mutating commands or implement. Read the relevant entry points, modules, tests and \
-             docs before planning, and never invent paths or symbols. When ready, call \
-             `submit_plan` with an implementation-ready plan (goal, exact files/symbols, scope, \
-             per-file changes, ordered steps with done criteria, tests/commands, risks/rollback \
-             and acceptance criteria). Keep it concise and grounded in evidence; on feedback, \
-             address every point and resubmit.\n\n",
+             mutating commands or implement. Read-only inspection commands are allowed and do \
+             not ask for approval (`git status/log/diff/show`, `ls`/`dir`, `cat`/`Get-Content`, \
+             `head`/`tail`, `rg`/`grep`, `find` without `-delete`/`-exec`); commands that write, \
+             delete, install or compose with `;`/`&`/`|`/redirection are denied with \
+             `PLAN_MODE_ACTIVE`. Use `read_file` for normal files, `search_text`/`search_files` \
+             with a specific file path to inspect one file, and a read-only command for large \
+             logs. Read the relevant entry points, modules, tests and docs before planning, and \
+             never invent paths or symbols. When ready, call `submit_plan` with an \
+             implementation-ready plan (goal, exact files/symbols, scope, per-file changes, \
+             ordered steps with done criteria, tests/commands, risks/rollback and acceptance \
+             criteria). Keep it concise and grounded in evidence; on feedback, address every \
+             point and resubmit.\n\n",
         );
     }
     out.push_str("## Workspace state\n\n");
@@ -909,6 +918,7 @@ mod tests {
 
         for needle in [
             "investigate and design only",
+            "Read-only inspection commands",
             "never invent paths or symbols",
             "implementation-ready plan",
             "exact files/symbols",
